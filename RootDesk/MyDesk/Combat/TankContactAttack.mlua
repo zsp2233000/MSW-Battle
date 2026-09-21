@@ -23,11 +23,10 @@ script TankContactAttack extends AttackComponent
     end
 
     @ExecSpace("ServerOnly")
-    method void TryContact(Entity target)
-        -- Resolve one native area attack while the selected enemy is inside contact range.
+    method void TryContact()
+        -- Resolve the native contact area at the current body position without target gating.
         local unit = self.Entity:GetComponent("script.BattleUnit")
         if not isvalid(unit) or not unit:IsAlive() or unit.UnitKind ~= "TANK" then return end
-        if not isvalid(target) then return end
         local map = self.Entity.CurrentMap
         if not isvalid(map) then return end
         local session = map:GetComponent("script.BattleSession")

@@ -66,7 +66,8 @@ test("Issue #3 starts one tank and one assault with the fixed tank profile", () 
 
   assert.match(unit, /@Sync property string UnitKind = "ASSAULT"/);
   assert.match(unit, /if self\.UnitKind == "TANK" then/);
-  assert.match(unit, /contact:TryContact\(target\)/);
+  assert.match(unit, /contact:TryContact\(\)/);
+  assert.match(unit, /movingContact:TryContact\(\)/);
   assert.match(unit, /self\.CombatState = "IDLE"/);
   assert.match(unit, /session:QueueDamage\(self\.Entity, event\.TotalDamage, event\.AttackerEntity\)/);
   assert.doesNotMatch(unit, /SetWorldPosition|SetPosition\(/);
@@ -75,6 +76,7 @@ test("Issue #3 starts one tank and one assault with the fixed tank profile", () 
   assert.match(contact, /ContactDamage = 40/);
   assert.match(contact, /ContactCooldown = 2\.0/);
   assert.match(contact, /self:AttackFrom\(self\.ContactSize/);
+  assert.doesNotMatch(contact, /TryContact\(Entity target\)/);
   assert.match(contact, /targetCooldowns/);
   assert.match(contact, /return self\.ContactDamage/);
   assert.match(contact, /session:QueueTankContactKnockback/);

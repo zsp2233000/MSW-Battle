@@ -127,13 +127,17 @@ script BattleUnit extends Component
                 movement:MoveToDirection(direction, delta)
             end
             self.CombatState = "MOVE"
+            if self.UnitKind == "TANK" then
+                local movingContact = self.Entity:GetComponent("script.TankContactAttack")
+                if isvalid(movingContact) then movingContact:TryContact() end
+            end
         else
             local movement = self.Entity:GetComponent("MovementComponent")
             if isvalid(movement) then movement:Stop() end
             if self.UnitKind == "TANK" then
                 self.CombatState = "IDLE"
                 local contact = self.Entity:GetComponent("script.TankContactAttack")
-                if isvalid(contact) then contact:TryContact(target) end
+                if isvalid(contact) then contact:TryContact() end
             else
                 self.CombatState = "ATTACK"
                 local attack = self.Entity:GetComponent("script.AssaultAttack")
