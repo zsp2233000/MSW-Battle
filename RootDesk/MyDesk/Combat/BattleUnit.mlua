@@ -18,6 +18,7 @@ script BattleUnit extends Component
     property number RetargetInterval = 0.5
     property number ImpactDelay = 0.18
     property number DeathHold = 0.6
+    property number HitStopDuration = 0.2
 
     @ExecSpace("ServerOnly")
     method void OnBeginPlay()
@@ -26,12 +27,13 @@ script BattleUnit extends Component
         self._T.retargetRemaining = 0
         self._T.deathRemaining = 0
         self._T.deathFinished = false
+        self._T.hitStopRemaining = 0
         if self.Hp <= 0 then self.Hp = self.MaxHp end
         self.CombatState = "IDLE"
     end
 
     @ExecSpace("ServerOnly")
-    method void Configure(string faction, string displayName, string unitKind, integer maxHp, number speed, integer damage, number interval, number range, number retarget, number impact, number deathHold, number openingDelay, number contactCooldown, Vector2 contactSize, number knockbackDistance)
+    method void Configure(string faction, string displayName, string unitKind, integer maxHp, number speed, integer damage, number interval, number range, number retarget, number impact, number deathHold, number openingDelay, number contactCooldown, Vector2 contactSize, number knockbackDistance, number hitStopDuration)
         -- Apply either the fixed tank contact profile or the existing assault profile.
         self.Faction = faction
         self.UnitKind = unitKind
@@ -44,12 +46,14 @@ script BattleUnit extends Component
         self.RetargetInterval = retarget
         self.ImpactDelay = impact
         self.DeathHold = deathHold
+        self.HitStopDuration = hitStopDuration
         self.IsDead = false
         self.CurrentTargetName = ""
         self.CombatState = "IDLE"
         self._T.displayName = displayName
         self._T.currentTarget = nil
         self._T.retargetRemaining = 0
+        self._T.hitStopRemaining = 0
         if unitKind == "TANK" then
             local contact = self.Entity:GetComponent("script.TankContactAttack")
             if isvalid(contact) then contact:Configure(damage, contactCooldown, contactSize, knockbackDistance) end
@@ -90,6 +94,16 @@ script BattleUnit extends Component
         if not isvalid(session) or not session:IsBattleActive() then
             self:StopForResult()
             return
+        end
+
+        if self._T.hitStopRemaining > 0 then
+            self._T.hitStopRemaining = math.max(0, self._T.hitStopRemaining - delta)
+            local hitStopMovement = self.Entity:GetComponent("MovementComponent")
+            if isvalid(hitStopMovement) then hitStopMovement:Stop() end
+            if self._T.hitStopRemaining > 0 then
+                self.CombatState = "HIT"
+                return
+            end
         end
 
         self._T.retargetRemaining = self._T.retargetRemaining - delta
@@ -169,12 +183,16 @@ script BattleUnit extends Component
         local session = self:GetSession()
         if isvalid(session) then session:EmitPresentation("DAMAGE", attacker, self.Entity, amount) end
         if self.Hp > 0 then
+            self._T.hitStopRemaining = self.HitStopDuration
+            local hitStopMovement = self.Entity:GetComponent("MovementComponent")
+            if isvalid(hitStopMovement) then hitStopMovement:Stop() end
             self.CombatState = "HIT"
             return
         end
 
         self.IsDead = true
         self.CombatState = "DEAD"
+        self._T.hitStopRemaining = 0
         self._T.currentTarget = nil
         self.CurrentTargetName = ""
         self._T.deathRemaining = self.DeathHold
@@ -192,6 +210,7 @@ script BattleUnit extends Component
     method void StopForResult()
         -- Stop all unit-side target, movement, and attack work after RESULT is entered.
         self.CombatState = "RESULT_STOP"
+        self._T.hitStopRemaining = 0
         self._T.currentTarget = nil
         self.CurrentTargetName = ""
         local movement = self.Entity:GetComponent("MovementComponent")

@@ -7,7 +7,7 @@
 | System | Built | Where (key files) | Notes / gotchas |
 |---|---|---|---|
 | Battle session | `@Component` | `RootDesk/MyDesk/Combat/BattleSession.mlua` | Server-authoritative Issue #3 session; fixed one player Tank versus one enemy Assault, with phase/result snapshot and single-result guard. |
-| Battle unit | `@Component` | `RootDesk/MyDesk/Combat/BattleUnit.mlua` | Retargets every 0.5s, moves with `MovementComponent`, branches Tank contact from Assault attack, applies death hold and post-result stop. |
+| Battle unit | `@Component` | `RootDesk/MyDesk/Combat/BattleUnit.mlua` | Retargets every 0.5s, moves with `MovementComponent`, branches Tank contact from Assault attack, applies 0.2s hit stop, death hold, and post-result stop. |
 | Tank contact attack | `@Component` / `AttackComponent` | `RootDesk/MyDesk/Combat/TankContactAttack.mlua` | Native `AttackFrom` → `Hit` path; fixed 40 damage, independent 2.0s per-target cooldown, enemy-only 0.8 knockback queue, and no contact SFX/VFX. |
 | Tank presentation | `@Component` | `RootDesk/MyDesk/Combat/TankPresentation.mlua` | Client-side Tank stand/move/hit/die AnimationClip switching plus the provided Tank hit/death SFX. Tank has no attack animation. |
 | Assault attack | `@Component` / `AttackComponent` | `RootDesk/MyDesk/Combat/AssaultAttack.mlua` | Existing native Attack→Hit path with 0.7s interval, 0.18s impact delay, fixed 35 damage, and faction filtering. |
@@ -31,9 +31,10 @@
 - Rebased the active runtime to the ticket scope: one fixed player Tank versus one fixed enemy Assault, auto-entering `BATTLE`; the Phase 2 deployment UI remains parked and hidden.
 - Added `TankContactAttack` with fixed 500 HP / 1.1 movement / 40 contact damage / independent 2.0s target cooldown. Contact uses the native `AttackComponent` → `HitEvent` path and can damage every overlapping enemy.
 - Added queued enemy-only 0.8 world-unit knockback with RectTile boundary clamping. The Tank position is never displaced by its own contact attack, and no stun or contact attack SFX/VFX path is used.
+- Added a 0.2s server-side hit stop after each resolved non-lethal HitEvent; the damaged unit remains in place before resuming targeting and movement.
 - Applied the supplied Tank stand/move/hit/die AnimationClip RUIDs and hit/death sound RUIDs through `TankPresentation`. Tank hit and death sounds are separate from the Tank's silent contact attack.
 - Adjusted the fixed camera to zoom out and offset downward so the lower map area remains visible.
-- Node contract tests pass. Maker refresh/build produced no error-level entries. The Maker runtime probe passed live multi-target contact, independent cooldown, no Tank recoil or stun, enemy-only boundary-clamped knockback, and result-stop checks; the normal Play run produced `BATTLE started: PLAYER tank vs ENEMY assault` and `RESULT=WIN`.
+- Node contract tests pass. Maker refresh/build produced no error-level entries. The Maker runtime probe passed live multi-target contact, independent cooldown, 0.2s hit stop, no Tank recoil or stun, enemy-only boundary-clamped knockback, and result-stop checks; the normal Play run produced `BATTLE started: PLAYER tank vs ENEMY assault` and `RESULT=WIN`.
 
 ### 2026-09-21 Phase 1 complete (summary)
 

@@ -26,6 +26,7 @@ script BattleSession extends Component
     property number RetargetInterval = 0.5
     property number ImpactDelay = 0.18
     property number DeathHold = 0.6
+    property number HitStopDuration = 0.2
     property number EnemyOpeningDelay = 0.12 -- Deterministic M1 lead; DRAW remains for same-batch edge cases.
     property integer TankMaxHp = 500
     property number TankMoveSpeed = 1.1 -- RectTile world speed; controller converts to InputSpeed * 1.2.
@@ -168,7 +169,7 @@ script BattleSession extends Component
         end
         local openingDelay = 0
         if faction == "ENEMY" then openingDelay = self.EnemyOpeningDelay end
-        unit:Configure(faction, name, unitKind, maxHp, speed, damage, interval, range, self.RetargetInterval, self.ImpactDelay, self.DeathHold, openingDelay, self.TankContactCooldown, self.TankContactSize, self.TankKnockbackDistance)
+        unit:Configure(faction, name, unitKind, maxHp, speed, damage, interval, range, self.RetargetInterval, self.ImpactDelay, self.DeathHold, openingDelay, self.TankContactCooldown, self.TankContactSize, self.TankKnockbackDistance, self.HitStopDuration)
         local record = { entity = entity, unit = unit, faction = faction, unitKind = unitKind, dead = false }
         table.insert(self._T.units, record)
         return entity
