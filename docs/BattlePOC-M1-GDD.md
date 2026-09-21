@@ -1,7 +1,7 @@
 # Battle POC — 單局陣型自動戰鬥設計文件（GDD）
 
 > 🔖 **AI 接續提醒**：若在新工作階段接續本遊戲，先載入 `msw-planning`，依恢復流程讀取 `BattlePOC-Roadmap.md` 與 `Archive/As-built.md`。開始實作或修改 `⬜/🟡/✅` 前，必須完整閱讀 `references/build-management.md`。
-> 最後更新：2026-09-21／階段：M1 Phase 1 已實作，Maker Play 已完成初輪 runtime 驗證
+> 最後更新：2026-09-21／階段：M1 Phase 2 部署 UI 已交付，等待人工輸入流程驗收
 
 > M1 vertical slice scope（Issue #2）先固定一隻 player `突擊` 對一隻 fixed enemy `突擊`，自動進入 `BATTLE`；本階段不實作下方完整部署 UI 與六對六內容。
 
@@ -99,7 +99,7 @@
 | 實體名稱 | 用途 |
 |---|---|
 | `BtnTank` | 選擇坦克 |
-| `BtnAssault` | 選擇突擊 |
+| `BtnAssault` | 顯示「戰士」，選擇內部 `ASSAULT`／突擊單位 |
 | `BtnShooter` | 選擇射手 |
 | `BtnStart` | 玩家至少部署一隻後可開始 |
 | `ResultWin` | Win 狀態顯示 |
@@ -142,11 +142,11 @@
 
 ### Phase 2 — 玩家部署與六對六編隊
 
-- ⬜ 串接人類提供的部署按鈕與開始按鈕 UI 實體。
-- ⬜ 完成左側自由放置、點擊移除、0.6 最小間距、一至六隻限制與伺服器驗證。
-- ⬜ 建立右側固定六隻敵軍與可調位置設定，預設二坦克、二突擊、二射手。
-- ⬜ 開戰後鎖定所有部署操作。
-- ⬜ 驗證一至六隻任意重複兵種皆能開始並完成單局。
+- 🟡 串接人類提供的部署按鈕與開始按鈕 UI 實體；`/ui/BattleGroup` 已提供 `BtnTank`、`BtnAssault`、`BtnShooter`、`BtnStart`，Maker Play 已確認四個按鈕成功綁定，等待人工點擊流程驗收。
+- 🟡 完成左側自由放置、點擊移除、0.6 最小間距、一至六隻限制與伺服器驗證；server gate／roster API 與命名 UI 已具備，等待 Maker Play 輸入驗證。
+- 🟡 建立右側固定六隻敵軍與可調位置設定，預設二坦克、二突擊、二射手；Maker Play 已確認生成與 snapshot 編成／座標。
+- 🟡 開戰後鎖定所有部署操作；phase gate 與轉場 guard 已實作，需玩家部署後驗證。
+- 🟡 驗證一至六隻任意重複兵種皆能開始並完成單局；roster／phase transition 與命名 UI 已具備，完整 1–6 編隊與單局驗證待人工操作。
 
 ### Phase 3 — 三兵種完整規則
 

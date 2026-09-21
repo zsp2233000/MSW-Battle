@@ -17,6 +17,7 @@ test("M1 map keeps RectTile and exposes the session boundary", () => {
   const rootEntity = map.listEntities().find((entity) => entity.path === "/maps/map01");
   assert.ok(rootEntity);
   assert.match(rootEntity.componentNames, /script\.BattleSession/);
+  assert.match(rootEntity.componentNames, /script\.BattleDeploymentInput/);
 });
 
 test("M1 unit model has the RectTile movement contract", () => {
@@ -82,4 +83,54 @@ test("M1 battle scripts expose the observable elapsed-time contract", () => {
 
   assert.doesNotMatch(unit, /SetWorldPosition|SetPosition\(/);
   assert.doesNotMatch(attack, /Hp\s*[-+]=/);
+});
+
+test("M1 Phase 2 exposes server-owned deployment and roster gates", () => {
+  const session = read("RootDesk/MyDesk/Combat/BattleSession.mlua");
+  const unit = read("RootDesk/MyDesk/Combat/BattleUnit.mlua");
+
+  assert.match(session, /@Sync property integer PlayerRosterCount = 0/);
+  assert.match(session, /@Sync property string SelectedUnitKind = ""/);
+  assert.match(session, /DeploymentMinX = -5\.0/);
+  assert.match(session, /DeploymentMaxX = -2\.0/);
+  assert.match(session, /DeploymentMinY = -3\.0/);
+  assert.match(session, /DeploymentMaxY = 1\.0/);
+  assert.match(session, /DeploymentMinDistance = 0\.6/);
+  assert.match(session, /DeploymentMaxUnits = 6/);
+  assert.match(session, /method void RequestSelectUnit\(string unitKind\)/);
+  assert.match(session, /method void RequestDeployAtWorld\(Vector3 requestedPosition\)/);
+  assert.match(session, /method void RequestRemoveUnit\(string unitName\)/);
+  assert.match(session, /method void RequestStartBattle\(\)/);
+  assert.match(session, /method void BeginBattle\(\)/);
+  assert.match(session, /method string FindPlayerUnitAtPosition\(Vector3 position\)/);
+  assert.match(session, /method boolean RemovePlayerUnitByName\(string unitName\)/);
+  assert.match(session, /self:RemovePlayerUnitByName\(existingName\)/);
+  assert.match(session, /self:SpawnFixedEnemies\(\)/);
+  assert.match(session, /record\.unit:ActivateForBattle\(\)/);
+  assert.match(session, /battleStarting/);
+  assert.match(session, /self\.Phase = "BATTLE"\s+self\._T\.battleStarting = false/);
+  assert.match(session, /self:IsAuthorizedRequester\(senderUserId\)/);
+  assert.match(session, /self\.Phase ~= "DEPLOYMENT"/);
+  assert.match(unit, /@Sync property string UnitKind = "ASSAULT"/);
+  assert.match(unit, /method void ActivateForBattle\(\)/);
+});
+
+test("M1 Phase 2 client adapter binds named UI and world deployment input", () => {
+  const input = read("RootDesk/MyDesk/Combat/BattleDeploymentInput.mlua");
+
+  for (const buttonName of ["BtnTank", "BtnAssault", "BtnShooter", "BtnStart"]) {
+    assert.match(input, new RegExp(buttonName));
+  }
+  assert.match(input, /@ExecSpace\("ClientOnly"\)\s+method void OnBeginPlay\(\)/);
+  assert.match(input, /ConnectEvent\(ButtonClickEvent/);
+  assert.match(input, /ConnectEvent\(ScreenTouchEvent/);
+  assert.match(input, /ScreenToWorldPosition\(event\.TouchPoint\)/);
+  assert.match(input, /IsPointerOverUI\(event\.TouchId\)/);
+  assert.match(input, /DisconnectEvent\(ButtonClickEvent/);
+  assert.match(input, /DisconnectEvent\(ScreenTouchEvent/);
+  assert.match(input, /session:RequestDeployAtWorld\(Vector3\(worldPosition\.x, worldPosition\.y, 0\)\)/);
+  assert.match(input, /method void ConfigureClientCamera\(\)/);
+  assert.match(input, /camera\.ScreenOffset = Vector2\(0\.5, 0\.5\)/);
+  assert.match(input, /camera\.CameraOffset = Vector2\(0, 0\)/);
+  assert.match(input, /self\.cameraConfigured == true/);
 });

@@ -1,10 +1,14 @@
 @Component
 script BattleSession extends Component
 
-    @Sync property string Phase = "BATTLE"
+    @Sync property string Phase = "DEPLOYMENT"
     @Sync property string Result = ""
     @Sync property integer PlayerAlive = 0
     @Sync property integer EnemyAlive = 0
+    @Sync property integer PlayerRosterCount = 0
+    @Sync property string SelectedUnitKind = ""
+    @Sync property string DeploymentMessage = ""
+    @Sync property integer DeploymentEventSerial = 0
     @Sync property string Snapshot = ""
     @Sync property string UnitSnapshots = ""
     @Sync property integer SnapshotSerial = 0
@@ -18,6 +22,18 @@ script BattleSession extends Component
     property string EnemyModelId = "battleunit"
     property Vector3 PlayerSpawnPosition = Vector3(-2.4, 0, 0)
     property Vector3 EnemySpawnPosition = Vector3(2.6, 0, 0)
+    property Vector3 EnemySpawnPosition1 = Vector3(1, -1, 0)
+    property Vector3 EnemySpawnPosition2 = Vector3(2, -1, 0)
+    property Vector3 EnemySpawnPosition3 = Vector3(3, -1, 0)
+    property Vector3 EnemySpawnPosition4 = Vector3(1, 0, 0)
+    property Vector3 EnemySpawnPosition5 = Vector3(2, 0, 0)
+    property Vector3 EnemySpawnPosition6 = Vector3(3, 0, 0)
+    property number DeploymentMinX = -5.0
+    property number DeploymentMaxX = -2.0
+    property number DeploymentMinY = -3.0
+    property number DeploymentMaxY = 1.0
+    property number DeploymentMinDistance = 0.6
+    property integer DeploymentMaxUnits = 6
     property integer UnitMaxHp = 220
     property number UnitMoveSpeed = 2.0 -- RectTile world speed; controller converts to InputSpeed * 1.2.
     property integer UnitDamage = 35
@@ -31,13 +47,19 @@ script BattleSession extends Component
 
     @ExecSpace("ServerOnly")
     method void OnBeginPlay()
-        -- Start one fixed assault-versus-assault session and publish its boundary state.
+        -- Prepare the deployment roster and publish the initial boundary state.
         self._T.units = {}
         self._T.pendingDamage = {}
+        self._T.nextPlayerId = 0
+        self._T.battleStarting = false
         self._T.initialized = true
         self._T.resultEntered = false
-        self.Phase = "BATTLE"
+        self.Phase = "DEPLOYMENT"
         self.Result = ""
+        self.PlayerRosterCount = 0
+        self.SelectedUnitKind = ""
+        self.DeploymentMessage = "DEPLOYMENT_READY"
+        self.DeploymentEventSerial = 0
         self.PlayerAlive = 0
         self.EnemyAlive = 0
         self.UnitSnapshots = ""
@@ -49,10 +71,8 @@ script BattleSession extends Component
         self.LastEventAmount = 0
         self:DisableDefaultPlayer()
 
-        local player = self:SpawnUnit(self.PlayerModelId, "M1_PlayerAssault", "PLAYER", self.PlayerSpawnPosition)
-        local enemy = self:SpawnUnit(self.EnemyModelId, "M1_EnemyAssault", "ENEMY", self.EnemySpawnPosition)
-        if player == nil or enemy == nil then
-            log_error("[M1][BattleSession] fixed assault spawn failed")
+        if self:SpawnFixedEnemies() == false then
+            log_error("[M1][BattleSession] fixed enemy roster spawn failed")
             self.Phase = "RESULT"
             self.Result = "DRAW"
             self._T.resultEntered = true
@@ -61,17 +81,14 @@ script BattleSession extends Component
             return
         end
 
-        self.PlayerAlive = 1
-        self.EnemyAlive = 1
-        self:EmitPresentation("SESSION_START", player, enemy, 0)
         self:RefreshSnapshot()
-        log("[M1][BattleSession] BATTLE started: PLAYER assault vs ENEMY assault")
+        log("[M1][BattleSession] DEPLOYMENT ready: fixed enemy roster=6")
     end
 
     @ExecSpace("ServerOnly")
     method void OnUpdate(number delta)
         -- Advance the live server simulation without bypassing native movement or hit resolution.
-        if self._T.initialized ~= true then return end
+        if self._T.initialized ~= true or self._T.battleStarting == true then return end
         self:StepSimulation(delta, false)
     end
 
@@ -119,7 +136,227 @@ script BattleSession extends Component
         return map
     end
 
-    method Entity SpawnUnit(string modelId, string name, string faction, Vector3 position)
+    method boolean IsValidUnitKind(string unitKind)
+        -- Keep the deployment choice closed to the three M1 unit kinds.
+        return unitKind == "TANK" or unitKind == "ASSAULT" or unitKind == "SHOOTER"
+    end
+
+    method boolean IsAuthorizedRequester(string requestUserId)
+        -- Accept requests only from a player currently occupying this map.
+        if requestUserId == nil or requestUserId == "" then return false end
+        local map = self:GetMapEntity()
+        if not isvalid(map) or _UserService.UserEntities == nil then return false end
+        local players = _UserService.UserEntities.Values
+        if players == nil then return false end
+        for _, player in ipairs(players) do
+            if isvalid(player) and player.CurrentMap == map then
+                local playerComponent = player:GetComponent("PlayerComponent")
+                if isvalid(playerComponent) and tostring(playerComponent.UserId) == tostring(requestUserId) then
+                    return true
+                end
+            end
+        end
+        return false
+    end
+
+    method void SetDeploymentMessage(string message)
+        -- Publish the latest server validation result for the future UI adapter.
+        self.DeploymentMessage = message
+        self.DeploymentEventSerial = self.DeploymentEventSerial + 1
+    end
+
+    method Vector3 GetEnemySpawnPosition(integer index)
+        -- Return one of the six configurable fixed enemy positions.
+        if index == 1 then return self.EnemySpawnPosition1 end
+        if index == 2 then return self.EnemySpawnPosition2 end
+        if index == 3 then return self.EnemySpawnPosition3 end
+        if index == 4 then return self.EnemySpawnPosition4 end
+        if index == 5 then return self.EnemySpawnPosition5 end
+        return self.EnemySpawnPosition6
+    end
+
+    method string GetEnemyUnitKind(integer index)
+        -- Keep the default fixed roster explicit and editable without a dataset.
+        if index <= 2 then return "TANK" end
+        if index <= 4 then return "ASSAULT" end
+        return "SHOOTER"
+    end
+
+    method boolean SpawnFixedEnemies()
+        -- Spawn the six fixed enemies during deployment and keep their AI gated by Phase.
+        for index = 1, 6 do
+            local name = "M1_Enemy_" .. tostring(index)
+            local enemy = self:SpawnUnit(self.EnemyModelId, name, "ENEMY", self:GetEnemyUnitKind(index), self:GetEnemySpawnPosition(index))
+            if enemy == nil then return false end
+        end
+        return true
+    end
+
+    method boolean IsInsideDeploymentBounds(Vector3 position)
+        -- Validate the requested world position against the server-owned deployment rectangle.
+        if position == nil then return false end
+        return position.x >= self.DeploymentMinX and position.x <= self.DeploymentMaxX and position.y >= self.DeploymentMinY and position.y <= self.DeploymentMaxY
+    end
+
+    method boolean HasDeploymentSpacing(Vector3 position)
+        -- Reject a new player unit when it is too close to an existing player unit.
+        local minimumSquared = self.DeploymentMinDistance * self.DeploymentMinDistance
+        for _, record in ipairs(self._T.units) do
+            if record.faction == "PLAYER" and isvalid(record.entity) then
+                local transform = record.entity:GetComponent("TransformComponent")
+                if isvalid(transform) then
+                    local existing = transform.WorldPosition
+                    local dx = existing.x - position.x
+                    local dy = existing.y - position.y
+                    if dx * dx + dy * dy < minimumSquared then return false end
+                end
+            end
+        end
+        return true
+    end
+
+    method string FindPlayerUnitAtPosition(Vector3 position)
+        -- Find a deployed player unit close enough for a deployment click to remove it.
+        if position == nil then return "" end
+        local minimumSquared = self.DeploymentMinDistance * self.DeploymentMinDistance
+        for _, record in ipairs(self._T.units) do
+            if record.faction == "PLAYER" and isvalid(record.entity) then
+                local transform = record.entity:GetComponent("TransformComponent")
+                if isvalid(transform) then
+                    local existing = transform.WorldPosition
+                    local dx = existing.x - position.x
+                    local dy = existing.y - position.y
+                    if dx * dx + dy * dy <= minimumSquared then return record.entity.Name end
+                end
+            end
+        end
+        return ""
+    end
+
+    method boolean RemovePlayerUnitByName(string unitName)
+        -- Remove one player roster record and leave the caller responsible for its message.
+        if unitName == nil or unitName == "" then return false end
+        for index, record in ipairs(self._T.units) do
+            if record.faction == "PLAYER" and isvalid(record.entity) and record.entity.Name == unitName then
+                if isvalid(record.unit) then record.unit:StopForResult() end
+                record.entity:Destroy()
+                table.remove(self._T.units, index)
+                self.PlayerRosterCount = math.max(0, self.PlayerRosterCount - 1)
+                self.PlayerAlive = self.PlayerRosterCount
+                return true
+            end
+        end
+        return false
+    end
+
+    @ExecSpace("Server")
+    method void RequestSelectUnit(string unitKind)
+        -- Validate and store a player's selected deployment kind on the server.
+        if not self:IsAuthorizedRequester(senderUserId) or self.Phase ~= "DEPLOYMENT" then return end
+        if not self:IsValidUnitKind(unitKind) then
+            self:SetDeploymentMessage("INVALID_UNIT_KIND")
+            return
+        end
+        self.SelectedUnitKind = unitKind
+        self:SetDeploymentMessage("SELECTED_" .. unitKind)
+    end
+
+    @ExecSpace("Server")
+    method void RequestDeployAtWorld(Vector3 requestedPosition)
+        -- Validate a deployment click and spawn one owned player unit when it is legal.
+        if not self:IsAuthorizedRequester(senderUserId) or self.Phase ~= "DEPLOYMENT" then return end
+        if not self:IsInsideDeploymentBounds(requestedPosition) then
+            self:SetDeploymentMessage("OUT_OF_DEPLOYMENT_BOUNDS")
+            return
+        end
+        local existingName = self:FindPlayerUnitAtPosition(requestedPosition)
+        if existingName ~= "" then
+            self:RemovePlayerUnitByName(existingName)
+            self:SetDeploymentMessage("REMOVED_" .. existingName)
+            self:RefreshSnapshot()
+            return
+        end
+        if not self:IsValidUnitKind(self.SelectedUnitKind) then
+            self:SetDeploymentMessage("SELECT_UNIT_FIRST")
+            return
+        end
+        if self.PlayerRosterCount >= self.DeploymentMaxUnits then
+            self:SetDeploymentMessage("DEPLOYMENT_FULL")
+            return
+        end
+        if not self:HasDeploymentSpacing(requestedPosition) then
+            self:SetDeploymentMessage("DEPLOYMENT_TOO_CLOSE")
+            return
+        end
+
+        local position = Vector3(requestedPosition.x, requestedPosition.y, 0)
+        self._T.nextPlayerId = self._T.nextPlayerId + 1
+        local name = "M1_Player_" .. tostring(self._T.nextPlayerId)
+        local player = self:SpawnUnit(self.PlayerModelId, name, "PLAYER", self.SelectedUnitKind, position)
+        if player == nil then
+            self:SetDeploymentMessage("DEPLOYMENT_SPAWN_FAILED")
+            return
+        end
+        self.PlayerRosterCount = self.PlayerRosterCount + 1
+        self.PlayerAlive = self.PlayerRosterCount
+        self:SetDeploymentMessage("DEPLOYED_" .. self.SelectedUnitKind)
+        self:RefreshSnapshot()
+    end
+
+    @ExecSpace("Server")
+    method void RequestRemoveUnit(string unitName)
+        -- Remove only a player roster unit while deployment is still open.
+        if not self:IsAuthorizedRequester(senderUserId) or self.Phase ~= "DEPLOYMENT" then return end
+        if self:RemovePlayerUnitByName(unitName) then
+            self:SetDeploymentMessage("REMOVED_" .. unitName)
+            self:RefreshSnapshot()
+            return
+        end
+        self:SetDeploymentMessage("UNIT_NOT_FOUND")
+    end
+
+    @ExecSpace("Server")
+    method void RequestStartBattle()
+        -- Start the battle only after the server confirms a non-empty player roster.
+        if not self:IsAuthorizedRequester(senderUserId) or self.Phase ~= "DEPLOYMENT" then return end
+        self:BeginBattle()
+    end
+
+    @ExecSpace("ServerOnly")
+    method void BeginBattle()
+        -- Lock the roster and activate every surviving unit for the battle loop.
+        if self.Phase ~= "DEPLOYMENT" or self.PlayerRosterCount <= 0 then
+            self:SetDeploymentMessage("PLAYER_ROSTER_REQUIRED")
+            return
+        end
+        self._T.battleStarting = true
+        self.Result = ""
+        self._T.resultEntered = false
+        self._T.pendingDamage = {}
+        self.PlayerAlive = 0
+        self.EnemyAlive = 0
+        local firstPlayer = nil
+        local firstEnemy = nil
+        for _, record in ipairs(self._T.units) do
+            record.dead = false
+            if isvalid(record.unit) then record.unit:ActivateForBattle() end
+            if record.faction == "PLAYER" then
+                self.PlayerAlive = self.PlayerAlive + 1
+                if firstPlayer == nil then firstPlayer = record.entity end
+            else
+                self.EnemyAlive = self.EnemyAlive + 1
+                if firstEnemy == nil then firstEnemy = record.entity end
+            end
+        end
+        self.Phase = "BATTLE"
+        self._T.battleStarting = false
+        self:EmitPresentation("SESSION_START", firstPlayer, firstEnemy, 0)
+        self:SetDeploymentMessage("BATTLE_STARTED")
+        self:RefreshSnapshot()
+        log("[M1][BattleSession] BATTLE started: player=" .. tostring(self.PlayerAlive) .. " vs enemy=" .. tostring(self.EnemyAlive))
+    end
+
+    method Entity SpawnUnit(string modelId, string name, string faction, string unitKind, Vector3 position)
         -- Spawn a native-body unit, then attach custom scripts in runtime-safe order.
         local map = self:GetMapEntity()
         if not isvalid(map) then return nil end
@@ -138,7 +375,7 @@ script BattleSession extends Component
         end
         local openingDelay = 0
         if faction == "ENEMY" then openingDelay = self.EnemyOpeningDelay end
-        unit:Configure(faction, name, self.UnitMaxHp, self.UnitMoveSpeed, self.UnitDamage, self.UnitAttackInterval, self.UnitAttackRange, self.RetargetInterval, self.ImpactDelay, self.DeathHold, openingDelay)
+        unit:Configure(faction, name, unitKind, self.UnitMaxHp, self.UnitMoveSpeed, self.UnitDamage, self.UnitAttackInterval, self.UnitAttackRange, self.RetargetInterval, self.ImpactDelay, self.DeathHold, openingDelay)
         local record = { entity = entity, unit = unit, faction = faction, dead = false }
         table.insert(self._T.units, record)
         return entity
@@ -304,11 +541,11 @@ script BattleSession extends Component
                 end
             end
             if isvalid(unit) and isvalid(entity) then
-                table.insert(unitParts, record.faction .. ":" .. entity.Name .. ",hp=" .. tostring(unit.Hp) .. ",alive=" .. tostring(unit:IsAlive()) .. ",state=" .. unit.CombatState .. ",target=" .. unit.CurrentTargetName .. "," .. positionText)
+                table.insert(unitParts, record.faction .. ":" .. entity.Name .. ",kind=" .. unit.UnitKind .. ",hp=" .. tostring(unit.Hp) .. ",alive=" .. tostring(unit:IsAlive()) .. ",state=" .. unit.CombatState .. ",target=" .. unit.CurrentTargetName .. "," .. positionText)
             end
         end
         self.UnitSnapshots = table.concat(unitParts, ";")
-        self.Snapshot = "phase=" .. self.Phase .. "|result=" .. self.Result .. "|playerAlive=" .. tostring(self.PlayerAlive) .. "|enemyAlive=" .. tostring(self.EnemyAlive) .. "|units=" .. self.UnitSnapshots .. "|event=" .. self.LastEvent .. "|eventSerial=" .. tostring(self.EventSerial) .. "|source=" .. self.LastEventSourceName .. "|target=" .. self.LastEventTargetName .. "|amount=" .. tostring(self.LastEventAmount)
+        self.Snapshot = "phase=" .. self.Phase .. "|result=" .. self.Result .. "|playerRoster=" .. tostring(self.PlayerRosterCount) .. "|playerAlive=" .. tostring(self.PlayerAlive) .. "|enemyAlive=" .. tostring(self.EnemyAlive) .. "|selected=" .. self.SelectedUnitKind .. "|deploymentMessage=" .. self.DeploymentMessage .. "|units=" .. self.UnitSnapshots .. "|event=" .. self.LastEvent .. "|eventSerial=" .. tostring(self.EventSerial) .. "|source=" .. self.LastEventSourceName .. "|target=" .. self.LastEventTargetName .. "|amount=" .. tostring(self.LastEventAmount)
         self.SnapshotSerial = self.SnapshotSerial + 1
     end
 

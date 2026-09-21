@@ -2,6 +2,7 @@
 script BattleUnit extends Component
 
     @Sync property string Faction = ""
+    @Sync property string UnitKind = "ASSAULT"
     @Sync property string CombatState = "IDLE"
     @Sync property string CurrentTargetName = ""
     @Sync property integer Hp = 0
@@ -30,9 +31,10 @@ script BattleUnit extends Component
     end
 
     @ExecSpace("ServerOnly")
-    method void Configure(string faction, string displayName, integer maxHp, number speed, integer damage, number interval, number range, number retarget, number impact, number deathHold, number openingDelay)
+    method void Configure(string faction, string displayName, string unitKind, integer maxHp, number speed, integer damage, number interval, number range, number retarget, number impact, number deathHold, number openingDelay)
         -- Apply the fixed M1 assault profile without requiring model-instance property overrides.
         self.Faction = faction
+        self.UnitKind = unitKind
         self.MaxHp = maxHp
         self.Hp = maxHp
         self.MoveSpeed = speed
@@ -50,6 +52,22 @@ script BattleUnit extends Component
         self._T.retargetRemaining = 0
         local attack = self.Entity:GetComponent("script.AssaultAttack")
         if isvalid(attack) then attack:Configure(damage, range, interval, impact, openingDelay) end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void ActivateForBattle()
+        -- Re-arm a deployed unit when the server opens the battle phase.
+        self.IsDead = false
+        self.CombatState = "IDLE"
+        self.CurrentTargetName = ""
+        self._T.currentTarget = nil
+        self._T.retargetRemaining = 0
+        self._T.deathRemaining = 0
+        self._T.deathFinished = false
+        self.Entity:SetEnable(true)
+        self.Entity:SetVisible(true)
+        local hit = self.Entity:GetComponent("HitComponent")
+        if isvalid(hit) then hit.Enable = true end
     end
 
     method boolean IsAlive()

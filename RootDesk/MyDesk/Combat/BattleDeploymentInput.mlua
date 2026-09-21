@@ -1,0 +1,148 @@
+@Component
+script BattleDeploymentInput extends Component
+
+    property any session = nil
+    property any buttonBindings = nil
+    property any screenTouchHandler = nil
+    property integer boundButtonCount = 0
+    property integer missingButtonCount = 0
+    property boolean cameraConfigured = false
+
+    @ExecSpace("ClientOnly")
+    method void OnBeginPlay()
+        -- Bind named deployment UI and battlefield clicks on the client.
+        self.session = self.Entity:GetComponent("script.BattleSession")
+        self.buttonBindings = {}
+        self.boundButtonCount = 0
+        self.missingButtonCount = 0
+        self.cameraConfigured = false
+        self:ConfigureClientCamera()
+        self:BindUnitButton("BtnTank", "TANK")
+        self:BindUnitButton("BtnAssault", "ASSAULT")
+        self:BindUnitButton("BtnShooter", "SHOOTER")
+        self:BindStartButton("BtnStart")
+        self.screenTouchHandler = _InputService:ConnectEvent(ScreenTouchEvent, self.HandleScreenTouch)
+        if self.boundButtonCount == 0 then
+            log("[M1][Phase2][Input] deployment UI not present; waiting for named buttons")
+        else
+            log("[M1][Phase2][Input] bound deployment buttons=" .. tostring(self.boundButtonCount))
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnUpdate(number delta)
+        -- Retry the camera setup until the local player camera is available.
+        if self.cameraConfigured == true then return end
+        self:ConfigureClientCamera()
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnEndPlay()
+        -- Release every client input handler before the map instance ends.
+        if self.screenTouchHandler ~= nil then
+            _InputService:DisconnectEvent(ScreenTouchEvent, self.screenTouchHandler)
+            self.screenTouchHandler = nil
+        end
+        if self.buttonBindings ~= nil then
+            for _, binding in ipairs(self.buttonBindings) do
+                if isvalid(binding.entity) and binding.eventCallback ~= nil then
+                    binding.entity:DisconnectEvent(ButtonClickEvent, binding.eventCallback)
+                end
+            end
+        end
+        self.buttonBindings = {}
+        self.session = nil
+        self.cameraConfigured = false
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ConfigureClientCamera()
+        -- Center the local camera so the full RectTile battlefield remains visible.
+        local player = _UserService.LocalPlayer
+        if not isvalid(player) then return end
+        local camera = player:GetComponent("CameraComponent")
+        if not isvalid(camera) then return end
+        camera.DeadZone = Vector2(1, 1)
+        camera.SoftZone = Vector2(1, 1)
+        camera.Damping = Vector2(0, 0)
+        camera.ScreenOffset = Vector2(0.5, 0.5)
+        camera.CameraOffset = Vector2(0, 0)
+        camera.IsAllowZoomInOut = false
+        self.cameraConfigured = true
+        log("[M1][Camera] client fixed-field camera screen=0.5,0.5")
+    end
+
+    @ExecSpace("ClientOnly")
+    method Entity FindNamedUiEntity(string entityName)
+        -- Find a named UI entity anywhere below the shared UI root.
+        local root = _EntityService:GetEntityByPath("/ui")
+        if not isvalid(root) then return nil end
+        if root.Name == entityName then return root end
+        return root:GetChildByName(entityName, true)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void BindUnitButton(string buttonName, string unitKind)
+        -- Connect one human-provided unit button without changing its appearance.
+        local button = self:FindNamedUiEntity(buttonName)
+        if not isvalid(button) then
+            self.missingButtonCount = self.missingButtonCount + 1
+            return
+        end
+        if not isvalid(button:GetComponent("ButtonComponent")) then
+            self.missingButtonCount = self.missingButtonCount + 1
+            return
+        end
+        local eventCallback = function(event)
+            self:HandleUnitButton(unitKind)
+        end
+        local eventHandler = button:ConnectEvent(ButtonClickEvent, eventCallback)
+        table.insert(self.buttonBindings, { entity = button, eventCallback = eventHandler })
+        self.boundButtonCount = self.boundButtonCount + 1
+    end
+
+    @ExecSpace("ClientOnly")
+    method void BindStartButton(string buttonName)
+        -- Connect the human-provided start button to the server-owned phase gate.
+        local button = self:FindNamedUiEntity(buttonName)
+        if not isvalid(button) then
+            self.missingButtonCount = self.missingButtonCount + 1
+            return
+        end
+        if not isvalid(button:GetComponent("ButtonComponent")) then
+            self.missingButtonCount = self.missingButtonCount + 1
+            return
+        end
+        local eventCallback = function(event)
+            self:HandleStartButton()
+        end
+        local eventHandler = button:ConnectEvent(ButtonClickEvent, eventCallback)
+        table.insert(self.buttonBindings, { entity = button, eventCallback = eventHandler })
+        self.boundButtonCount = self.boundButtonCount + 1
+    end
+
+    @ExecSpace("ClientOnly")
+    method void HandleUnitButton(string unitKind)
+        -- Send a unit selection request to the authoritative battle session.
+        if not isvalid(self.session) then return end
+        self.session:RequestSelectUnit(unitKind)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void HandleStartButton()
+        -- Send the start request and let the server validate the roster and phase.
+        if not isvalid(self.session) then return end
+        self.session:RequestStartBattle()
+    end
+
+    @ExecSpace("ClientOnly")
+    method void HandleScreenTouch(ScreenTouchEvent event)
+        -- Convert a non-UI screen click into a server-validated deployment or removal request.
+        if event == nil or event.TouchId < 1 then return end
+        if _InputService:IsPointerOverUI(event.TouchId) then return end
+        if not isvalid(self.session) then return end
+        local worldPosition = _UILogic:ScreenToWorldPosition(event.TouchPoint)
+        self.session:RequestDeployAtWorld(Vector3(worldPosition.x, worldPosition.y, 0))
+    end
+
+end

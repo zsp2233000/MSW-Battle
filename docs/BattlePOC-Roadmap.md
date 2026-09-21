@@ -13,7 +13,7 @@
 
 | M | 主題 | 狀態 |
 |---|---|---|
-| M1 | 單人對固定六隻敵軍的完整 POC → `BattlePOC-M1-GDD.md` | 🔨 active |
+| M1 | 單人對固定六隻敵軍的完整 POC → `BattlePOC-M1-GDD.md` | 🔨 active (Phase 1/5 done) |
 | M2 | 雙方玩家一次布陣與對戰同步 | planned |
 | M3 | 依 POC 測試結果擴充關卡、兵種與平衡資料化 | candidate |
 
