@@ -48,6 +48,7 @@ test("Issue #3 starts one tank and one assault with the fixed tank profile", () 
   const contact = read("RootDesk/MyDesk/Combat/TankContactAttack.mlua");
   const presentation = read("RootDesk/MyDesk/Combat/TankPresentation.mlua");
   const assault = read("RootDesk/MyDesk/Combat/AssaultAttack.mlua");
+  const runtimeProbe = read("tests/tank_contact_runtime_probe.lua");
 
   assert.match(session, /SpawnUnit\(self\.PlayerModelId, "M1_PlayerTank", "PLAYER", "TANK"/);
   assert.match(session, /SpawnUnit\(self\.EnemyModelId, "M1_EnemyAssault", "ENEMY", "ASSAULT"/);
@@ -93,6 +94,10 @@ test("Issue #3 starts one tank and one assault with the fixed tank profile", () 
 
   assert.match(assault, /extends AttackComponent/);
   assert.match(assault, /return self\.AttackDamage/);
+  assert.match(runtimeProbe, /session:SpawnUnit/);
+  assert.match(runtimeProbe, /_TimerService:SetTimerOnce/);
+  assert.match(runtimeProbe, /session:EnterResult\("WIN"\)/);
+  assert.match(runtimeProbe, /\[M1\]\[TankProbe\] PASS/);
 });
 
 test("Issue #3 keeps the existing battle group UI available without binding it to runtime", () => {

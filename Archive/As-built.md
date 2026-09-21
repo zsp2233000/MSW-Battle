@@ -15,7 +15,7 @@
 | Battle map | `.map` | `map/map01.map` | `TileMapMode=1` (`RectTile`); map root owns only `script.BattleSession` for the active Issue #3 runtime. |
 | DefaultPlayer / camera | runtime logic | `BattleSession.mlua` (`DisableDefaultPlayer`) | DefaultPlayer remains visible while controller, body, collision, trigger, hit, and target participation are disabled; camera is centered, zoomed out, and offset down to show the full field. |
 | Battle UI | `.ui` / parked adapter | `ui/BattleGroup.ui`, `RootDesk/MyDesk/Combat/BattleDeploymentInput.mlua` | Existing deployment UI is retained for Phase 2 but hidden and not attached to `map01` during Issue #3. |
-| Regression contract | Node tests | `tests/battle_session_contract.test.cjs`, `tests/tank_contact_behavior.test.cjs` | Covers RectTile/model invariants, fixed Tank/Assault spawn, Tank rules, supplied resource bindings, hidden parked UI, no deployment runtime binding, cooldown/multi-target/knockback/result behavior. |
+| Regression contract | Node contract + Maker runtime probe | `tests/battle_session_contract.test.cjs`, `tests/tank_contact_runtime_probe.lua` | Covers RectTile/model invariants, fixed Tank/Assault spawn, Tank rules, supplied resource bindings, hidden parked UI, no deployment runtime binding, and live cooldown/multi-target/knockback/result behavior. |
 
 ## Standing issues & handoff rules (update in place — never re-append)
 
@@ -33,7 +33,7 @@
 - Added queued enemy-only 0.8 world-unit knockback with RectTile boundary clamping. The Tank position is never displaced by its own contact attack, and no stun or contact attack SFX/VFX path is used.
 - Applied the supplied Tank stand/move/hit/die AnimationClip RUIDs and hit/death sound RUIDs through `TankPresentation`. Tank hit and death sounds are separate from the Tank's silent contact attack.
 - Adjusted the fixed camera to zoom out and offset downward so the lower map area remains visible.
-- Node contract tests pass. Maker refresh/build produced no error-level entries. Maker Play produced `BATTLE started: PLAYER tank vs ENEMY assault`, `RESULT=WIN`, and a live multi-target contact check showed both overlapping enemies taking the same fixed damage and being clamped at the arena boundary.
+- Node contract tests pass. Maker refresh/build produced no error-level entries. The Maker runtime probe passed live multi-target contact, independent cooldown, no Tank recoil or stun, enemy-only boundary-clamped knockback, and result-stop checks; the normal Play run produced `BATTLE started: PLAYER tank vs ENEMY assault` and `RESULT=WIN`.
 
 ### 2026-09-21 Phase 1 complete (summary)
 
