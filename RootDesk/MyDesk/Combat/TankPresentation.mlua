@@ -1,0 +1,73 @@
+@Component
+script TankPresentation extends Component
+
+    property string StandAnimationRUID = "a95cfed2c8fe4d2cb64cbb62db051f92"
+    property string MoveAnimationRUID = "8257566e41aa4234929e81c6c2dab2e4"
+    property string HitAnimationRUID = "5ebbdaf503964f3e87de155d16650805"
+    property string DeathAnimationRUID = "dddbe2f162184ec89add7440da56eb75"
+    property string HitSoundRUID = "6eb2ef8a783c4393bd7ee6a2c199bda7"
+    property string DeathSoundRUID = "c49646f7299e4c6e81e953c96e20b294"
+
+    @ExecSpace("ClientOnly")
+    method void OnBeginPlay()
+        -- Initialize the tank's visual state and sound serial cursors on the client.
+        self._T.lastCombatState = ""
+        self._T.lastDamageSerial = 0
+        self._T.deathSoundPlayed = false
+        self:ApplyAnimation("IDLE")
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnUpdate(number delta)
+        -- Mirror synced combat state and play hit/death sounds exactly once per semantic event.
+        local unit = self.Entity:GetComponent("script.BattleUnit")
+        if not isvalid(unit) then return end
+        if unit.CombatState ~= self._T.lastCombatState then
+            self._T.lastCombatState = unit.CombatState
+            self:ApplyAnimation(unit.CombatState)
+        end
+        if unit.DamageTakenSerial ~= self._T.lastDamageSerial then
+            self._T.lastDamageSerial = unit.DamageTakenSerial
+            if unit.IsDead ~= true then self:PlayAtEntity(self.HitSoundRUID) end
+        end
+        if unit.IsDead == true and self._T.deathSoundPlayed ~= true then
+            self._T.deathSoundPlayed = true
+            self:PlayAtEntity(self.DeathSoundRUID)
+            self:ApplyAnimation("DEAD")
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ApplyAnimation(string combatState)
+        -- Assign the supplied animation clip directly to the tank SpriteRendererComponent.
+        local sprite = self.Entity:GetComponent("SpriteRendererComponent")
+        if not isvalid(sprite) then return end
+        local animationRUID = self.StandAnimationRUID
+        if combatState == "MOVE" then
+            animationRUID = self.MoveAnimationRUID
+        elseif combatState == "HIT" then
+            animationRUID = self.HitAnimationRUID
+        elseif combatState == "DEAD" then
+            animationRUID = self.DeathAnimationRUID
+        end
+        sprite.SpriteRUID = animationRUID
+        sprite.StartFrameIndex = 0
+        sprite.EndFrameIndex = 2147483647
+        sprite.PlayRate = 1
+    end
+
+    @ExecSpace("ClientOnly")
+    method void PlayAtEntity(string soundRUID)
+        -- Play only tank receive-hit/death sounds; contact attack has no sound effect.
+        if soundRUID == nil or soundRUID == "" or soundRUID == "TBD" or soundRUID == "N/A" then return end
+        local transform = self.Entity:GetComponent("TransformComponent")
+        if not isvalid(transform) then return end
+        local listener = _UserService.LocalPlayer
+        if isvalid(listener) then
+            _SoundService:PlaySoundAtPos(soundRUID, transform.WorldPosition, listener, 1.0)
+        else
+            _SoundService:PlaySound(soundRUID, 1.0)
+        end
+    end
+
+end

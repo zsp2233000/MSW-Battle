@@ -31,8 +31,8 @@ script BattleUnit extends Component
     end
 
     @ExecSpace("ServerOnly")
-    method void Configure(string faction, string displayName, string unitKind, integer maxHp, number speed, integer damage, number interval, number range, number retarget, number impact, number deathHold, number openingDelay)
-        -- Apply the fixed M1 assault profile without requiring model-instance property overrides.
+    method void Configure(string faction, string displayName, string unitKind, integer maxHp, number speed, integer damage, number interval, number range, number retarget, number impact, number deathHold, number openingDelay, number contactCooldown, Vector2 contactSize, number knockbackDistance)
+        -- Apply either the fixed tank contact profile or the existing assault profile.
         self.Faction = faction
         self.UnitKind = unitKind
         self.MaxHp = maxHp
@@ -50,24 +50,13 @@ script BattleUnit extends Component
         self._T.displayName = displayName
         self._T.currentTarget = nil
         self._T.retargetRemaining = 0
-        local attack = self.Entity:GetComponent("script.AssaultAttack")
-        if isvalid(attack) then attack:Configure(damage, range, interval, impact, openingDelay) end
-    end
-
-    @ExecSpace("ServerOnly")
-    method void ActivateForBattle()
-        -- Re-arm a deployed unit when the server opens the battle phase.
-        self.IsDead = false
-        self.CombatState = "IDLE"
-        self.CurrentTargetName = ""
-        self._T.currentTarget = nil
-        self._T.retargetRemaining = 0
-        self._T.deathRemaining = 0
-        self._T.deathFinished = false
-        self.Entity:SetEnable(true)
-        self.Entity:SetVisible(true)
-        local hit = self.Entity:GetComponent("HitComponent")
-        if isvalid(hit) then hit.Enable = true end
+        if unitKind == "TANK" then
+            local contact = self.Entity:GetComponent("script.TankContactAttack")
+            if isvalid(contact) then contact:Configure(damage, contactCooldown, contactSize, knockbackDistance) end
+        else
+            local attack = self.Entity:GetComponent("script.AssaultAttack")
+            if isvalid(attack) then attack:Configure(damage, range, interval, impact, openingDelay) end
+        end
     end
 
     method boolean IsAlive()
@@ -92,7 +81,7 @@ script BattleUnit extends Component
 
     @ExecSpace("ServerOnly")
     method void Tick(number delta)
-        -- Retarget on the 0.5-second cadence, move per frame, and start attacks only in range.
+        -- Retarget on the cadence, move per frame, and use only the unit's configured attack path.
         if self.IsDead then
             self:TickDeathHold(delta)
             return
@@ -141,9 +130,15 @@ script BattleUnit extends Component
         else
             local movement = self.Entity:GetComponent("MovementComponent")
             if isvalid(movement) then movement:Stop() end
-            self.CombatState = "ATTACK"
-            local attack = self.Entity:GetComponent("script.AssaultAttack")
-            if isvalid(attack) then attack:TryStart(target) end
+            if self.UnitKind == "TANK" then
+                self.CombatState = "IDLE"
+                local contact = self.Entity:GetComponent("script.TankContactAttack")
+                if isvalid(contact) then contact:TryContact(target) end
+            else
+                self.CombatState = "ATTACK"
+                local attack = self.Entity:GetComponent("script.AssaultAttack")
+                if isvalid(attack) then attack:TryStart(target) end
+            end
         end
     end
 
@@ -199,6 +194,8 @@ script BattleUnit extends Component
         if isvalid(movement) then movement:Stop() end
         local attack = self.Entity:GetComponent("script.AssaultAttack")
         if isvalid(attack) then attack:CancelImpact() end
+        local contact = self.Entity:GetComponent("script.TankContactAttack")
+        if isvalid(contact) then contact:CancelContact() end
     end
 
     @ExecSpace("ServerOnly")

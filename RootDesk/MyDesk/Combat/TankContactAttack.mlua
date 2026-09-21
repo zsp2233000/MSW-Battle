@@ -1,0 +1,104 @@
+@Component
+script TankContactAttack extends AttackComponent
+
+    property integer ContactDamage = 40
+    property number ContactCooldown = 2.0
+    property Vector2 ContactSize = Vector2(1.2, 1.2)
+    property number KnockbackDistance = 0.8
+
+    @ExecSpace("ServerOnly")
+    method void OnBeginPlay()
+        -- Reset per-target contact timers before the owning BattleUnit starts ticking.
+        self._T.targetCooldowns = {}
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Configure(integer damage, number cooldown, Vector2 size, number knockbackDistance)
+        -- Apply the fixed tank contact profile supplied by the battle session.
+        self.ContactDamage = damage
+        self.ContactCooldown = cooldown
+        self.ContactSize = size
+        self.KnockbackDistance = knockbackDistance
+        self._T.targetCooldowns = {}
+    end
+
+    @ExecSpace("ServerOnly")
+    method void TryContact(Entity target)
+        -- Resolve one native area attack while the selected enemy is inside contact range.
+        local unit = self.Entity:GetComponent("script.BattleUnit")
+        if not isvalid(unit) or not unit:IsAlive() or unit.UnitKind ~= "TANK" then return end
+        if not isvalid(target) then return end
+        local map = self.Entity.CurrentMap
+        if not isvalid(map) then return end
+        local session = map:GetComponent("script.BattleSession")
+        if not isvalid(session) or not session:IsBattleActive() then return end
+        local transform = self.Entity:GetComponent("TransformComponent")
+        if not isvalid(transform) then return end
+        local position = transform.WorldPosition
+        self:AttackFrom(self.ContactSize, Vector2(position.x, position.y), "tank_contact", nil)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Advance(number delta)
+        -- Count down each enemy independently so one overlap never blocks another target.
+        if self._T.targetCooldowns == nil then self._T.targetCooldowns = {} end
+        local expired = {}
+        for targetName, remaining in pairs(self._T.targetCooldowns) do
+            local nextRemaining = math.max(0, remaining - delta)
+            if nextRemaining <= 0 then
+                table.insert(expired, targetName)
+            else
+                self._T.targetCooldowns[targetName] = nextRemaining
+            end
+        end
+        for _, targetName in ipairs(expired) do
+            self._T.targetCooldowns[targetName] = nil
+        end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void OnUpdate(number delta)
+        -- Drive contact cooldowns in the live server frame loop.
+        self:Advance(delta)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void CancelContact()
+        -- Stop future contact damage after the session enters its terminal result state.
+        self._T.targetCooldowns = {}
+    end
+
+    method integer CalcDamage(Entity attacker, Entity defender, string attackInfo)
+        -- Supply fixed 40 damage through the native Attack to Hit pipeline.
+        return self.ContactDamage
+    end
+
+    method boolean IsAttackTarget(Entity defender, string attackInfo)
+        -- Accept only live opposing units whose individual contact timer has elapsed.
+        local attackerUnit = self.Entity:GetComponent("script.BattleUnit")
+        local defenderUnit = nil
+        if isvalid(defender) then defenderUnit = defender:GetComponent("script.BattleUnit") end
+        if not isvalid(attackerUnit) or not attackerUnit:IsAlive() or attackerUnit.UnitKind ~= "TANK" then return false end
+        if not isvalid(defenderUnit) or not defenderUnit:IsAlive() or attackerUnit.Faction == defenderUnit.Faction then return false end
+        local targetName = defender.Name
+        local remaining = self._T.targetCooldowns[targetName]
+        if remaining ~= nil and remaining > 0 then return false end
+        return __base:IsAttackTarget(defender, attackInfo)
+    end
+
+    method void OnAttack(Entity defender)
+        -- Publish contact semantics, start this target's cooldown, and queue enemy-only knockback.
+        if not isvalid(defender) then return end
+        if self._T.targetCooldowns == nil then self._T.targetCooldowns = {} end
+        self._T.targetCooldowns[defender.Name] = self.ContactCooldown
+        local unit = self.Entity:GetComponent("script.BattleUnit")
+        local map = self.Entity.CurrentMap
+        if not isvalid(unit) or not isvalid(map) then return end
+        local session = map:GetComponent("script.BattleSession")
+        if not isvalid(session) or not session:IsBattleActive() then return end
+        unit.AttackSerial = unit.AttackSerial + 1
+        session:EmitPresentation("TANK_CONTACT_HIT", self.Entity, defender, self.ContactDamage)
+        session:QueueTankContactKnockback(self.Entity, defender, self.KnockbackDistance)
+    end
+
+end

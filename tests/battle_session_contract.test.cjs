@@ -11,16 +11,16 @@ function read(relativePath) {
   return fs.readFileSync(path.join(root, relativePath), "utf8");
 }
 
-test("M1 map keeps RectTile and exposes the session boundary", () => {
+test("M1 map keeps RectTile and exposes only the fixed battle session", () => {
   const map = MapBuilder.read(path.join(root, "map/map01.map"));
   assert.equal(map.getMapInfo().TileMapMode, 1);
   const rootEntity = map.listEntities().find((entity) => entity.path === "/maps/map01");
   assert.ok(rootEntity);
   assert.match(rootEntity.componentNames, /script\.BattleSession/);
-  assert.match(rootEntity.componentNames, /script\.BattleDeploymentInput/);
+  assert.doesNotMatch(rootEntity.componentNames, /BattleDeploymentInput/);
 });
 
-test("M1 unit model has the RectTile movement contract", () => {
+test("M1 unit model has the RectTile movement and native hit contract", () => {
   const snapshot = ModelBuilder.snapshot(path.join(root, "RootDesk/MyDesk/Models/Monsters/BattleUnit.model"));
   const requiredComponents = [
     "MOD.Core.TransformComponent",
@@ -42,95 +42,62 @@ test("M1 unit model has the RectTile movement contract", () => {
   assert.ok(values.get("MOD.Core.SpriteRendererComponent.SpriteRUID"));
 });
 
-test("M1 battle scripts expose the observable elapsed-time contract", () => {
+test("Issue #3 starts one tank and one assault with the fixed tank profile", () => {
   const session = read("RootDesk/MyDesk/Combat/BattleSession.mlua");
   const unit = read("RootDesk/MyDesk/Combat/BattleUnit.mlua");
-  const attack = read("RootDesk/MyDesk/Combat/AssaultAttack.mlua");
+  const contact = read("RootDesk/MyDesk/Combat/TankContactAttack.mlua");
+  const presentation = read("RootDesk/MyDesk/Combat/TankPresentation.mlua");
+  const assault = read("RootDesk/MyDesk/Combat/AssaultAttack.mlua");
 
-  assert.match(session, /method void AdvanceForTest\(number elapsed\)/);
-  assert.match(session, /method string GetDebugSnapshot\(\)/);
-  assert.match(session, /method string GetUnitSnapshots\(\)/);
-  assert.match(session, /WorldPosition/);
-  assert.match(session, /UnitSnapshots/);
-  assert.match(session, /hp=/);
-  assert.match(session, /alive=/);
-  assert.match(session, /x=/);
-  assert.match(session, /y=/);
-  assert.match(session, /self\._T\.resultEntered == true/);
-  assert.match(session, /self\.Phase = "RESULT"/);
+  assert.match(session, /SpawnUnit\(self\.PlayerModelId, "M1_PlayerTank", "PLAYER", "TANK"/);
+  assert.match(session, /SpawnUnit\(self\.EnemyModelId, "M1_EnemyAssault", "ENEMY", "ASSAULT"/);
+  assert.match(session, /TankMaxHp = 500/);
+  assert.match(session, /TankMoveSpeed = 1\.1/);
+  assert.match(session, /TankContactDamage = 40/);
+  assert.match(session, /TankContactCooldown = 2\.0/);
+  assert.match(session, /TankKnockbackDistance = 0\.8/);
+  assert.match(session, /QueueTankContactKnockback/);
+  assert.match(session, /ApplyPendingKnockbacks/);
+  assert.match(session, /ArenaMinX/);
+  assert.match(session, /CameraZoomPercent = 70/);
+  assert.match(session, /CameraOffset = Vector2\(0, -1\.0\)/);
   assert.match(session, /self:EmitPresentation\("RESULT"/);
-  assert.match(session, /camera\.DeadZone = Vector2\(1, 1\)/);
-  assert.match(session, /camera\.IsAllowZoomInOut = false/);
-  assert.match(session, /trigger\.Enable = false/);
-  assert.match(session, /physicsCollider\.Enable = false/);
-  assert.match(session, /UnitMaxHp = 220/);
-  assert.match(session, /UnitMoveSpeed = 2\.0/);
-  assert.match(session, /UnitDamage = 35/);
-  assert.match(session, /UnitAttackInterval = 0\.7/);
-  assert.match(session, /UnitAttackRange = 0\.6/);
-  assert.match(session, /RetargetInterval = 0\.5/);
-  assert.match(session, /EnemyOpeningDelay = 0\.12/);
-  assert.match(session, /PlayerSpawnPosition = Vector3\(-2\.4, 0, 0\)/);
+  assert.match(session, /self\._T\.resultEntered == true/);
 
-  assert.match(unit, /movement:MoveToDirection\(direction, delta\)/);
-  assert.match(unit, /movement\.InputSpeed = self\.MoveSpeed \* 1\.2/);
-  assert.match(unit, /session:QueueDamage\(self\.Entity, event\.TotalDamage, event\.AttackerEntity\)/);
-  assert.match(attack, /self:AttackFrom\(Vector2\(1\.2, 1\.2\)/);
-  assert.match(attack, /return self\.AttackDamage/);
-  assert.match(attack, /openingDelayPending/);
-  assert.match(attack, /self\.CooldownRemaining = self\._T\.openingDelay/);
-  assert.match(attack, /self\.PendingTarget = target/);
-
-  assert.doesNotMatch(unit, /SetWorldPosition|SetPosition\(/);
-  assert.doesNotMatch(attack, /Hp\s*[-+]=/);
-});
-
-test("M1 Phase 2 exposes server-owned deployment and roster gates", () => {
-  const session = read("RootDesk/MyDesk/Combat/BattleSession.mlua");
-  const unit = read("RootDesk/MyDesk/Combat/BattleUnit.mlua");
-
-  assert.match(session, /@Sync property integer PlayerRosterCount = 0/);
-  assert.match(session, /@Sync property string SelectedUnitKind = ""/);
-  assert.match(session, /DeploymentMinX = -5\.0/);
-  assert.match(session, /DeploymentMaxX = -2\.0/);
-  assert.match(session, /DeploymentMinY = -3\.0/);
-  assert.match(session, /DeploymentMaxY = 1\.0/);
-  assert.match(session, /DeploymentMinDistance = 0\.6/);
-  assert.match(session, /DeploymentMaxUnits = 6/);
-  assert.match(session, /method void RequestSelectUnit\(string unitKind\)/);
-  assert.match(session, /method void RequestDeployAtWorld\(Vector3 requestedPosition\)/);
-  assert.match(session, /method void RequestRemoveUnit\(string unitName\)/);
-  assert.match(session, /method void RequestStartBattle\(\)/);
-  assert.match(session, /method void BeginBattle\(\)/);
-  assert.match(session, /method string FindPlayerUnitAtPosition\(Vector3 position\)/);
-  assert.match(session, /method boolean RemovePlayerUnitByName\(string unitName\)/);
-  assert.match(session, /self:RemovePlayerUnitByName\(existingName\)/);
-  assert.match(session, /self:SpawnFixedEnemies\(\)/);
-  assert.match(session, /record\.unit:ActivateForBattle\(\)/);
-  assert.match(session, /battleStarting/);
-  assert.match(session, /self\.Phase = "BATTLE"\s+self\._T\.battleStarting = false/);
-  assert.match(session, /self:IsAuthorizedRequester\(senderUserId\)/);
-  assert.match(session, /self\.Phase ~= "DEPLOYMENT"/);
   assert.match(unit, /@Sync property string UnitKind = "ASSAULT"/);
-  assert.match(unit, /method void ActivateForBattle\(\)/);
+  assert.match(unit, /if self\.UnitKind == "TANK" then/);
+  assert.match(unit, /contact:TryContact\(target\)/);
+  assert.match(unit, /self\.CombatState = "IDLE"/);
+  assert.match(unit, /session:QueueDamage\(self\.Entity, event\.TotalDamage, event\.AttackerEntity\)/);
+  assert.doesNotMatch(unit, /SetWorldPosition|SetPosition\(/);
+
+  assert.match(contact, /extends AttackComponent/);
+  assert.match(contact, /ContactDamage = 40/);
+  assert.match(contact, /ContactCooldown = 2\.0/);
+  assert.match(contact, /self:AttackFrom\(self\.ContactSize/);
+  assert.match(contact, /targetCooldowns/);
+  assert.match(contact, /return self\.ContactDamage/);
+  assert.match(contact, /session:QueueTankContactKnockback/);
+  assert.doesNotMatch(contact, /_SoundService|VFX|Effect/);
+
+  assert.match(presentation, /a95cfed2c8fe4d2cb64cbb62db051f92/);
+  assert.match(presentation, /8257566e41aa4234929e81c6c2dab2e4/);
+  assert.match(presentation, /5ebbdaf503964f3e87de155d16650805/);
+  assert.match(presentation, /dddbe2f162184ec89add7440da56eb75/);
+  assert.match(presentation, /6eb2ef8a783c4393bd7ee6a2c199bda7/);
+  assert.match(presentation, /c49646f7299e4c6e81e953c96e20b294/);
+  assert.match(presentation, /PlaySoundAtPos/);
+  assert.doesNotMatch(presentation, /AttackSound|ContactSound/);
+
+  assert.match(assault, /extends AttackComponent/);
+  assert.match(assault, /return self\.AttackDamage/);
 });
 
-test("M1 Phase 2 client adapter binds named UI and world deployment input", () => {
-  const input = read("RootDesk/MyDesk/Combat/BattleDeploymentInput.mlua");
-
-  for (const buttonName of ["BtnTank", "BtnAssault", "BtnShooter", "BtnStart"]) {
-    assert.match(input, new RegExp(buttonName));
-  }
-  assert.match(input, /@ExecSpace\("ClientOnly"\)\s+method void OnBeginPlay\(\)/);
-  assert.match(input, /ConnectEvent\(ButtonClickEvent/);
-  assert.match(input, /ConnectEvent\(ScreenTouchEvent/);
-  assert.match(input, /ScreenToWorldPosition\(event\.TouchPoint\)/);
-  assert.match(input, /IsPointerOverUI\(event\.TouchId\)/);
-  assert.match(input, /DisconnectEvent\(ButtonClickEvent/);
-  assert.match(input, /DisconnectEvent\(ScreenTouchEvent/);
-  assert.match(input, /session:RequestDeployAtWorld\(Vector3\(worldPosition\.x, worldPosition\.y, 0\)\)/);
-  assert.match(input, /method void ConfigureClientCamera\(\)/);
-  assert.match(input, /camera\.ScreenOffset = Vector2\(0\.5, 0\.5\)/);
-  assert.match(input, /camera\.CameraOffset = Vector2\(0, 0\)/);
-  assert.match(input, /self\.cameraConfigured == true/);
+test("Issue #3 keeps the existing battle group UI available without binding it to runtime", () => {
+  const uiPath = path.join(root, "ui/BattleGroup.ui");
+  assert.ok(fs.existsSync(uiPath));
+  const ui = read("ui/BattleGroup.ui");
+  assert.match(ui, /BtnTank/);
+  const parsed = JSON.parse(ui);
+  assert.equal(parsed.ContentProto.Entities[0].jsonString.visible, false);
 });

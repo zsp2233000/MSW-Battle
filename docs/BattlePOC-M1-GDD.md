@@ -1,9 +1,9 @@
 # Battle POC — 單局陣型自動戰鬥設計文件（GDD）
 
 > 🔖 **AI 接續提醒**：若在新工作階段接續本遊戲，先載入 `msw-planning`，依恢復流程讀取 `BattlePOC-Roadmap.md` 與 `Archive/As-built.md`。開始實作或修改 `⬜/🟡/✅` 前，必須完整閱讀 `references/build-management.md`。
-> 最後更新：2026-09-21／階段：M1 Phase 2 部署 UI 已交付，等待人工輸入流程驗收
+> 最後更新：2026-09-21／階段：M1 Issue #3 坦克固定自動戰鬥已實作；Phase 2 部署 UI 保留但未接入本次 runtime
 
-> M1 vertical slice scope（Issue #2）先固定一隻 player `突擊` 對一隻 fixed enemy `突擊`，自動進入 `BATTLE`；本階段不實作下方完整部署 UI 與六對六內容。
+> M1 current runtime scope（Issue #3）固定一隻 player `坦克` 對一隻 fixed enemy `突擊`，自動進入 `BATTLE`；本次只交付坦克規則，部署 UI 與六對六內容保留為後續工作。
 
 ## 1. 一句話概念
 
@@ -70,7 +70,7 @@
 - 坦克接觸可同時傷害所有重疊的敵方單位，各目標分別計算兩秒冷卻。
 - 坦克碰撞時只有敵方被擊退；坦克不後退。
 - 擊退不造成暈眩；目標以速度與衰減完成擊退，位置限制於戰場內。
-- 坦克接觸不播放碰撞特效或音效，但仍更新 HP、顯示傷害數字，並讓敵方播放受擊／擊退動畫。
+- 坦克接觸不播放碰撞特效、攻擊音效、碰撞音效或該次接觸引發的受擊音效，但仍更新 HP、顯示傷害數字，並讓敵方播放受擊／擊退動畫；坦克受到敵方攻擊播放 `Tank hit SFX`，坦克死亡播放 `Tank die SFX`。
 - 突擊與射手的傷害經由標準 Attack → Hit 流程處理，不直接改寫 HP。
 
 ### 4.5 動畫與呈現資產契約
@@ -114,20 +114,20 @@
 
 | 遊戲系統 | MSW 實作 |
 |---|---|
-| 全局階段與結果 | 伺服器權威 `@Logic` 管理 `DEPLOYMENT/BATTLE/RESULT`、存活數與同批結果判定；同步客戶端必要狀態 |
-| 玩家輸入 | 客戶端 UI／滑鼠事件送出部署、移除與開始意圖；伺服器驗證階段、區域、數量與間距 |
-| 單位模型 | 坦克、突擊、射手各用可重複生成的 `.model`；共同掛載生命、陣營、AI 與呈現元件 |
+| 全局階段與結果 | 伺服器權威 `BattleSession` 管理固定 `BATTLE/RESULT`、存活數與同批結果判定；同步客戶端必要狀態 |
+| 玩家輸入 | Issue #3 不接入部署輸入；`BattleGroup.ui` 保留並隱藏，Phase 2 adapter 留待後續 |
+| 單位模型 | 沿用 `battleunit` `.model`；固定生成一隻坦克與一隻突擊，共同掛載生命、陣營與 AI |
 | 地圖物理 | `RectTile` 搭配 `KinematicbodyComponent`；不使用重力、跳躍或 foothold |
 | 移動 | `MovementComponent` 逐幀朝目標方向移動；禁止用計時器跳位置或直接改 Transform 模擬移動 |
 | 索敵與狀態 | 自訂 `@Component` 保存陣營、目前目標與 `IDLE/MOVE/ATTACK/HIT/DEAD`；每 0.5 秒掃描最近存活敵人 |
 | 一般攻擊 | `AttackComponent`、`HitComponent` 與 Hit 事件鏈；攻擊動畫命中影格觸發固定傷害 |
-| 坦克接觸 | `TriggerComponent` 重疊事件＋每目標冷卻表；經 Hit 流程造成傷害，使用 Kinematicbody 速度與衰減擊退敵方 |
+| 坦克接觸 | `TankContactAttack` 使用 `AttackComponent:AttackFrom` 與每目標冷卻表；經 Hit 流程造成傷害，使用 Kinematicbody 位移並夾在邊界內擊退敵方 |
 | 射手 | 距離驗證後於命中影格直接命中目標；不建立投射物 Entity |
-| 動畫 | `SpriteRendererComponent.SpriteRUID` 切換人類提供的 AnimationClip RUID；死亡依完整片長延遲移除 |
+| 動畫 | `TankPresentation` 在客戶端依坦克狀態切換人類提供的 stand／move／hit／die AnimationClip RUID；死亡依既有 death hold 延遲移除 |
 | HP 條 | 單位下的世界空間子 Entity；兩個人類提供的 Sprite RUID，填充值依 HP 比例縮放 |
 | 傷害數字 | 使用人類提供的 DamageSkin RUID 與 MSW 傷害數字機制 |
-| 特效／音效 | 命中與死亡事件呼叫 MSW 特效／音效服務；坦克造成接觸傷害的事件明確跳過特效與音效 |
-| UI | 人類建立 `.ui`；客戶端綁定指定名稱的 Button／結果 Entity，只處理點擊、可用性與顯示狀態 |
+| 特效／音效 | 坦克主動接觸不呼叫攻擊／碰撞／受擊音效；坦克受擊與死亡由 `TankPresentation` 播放已提供的 SFX |
+| UI | `BattleGroup.ui` 保留但隱藏；Issue #3 不綁定部署按鈕或開始按鈕 |
 | 相機與玩家 | 固定相機顯示完整戰場；停用 DefaultPlayer 移動與碰撞，使其不進入戰鬥查詢 |
 
 ## 6. Roadmap（本里程碑 Phases）
@@ -140,7 +140,7 @@
 - ✅ Tested 固定全場相機，保留但停用 DefaultPlayer 的移動、碰撞與戰鬥資格；使用者已完成 Maker Play 視覺／互動確認。
 - ✅ Tested 提供結果判定、AI 停止、Hit 流程及死亡後不可再次受傷的契約測試；Node 靜態契約與 Maker Play start/result/stop 均 PASS。
 
-### Phase 2 — 玩家部署與六對六編隊
+### Phase 2 — 玩家部署與六對六編隊（保留，非 Issue #3 runtime）
 
 - 🟡 串接人類提供的部署按鈕與開始按鈕 UI 實體；`/ui/BattleGroup` 已提供 `BtnTank`、`BtnAssault`、`BtnShooter`、`BtnStart`，Maker Play 已確認四個按鈕成功綁定，等待人工點擊流程驗收。
 - 🟡 完成左側自由放置、點擊移除、0.6 最小間距、一至六隻限制與伺服器驗證；server gate／roster API 與命名 UI 已具備，等待 Maker Play 輸入驗證。
@@ -150,15 +150,15 @@
 
 ### Phase 3 — 三兵種完整規則
 
-- ⬜ 完成坦克高 HP、無一般攻擊、每目標兩秒接觸傷害。
-- ⬜ 完成只擊退敵方約 0.8 世界單位、無暈眩、無單位阻擋及戰場邊界限制。
+- ✅ 完成坦克高 HP、無一般攻擊、每目標兩秒接觸傷害；Issue #3 runtime 已驗證。
+- ✅ 完成只擊退敵方約 0.8 世界單位、無暈眩、無單位阻擋及戰場邊界限制；Issue #3 runtime 已驗證。
 - ⬜ 完成突擊的近戰距離、攻擊間隔與命中影格傷害。
 - ⬜ 完成射手的遠距瞬發命中、攻擊間隔與命中影格傷害。
 - ⬜ 驗證固定傷害、無剋制／護甲／暴擊，以及同批全滅為 Draw。
 
 ### Phase 4 — 人類資產與完整戰鬥回饋
 
-- ⬜ 人類提供 14 個 AnimationClip RUID、突擊／射手命中影格與各死亡動畫片長可讀資料。
+- 🟡 人類已提供坦克 4 個 AnimationClip RUID 與受擊／死亡 SFX；突擊／射手資產仍為 TBD。
 - ⬜ 人類提供 HP 條背景／填充值、DamageSkin、共用命中特效及指定音效 RUID。
 - ⬜ 人類建立並交付具有約定實體名稱、文字與外觀的 UI。
 - ⬜ 串接 stand／move／attack／hit／die 動畫；坦克不建立 attack 動畫。
@@ -188,7 +188,7 @@
 | 部署 | 已決定：左側自由配置一至六隻，至少一隻才可開始，兵種不限配額 |
 | 索敵 | 已決定：每 0.5 秒重新評估最近存活敵人 |
 | 戰鬥數值 | 已決定：採 §4.4 固定數值，無剋制／護甲／暴擊 |
-| 坦克 | 已決定：無一般攻擊；接觸傷害只擊退敵方，且無碰撞特效與音效 |
+| 坦克 | 已決定：無一般攻擊；接觸傷害只擊退敵方，且無碰撞特效、攻擊音效或該次接觸引發的受擊音效；坦克被攻擊與死亡仍播放各自 SFX |
 | 射手 | 已決定：命中影格直接命中，不建立投射物 |
 | 動畫時序 | 已決定：突擊／射手由人類提供命中影格；死亡播完才移除 |
 | 美術與 UI | 已決定：全部由人類設計及提供；AI 僅串接功能 |
@@ -202,3 +202,4 @@
 | 2026-09-21 | 修改 | 傷害改為全固定，移除兵種剋制 | 壓縮 POC 平衡範圍 | 不實作護甲、暴擊、倍率與剋制表 |
 | 2026-09-21 | 新增 | POC 納入動畫、HP 條、傷害數字、特效、音效、死亡及擊退動畫 | 完整驗證戰鬥呈現 | 新增人類資產契約與 Phase 4 |
 | 2026-09-21 | 修改 | 坦克接觸不播放碰撞特效或音效，且只擊退敵方 | 修正坦克呈現與受力方向 | 坦克接觸事件跳過特效／音效；擊退只作用於敵方目標 |
+| 2026-09-21 | 實作 | Issue #3 先交付固定坦克對突擊的自動戰鬥 | 收斂目前票券範圍 | 坦克接觸傷害、每目標冷卻、敵方擊退、邊界與坦克受擊／死亡音效已接入；部署 UI 保留但隱藏 |

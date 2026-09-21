@@ -20,12 +20,12 @@
 | 欄位          | 資產類型           | RUID／值                           | 狀態 | 備註                              |
 | ------------- | ------------------ | ---------------------------------- | ---- | --------------------------------- |
 | Tank ModelId  | Model ID           | `battleunit`                       | ✅    | 若使用其他模型，填入新的 Model ID |
-| Tank `stand`  | AnimationClip RUID | `a95cfed2c8fe4d2cb64cbb62db051f92` | ⬜    | 待機                              |
-| Tank `move`   | AnimationClip RUID | `8257566e41aa4234929e81c6c2dab2e4` | ⬜    | 直線移動                          |
-| Tank `hit`    | AnimationClip RUID | `5ebbdaf503964f3e87de155d16650805` | ⬜    | 受擊與擊退期間沿用                |
-| Tank `die`    | AnimationClip RUID | `dddbe2f162184ec89add7440da56eb75` | ⬜    | 死亡播放完成後移除或隱藏          |
-| Tank hit SFX  | Sound RUID         | `6eb2ef8a783c4393bd7ee6a2c199bda7` | ⬜    | 坦克受到敵方攻擊時播放            |
-| Tank die SFX  | Sound RUID         | `c49646f7299e4c6e81e953c96e20b294` | ⬜    | 坦克死亡時播放                    |
+| Tank `stand`  | AnimationClip RUID | `a95cfed2c8fe4d2cb64cbb62db051f92` | ✅    | 已接入待機                          |
+| Tank `move`   | AnimationClip RUID | `8257566e41aa4234929e81c6c2dab2e4` | ✅    | 已接入直線移動                      |
+| Tank `hit`    | AnimationClip RUID | `5ebbdaf503964f3e87de155d16650805` | ✅    | 已接入受擊與擊退期間呈現            |
+| Tank `die`    | AnimationClip RUID | `dddbe2f162184ec89add7440da56eb75` | ✅    | 已接入死亡呈現                      |
+| Tank hit SFX  | Sound RUID         | `6eb2ef8a783c4393bd7ee6a2c199bda7` | ✅    | 已接入坦克受到敵方攻擊時播放        |
+| Tank die SFX  | Sound RUID         | `c49646f7299e4c6e81e953c96e20b294` | ✅    | 已接入坦克死亡時播放                |
 | Tank `attack` | AnimationClip RUID | `N/A`                              | ⏸    | Issue #3 要求坦克沒有一般攻擊     |
 
 ### 固定敵方突擊單位
