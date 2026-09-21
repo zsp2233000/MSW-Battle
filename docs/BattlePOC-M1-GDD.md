@@ -1,7 +1,9 @@
 # Battle POC — 單局陣型自動戰鬥設計文件（GDD）
 
 > 🔖 **AI 接續提醒**：若在新工作階段接續本遊戲，先載入 `msw-planning`，依恢復流程讀取 `BattlePOC-Roadmap.md` 與 `Archive/As-built.md`。開始實作或修改 `⬜/🟡/✅` 前，必須完整閱讀 `references/build-management.md`。
-> 最後更新：2026-09-21／階段：M1 規劃完成，尚未實作
+> 最後更新：2026-09-21／階段：M1 Phase 1 已實作，Maker Play 驗證待完成
+
+> M1 vertical slice scope（Issue #2）先固定一隻 player `突擊` 對一隻 fixed enemy `突擊`，自動進入 `BATTLE`；本階段不實作下方完整部署 UI 與六對六內容。
 
 ## 1. 一句話概念
 
@@ -132,11 +134,11 @@
 
 ### Phase 1 — 一對一自動戰鬥垂直切片
 
-- ⬜ 建立共用戰鬥階段、陣營、存活與結果狀態。
-- ⬜ 建立 RectTile／Kinematicbody 單位模型與逐幀直線移動。
-- ⬜ 完成一隻突擊對一隻突擊的 0.5 秒索敵、近戰攻擊、死亡與 Win／Lose 結果邏輯。
-- ⬜ 固定全場相機，保留但停用 DefaultPlayer 的移動、碰撞與戰鬥資格。
-- ⬜ 驗證結果判定、停止 AI、Hit 流程及死亡後不可再次受傷。
+- 🟡 Implemented (untested) 建立共用戰鬥階段、陣營、存活與結果狀態；Maker Play log 待補。
+- 🟡 Implemented (untested) 建立 RectTile／Kinematicbody 單位模型與逐幀直線移動；Maker Play 位置觀察待補。
+- 🟡 Implemented (untested) 完成一隻突擊對一隻突擊的 0.5 秒索敵、近戰攻擊、死亡與 Win／Lose 結果邏輯；native HitEvent log 待補。
+- 🟡 Implemented (untested) 固定全場相機，保留但停用 DefaultPlayer 的移動、碰撞與戰鬥資格；Maker Play 視覺／互動確認待補。
+- 🟡 Implemented (untested) 提供結果判定、AI 停止、Hit 流程及死亡後不可再次受傷的契約測試；Node 靜態契約 PASS，Maker runtime 待補。
 
 ### Phase 2 — 玩家部署與六對六編隊
 

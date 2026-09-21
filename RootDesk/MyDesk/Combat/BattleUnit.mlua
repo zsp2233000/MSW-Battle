@@ -1,0 +1,195 @@
+@Component
+script BattleUnit extends Component
+
+    @Sync property string Faction = ""
+    @Sync property string CombatState = "IDLE"
+    @Sync property string CurrentTargetName = ""
+    @Sync property integer Hp = 0
+    @Sync property integer MaxHp = 220
+    @Sync property boolean IsDead = false
+    @Sync property integer DamageTakenSerial = 0
+    @Sync property integer AttackSerial = 0
+
+    property number MoveSpeed = 2.0
+    property integer AttackDamage = 35
+    property number AttackInterval = 0.7
+    property number AttackRange = 0.6
+    property number RetargetInterval = 0.5
+    property number ImpactDelay = 0.18
+    property number DeathHold = 0.6
+
+    @ExecSpace("ServerOnly")
+    method void OnBeginPlay()
+        -- Initialize a unit before the session supplies its faction and tuned combat values.
+        self._T.currentTarget = nil
+        self._T.retargetRemaining = 0
+        self._T.deathRemaining = 0
+        self._T.deathFinished = false
+        if self.Hp <= 0 then self.Hp = self.MaxHp end
+        self.CombatState = "IDLE"
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Configure(string faction, string displayName, integer maxHp, number speed, integer damage, number interval, number range, number retarget, number impact, number deathHold, number openingDelay)
+        -- Apply the fixed M1 assault profile without requiring model-instance property overrides.
+        self.Faction = faction
+        self.MaxHp = maxHp
+        self.Hp = maxHp
+        self.MoveSpeed = speed
+        self.AttackDamage = damage
+        self.AttackInterval = interval
+        self.AttackRange = range
+        self.RetargetInterval = retarget
+        self.ImpactDelay = impact
+        self.DeathHold = deathHold
+        self.IsDead = false
+        self.CurrentTargetName = ""
+        self.CombatState = "IDLE"
+        self._T.displayName = displayName
+        self._T.currentTarget = nil
+        self._T.retargetRemaining = 0
+        local attack = self.Entity:GetComponent("script.AssaultAttack")
+        if isvalid(attack) then attack:Configure(damage, range, interval, impact, openingDelay) end
+    end
+
+    method boolean IsAlive()
+        -- Expose the only targetability predicate used by session and combat overrides.
+        return self.IsDead == false and self.Hp > 0 and isvalid(self.Entity)
+    end
+
+    method Entity GetCurrentTarget()
+        -- Return the current target only while the entity reference is still valid.
+        if self._T.currentTarget ~= nil and isvalid(self._T.currentTarget) then return self._T.currentTarget end
+        return nil
+    end
+
+    method any GetSession()
+        -- Resolve the map-scoped session component from the unit's current map.
+        local map = self.Entity.CurrentMap
+        if not isvalid(map) then return nil end
+        local session = map:GetComponent("script.BattleSession")
+        if not isvalid(session) then return nil end
+        return session
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Tick(number delta)
+        -- Retarget on the 0.5-second cadence, move per frame, and start attacks only in range.
+        if self.IsDead then
+            self:TickDeathHold(delta)
+            return
+        end
+        local session = self:GetSession()
+        if not isvalid(session) or not session:IsBattleActive() then
+            self:StopForResult()
+            return
+        end
+
+        self._T.retargetRemaining = self._T.retargetRemaining - delta
+        local target = self:GetCurrentTarget()
+        local targetUnit = nil
+        if isvalid(target) then targetUnit = target:GetComponent("script.BattleUnit") end
+        if target == nil or not isvalid(targetUnit) or not targetUnit:IsAlive() or self._T.retargetRemaining <= 0 then
+            self._T.retargetRemaining = self.RetargetInterval
+            target = session:FindNearestEnemy(self.Entity, target)
+            self._T.currentTarget = target
+            self.CurrentTargetName = ""
+            if isvalid(target) then self.CurrentTargetName = target.Name end
+        end
+        if not isvalid(target) then
+            self.CombatState = "IDLE"
+            local idleMovement = self.Entity:GetComponent("MovementComponent")
+            if isvalid(idleMovement) then idleMovement:Stop() end
+            return
+        end
+
+        local transform = self.Entity:GetComponent("TransformComponent")
+        local targetTransform = target:GetComponent("TransformComponent")
+        if not isvalid(transform) or not isvalid(targetTransform) then return end
+        local position = transform.WorldPosition
+        local targetPosition = targetTransform.WorldPosition
+        local dx = targetPosition.x - position.x
+        local dy = targetPosition.y - position.y
+        local distanceSquared = dx * dx + dy * dy
+        if distanceSquared > self.AttackRange * self.AttackRange then
+            local distance = math.sqrt(distanceSquared)
+            local direction = Vector2(dx / distance, dy / distance)
+            local movement = self.Entity:GetComponent("MovementComponent")
+            if isvalid(movement) then
+                movement.InputSpeed = self.MoveSpeed * 1.2
+                movement:MoveToDirection(direction, delta)
+            end
+            self.CombatState = "MOVE"
+        else
+            local movement = self.Entity:GetComponent("MovementComponent")
+            if isvalid(movement) then movement:Stop() end
+            self.CombatState = "ATTACK"
+            local attack = self.Entity:GetComponent("script.AssaultAttack")
+            if isvalid(attack) then attack:TryStart(target) end
+        end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void TickDeathHold(number delta)
+        -- Hold the dead presentation briefly, then remove the unit from the active world.
+        if self._T.deathFinished == true then return end
+        self._T.deathRemaining = self._T.deathRemaining - delta
+        if self._T.deathRemaining <= 0 then
+            self._T.deathFinished = true
+            self.Entity:SetVisible(false)
+            self.Entity:SetEnable(false)
+            local session = self:GetSession()
+            if isvalid(session) then session:EmitPresentation("DEATH_FINISHED", self.Entity, nil, 0) end
+        end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void ApplyResolvedDamage(integer amount, Entity attacker)
+        -- Apply only coalesced HitEvent damage and transition to DEAD once at zero HP.
+        if amount == nil or amount <= 0 or not self:IsAlive() then return end
+        self.Hp = math.max(0, self.Hp - amount)
+        self.DamageTakenSerial = self.DamageTakenSerial + 1
+        local session = self:GetSession()
+        if isvalid(session) then session:EmitPresentation("DAMAGE", attacker, self.Entity, amount) end
+        if self.Hp > 0 then
+            self.CombatState = "HIT"
+            return
+        end
+
+        self.IsDead = true
+        self.CombatState = "DEAD"
+        self._T.currentTarget = nil
+        self.CurrentTargetName = ""
+        self._T.deathRemaining = self.DeathHold
+        self._T.deathFinished = false
+        local movement = self.Entity:GetComponent("MovementComponent")
+        if isvalid(movement) then movement:Stop() end
+        local hit = self.Entity:GetComponent("HitComponent")
+        if isvalid(hit) then hit.Enable = false end
+        local state = self.Entity:GetComponent("StateComponent")
+        if isvalid(state) then state:ChangeState("DEAD") end
+        if isvalid(session) then session:NotifyDeath(self.Entity) end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void StopForResult()
+        -- Stop all unit-side target, movement, and attack work after RESULT is entered.
+        self.CombatState = "RESULT_STOP"
+        self._T.currentTarget = nil
+        self.CurrentTargetName = ""
+        local movement = self.Entity:GetComponent("MovementComponent")
+        if isvalid(movement) then movement:Stop() end
+        local attack = self.Entity:GetComponent("script.AssaultAttack")
+        if isvalid(attack) then attack:CancelImpact() end
+    end
+
+    @ExecSpace("ServerOnly")
+    @EventSender("Self")
+    handler HandleHitEvent(HitEvent event)
+        -- Forward native HitEvent damage to the map session; never mutate HP in the handler.
+        local session = self:GetSession()
+        if not isvalid(session) or not session:IsBattleActive() or self.IsDead then return end
+        session:QueueDamage(self.Entity, event.TotalDamage, event.AttackerEntity)
+    end
+
+end

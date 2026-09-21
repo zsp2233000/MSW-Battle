@@ -1,0 +1,129 @@
+@Component
+script AssaultAttack extends AttackComponent
+
+    property integer AttackDamage = 35
+    property number AttackRange = 0.6
+    property number AttackInterval = 0.7
+    property number ImpactDelay = 0.18
+    property number CooldownRemaining = 0
+    @HideFromInspector property Entity PendingTarget = nil
+    @HideFromInspector property number ImpactRemaining = -1
+
+    @ExecSpace("ServerOnly")
+    method void Configure(integer damage, number range, number interval, number impact, number openingDelay)
+        -- Receive the session's assault profile and deterministic opening lead in one place.
+        self.AttackDamage = damage
+        self.AttackRange = range
+        self.AttackInterval = interval
+        self.ImpactDelay = impact
+        self._T.openingDelay = openingDelay or 0
+        self.CooldownRemaining = self._T.openingDelay
+    end
+
+    @ExecSpace("ServerOnly")
+    method void OnBeginPlay()
+        -- Reset attack timers before the owning BattleUnit starts its first tick.
+        self.CooldownRemaining = self._T.openingDelay or 0
+        self.ImpactRemaining = -1
+        self.PendingTarget = nil
+    end
+
+    @ExecSpace("ServerOnly")
+    method void TryStart(Entity target)
+        -- Start one delayed strike when cooldown, target validity, and battle phase allow it.
+        local unit = self.Entity:GetComponent("script.BattleUnit")
+        if not isvalid(unit) or not unit:IsAlive() then return end
+        if self.PendingTarget ~= nil or self.CooldownRemaining > 0 or not isvalid(target) then return end
+        local map = self.Entity.CurrentMap
+        if not isvalid(map) then return end
+        local session = map:GetComponent("script.BattleSession")
+        if not isvalid(session) or not session:IsBattleActive() then return end
+        self.PendingTarget = target
+        self.ImpactRemaining = self.ImpactDelay
+        self.CooldownRemaining = self.AttackInterval
+        unit.AttackSerial = unit.AttackSerial + 1
+        session:EmitPresentation("ATTACK_START", self.Entity, target, self.AttackDamage)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Advance(number delta)
+        -- Advance cooldown and impact timers; used by live OnUpdate and AdvanceForTest.
+        if self.CooldownRemaining > 0 then
+            self.CooldownRemaining = math.max(0, self.CooldownRemaining - delta)
+        end
+        if self.ImpactRemaining < 0 then return end
+        local target = self.PendingTarget
+        if not isvalid(target) then
+            self:CancelImpact()
+            return
+        end
+        local unit = self.Entity:GetComponent("script.BattleUnit")
+        if not isvalid(unit) or not unit:IsAlive() then
+            self:CancelImpact()
+            return
+        end
+        self.ImpactRemaining = self.ImpactRemaining - delta
+        if self.ImpactRemaining <= 0 then self:ResolveImpact(target) end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void OnUpdate(number delta)
+        -- Drive the same timer path when the engine owns the frame loop.
+        self:Advance(delta)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void ResolveImpact(Entity target)
+        -- Resolve a native attack box at the target's current position, never by teleporting a body.
+        self.PendingTarget = nil
+        self.ImpactRemaining = -1
+        local map = self.Entity.CurrentMap
+        local session = nil
+        if isvalid(map) then session = map:GetComponent("script.BattleSession") end
+        if not isvalid(session) or not session:IsBattleActive() then return end
+        if not isvalid(target) then return end
+        local unit = self.Entity:GetComponent("script.BattleUnit")
+        local targetUnit = target:GetComponent("script.BattleUnit")
+        local transform = target:GetComponent("TransformComponent")
+        if not isvalid(unit) or not unit:IsAlive() or not isvalid(targetUnit) or not targetUnit:IsAlive() or not isvalid(transform) then return end
+        local sourceTransform = self.Entity:GetComponent("TransformComponent")
+        if not isvalid(sourceTransform) then return end
+        local sourcePosition = sourceTransform.WorldPosition
+        local targetPosition = transform.WorldPosition
+        local dx = targetPosition.x - sourcePosition.x
+        local dy = targetPosition.y - sourcePosition.y
+        if dx * dx + dy * dy > (self.AttackRange + 0.05) * (self.AttackRange + 0.05) then return end
+        self:AttackFrom(Vector2(1.2, 1.2), Vector2(targetPosition.x, targetPosition.y), "assault", nil)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void CancelImpact()
+        -- Cancel any delayed impact when target, attacker, or session becomes invalid.
+        self.PendingTarget = nil
+        self.ImpactRemaining = -1
+    end
+
+    method integer CalcDamage(Entity attacker, Entity defender, string attackInfo)
+        -- Supply the fixed 35 damage value to the native Attack→Hit pipeline.
+        return self.AttackDamage
+    end
+
+    method boolean IsAttackTarget(Entity defender, string attackInfo)
+        -- Restrict attacks to the opposing live assault faction and native target rules.
+        local attackerUnit = self.Entity:GetComponent("script.BattleUnit")
+        local defenderUnit = nil
+        if isvalid(defender) then defenderUnit = defender:GetComponent("script.BattleUnit") end
+        if not isvalid(attackerUnit) or not attackerUnit:IsAlive() or not isvalid(defenderUnit) or not defenderUnit:IsAlive() then return false end
+        if attackerUnit.Faction == defenderUnit.Faction then return false end
+        return __base:IsAttackTarget(defender, attackInfo)
+    end
+
+    method void OnAttack(Entity defender)
+        -- Publish a semantic HIT event while native HitEvent remains responsible for damage.
+        local map = self.Entity.CurrentMap
+        if not isvalid(map) then return end
+        local session = map:GetComponent("script.BattleSession")
+        if isvalid(session) and session:IsBattleActive() then session:EmitPresentation("HIT", self.Entity, defender, self.AttackDamage) end
+    end
+
+end
