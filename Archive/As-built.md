@@ -15,7 +15,7 @@
 | Battle map | `.map` | `map/map01.map` | `TileMapMode=1` (`RectTile`); map root owns only `script.BattleSession` for the active Issue #3 runtime. |
 | DefaultPlayer / camera | runtime logic | `BattleSession.mlua` (`DisableDefaultPlayer`) | DefaultPlayer remains visible while controller, body, collision, trigger, hit, and target participation are disabled; camera is centered, zoomed out, and offset down to show the full field. |
 | Battle UI | `.ui` / parked adapter | `ui/BattleGroup.ui`, `RootDesk/MyDesk/Combat/BattleDeploymentInput.mlua` | Existing deployment UI is retained for Phase 2 but hidden and not attached to `map01` during Issue #3. |
-| Regression contract | Node test | `tests/battle_session_contract.test.cjs` | Covers RectTile/model invariants, fixed Tank/Assault spawn, Tank rules, supplied resource bindings, hidden parked UI, and no deployment runtime binding. |
+| Regression contract | Node tests | `tests/battle_session_contract.test.cjs`, `tests/tank_contact_behavior.test.cjs` | Covers RectTile/model invariants, fixed Tank/Assault spawn, Tank rules, supplied resource bindings, hidden parked UI, no deployment runtime binding, cooldown/multi-target/knockback/result behavior. |
 
 ## Standing issues & handoff rules (update in place — never re-append)
 
