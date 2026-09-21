@@ -76,6 +76,9 @@ test("M1 battle scripts expose the observable elapsed-time contract", () => {
   assert.match(unit, /session:QueueDamage\(self\.Entity, event\.TotalDamage, event\.AttackerEntity\)/);
   assert.match(attack, /self:AttackFrom\(Vector2\(1\.2, 1\.2\)/);
   assert.match(attack, /return self\.AttackDamage/);
+  assert.match(attack, /openingDelayPending/);
+  assert.match(attack, /self\.CooldownRemaining = self\._T\.openingDelay/);
+  assert.match(attack, /self\.PendingTarget = target/);
 
   assert.doesNotMatch(unit, /SetWorldPosition|SetPosition\(/);
   assert.doesNotMatch(attack, /Hp\s*[-+]=/);

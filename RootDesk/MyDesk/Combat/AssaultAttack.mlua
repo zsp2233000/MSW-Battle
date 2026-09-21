@@ -17,13 +17,16 @@ script AssaultAttack extends AttackComponent
         self.AttackInterval = interval
         self.ImpactDelay = impact
         self._T.openingDelay = openingDelay or 0
-        self.CooldownRemaining = self._T.openingDelay
+        self._T.openingDelayPending = self._T.openingDelay > 0
+        self.CooldownRemaining = 0
     end
 
     @ExecSpace("ServerOnly")
     method void OnBeginPlay()
         -- Reset attack timers before the owning BattleUnit starts its first tick.
-        self.CooldownRemaining = self._T.openingDelay or 0
+        self._T.openingDelay = self._T.openingDelay or 0
+        self._T.openingDelayPending = self._T.openingDelay > 0
+        self.CooldownRemaining = 0
         self.ImpactRemaining = -1
         self.PendingTarget = nil
     end
@@ -38,6 +41,11 @@ script AssaultAttack extends AttackComponent
         if not isvalid(map) then return end
         local session = map:GetComponent("script.BattleSession")
         if not isvalid(session) or not session:IsBattleActive() then return end
+        if self._T.openingDelayPending == true then
+            self._T.openingDelayPending = false
+            self.CooldownRemaining = self._T.openingDelay
+            return
+        end
         self.PendingTarget = target
         self.ImpactRemaining = self.ImpactDelay
         self.CooldownRemaining = self.AttackInterval
