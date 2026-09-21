@@ -135,9 +135,9 @@
 ### Phase 1 — 一對一自動戰鬥垂直切片
 
 - ✅ Tested 建立共用戰鬥階段、陣營、存活與結果狀態；Maker Play 已記錄 `BATTLE started` 與 `RESULT=WIN`。
-- 🟡 Implemented (runtime path verified) 建立 RectTile／Kinematicbody 單位模型與逐幀直線移動；視覺位置觀察待補。
-- 🟡 Implemented (runtime outcome verified) 完成一隻突擊對一隻突擊的 0.5 秒索敵、近戰攻擊、死亡與 Win／Lose 結果邏輯；逐次 native HitEvent timing log 待補。
-- 🟡 Implemented (untested) 固定全場相機，保留但停用 DefaultPlayer 的移動、碰撞與戰鬥資格；Maker Play 視覺／互動確認待補。
+- ✅ Tested 建立 RectTile／Kinematicbody 單位模型與逐幀直線移動；使用者已在 Maker Play 確認位置、追擊與攻擊距離正常。
+- ✅ Tested 完成一隻突擊對一隻突擊的 0.5 秒索敵、近戰攻擊、死亡與 Win／Lose 結果邏輯；Node 契約、Maker runtime 與使用者功能測試均正常。
+- ✅ Tested 固定全場相機，保留但停用 DefaultPlayer 的移動、碰撞與戰鬥資格；使用者已完成 Maker Play 視覺／互動確認。
 - ✅ Tested 提供結果判定、AI 停止、Hit 流程及死亡後不可再次受傷的契約測試；Node 靜態契約與 Maker Play start/result/stop 均 PASS。
 
 ### Phase 2 — 玩家部署與六對六編隊
