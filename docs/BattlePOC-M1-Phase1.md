@@ -14,12 +14,12 @@
 
 | 項目 | 狀態 | 證據 / 待驗證 |
 |---|---|---|
-| 1. 建立 `BATTLE` / `RESULT`、雙方 faction、alive count、單次結果與 session snapshot | 🟡 Implemented (untested) | `RootDesk/MyDesk/Combat/BattleSession.mlua`；待 Maker Play log |
-| 2. 建立 RectTile 單位 model 與逐幀直線追擊，停止於攻擊距離 | 🟡 Implemented (untested) | `RootDesk/MyDesk/Models/Monsters/BattleUnit.model` + `BattleUnit.mlua`；待 Maker Play 位置觀察 |
-| 3. 每 0.5 秒 retarget、0.7 秒 attack、0.18 秒 impact、35 damage、死亡免疫與 Win/Lose | 🟡 Implemented (untested) | `AssaultAttack.mlua` + model native `HitComponent`；待 native HitEvent log |
+| 1. 建立 `BATTLE` / `RESULT`、雙方 faction、alive count、單次結果與 session snapshot | ✅ Tested | Maker Play 2026-09-21 20:04:55 記錄 `BATTLE started: PLAYER assault vs ENEMY assault`；20:05:01 記錄 `RESULT=WIN` |
+| 2. 建立 RectTile 單位 model 與逐幀直線追擊，停止於攻擊距離 | 🟡 Implemented (runtime path verified) | Play 能完成一對一戰鬥並產生結果；尚未做視覺位置／攻擊距離觀察 |
+| 3. 每 0.5 秒 retarget、0.7 秒 attack、0.18 秒 impact、35 damage、死亡免疫與 Win/Lose | 🟡 Implemented (runtime outcome verified) | Play 已走完 `WIN` 結果；尚未輸出 native HitEvent／逐次傷害 timing log |
 | 4. 固定 full-field 相機；DefaultPlayer 可見但不可移動、碰撞、被選取或參與勝負 | 🟡 Implemented (untested) | `BattleSession:DisableDefaultPlayer()`；待 Maker Play 視覺/互動確認 |
-| 5. 高階 elapsed-time harness 與外部契約測試 | 🟡 Implemented (untested) | `AdvanceForTest()` + `tests/battle_session_contract.test.cjs`；Node 靜態契約 PASS，runtime 待 Maker |
+| 5. 高階 elapsed-time harness 與外部契約測試 | ✅ Tested | `AdvanceForTest()` + `tests/battle_session_contract.test.cjs`；Node 靜態契約 PASS，Maker Play start/result/stop PASS |
 
 ## Verification boundary
 
-目前工作環境沒有 Maker Refresh / Play / runtime log connector，因此本階段先交付可 Refresh 的 `.mlua`、builder 產出的 `.model` / `.map` 與 Node 契約測試。`BattleUnit.model` 的非空 SpriteRUID 是 MSW 平台要求的 documented placeholder，不是資產搜尋／選擇結果；人類資產仍待補。未取得 Maker runtime 證據前，不得把 runtime 項目標成 `✅ Tested`，也不得刪除此 Phase 文件。
+Maker MCP 已可用。2026-09-21 已完成 `stop → clear_logs → refresh → build logs → play → normal logs → stop`：map01 進入 Play，建立 `server_main`／`client` context，並取得 `BATTLE started` 與 `RESULT=WIN`；Build Console 僅回報 34 筆 `Info` 型 API 檢查項，未見 `Error`。目前仍未以 screenshot／人工操作確認 full-field 相機、DefaultPlayer 禁用狀態、單位位置與逐次 HitEvent timing，因此第 2–4 項不可宣稱完整驗收。`BattleUnit.model` 的非空 SpriteRUID 是 MSW 平台要求的 documented placeholder，不是資產搜尋／選擇結果；人類資產仍待補。
