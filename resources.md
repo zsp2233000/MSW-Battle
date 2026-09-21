@@ -53,6 +53,7 @@ Issue #3 延續既有一對一自動戰鬥，若敵方突擊仍使用人類動�
 | Tank contact damage              |   `40` | 標準 Hit 流程                                                                                                |
 | Tank per-target contact cooldown | `2.0s` | 每個重疊敵人獨立計時                                                                                         |
 | Enemy knockback distance         |  `0.8` | 只擊退敵方，坦克不後退                                                                                       |
+| Hit stop duration                |  `0.2s` | 受擊單位在 Hit→HP 結算後原地停止；死亡與 RESULT 優先                                               |
 | Tank normal attack               |  `N/A` | 不進入或發出一般 attack 行為                                                                                 |
 | Tank contact attack VFX/SFX      |  `N/A` | 坦克主動接觸攻擊不播放碰撞特效、攻擊音效、碰撞音效或該次接觸引發的受擊音效；坦克被攻擊與死亡仍播放各自的 SFX |
 
