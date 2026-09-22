@@ -69,16 +69,19 @@ end
 
 local shooter = session:SpawnUnit(session.PlayerModelId, "M1_ShooterProbe", "PLAYER", "SHOOTER", Vector3(0, 0, 0))
 local target = session:SpawnUnit(session.EnemyModelId, "M1_ShooterProbeTarget", "ENEMY", "ASSAULT", Vector3(5, 0, 0))
-if not isvalid(shooter) or not isvalid(target) then
+local decoy = session:SpawnUnit(session.EnemyModelId, "M1_ShooterProbeDecoy", "ENEMY", "ASSAULT", Vector3(5, 0.15, 0))
+if not isvalid(shooter) or not isvalid(target) or not isvalid(decoy) then
     log_error("[M1][ShooterProbe][FAIL] shooter fixture spawn failed")
     return
 end
 session.PlayerAlive = session.PlayerAlive + 1
-session.EnemyAlive = session.EnemyAlive + 1
+session.EnemyAlive = session.EnemyAlive + 2
 silenceAssaultTarget(target)
+silenceAssaultTarget(decoy)
 
 local shooterUnit = shooter:GetComponent("script.BattleUnit")
 local targetUnit = target:GetComponent("script.BattleUnit")
+local decoyUnit = decoy:GetComponent("script.BattleUnit")
 local shooterStart = getPosition(shooter)
 session:AdvanceForTest(0.5)
 local outsideRangeHp = targetUnit.Hp
@@ -90,6 +93,7 @@ session:AdvanceForTest(1.0)
 local firstHitHp = targetUnit.Hp
 local firstAttackSerial = shooterUnit.AttackSerial
 check(firstHitHp == 190, "shooter deals fixed 30 damage after the configurable impact delay")
+check(decoyUnit.Hp == 220, "shooter hits only the selected target instead of a nearby decoy")
 check(session.LastEvent == "DAMAGE", "shooter reaches the semantic damage event through Hit")
 
 session:AdvanceForTest(0.5)
@@ -148,13 +152,38 @@ session:AdvanceForTest(0.05)
 session:AdvanceForTest(0.2)
 check(deathTargetUnit.IsDead == true and deathTargetUnit.Hp == 0 and deathTargetUnit.DamageTakenSerial == 1, "target dies before impact and cancels the pending shot")
 
+local invalidationShooter = session:SpawnUnit(session.PlayerModelId, "M1_ShooterProbeInvalidation", "PLAYER", "SHOOTER", Vector3(-3, -3, 0))
+local invalidTarget = session:SpawnUnit(session.EnemyModelId, "M1_ShooterProbeInvalidTarget", "ENEMY", "ASSAULT", Vector3(0, -3, 0))
+local replacementTarget = session:SpawnUnit(session.EnemyModelId, "M1_ShooterProbeReplacement", "ENEMY", "ASSAULT", Vector3(0.2, -3, 0))
+if not isvalid(invalidationShooter) or not isvalid(invalidTarget) or not isvalid(replacementTarget) then
+    log_error("[M1][ShooterProbe][FAIL] invalidation fixture spawn failed")
+    return
+end
+session.PlayerAlive = session.PlayerAlive + 1
+session.EnemyAlive = session.EnemyAlive + 2
+silenceAssaultTarget(invalidTarget)
+silenceAssaultTarget(replacementTarget)
+freezeUnit(invalidationShooter)
+local invalidationUnit = invalidationShooter:GetComponent("script.BattleUnit")
+local replacementUnit = replacementTarget:GetComponent("script.BattleUnit")
+session:AdvanceForTest(0.05)
+invalidTarget:SetEnable(false)
+session:AdvanceForTest(0.2)
+check(invalidTarget.Enable == false and invalidationUnit.CurrentTargetName == replacementTarget.Name, "invalid target is skipped and next target is reacquired")
+check(replacementUnit.Hp == 190, "reacquired target receives the next valid shooter hit")
+
 local snapshots = session:GetUnitSnapshots()
 check(string.find(snapshots, "Projectile") == nil and string.find(snapshots, "projectile") == nil and not hasProjectileEntity(map), "shooter registers no projectile entity")
 
+local shooterPositionAtResult = getPosition(shooter)
+local shooterAttackSerialAtResult = shooterUnit.AttackSerial
 session:EnterResult("WIN")
 local hpAtResult = targetUnit.Hp
 session:AdvanceForTest(1.0)
 check(targetUnit.Hp == hpAtResult, "RESULT blocks future shooter movement, attacks, and damage")
+local shooterPositionAfterResult = getPosition(shooter)
+check(shooterPositionAfterResult.x == shooterPositionAtResult.x and shooterPositionAfterResult.y == shooterPositionAtResult.y, "RESULT blocks shooter movement")
+check(shooterUnit.AttackSerial == shooterAttackSerialAtResult and shooterUnit.CurrentTargetName == "" and shooterUnit.CombatState == "RESULT_STOP", "RESULT blocks shooter targeting and new attacks")
 
 if failures == 0 then
     log("[M1][ShooterProbe] PASS")

@@ -26,7 +26,7 @@ script TankContactAttack extends AttackComponent
     method void TryContact()
         -- Resolve the native contact area at the current body position without target gating.
         local unit = self.Entity:GetComponent("script.BattleUnit")
-        if not isvalid(unit) or not unit:IsAlive() then return end
+        if not isvalid(unit) or not unit:IsAlive() or unit.UnitKind ~= "TANK" then return end
         local map = self.Entity.CurrentMap
         if not isvalid(map) then return end
         local session = map:GetComponent("script.BattleSession")
@@ -89,7 +89,7 @@ script TankContactAttack extends AttackComponent
         local attackerUnit = self.Entity:GetComponent("script.BattleUnit")
         local defenderUnit = nil
         if isvalid(defender) then defenderUnit = defender:GetComponent("script.BattleUnit") end
-        if not isvalid(attackerUnit) or not attackerUnit:IsAlive() then return false end
+        if not isvalid(attackerUnit) or not attackerUnit:IsAlive() or attackerUnit.UnitKind ~= "TANK" then return false end
         if not isvalid(defenderUnit) or not defenderUnit:IsAlive() or attackerUnit.Faction == defenderUnit.Faction then return false end
         local targetName = defender.Name
         local remaining = self._T.targetCooldowns[targetName]

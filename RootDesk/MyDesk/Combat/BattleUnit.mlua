@@ -111,7 +111,7 @@ script BattleUnit extends Component
 
     method boolean IsAlive()
         -- Expose the only targetability predicate used by session and combat overrides.
-        return self.IsDead == false and self.Hp > 0 and isvalid(self.Entity)
+        return self.IsDead == false and self.Hp > 0 and isvalid(self.Entity) and self.Entity.Enable ~= false
     end
 
     method Entity GetCurrentTarget()

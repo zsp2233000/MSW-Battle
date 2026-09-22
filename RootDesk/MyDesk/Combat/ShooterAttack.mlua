@@ -26,6 +26,7 @@ script ShooterAttack extends AttackComponent
         -- Reset the shooter timing state before the owning BattleUnit starts its first tick.
         self._T.openingDelay = self._T.openingDelay or 0
         self._T.openingDelayPending = self._T.openingDelay > 0
+        self._T.impactTarget = nil
         self.CooldownRemaining = 0
         self.ImpactRemaining = -1
         self.PendingTarget = nil
@@ -47,6 +48,7 @@ script ShooterAttack extends AttackComponent
             return
         end
         self.PendingTarget = target
+        self._T.impactTarget = nil
         self.ImpactRemaining = self.ImpactDelay
         self.CooldownRemaining = self.AttackInterval
         unit.AttackSerial = unit.AttackSerial + 1
@@ -117,6 +119,7 @@ script ShooterAttack extends AttackComponent
         local transform = target:GetComponent("TransformComponent")
         if not isvalid(unit) or not unit:IsAlive() or not isvalid(targetUnit) or not targetUnit:IsAlive() or not isvalid(transform) then return end
         local targetPosition = transform.WorldPosition
+        self._T.impactTarget = target
         self:AttackFrom(Vector2(0.2, 0.2), Vector2(targetPosition.x, targetPosition.y), "shooter", nil)
     end
 
@@ -125,6 +128,7 @@ script ShooterAttack extends AttackComponent
         -- Cancel the delayed shot when its target or battle conditions become invalid.
         self.PendingTarget = nil
         self.ImpactRemaining = -1
+        self._T.impactTarget = nil
     end
 
     @ExecSpace("ServerOnly")
@@ -145,6 +149,7 @@ script ShooterAttack extends AttackComponent
         if isvalid(defender) then defenderUnit = defender:GetComponent("script.BattleUnit") end
         if not isvalid(attackerUnit) or not attackerUnit:IsAlive() or not isvalid(defenderUnit) or not defenderUnit:IsAlive() then return false end
         if attackerUnit.Faction == defenderUnit.Faction then return false end
+        if self._T.impactTarget ~= nil and defender ~= self._T.impactTarget then return false end
         return __base:IsAttackTarget(defender, attackInfo)
     end
 

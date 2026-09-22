@@ -149,6 +149,7 @@ test("Issue #4 adds a configurable hitscan shooter adapter", () => {
   assert.match(composition, /unitKind == "SHOOTER"/);
   assert.match(composition, /script\.ShooterAttack/);
   assert.match(unit, /unitKind == "TANK"/);
+  assert.match(unit, /self\.Entity\.Enable ~= false/);
   assert.doesNotMatch(unit, /Projectile|projectile/);
 
   assert.match(shooter, /extends AttackComponent/);
@@ -160,6 +161,7 @@ test("Issue #4 adds a configurable hitscan shooter adapter", () => {
   assert.match(shooter, /@ExecSpace\("ServerOnly"\)\s+method void OnUpdate\(number delta\)/);
   assert.match(shooter, /method void Cancel\(\)/);
   assert.match(shooter, /AttackFrom\(Vector2\(0\.2, 0\.2\), Vector2\(targetPosition\.x, targetPosition\.y\), "shooter", nil\)/);
+  assert.match(shooter, /impactTarget/);
   assert.match(shooter, /return dx \* dx \+ dy \* dy <= self\.AttackRange \* self\.AttackRange/);
   assert.doesNotMatch(shooter, /AttackRange \+ 0\.05/);
   assert.match(shooter, /return self\.AttackDamage/);
@@ -171,7 +173,10 @@ test("Issue #4 adds a configurable hitscan shooter adapter", () => {
   assert.match(runtimeProbe, /pre-impact/);
   assert.match(runtimeProbe, /target dies before impact/);
   assert.match(runtimeProbe, /target leaves range before impact/);
+  assert.match(runtimeProbe, /SetEnable\(false\)/);
+  assert.match(runtimeProbe, /replacementTarget/);
   assert.match(runtimeProbe, /ATTACK_START/);
+  assert.match(runtimeProbe, /AttackSerial/);
   assert.match(runtimeProbe, /Children:ToTable/);
   assert.match(runtimeProbe, /\[M1\]\[ShooterProbe\] PASS/);
 });

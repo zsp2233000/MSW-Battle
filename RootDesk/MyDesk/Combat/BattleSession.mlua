@@ -239,7 +239,7 @@ script BattleSession extends Component
         if not self:IsBattleActive() or not isvalid(attacker) or not isvalid(defender) then return end
         local attackerUnit = attacker:GetComponent("script.BattleUnit")
         local defenderUnit = defender:GetComponent("script.BattleUnit")
-        if not isvalid(attackerUnit) or not isvalid(defenderUnit) then return end
+        if not isvalid(attackerUnit) or not isvalid(defenderUnit) or attackerUnit.UnitKind ~= "TANK" then return end
         if not defenderUnit:IsAlive() or attackerUnit.Faction == defenderUnit.Faction then return end
         table.insert(self._T.pendingKnockbacks, { attacker = attacker, defender = defender, distance = distance or self.TankKnockbackDistance })
     end
@@ -261,7 +261,7 @@ script BattleSession extends Component
                 local attackerTransform = item.attacker:GetComponent("TransformComponent")
                 local defenderTransform = item.defender:GetComponent("TransformComponent")
                 local kinematic = item.defender:GetComponent("KinematicbodyComponent")
-                if isvalid(attackerUnit) and isvalid(defenderUnit) and isvalid(attackerTransform) and isvalid(defenderTransform) and isvalid(kinematic) and defenderUnit:IsAlive() and attackerUnit.Faction ~= defenderUnit.Faction then
+                if isvalid(attackerUnit) and isvalid(defenderUnit) and isvalid(attackerTransform) and isvalid(defenderTransform) and isvalid(kinematic) and attackerUnit.UnitKind == "TANK" and defenderUnit:IsAlive() and attackerUnit.Faction ~= defenderUnit.Faction then
                     local attackerPosition = attackerTransform.WorldPosition
                     local defenderPosition = defenderTransform.WorldPosition
                     local dx = defenderPosition.x - attackerPosition.x
