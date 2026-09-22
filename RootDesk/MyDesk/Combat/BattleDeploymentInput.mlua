@@ -6,7 +6,6 @@ script BattleDeploymentInput extends Component
     property any screenTouchHandler = nil
     property integer boundButtonCount = 0
     property integer missingButtonCount = 0
-    property boolean cameraConfigured = false
 
     @ExecSpace("ClientOnly")
     method void OnBeginPlay()
@@ -15,8 +14,6 @@ script BattleDeploymentInput extends Component
         self.buttonBindings = {}
         self.boundButtonCount = 0
         self.missingButtonCount = 0
-        self.cameraConfigured = false
-        self:ConfigureClientCamera()
         self:BindUnitButton("BtnTank", "TANK")
         self:BindUnitButton("BtnAssault", "ASSAULT")
         self:BindUnitButton("BtnShooter", "SHOOTER")
@@ -27,13 +24,6 @@ script BattleDeploymentInput extends Component
         else
             log("[M1][Phase2][Input] bound deployment buttons=" .. tostring(self.boundButtonCount))
         end
-    end
-
-    @ExecSpace("ClientOnly")
-    method void OnUpdate(number delta)
-        -- Retry the camera setup until the local player camera is available.
-        if self.cameraConfigured == true then return end
-        self:ConfigureClientCamera()
     end
 
     @ExecSpace("ClientOnly")
@@ -52,24 +42,6 @@ script BattleDeploymentInput extends Component
         end
         self.buttonBindings = {}
         self.session = nil
-        self.cameraConfigured = false
-    end
-
-    @ExecSpace("ClientOnly")
-    method void ConfigureClientCamera()
-        -- Center the local camera so the full RectTile battlefield remains visible.
-        local player = _UserService.LocalPlayer
-        if not isvalid(player) then return end
-        local camera = player:GetComponent("CameraComponent")
-        if not isvalid(camera) then return end
-        camera.DeadZone = Vector2(1, 1)
-        camera.SoftZone = Vector2(1, 1)
-        camera.Damping = Vector2(0, 0)
-        camera.ScreenOffset = Vector2(0.5, 0.5)
-        camera.CameraOffset = Vector2(0, 0)
-        camera.IsAllowZoomInOut = false
-        self.cameraConfigured = true
-        log("[M1][Camera] client fixed-field camera screen=0.5,0.5")
     end
 
     @ExecSpace("ClientOnly")

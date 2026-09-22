@@ -1,0 +1,78 @@
+@Component
+script BattleFixedCamera extends Component
+
+    property number CameraZoomPercent = 70
+    property Vector2 CameraOffset = Vector2(0, -16.0)
+
+    @ExecSpace("ClientOnly")
+    method void OnBeginPlay()
+        -- Start client-side camera ownership and wait for the local player camera if needed.
+        self._T.cameraConfigured = false
+        self._T.cameraCaptured = false
+        self._T.camera = nil
+        self:TryConfigureCamera()
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnUpdate(number delta)
+        -- Retry only until the local player's CameraComponent becomes available.
+        if self._T.cameraConfigured == true then return end
+        self:TryConfigureCamera()
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnEndPlay()
+        -- Restore the local camera settings before this battle map component ends.
+        self:RestoreCamera()
+        self._T.cameraConfigured = false
+        self._T.cameraCaptured = false
+        self._T.camera = nil
+    end
+
+    @ExecSpace("ClientOnly")
+    method void TryConfigureCamera()
+        -- Capture the previous camera state once, then apply the fixed battlefield view.
+        local player = _UserService.LocalPlayer
+        if not isvalid(player) then return end
+        local camera = player:GetComponent("CameraComponent")
+        if not isvalid(camera) then return end
+
+        if self._T.cameraCaptured ~= true then
+            self._T.camera = camera
+            self._T.originalDeadZone = camera.DeadZone
+            self._T.originalSoftZone = camera.SoftZone
+            self._T.originalDamping = camera.Damping
+            self._T.originalScreenOffset = camera.ScreenOffset
+            self._T.originalCameraOffset = camera.CameraOffset
+            self._T.originalZoomRatio = camera.ZoomRatio
+            self._T.originalAllowZoom = camera.IsAllowZoomInOut
+            self._T.cameraCaptured = true
+        end
+
+        camera.DeadZone = Vector2(1, 1)
+        camera.SoftZone = Vector2(1, 1)
+        camera.Damping = Vector2(0, 0)
+        camera.ScreenOffset = Vector2(0.5, 0.5)
+        camera.CameraOffset = self.CameraOffset
+        camera.ZoomRatio = self.CameraZoomPercent
+        camera.IsAllowZoomInOut = false
+        self._T.cameraConfigured = true
+        log("[M1][Camera] fixed-field applied zoom=" .. tostring(self.CameraZoomPercent) .. ",offset=" .. tostring(self.CameraOffset.y))
+    end
+
+    @ExecSpace("ClientOnly")
+    method void RestoreCamera()
+        -- Restore the exact state captured before this battle camera took ownership.
+        if self._T.cameraCaptured ~= true or not isvalid(self._T.camera) then return end
+        local camera = self._T.camera
+        camera.DeadZone = self._T.originalDeadZone
+        camera.SoftZone = self._T.originalSoftZone
+        camera.Damping = self._T.originalDamping
+        camera.ScreenOffset = self._T.originalScreenOffset
+        camera.CameraOffset = self._T.originalCameraOffset
+        camera.ZoomRatio = self._T.originalZoomRatio
+        camera.IsAllowZoomInOut = self._T.originalAllowZoom
+        log("[M1][Camera] fixed-field restored")
+    end
+
+end

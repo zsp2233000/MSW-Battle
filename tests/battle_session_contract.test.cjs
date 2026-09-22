@@ -11,13 +11,37 @@ function read(relativePath) {
   return fs.readFileSync(path.join(root, relativePath), "utf8");
 }
 
-test("M1 map keeps RectTile and exposes only the fixed battle session", () => {
+test("M1 map keeps RectTile and exposes the fixed battle session camera", () => {
   const map = MapBuilder.read(path.join(root, "map/map01.map"));
   assert.equal(map.getMapInfo().TileMapMode, 1);
   const rootEntity = map.listEntities().find((entity) => entity.path === "/maps/map01");
   assert.ok(rootEntity);
   assert.match(rootEntity.componentNames, /script\.BattleSession/);
+  assert.match(rootEntity.componentNames, /script\.BattleFixedCamera/);
   assert.doesNotMatch(rootEntity.componentNames, /BattleDeploymentInput/);
+});
+
+test("fixed battlefield camera has one client-only CameraComponent owner", () => {
+  const combatPath = path.join(root, "RootDesk/MyDesk/Combat");
+  const combatScripts = fs.readdirSync(combatPath)
+    .filter((file) => file.endsWith(".mlua"))
+    .map((file) => ({ file, source: fs.readFileSync(path.join(combatPath, file), "utf8") }));
+  const cameraOwners = combatScripts
+    .filter(({ source }) => source.replace(/--[^\r\n]*/g, "").includes("CameraComponent"))
+    .map(({ file }) => file);
+
+  assert.deepEqual(cameraOwners, ["BattleFixedCamera.mlua"]);
+
+  const camera = read("RootDesk/MyDesk/Combat/BattleFixedCamera.mlua");
+  for (const method of ["OnBeginPlay", "OnUpdate", "OnEndPlay", "TryConfigureCamera", "RestoreCamera"]) {
+    assert.match(camera, new RegExp(`@ExecSpace\\("ClientOnly"\\)\\s+method [^\\n]+ ${method}\\(`));
+  }
+  assert.match(camera, /property number CameraZoomPercent/);
+  assert.match(camera, /property Vector2 CameraOffset/);
+  assert.match(camera, /originalDeadZone = camera\.DeadZone/);
+  assert.match(camera, /camera\.DeadZone = self\._T\.originalDeadZone/);
+  assert.match(camera, /camera\.CameraOffset = self\.CameraOffset/);
+  assert.match(camera, /camera\.CameraOffset = self\._T\.originalCameraOffset/);
 });
 
 test("M1 unit model has the RectTile movement and native hit contract", () => {
@@ -61,8 +85,7 @@ test("Issue #3 starts one tank and one assault with the fixed tank profile", () 
   assert.match(session, /QueueTankContactKnockback/);
   assert.match(session, /ApplyPendingKnockbacks/);
   assert.match(session, /ArenaMinX/);
-  assert.match(session, /CameraZoomPercent = 70/);
-  assert.match(session, /CameraOffset = Vector2\(0, -1\.0\)/);
+  assert.doesNotMatch(session, /CameraComponent|CameraZoomPercent|CameraOffset/);
   assert.match(session, /self:EmitPresentation\("RESULT"/);
   assert.match(session, /self\._T\.resultEntered == true/);
 

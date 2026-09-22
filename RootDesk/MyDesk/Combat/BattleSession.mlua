@@ -39,9 +39,6 @@ script BattleSession extends Component
     property number ArenaMaxX = 3.5
     property number ArenaMinY = -3.5
     property number ArenaMaxY = 1.5
-    property string CameraMode = "FIXED_FULL_FIELD"
-    property number CameraZoomPercent = 70
-    property Vector2 CameraOffset = Vector2(0, -1.0)
 
     @ExecSpace("ServerOnly")
     method void OnBeginPlay()
@@ -397,7 +394,7 @@ script BattleSession extends Component
 
     @ExecSpace("ServerOnly")
     method void DisableDefaultPlayer()
-        -- Keep DefaultPlayer visible while removing control, collision, and camera drift.
+        -- Keep DefaultPlayer visible while removing control and collision.
         local map = self:GetMapEntity()
         if not isvalid(map) or _UserService.UserEntities == nil then return end
         for _, player in ipairs(_UserService.UserEntities.Values) do
@@ -419,16 +416,6 @@ script BattleSession extends Component
                     for _, childTrigger in ipairs(childTriggers) do
                         if isvalid(childTrigger) then childTrigger.Enable = false end
                     end
-                end
-                local camera = player:GetComponent("CameraComponent")
-                if isvalid(camera) then
-                    camera.DeadZone = Vector2(1, 1)
-                    camera.SoftZone = Vector2(1, 1)
-                    camera.Damping = Vector2(0, 0)
-                    camera.ScreenOffset = Vector2(0.5, 0.5)
-                    camera.CameraOffset = self.CameraOffset
-                    camera.ZoomRatio = self.CameraZoomPercent
-                    camera.IsAllowZoomInOut = false
                 end
                 local playerHit = player:GetComponent("script.PlayerHit")
                 if isvalid(playerHit) then playerHit.Enable = false end
