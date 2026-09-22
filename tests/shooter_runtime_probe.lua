@@ -95,6 +95,7 @@ local firstAttackSerial = shooterUnit.AttackSerial
 check(firstHitHp == 190, "shooter deals fixed 30 damage after the configurable impact delay")
 check(decoyUnit.Hp == 220, "shooter hits only the selected target instead of a nearby decoy")
 check(session.LastEvent == "DAMAGE", "shooter reaches the semantic damage event through Hit")
+check(string.find(session.EventHistory, "HIT") ~= nil and string.find(session.EventHistory, "DAMAGE") ~= nil, "shooter preserves hit and damage semantic events for presentation")
 
 session:AdvanceForTest(0.5)
 check(targetUnit.Hp == 190 and shooterUnit.AttackSerial == firstAttackSerial, "shooter attack interval blocks a second shot before 0.8 seconds")

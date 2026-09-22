@@ -66,7 +66,7 @@ test("M1 unit model has the RectTile movement and native hit contract", () => {
   assert.ok(values.get("MOD.Core.SpriteRendererComponent.SpriteRUID"));
 });
 
-test("fixed battle keeps the tank profile and adds the shooter roster", () => {
+test("battle phase keeps the Tank profile and adds Shooter to the player formation", () => {
   const session = read("RootDesk/MyDesk/Combat/BattleSession.mlua");
   const unit = read("RootDesk/MyDesk/Combat/BattleUnit.mlua");
   const contact = read("RootDesk/MyDesk/Combat/TankContactAttack.mlua");
@@ -78,6 +78,7 @@ test("fixed battle keeps the tank profile and adds the shooter roster", () => {
   assert.match(session, /SpawnUnit\(self\.PlayerModelId, "M1_PlayerShooter", "PLAYER", "SHOOTER"/);
   assert.match(session, /SpawnUnit\(self\.EnemyModelId, "M1_EnemyAssault", "ENEMY", "ASSAULT"/);
   assert.match(session, /self\.PlayerAlive = 2/);
+  assert.match(session, /EventHistory/);
   assert.match(session, /TankMaxHp = 500/);
   assert.match(session, /TankMoveSpeed = 1\.1/);
   assert.match(session, /TankContactDamage = 40/);
@@ -166,6 +167,7 @@ test("Issue #4 adds a configurable hitscan shooter adapter", () => {
   assert.doesNotMatch(shooter, /AttackRange \+ 0\.05/);
   assert.match(shooter, /return self\.AttackDamage/);
   assert.match(shooter, /session:EmitPresentation\("HIT"/);
+  assert.match(session, /while #self\._T\.eventHistory > 24/);
   assert.doesNotMatch(shooter, /SpawnService|Projectile|projectile/);
 
   assert.match(runtimeProbe, /SpawnUnit\(session\.EnemyModelId, "M1_ShooterProbeTarget"/);

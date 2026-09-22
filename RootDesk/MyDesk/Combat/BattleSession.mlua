@@ -10,6 +10,7 @@ script BattleSession extends Component
     @Sync property integer SnapshotSerial = 0
     @Sync property string LastEvent = ""
     @Sync property integer EventSerial = 0
+    @Sync property string EventHistory = ""
     @Sync property string LastEventSourceName = ""
     @Sync property string LastEventTargetName = ""
     @Sync property integer LastEventAmount = 0
@@ -49,7 +50,7 @@ script BattleSession extends Component
 
     @ExecSpace("ServerOnly")
     method void OnBeginPlay()
-        -- Start the fixed tank-and-shooter-versus-assault session and publish its boundary state.
+        -- Start the battle phase with the player Tank and Shooter against the fixed enemy Assault.
         self._T.units = {}
         self._T.pendingDamage = {}
         self._T.pendingKnockbacks = {}
@@ -62,6 +63,7 @@ script BattleSession extends Component
         self.UnitSnapshots = ""
         self.SnapshotSerial = 0
         self.EventSerial = 0
+        self.EventHistory = ""
         self.LastEvent = ""
         self.LastEventSourceName = ""
         self.LastEventTargetName = ""
@@ -85,7 +87,7 @@ script BattleSession extends Component
         self.EnemyAlive = 1
         self:EmitPresentation("SESSION_START", player, enemy, 0)
         self:RefreshSnapshot()
-        log("[M1][BattleSession] BATTLE started: PLAYER tank + shooter vs ENEMY assault")
+        log("[M1][BattleSession] BATTLE started: PLAYER tank + shooter vs fixed ENEMY assault")
     end
 
     @ExecSpace("ServerOnly")
@@ -386,6 +388,10 @@ script BattleSession extends Component
         self.LastEventTargetName = ""
         if isvalid(source) then self.LastEventSourceName = source.Name end
         if isvalid(target) then self.LastEventTargetName = target.Name end
+        if self._T.eventHistory == nil then self._T.eventHistory = {} end
+        table.insert(self._T.eventHistory, eventName .. ":" .. self.LastEventSourceName .. ":" .. self.LastEventTargetName .. ":" .. tostring(self.LastEventAmount))
+        while #self._T.eventHistory > 24 do table.remove(self._T.eventHistory, 1) end
+        self.EventHistory = table.concat(self._T.eventHistory, ";")
     end
 
     method void RefreshSnapshot()
@@ -407,7 +413,7 @@ script BattleSession extends Component
             end
         end
         self.UnitSnapshots = table.concat(unitParts, ";")
-        self.Snapshot = "phase=" .. self.Phase .. "|result=" .. self.Result .. "|playerAlive=" .. tostring(self.PlayerAlive) .. "|enemyAlive=" .. tostring(self.EnemyAlive) .. "|units=" .. self.UnitSnapshots .. "|event=" .. self.LastEvent .. "|eventSerial=" .. tostring(self.EventSerial) .. "|source=" .. self.LastEventSourceName .. "|target=" .. self.LastEventTargetName .. "|amount=" .. tostring(self.LastEventAmount)
+        self.Snapshot = "phase=" .. self.Phase .. "|result=" .. self.Result .. "|playerAlive=" .. tostring(self.PlayerAlive) .. "|enemyAlive=" .. tostring(self.EnemyAlive) .. "|units=" .. self.UnitSnapshots .. "|event=" .. self.LastEvent .. "|eventSerial=" .. tostring(self.EventSerial) .. "|source=" .. self.LastEventSourceName .. "|target=" .. self.LastEventTargetName .. "|amount=" .. tostring(self.LastEventAmount) .. "|events=" .. self.EventHistory
         self.SnapshotSerial = self.SnapshotSerial + 1
     end
 
