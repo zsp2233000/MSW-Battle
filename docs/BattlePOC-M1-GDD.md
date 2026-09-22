@@ -86,7 +86,7 @@
 | 射手動畫 | `stand`、`move`、`attack`、`hit`、`die`，共 5 個 AnimationClip RUID | `attack` 另提供命中影格 |
 | HP 條 | 背景與填充值各 1 個 Sprite RUID | 顯示於單位上方；系統只依 HP 比例縮放填充值 |
 | 傷害數字 | 1 個 DamageSkin RUID | 每次成功傷害顯示固定傷害值 |
-| 命中特效 | 1 個共用特效 RUID | 僅突擊與射手命中時播放；坦克接觸不播放 |
+| 命中特效 | 各攻擊者的 `hit` Effect RUID | `hit` RUID 由攻擊者決定，但特效掛在被擊中的目標 Entity 上；TBD 時不播放 |
 | 音效 | 坦克／射手 attack、onhit、die 音效 | 本次接入坦克與射手；攻擊命中或攻擊開始依兵種播放 attack SFX，被擊中播放 onhit SFX，死亡播放 die SFX |
 
 - 突擊與射手的傷害在 `attack` 動畫命中影格發生，不以整段動畫結束時間代替。
@@ -128,7 +128,7 @@
 | 動畫 | `TankPresentation` 在客戶端依坦克狀態切換人類提供的 stand／move／hit／die AnimationClip RUID；死亡依既有 death hold 延遲移除 |
 | HP 條 | 單位下的世界空間子 Entity；兩個人類提供的 Sprite RUID，填充值依 HP 比例縮放 |
 | 傷害數字 | 使用人類提供的 DamageSkin RUID 與 MSW 傷害數字機制 |
-| 特效／音效 | `TankPresentation` 播放坦克 attack／onhit／die SFX；`ShooterPresentation` 播放射手 attack／onhit／die SFX；碰撞特效與碰撞音效仍不使用 |
+| 特效／音效 | `BattleHitEffectPresentation` 將攻擊者的 hit Effect RUID 掛到受擊目標；`TankPresentation` 播放坦克 attack／onhit／die SFX；`ShooterPresentation` 播放射手 attack／onhit／die SFX；碰撞音效仍不使用 |
 | UI | `BattleGroup.ui` 保留但隱藏；Issue #3 不綁定部署按鈕或開始按鈕 |
 | 相機與玩家 | 固定相機顯示完整戰場；停用 DefaultPlayer 移動與碰撞，使其不進入戰鬥查詢 |
 

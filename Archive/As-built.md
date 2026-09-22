@@ -11,6 +11,7 @@
 | Tank contact attack | `@Component` / `AttackComponent` | `RootDesk/MyDesk/Combat/TankContactAttack.mlua` | Native `AttackFrom` → `Hit` path; fixed 40 damage, independent 2.0s per-target cooldown, enemy-only 0.8 knockback queue; presentation owns attack SFX while collision SFX/VFX remain unused. |
 | Tank presentation | `@Component` | `RootDesk/MyDesk/Combat/TankPresentation.mlua` | Client-side Tank stand/move/hit/die AnimationClip switching plus attack/onhit/die SFX hooks. Tank has no attack animation. |
 | Shooter presentation | `@Component` | `RootDesk/MyDesk/Combat/ShooterPresentation.mlua` | Client-side attack/onhit/die SFX hooks driven by synced attack and damage serials. |
+| Hit effect presentation | `@Component` | `RootDesk/MyDesk/Combat/BattleHitEffectPresentation.mlua` | Client-side attached hit effect; the attacker's RUID is resolved on the server and rendered on the defender entity. |
 | Assault attack | `@Component` / `AttackComponent` | `RootDesk/MyDesk/Combat/AssaultAttack.mlua` | Existing native Attack→Hit path with 0.7s interval, 0.18s impact delay, fixed 35 damage, and faction filtering. |
 | Unit model | `.model` | `RootDesk/MyDesk/Models/Monsters/BattleUnit.model` | `KinematicbodyComponent` for `RectTile`; placeholder `SpriteRUID` remains the model contract, while Tank presentation applies supplied clips at runtime. |
 | Battle map | `.map` | `map/map01.map` | `TileMapMode=1` (`RectTile`); map root owns only `script.BattleSession` for the active Issue #3 runtime. |

@@ -153,6 +153,7 @@ script BattleSession extends Component
         end
 
         entity:AddComponent("script.BattleUnit")
+        entity:AddComponent("script.BattleHitEffectPresentation")
         entity:AddComponent("script.BattleAttackComposition")
         local maxHp = self.UnitMaxHp
         local speed = self.UnitMoveSpeed

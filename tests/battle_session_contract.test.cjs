@@ -72,7 +72,9 @@ test("battle phase keeps the Tank profile and adds Shooter to the player formati
   const contact = read("RootDesk/MyDesk/Combat/TankContactAttack.mlua");
   const presentation = read("RootDesk/MyDesk/Combat/TankPresentation.mlua");
   const shooterPresentation = read("RootDesk/MyDesk/Combat/ShooterPresentation.mlua");
+  const hitEffectPresentation = read("RootDesk/MyDesk/Combat/BattleHitEffectPresentation.mlua");
   const assault = read("RootDesk/MyDesk/Combat/AssaultAttack.mlua");
+  const shooterAttack = read("RootDesk/MyDesk/Combat/ShooterAttack.mlua");
   const runtimeProbe = read("tests/tank_contact_runtime_probe.lua");
   const resources = read("resources.md");
 
@@ -102,6 +104,11 @@ test("battle phase keeps the Tank profile and adds Shooter to the player formati
   assert.match(unit, /hitStopRemaining/);
   assert.match(unit, /hitStopMovement:Stop\(\)/);
   assert.match(unit, /self\.CombatState = "IDLE"/);
+  assert.match(unit, /@Sync property integer HitEffectSerial = 0/);
+  assert.match(unit, /@Sync property string LastHitEffectRUID = "TBD"/);
+  assert.match(unit, /method string GetHitEffectRUID\(\)/);
+  assert.match(unit, /self\.LastHitEffectRUID = hitEffectRUID/);
+  assert.match(unit, /self\.HitEffectSerial = self\.HitEffectSerial \+ 1/);
   assert.match(unit, /session:QueueDamage\(self\.Entity, event\.TotalDamage, event\.AttackerEntity\)/);
   assert.doesNotMatch(unit, /SetWorldPosition|SetPosition\(/);
 
@@ -113,7 +120,7 @@ test("battle phase keeps the Tank profile and adds Shooter to the player formati
   assert.match(contact, /targetCooldowns/);
   assert.match(contact, /return self\.ContactDamage/);
   assert.match(contact, /session:QueueKnockback/);
-  assert.doesNotMatch(contact, /_SoundService|VFX|Effect/);
+  assert.doesNotMatch(contact, /_SoundService|VFX|PlayEffect/);
 
   assert.match(presentation, /a95cfed2c8fe4d2cb64cbb62db051f92/);
   assert.match(presentation, /8257566e41aa4234929e81c6c2dab2e4/);
@@ -132,6 +139,13 @@ test("battle phase keeps the Tank profile and adds Shooter to the player formati
   assert.match(presentation, /unit\.IsDead == true and self\._T\.deathSoundPlayed ~= true/);
   assert.match(presentation, /soundRUID == nil[\s\S]*soundRUID == "TBD"[\s\S]*soundRUID == "N\/A"/);
 
+  assert.match(session, /entity:AddComponent\("script\.BattleHitEffectPresentation"\)/);
+  assert.match(hitEffectPresentation, /@ExecSpace\("ClientOnly"\)\s+method void OnUpdate\(/);
+  assert.match(hitEffectPresentation, /unit\.HitEffectSerial/);
+  assert.match(hitEffectPresentation, /unit\.LastHitEffectRUID/);
+  assert.match(hitEffectPresentation, /PlayEffectAttached\(effectRUID, self\.Entity/);
+  assert.match(hitEffectPresentation, /effectRUID == nil[\s\S]*effectRUID == "TBD"[\s\S]*effectRUID == "N\/A"/);
+
   assert.match(session, /entity:AddComponent\("script\.ShooterPresentation"\)/);
   assert.match(shooterPresentation, /AttackSoundRUID/);
   assert.match(shooterPresentation, /OnHitSoundRUID/);
@@ -144,6 +158,7 @@ test("battle phase keeps the Tank profile and adds Shooter to the player formati
   assert.match(shooterPresentation, /unit\.DamageTakenSerial[\s\S]*self:PlayAtEntity\(self\.OnHitSoundRUID\)/);
   assert.match(shooterPresentation, /unit\.IsDead == true and self\._T\.deathSoundPlayed ~= true/);
   assert.match(shooterPresentation, /soundRUID == nil[\s\S]*soundRUID == "TBD"[\s\S]*soundRUID == "N\/A"/);
+  assert.match(shooterAttack, /property string HitEffectRUID = "1f2bdb3b15a145ea8f3db3fbfb61296b"/);
 
   assert.match(resources, /Tank attack SFX\s*\| Sound RUID/);
   assert.match(resources, /Tank onhit SFX\s*\| Sound RUID/);
@@ -151,6 +166,9 @@ test("battle phase keeps the Tank profile and adds Shooter to the player formati
   assert.match(resources, /Shooter attack SFX\s*\| Sound RUID/);
   assert.match(resources, /Shooter onhit SFX\s*\| Sound RUID/);
   assert.match(resources, /Shooter die SFX\s*\| Sound RUID/);
+  assert.match(resources, /Tank `hit` effect\s*\| Effect RUID/);
+  assert.match(resources, /Assault `hit` effect\s*\| Effect RUID/);
+  assert.match(resources, /Shooter `hit` effect\s*\| Effect RUID/);
 
   assert.match(assault, /extends AttackComponent/);
   assert.match(assault, /return self\.AttackDamage/);
