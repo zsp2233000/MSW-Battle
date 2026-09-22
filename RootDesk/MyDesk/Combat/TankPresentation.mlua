@@ -5,6 +5,7 @@ script TankPresentation extends Component
     property string MoveAnimationRUID = "8257566e41aa4234929e81c6c2dab2e4"
     property string OnHitAnimationRUID = "5ebbdaf503964f3e87de155d16650805"
     property string DeathAnimationRUID = "dddbe2f162184ec89add7440da56eb75"
+    property string AttackSoundRUID = "TBD"
     property string OnHitSoundRUID = "6eb2ef8a783c4393bd7ee6a2c199bda7"
     property string DeathSoundRUID = "c49646f7299e4c6e81e953c96e20b294"
 
@@ -12,6 +13,7 @@ script TankPresentation extends Component
     method void OnBeginPlay()
         -- Initialize the tank's visual state and sound serial cursors on the client.
         self._T.lastCombatState = ""
+        self._T.lastAttackSerial = 0
         self._T.lastDamageSerial = 0
         self._T.deathSoundPlayed = false
         self:ApplyAnimation("IDLE")
@@ -19,12 +21,16 @@ script TankPresentation extends Component
 
     @ExecSpace("ClientOnly")
     method void OnUpdate(number delta)
-        -- Mirror synced combat state and play hit/death sounds exactly once per semantic event.
+        -- Mirror synced combat state and play attack/onhit/die sounds exactly once per event.
         local unit = self.Entity:GetComponent("script.BattleUnit")
         if not isvalid(unit) then return end
         if unit.CombatState ~= self._T.lastCombatState then
             self._T.lastCombatState = unit.CombatState
             self:ApplyAnimation(unit.CombatState)
+        end
+        if unit.AttackSerial ~= self._T.lastAttackSerial then
+            self._T.lastAttackSerial = unit.AttackSerial
+            self:PlayAtEntity(self.AttackSoundRUID)
         end
         if unit.DamageTakenSerial ~= self._T.lastDamageSerial then
             self._T.lastDamageSerial = unit.DamageTakenSerial
@@ -58,7 +64,7 @@ script TankPresentation extends Component
 
     @ExecSpace("ClientOnly")
     method void PlayAtEntity(string soundRUID)
-        -- Play only tank receive-hit/death sounds; contact attack has no sound effect.
+        -- Play a configured Tank attack/onhit/die sound at the unit's world position.
         if soundRUID == nil or soundRUID == "" or soundRUID == "TBD" or soundRUID == "N/A" then return end
         local transform = self.Entity:GetComponent("TransformComponent")
         if not isvalid(transform) then return end

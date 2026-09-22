@@ -71,6 +71,7 @@ test("battle phase keeps the Tank profile and adds Shooter to the player formati
   const unit = read("RootDesk/MyDesk/Combat/BattleUnit.mlua");
   const contact = read("RootDesk/MyDesk/Combat/TankContactAttack.mlua");
   const presentation = read("RootDesk/MyDesk/Combat/TankPresentation.mlua");
+  const shooterPresentation = read("RootDesk/MyDesk/Combat/ShooterPresentation.mlua");
   const assault = read("RootDesk/MyDesk/Combat/AssaultAttack.mlua");
   const runtimeProbe = read("tests/tank_contact_runtime_probe.lua");
 
@@ -118,11 +119,20 @@ test("battle phase keeps the Tank profile and adds Shooter to the player formati
   assert.match(presentation, /OnHitAnimationRUID/);
   assert.match(presentation, /5ebbdaf503964f3e87de155d16650805/);
   assert.match(presentation, /dddbe2f162184ec89add7440da56eb75/);
+  assert.match(presentation, /AttackSoundRUID/);
   assert.match(presentation, /OnHitSoundRUID/);
   assert.match(presentation, /6eb2ef8a783c4393bd7ee6a2c199bda7/);
   assert.match(presentation, /c49646f7299e4c6e81e953c96e20b294/);
+  assert.match(presentation, /lastAttackSerial/);
   assert.match(presentation, /PlaySoundAtPos/);
-  assert.doesNotMatch(presentation, /AttackSound|ContactSound/);
+
+  assert.match(session, /entity:AddComponent\("script\.ShooterPresentation"\)/);
+  assert.match(shooterPresentation, /AttackSoundRUID/);
+  assert.match(shooterPresentation, /OnHitSoundRUID/);
+  assert.match(shooterPresentation, /DeathSoundRUID/);
+  assert.match(shooterPresentation, /lastAttackSerial/);
+  assert.match(shooterPresentation, /lastDamageSerial/);
+  assert.match(shooterPresentation, /PlaySoundAtPos/);
 
   assert.match(assault, /extends AttackComponent/);
   assert.match(assault, /return self\.AttackDamage/);
