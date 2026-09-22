@@ -3,6 +3,7 @@
 local map = _EntityService:GetEntityByPath("/maps/map01")
 local session = map:GetComponent("script.BattleSession")
 local tank = _EntityService:GetEntityByPath("/maps/map01/M1_PlayerTank")
+local fixedShooter = _EntityService:GetEntityByPath("/maps/map01/M1_PlayerShooter")
 local tankUnit = tank:GetComponent("script.BattleUnit")
 local tankBody = tank:GetComponent("KinematicbodyComponent")
 local failures = 0
@@ -48,6 +49,21 @@ end
 if not isvalid(map) or not isvalid(session) or not isvalid(tank) or not isvalid(tankUnit) or not isvalid(tankBody) or not session:IsBattleActive() then
     log_error("[M1][TankProbe][FAIL] fixed battle session is not ready")
     return
+end
+
+-- Freeze the fixed shooter so its ranged adapter cannot affect the tank contact fixtures.
+if isvalid(fixedShooter) then
+    local shooterUnit = fixedShooter:GetComponent("script.BattleUnit")
+    local shooterMovement = fixedShooter:GetComponent("MovementComponent")
+    if isvalid(shooterUnit) then
+        shooterUnit:CancelAttack()
+        shooterUnit.MoveSpeed = 0
+        shooterUnit.RetargetInterval = 99
+    end
+    if isvalid(shooterMovement) then
+        shooterMovement.InputSpeed = 0
+        shooterMovement:Stop()
+    end
 end
 
 -- Freeze the Tank only for this probe so its position can be compared across contact hits.

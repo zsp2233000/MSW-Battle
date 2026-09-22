@@ -66,7 +66,7 @@ test("M1 unit model has the RectTile movement and native hit contract", () => {
   assert.ok(values.get("MOD.Core.SpriteRendererComponent.SpriteRUID"));
 });
 
-test("Issue #3 starts one tank and one assault with the fixed tank profile", () => {
+test("fixed battle keeps the tank profile and adds the shooter roster", () => {
   const session = read("RootDesk/MyDesk/Combat/BattleSession.mlua");
   const unit = read("RootDesk/MyDesk/Combat/BattleUnit.mlua");
   const contact = read("RootDesk/MyDesk/Combat/TankContactAttack.mlua");
@@ -75,7 +75,9 @@ test("Issue #3 starts one tank and one assault with the fixed tank profile", () 
   const runtimeProbe = read("tests/tank_contact_runtime_probe.lua");
 
   assert.match(session, /SpawnUnit\(self\.PlayerModelId, "M1_PlayerTank", "PLAYER", "TANK"/);
+  assert.match(session, /SpawnUnit\(self\.PlayerModelId, "M1_PlayerShooter", "PLAYER", "SHOOTER"/);
   assert.match(session, /SpawnUnit\(self\.EnemyModelId, "M1_EnemyAssault", "ENEMY", "ASSAULT"/);
+  assert.match(session, /self\.PlayerAlive = 2/);
   assert.match(session, /TankMaxHp = 500/);
   assert.match(session, /TankMoveSpeed = 1\.1/);
   assert.match(session, /TankContactDamage = 40/);
@@ -158,13 +160,19 @@ test("Issue #4 adds a configurable hitscan shooter adapter", () => {
   assert.match(shooter, /@ExecSpace\("ServerOnly"\)\s+method void OnUpdate\(number delta\)/);
   assert.match(shooter, /method void Cancel\(\)/);
   assert.match(shooter, /AttackFrom\(Vector2\(0\.2, 0\.2\), Vector2\(targetPosition\.x, targetPosition\.y\), "shooter", nil\)/);
+  assert.match(shooter, /return dx \* dx \+ dy \* dy <= self\.AttackRange \* self\.AttackRange/);
+  assert.doesNotMatch(shooter, /AttackRange \+ 0\.05/);
   assert.match(shooter, /return self\.AttackDamage/);
   assert.match(shooter, /session:EmitPresentation\("HIT"/);
   assert.doesNotMatch(shooter, /SpawnService|Projectile|projectile/);
 
   assert.match(runtimeProbe, /SpawnUnit\(session\.EnemyModelId, "M1_ShooterProbeTarget"/);
   assert.match(runtimeProbe, /AdvanceForTest/);
+  assert.match(runtimeProbe, /pre-impact/);
+  assert.match(runtimeProbe, /target dies before impact/);
   assert.match(runtimeProbe, /target leaves range before impact/);
+  assert.match(runtimeProbe, /ATTACK_START/);
+  assert.match(runtimeProbe, /Children:ToTable/);
   assert.match(runtimeProbe, /\[M1\]\[ShooterProbe\] PASS/);
 });
 

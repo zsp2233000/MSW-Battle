@@ -17,6 +17,7 @@ script BattleSession extends Component
     property string PlayerModelId = "battleunit"
     property string EnemyModelId = "battleunit"
     property Vector3 PlayerSpawnPosition = Vector3(-2.4, 0, 0)
+    property Vector3 ShooterSpawnPosition = Vector3(-3.4, 0.8, 0)
     property Vector3 EnemySpawnPosition = Vector3(2.6, 0, 0)
     property integer UnitMaxHp = 220
     property number UnitMoveSpeed = 2.0 -- RectTile world speed; controller converts to InputSpeed * 1.2.
@@ -48,7 +49,7 @@ script BattleSession extends Component
 
     @ExecSpace("ServerOnly")
     method void OnBeginPlay()
-        -- Start the fixed tank-versus-assault session and publish its boundary state.
+        -- Start the fixed tank-and-shooter-versus-assault session and publish its boundary state.
         self._T.units = {}
         self._T.pendingDamage = {}
         self._T.pendingKnockbacks = {}
@@ -68,9 +69,10 @@ script BattleSession extends Component
         self:DisableDefaultPlayer()
 
         local player = self:SpawnUnit(self.PlayerModelId, "M1_PlayerTank", "PLAYER", "TANK", self.PlayerSpawnPosition)
+        local shooter = self:SpawnUnit(self.PlayerModelId, "M1_PlayerShooter", "PLAYER", "SHOOTER", self.ShooterSpawnPosition)
         local enemy = self:SpawnUnit(self.EnemyModelId, "M1_EnemyAssault", "ENEMY", "ASSAULT", self.EnemySpawnPosition)
-        if player == nil or enemy == nil then
-            log_error("[M1][BattleSession] fixed tank spawn failed")
+        if player == nil or shooter == nil or enemy == nil then
+            log_error("[M1][BattleSession] fixed battle roster spawn failed")
             self.Phase = "RESULT"
             self.Result = "DRAW"
             self._T.resultEntered = true
@@ -79,11 +81,11 @@ script BattleSession extends Component
             return
         end
 
-        self.PlayerAlive = 1
+        self.PlayerAlive = 2
         self.EnemyAlive = 1
         self:EmitPresentation("SESSION_START", player, enemy, 0)
         self:RefreshSnapshot()
-        log("[M1][BattleSession] BATTLE started: PLAYER tank vs ENEMY assault")
+        log("[M1][BattleSession] BATTLE started: PLAYER tank + shooter vs ENEMY assault")
     end
 
     @ExecSpace("ServerOnly")

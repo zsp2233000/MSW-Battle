@@ -99,7 +99,7 @@ script ShooterAttack extends AttackComponent
         local targetPosition = targetTransform.WorldPosition
         local dx = targetPosition.x - sourcePosition.x
         local dy = targetPosition.y - sourcePosition.y
-        return dx * dx + dy * dy <= (self.AttackRange + 0.05) * (self.AttackRange + 0.05)
+        return dx * dx + dy * dy <= self.AttackRange * self.AttackRange
     end
 
     @ExecSpace("ServerOnly")
