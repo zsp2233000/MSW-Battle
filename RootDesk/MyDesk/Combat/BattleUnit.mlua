@@ -264,6 +264,7 @@ script BattleUnit extends Component
         -- Forward native HitEvent damage to the map session; never mutate HP in the handler.
         local session = self:GetSession()
         if not isvalid(session) or not session:IsBattleActive() or self.IsDead then return end
+        session:EmitPresentation("TARGET_HIT", event.AttackerEntity, self.Entity, event.TotalDamage)
         session:QueueDamage(self.Entity, event.TotalDamage, event.AttackerEntity)
     end
 

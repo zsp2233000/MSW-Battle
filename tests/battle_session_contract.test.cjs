@@ -161,12 +161,14 @@ test("Issue #4 adds a configurable hitscan shooter adapter", () => {
   assert.match(shooter, /method void Advance\(number delta\)/);
   assert.match(shooter, /@ExecSpace\("ServerOnly"\)\s+method void OnUpdate\(number delta\)/);
   assert.match(shooter, /method void Cancel\(\)/);
+  assert.match(shooter, /method void CancelImpact\(\)[\s\S]*self\.CooldownRemaining = 0/);
   assert.match(shooter, /AttackFrom\(Vector2\(0\.2, 0\.2\), Vector2\(targetPosition\.x, targetPosition\.y\), "shooter", nil\)/);
   assert.match(shooter, /impactTarget/);
   assert.match(shooter, /return dx \* dx \+ dy \* dy <= self\.AttackRange \* self\.AttackRange/);
   assert.doesNotMatch(shooter, /AttackRange \+ 0\.05/);
   assert.match(shooter, /return self\.AttackDamage/);
   assert.match(shooter, /session:EmitPresentation\("HIT"/);
+  assert.match(unit, /session:EmitPresentation\("TARGET_HIT"/);
   assert.match(session, /while #self\._T\.eventHistory > 24/);
   assert.doesNotMatch(shooter, /SpawnService|Projectile|projectile/);
 

@@ -128,6 +128,7 @@ script ShooterAttack extends AttackComponent
         -- Cancel the delayed shot when its target or battle conditions become invalid.
         self.PendingTarget = nil
         self.ImpactRemaining = -1
+        self.CooldownRemaining = 0
         self._T.impactTarget = nil
     end
 
