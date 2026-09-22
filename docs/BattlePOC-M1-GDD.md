@@ -87,7 +87,7 @@
 | HP 條 | 背景與填充值各 1 個 Sprite RUID | 顯示於單位上方；系統只依 HP 比例縮放填充值 |
 | 傷害數字 | 1 個 DamageSkin RUID | 每次成功傷害顯示固定傷害值 |
 | 命中特效 | 1 個共用特效 RUID | 僅突擊與射手命中時播放；坦克接觸不播放 |
-| 音效 | 坦克／突擊／射手攻擊、各兵種 onhit、各兵種 die 音效 | 攻擊命中或攻擊開始依兵種播放 attack SFX；被擊中播放 onhit SFX；死亡播放 die SFX |
+| 音效 | 坦克／射手 attack、onhit、die 音效 | 本次接入坦克與射手；攻擊命中或攻擊開始依兵種播放 attack SFX，被擊中播放 onhit SFX，死亡播放 die SFX |
 
 - 突擊與射手的傷害在 `attack` 動畫命中影格發生，不以整段動畫結束時間代替。
 - 系統依 AnimationClip 影格時間換算命中時間。

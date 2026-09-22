@@ -34,7 +34,7 @@ script TankPresentation extends Component
         end
         if unit.DamageTakenSerial ~= self._T.lastDamageSerial then
             self._T.lastDamageSerial = unit.DamageTakenSerial
-            if unit.IsDead ~= true then self:PlayAtEntity(self.OnHitSoundRUID) end
+            self:PlayAtEntity(self.OnHitSoundRUID)
         end
         if unit.IsDead == true and self._T.deathSoundPlayed ~= true then
             self._T.deathSoundPlayed = true

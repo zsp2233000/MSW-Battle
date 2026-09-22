@@ -74,6 +74,7 @@ test("battle phase keeps the Tank profile and adds Shooter to the player formati
   const shooterPresentation = read("RootDesk/MyDesk/Combat/ShooterPresentation.mlua");
   const assault = read("RootDesk/MyDesk/Combat/AssaultAttack.mlua");
   const runtimeProbe = read("tests/tank_contact_runtime_probe.lua");
+  const resources = read("resources.md");
 
   assert.match(session, /SpawnUnit\(self\.PlayerModelId, "M1_PlayerTank", "PLAYER", "TANK"/);
   assert.match(session, /SpawnUnit\(self\.PlayerModelId, "M1_PlayerShooter", "PLAYER", "SHOOTER"/);
@@ -125,6 +126,11 @@ test("battle phase keeps the Tank profile and adds Shooter to the player formati
   assert.match(presentation, /c49646f7299e4c6e81e953c96e20b294/);
   assert.match(presentation, /lastAttackSerial/);
   assert.match(presentation, /PlaySoundAtPos/);
+  assert.match(presentation, /@ExecSpace\("ClientOnly"\)\s+method void OnBeginPlay\(/);
+  assert.match(presentation, /@ExecSpace\("ClientOnly"\)\s+method void OnUpdate\(/);
+  assert.match(presentation, /unit\.DamageTakenSerial[\s\S]*self:PlayAtEntity\(self\.OnHitSoundRUID\)/);
+  assert.match(presentation, /unit\.IsDead == true and self\._T\.deathSoundPlayed ~= true/);
+  assert.match(presentation, /soundRUID == nil[\s\S]*soundRUID == "TBD"[\s\S]*soundRUID == "N\/A"/);
 
   assert.match(session, /entity:AddComponent\("script\.ShooterPresentation"\)/);
   assert.match(shooterPresentation, /AttackSoundRUID/);
@@ -133,6 +139,18 @@ test("battle phase keeps the Tank profile and adds Shooter to the player formati
   assert.match(shooterPresentation, /lastAttackSerial/);
   assert.match(shooterPresentation, /lastDamageSerial/);
   assert.match(shooterPresentation, /PlaySoundAtPos/);
+  assert.match(shooterPresentation, /@ExecSpace\("ClientOnly"\)\s+method void OnBeginPlay\(/);
+  assert.match(shooterPresentation, /@ExecSpace\("ClientOnly"\)\s+method void OnUpdate\(/);
+  assert.match(shooterPresentation, /unit\.DamageTakenSerial[\s\S]*self:PlayAtEntity\(self\.OnHitSoundRUID\)/);
+  assert.match(shooterPresentation, /unit\.IsDead == true and self\._T\.deathSoundPlayed ~= true/);
+  assert.match(shooterPresentation, /soundRUID == nil[\s\S]*soundRUID == "TBD"[\s\S]*soundRUID == "N\/A"/);
+
+  assert.match(resources, /Tank attack SFX\s*\| Sound RUID/);
+  assert.match(resources, /Tank onhit SFX\s*\| Sound RUID/);
+  assert.match(resources, /Tank die SFX\s*\| Sound RUID/);
+  assert.match(resources, /Shooter attack SFX\s*\| Sound RUID/);
+  assert.match(resources, /Shooter onhit SFX\s*\| Sound RUID/);
+  assert.match(resources, /Shooter die SFX\s*\| Sound RUID/);
 
   assert.match(assault, /extends AttackComponent/);
   assert.match(assault, /return self\.AttackDamage/);
