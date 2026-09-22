@@ -13,7 +13,7 @@
 
 ## Issue #3 必填資源
 
-### 坦克
+### 坦克（戰士）
 
 坦克沒有一般攻擊，因此不需要 `attack` 動畫。接觸傷害、冷卻與擊退規則由程式處理。
 
@@ -41,6 +41,22 @@ Issue #3 延續既有一對一自動戰鬥，若敵方突擊仍使用人類動�
 | Assault `hit`               | AnimationClip RUID | `TBD`        | ⬜    | 受擊                                  |
 | Assault `die`               | AnimationClip RUID | `TBD`        | ⬜    | 死亡                                  |
 | Assault attack impact frame | Frame／秒數        | `TBD`        | ⬜    | 攻擊動畫中實際造成命中的時間點        |
+
+## Issue #4 必填資源
+
+### 射手
+
+射手使用直線移動與 hitscan 攻擊，不建立投射物 Entity。請填入戰士與射手實際使用的動畫資源 RUID；若沿用同一組資源可重複填寫相同 RUID。
+
+| 欄位                         | 資產類型           | RUID／值     | 狀態 | 備註                                  |
+| ---------------------------- | ------------------ | ------------ | ---- | ------------------------------------- |
+| Shooter ModelId              | Model ID           | `battleunit` | ✅    | 可與坦克（戰士）共用模型，或填入專用 Model ID |
+| Shooter `stand`              | AnimationClip RUID | `TBD`        | ⬜    | 待機                                  |
+| Shooter `move`               | AnimationClip RUID | `TBD`        | ⬜    | 直線移動                              |
+| Shooter `attack`             | AnimationClip RUID | `TBD`        | ⬜    | 遠距攻擊                              |
+| Shooter `hit`                | AnimationClip RUID | `TBD`        | ⬜    | 受擊                                  |
+| Shooter `die`                | AnimationClip RUID | `TBD`        | ⬜    | 死亡                                  |
+| Shooter attack impact frame  | Frame／秒數        | `TBD`        | ⬜    | 攻擊動畫中實際觸發 hitscan 命中的時間點 |
 
 ## Issue #3 行為設定確認
 
