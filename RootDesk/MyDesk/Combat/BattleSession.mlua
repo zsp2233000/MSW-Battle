@@ -133,7 +133,7 @@ script BattleSession extends Component
     end
 
     method Entity SpawnUnit(string modelId, string name, string faction, string unitKind, Vector3 position)
-        -- Spawn a native-body unit and let BattleUnit own its attack adapter selection.
+        -- Spawn a native-body unit and inject the composition module that creates its adapter.
         local map = self:GetMapEntity()
         if not isvalid(map) then return nil end
         local entity = _SpawnService:SpawnByModelId(modelId, name, position, map)
@@ -143,6 +143,7 @@ script BattleSession extends Component
         end
 
         entity:AddComponent("script.BattleUnit")
+        entity:AddComponent("script.BattleAttackComposition")
         local maxHp = self.UnitMaxHp
         local speed = self.UnitMoveSpeed
         local damage = self.UnitDamage
@@ -161,8 +162,14 @@ script BattleSession extends Component
             log_error("[M1][BattleSession] BattleUnit component missing on " .. name)
             return nil
         end
+        local attackFactory = entity:GetComponent("script.BattleAttackComposition")
+        if not isvalid(attackFactory) then
+            log_error("[M1][BattleSession] attack composition missing on " .. name)
+            return nil
+        end
         local openingDelay = 0
         if faction == "ENEMY" then openingDelay = self.EnemyOpeningDelay end
+        unit:BindAttackFactory(attackFactory)
         unit:Configure(faction, name, unitKind, maxHp, speed, damage, interval, range, self.RetargetInterval, self.ImpactDelay, self.DeathHold, openingDelay, self.TankContactCooldown, self.TankContactSize, self.TankKnockbackDistance, self.HitStopDuration)
         if not unit:HasAttackAdapter() then
             log_error("[M1][BattleSession] attack adapter missing on " .. name)

@@ -130,14 +130,20 @@ test("Issue #3 starts one tank and one assault with the fixed tank profile", () 
 test("BattleUnit owns attack dispatch while BattleSession stays adapter-agnostic", () => {
   const session = read("RootDesk/MyDesk/Combat/BattleSession.mlua");
   const unit = read("RootDesk/MyDesk/Combat/BattleUnit.mlua");
+  const composition = read("RootDesk/MyDesk/Combat/BattleAttackComposition.mlua");
   const contact = read("RootDesk/MyDesk/Combat/TankContactAttack.mlua");
   const assault = read("RootDesk/MyDesk/Combat/AssaultAttack.mlua");
   const runtimeProbe = read("tests/tank_contact_runtime_probe.lua");
 
+  assert.match(composition, /method Component CreateAdapter\(Entity owner, string unitKind\)/);
+  assert.match(composition, /owner:AddComponent\(adapterType\)/);
+  assert.match(unit, /method void BindAttackFactory\(Component factory\)/);
   assert.match(unit, /method void DriveAttack\(Entity target, boolean targetInRange\)/);
   assert.match(unit, /method void AdvanceAttack\(number delta\)/);
   assert.match(unit, /method void CancelAttack\(\)/);
   assert.match(unit, /attackAdapter/);
+  assert.match(session, /entity:AddComponent\("script\.BattleAttackComposition"\)/);
+  assert.doesNotMatch(unit, /self\.Entity:AddComponent\(adapterType\)/);
   assert.match(assault, /method void TryEngage\(Entity target, boolean targetInRange\)/);
   assert.match(assault, /method void Cancel\(\)/);
   assert.match(contact, /method void TryEngage\(Entity target, boolean targetInRange\)/);

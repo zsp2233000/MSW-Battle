@@ -24,6 +24,7 @@ script BattleUnit extends Component
     method void OnBeginPlay()
         -- Initialize a unit before the session supplies its faction and tuned combat values.
         self._T.currentTarget = nil
+        self._T.attackFactory = nil
         self._T.attackAdapter = nil
         self._T.attackConfigured = false
         self._T.retargetRemaining = 0
@@ -58,15 +59,11 @@ script BattleUnit extends Component
         self._T.hitStopRemaining = 0
         self._T.attackAdapter = nil
         self._T.attackConfigured = false
-        local adapterType = "script.AssaultAttack"
-        if unitKind == "TANK" then
-            adapterType = "script.TankContactAttack"
+        if not isvalid(self._T.attackFactory) then
+            log_error("[M1][BattleUnit] attack composition missing for " .. unitKind)
+            return
         end
-        local adapter = self.Entity:GetComponent(adapterType)
-        if not isvalid(adapter) then
-            self.Entity:AddComponent(adapterType)
-            adapter = self.Entity:GetComponent(adapterType)
-        end
+        local adapter = self._T.attackFactory:CreateAdapter(self.Entity, unitKind)
         if not isvalid(adapter) then
             log_error("[M1][BattleUnit] attack adapter missing for " .. unitKind)
             return
@@ -78,6 +75,12 @@ script BattleUnit extends Component
             adapter:Configure(damage, range, interval, impact, openingDelay)
         end
         self._T.attackConfigured = true
+    end
+
+    @ExecSpace("ServerOnly")
+    method void BindAttackFactory(Component factory)
+        -- Accept the composition dependency that owns concrete adapter creation.
+        self._T.attackFactory = factory
     end
 
     method boolean HasAttackAdapter()
