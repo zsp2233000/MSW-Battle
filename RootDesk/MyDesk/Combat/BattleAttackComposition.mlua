@@ -8,6 +8,8 @@ script BattleAttackComposition extends Component
         local adapterType = "script.AssaultAttack"
         if unitKind == "TANK" then
             adapterType = "script.TankContactAttack"
+        elseif unitKind == "SHOOTER" then
+            adapterType = "script.ShooterAttack"
         end
         local adapter = owner:GetComponent(adapterType)
         if not isvalid(adapter) then

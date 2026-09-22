@@ -23,6 +23,12 @@ script BattleSession extends Component
     property integer UnitDamage = 35
     property number UnitAttackInterval = 0.7
     property number UnitAttackRange = 0.6
+    property integer ShooterMaxHp = 120
+    property number ShooterMoveSpeed = 0.8 -- RectTile world speed; controller converts to InputSpeed * 1.2.
+    property integer ShooterDamage = 30
+    property number ShooterAttackInterval = 0.8
+    property number ShooterAttackRange = 4.0
+    property number ShooterImpactDelay = 0.18
     property number RetargetInterval = 0.5
     property number ImpactDelay = 0.18
     property number DeathHold = 0.6
@@ -149,6 +155,7 @@ script BattleSession extends Component
         local damage = self.UnitDamage
         local interval = self.UnitAttackInterval
         local range = self.UnitAttackRange
+        local impact = self.ImpactDelay
         if unitKind == "TANK" then
             maxHp = self.TankMaxHp
             speed = self.TankMoveSpeed
@@ -156,6 +163,13 @@ script BattleSession extends Component
             interval = self.TankContactCooldown
             range = self.TankContactRange
             entity:AddComponent("script.TankPresentation")
+        elseif unitKind == "SHOOTER" then
+            maxHp = self.ShooterMaxHp
+            speed = self.ShooterMoveSpeed
+            damage = self.ShooterDamage
+            interval = self.ShooterAttackInterval
+            range = self.ShooterAttackRange
+            impact = self.ShooterImpactDelay
         end
         local unit = entity:GetComponent("script.BattleUnit")
         if not isvalid(unit) then
@@ -170,7 +184,7 @@ script BattleSession extends Component
         local openingDelay = 0
         if faction == "ENEMY" then openingDelay = self.EnemyOpeningDelay end
         unit:BindAttackFactory(attackFactory)
-        unit:Configure(faction, name, unitKind, maxHp, speed, damage, interval, range, self.RetargetInterval, self.ImpactDelay, self.DeathHold, openingDelay, self.TankContactCooldown, self.TankContactSize, self.TankKnockbackDistance, self.HitStopDuration)
+        unit:Configure(faction, name, unitKind, maxHp, speed, damage, interval, range, self.RetargetInterval, impact, self.DeathHold, openingDelay, self.TankContactCooldown, self.TankContactSize, self.TankKnockbackDistance, self.HitStopDuration)
         if not unit:HasAttackAdapter() then
             log_error("[M1][BattleSession] attack adapter missing on " .. name)
             return nil

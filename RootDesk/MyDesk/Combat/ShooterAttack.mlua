@@ -1,0 +1,159 @@
+@Component
+script ShooterAttack extends AttackComponent
+
+    property integer AttackDamage = 30
+    property number AttackRange = 4.0
+    property number AttackInterval = 0.8
+    property number ImpactDelay = 0.18
+    property number CooldownRemaining = 0
+    @HideFromInspector property Entity PendingTarget = nil
+    @HideFromInspector property number ImpactRemaining = -1
+
+    @ExecSpace("ServerOnly")
+    method void Configure(integer damage, number range, number interval, number impact, number openingDelay)
+        -- Receive the session's shooter profile and deterministic opening lead in one place.
+        self.AttackDamage = damage
+        self.AttackRange = range
+        self.AttackInterval = interval
+        self.ImpactDelay = impact
+        self._T.openingDelay = openingDelay or 0
+        self._T.openingDelayPending = self._T.openingDelay > 0
+        self.CooldownRemaining = 0
+    end
+
+    @ExecSpace("ServerOnly")
+    method void OnBeginPlay()
+        -- Reset the shooter timing state before the owning BattleUnit starts its first tick.
+        self._T.openingDelay = self._T.openingDelay or 0
+        self._T.openingDelayPending = self._T.openingDelay > 0
+        self.CooldownRemaining = 0
+        self.ImpactRemaining = -1
+        self.PendingTarget = nil
+    end
+
+    @ExecSpace("ServerOnly")
+    method void TryStart(Entity target)
+        -- Start one delayed hitscan strike when cooldown, target validity, and battle phase allow it.
+        local unit = self.Entity:GetComponent("script.BattleUnit")
+        if not isvalid(unit) or not unit:IsAlive() then return end
+        if self.PendingTarget ~= nil or self.CooldownRemaining > 0 or not isvalid(target) then return end
+        local map = self.Entity.CurrentMap
+        if not isvalid(map) then return end
+        local session = map:GetComponent("script.BattleSession")
+        if not isvalid(session) or not session:IsBattleActive() then return end
+        if self._T.openingDelayPending == true then
+            self._T.openingDelayPending = false
+            self.CooldownRemaining = self._T.openingDelay
+            return
+        end
+        self.PendingTarget = target
+        self.ImpactRemaining = self.ImpactDelay
+        self.CooldownRemaining = self.AttackInterval
+        unit.AttackSerial = unit.AttackSerial + 1
+        session:EmitPresentation("ATTACK_START", self.Entity, target, self.AttackDamage)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void TryEngage(Entity target, boolean targetInRange)
+        -- Adapt the unit-level attack request to the shooter timing implementation.
+        if targetInRange ~= true then return end
+        self:TryStart(target)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Advance(number delta)
+        -- Advance cooldown and cancel a pending shot if its target leaves the valid firing range.
+        if self.CooldownRemaining > 0 then
+            self.CooldownRemaining = math.max(0, self.CooldownRemaining - delta)
+        end
+        if self.ImpactRemaining < 0 then return end
+        local target = self.PendingTarget
+        if not isvalid(target) or not self:IsTargetInRange(target) then
+            self:CancelImpact()
+            return
+        end
+        local unit = self.Entity:GetComponent("script.BattleUnit")
+        local targetUnit = target:GetComponent("script.BattleUnit")
+        if not isvalid(unit) or not unit:IsAlive() or not isvalid(targetUnit) or not targetUnit:IsAlive() then
+            self:CancelImpact()
+            return
+        end
+        self.ImpactRemaining = self.ImpactRemaining - delta
+        if self.ImpactRemaining <= 0 then self:ResolveImpact(target) end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void OnUpdate(number delta)
+        -- Drive the shooter timing path during the live server frame loop.
+        self:Advance(delta)
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean IsTargetInRange(Entity target)
+        -- Check the live world distance used by the hitscan impact gate.
+        if not isvalid(target) then return false end
+        local sourceTransform = self.Entity:GetComponent("TransformComponent")
+        local targetTransform = target:GetComponent("TransformComponent")
+        if not isvalid(sourceTransform) or not isvalid(targetTransform) then return false end
+        local sourcePosition = sourceTransform.WorldPosition
+        local targetPosition = targetTransform.WorldPosition
+        local dx = targetPosition.x - sourcePosition.x
+        local dy = targetPosition.y - sourcePosition.y
+        return dx * dx + dy * dy <= (self.AttackRange + 0.05) * (self.AttackRange + 0.05)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void ResolveImpact(Entity target)
+        -- Resolve a direct world-position attack at the target's current impact-frame location.
+        self.PendingTarget = nil
+        self.ImpactRemaining = -1
+        local map = self.Entity.CurrentMap
+        local session = nil
+        if isvalid(map) then session = map:GetComponent("script.BattleSession") end
+        if not isvalid(session) or not session:IsBattleActive() then return end
+        if not isvalid(target) or not self:IsTargetInRange(target) then return end
+        local unit = self.Entity:GetComponent("script.BattleUnit")
+        local targetUnit = target:GetComponent("script.BattleUnit")
+        local transform = target:GetComponent("TransformComponent")
+        if not isvalid(unit) or not unit:IsAlive() or not isvalid(targetUnit) or not targetUnit:IsAlive() or not isvalid(transform) then return end
+        local targetPosition = transform.WorldPosition
+        self:AttackFrom(Vector2(0.2, 0.2), Vector2(targetPosition.x, targetPosition.y), "shooter", nil)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void CancelImpact()
+        -- Cancel the delayed shot when its target or battle conditions become invalid.
+        self.PendingTarget = nil
+        self.ImpactRemaining = -1
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Cancel()
+        -- Expose the common adapter cancellation operation to BattleUnit.
+        self:CancelImpact()
+    end
+
+    method integer CalcDamage(Entity attacker, Entity defender, string attackInfo)
+        -- Supply the fixed 30 damage value to the native Attack→Hit pipeline.
+        return self.AttackDamage
+    end
+
+    method boolean IsAttackTarget(Entity defender, string attackInfo)
+        -- Restrict hitscan attacks to opposing live BattleUnit entities.
+        local attackerUnit = self.Entity:GetComponent("script.BattleUnit")
+        local defenderUnit = nil
+        if isvalid(defender) then defenderUnit = defender:GetComponent("script.BattleUnit") end
+        if not isvalid(attackerUnit) or not attackerUnit:IsAlive() or not isvalid(defenderUnit) or not defenderUnit:IsAlive() then return false end
+        if attackerUnit.Faction == defenderUnit.Faction then return false end
+        return __base:IsAttackTarget(defender, attackInfo)
+    end
+
+    method void OnAttack(Entity defender)
+        -- Publish shooter attack-hit semantics while native HitEvent remains responsible for damage.
+        local map = self.Entity.CurrentMap
+        if not isvalid(map) then return end
+        local session = map:GetComponent("script.BattleSession")
+        if isvalid(session) and session:IsBattleActive() then session:EmitPresentation("HIT", self.Entity, defender, self.AttackDamage) end
+    end
+
+end

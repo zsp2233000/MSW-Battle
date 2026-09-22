@@ -127,6 +127,47 @@ test("Issue #3 starts one tank and one assault with the fixed tank profile", () 
   assert.match(runtimeProbe, /\[M1\]\[TankProbe\] PASS/);
 });
 
+test("Issue #4 adds a configurable hitscan shooter adapter", () => {
+  const session = read("RootDesk/MyDesk/Combat/BattleSession.mlua");
+  const composition = read("RootDesk/MyDesk/Combat/BattleAttackComposition.mlua");
+  const unit = read("RootDesk/MyDesk/Combat/BattleUnit.mlua");
+  const shooter = read("RootDesk/MyDesk/Combat/ShooterAttack.mlua");
+  const runtimeProbe = read("tests/shooter_runtime_probe.lua");
+
+  assert.match(session, /ShooterMaxHp = 120/);
+  assert.match(session, /ShooterMoveSpeed = 0\.8/);
+  assert.match(session, /ShooterDamage = 30/);
+  assert.match(session, /ShooterAttackInterval = 0\.8/);
+  assert.match(session, /ShooterAttackRange = 4\.0/);
+  assert.match(session, /ShooterImpactDelay/);
+  assert.match(session, /unitKind == "SHOOTER"/);
+  assert.match(session, /self\.ShooterMaxHp/);
+  assert.match(session, /self\.ShooterAttackRange/);
+
+  assert.match(composition, /unitKind == "SHOOTER"/);
+  assert.match(composition, /script\.ShooterAttack/);
+  assert.match(unit, /unitKind == "TANK"/);
+  assert.doesNotMatch(unit, /Projectile|projectile/);
+
+  assert.match(shooter, /extends AttackComponent/);
+  assert.match(shooter, /AttackDamage = 30/);
+  assert.match(shooter, /AttackRange = 4\.0/);
+  assert.match(shooter, /AttackInterval = 0\.8/);
+  assert.match(shooter, /method void TryEngage\(Entity target, boolean targetInRange\)/);
+  assert.match(shooter, /method void Advance\(number delta\)/);
+  assert.match(shooter, /@ExecSpace\("ServerOnly"\)\s+method void OnUpdate\(number delta\)/);
+  assert.match(shooter, /method void Cancel\(\)/);
+  assert.match(shooter, /AttackFrom\(Vector2\(0\.2, 0\.2\), Vector2\(targetPosition\.x, targetPosition\.y\), "shooter", nil\)/);
+  assert.match(shooter, /return self\.AttackDamage/);
+  assert.match(shooter, /session:EmitPresentation\("HIT"/);
+  assert.doesNotMatch(shooter, /SpawnService|Projectile|projectile/);
+
+  assert.match(runtimeProbe, /SpawnUnit\(session\.EnemyModelId, "M1_ShooterProbeTarget"/);
+  assert.match(runtimeProbe, /AdvanceForTest/);
+  assert.match(runtimeProbe, /target leaves range before impact/);
+  assert.match(runtimeProbe, /\[M1\]\[ShooterProbe\] PASS/);
+});
+
 test("BattleUnit owns attack dispatch while BattleSession stays adapter-agnostic", () => {
   const session = read("RootDesk/MyDesk/Combat/BattleSession.mlua");
   const unit = read("RootDesk/MyDesk/Combat/BattleUnit.mlua");
