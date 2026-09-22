@@ -93,7 +93,7 @@ _TimerService:SetTimerOnce(function()
         local position = getProbePosition(tank)
         check(math.abs(position.x - initialPosition.x) < 0.001 and math.abs(position.y - initialPosition.y) < 0.001, "Tank does not recoil from contact")
         check(firstUnit.CombatState ~= "STUN" and secondUnit.CombatState ~= "STUN", "contact does not stun targets")
-        check(firstUnit.CombatState == "HIT" and secondUnit.CombatState == "HIT", "damaged units hold HIT for the hit-stop window")
+        check(firstUnit.CombatState == "ON_HIT" and secondUnit.CombatState == "ON_HIT", "damaged units hold ON_HIT for the hit-stop window")
         logProbeState("after-first-contact")
 
         -- Re-overlap before the cooldown expires; neither target may take a second hit.

@@ -147,7 +147,7 @@ script BattleUnit extends Component
             local hitStopMovement = self.Entity:GetComponent("MovementComponent")
             if isvalid(hitStopMovement) then hitStopMovement:Stop() end
             if self._T.hitStopRemaining > 0 then
-                self.CombatState = "HIT"
+                self.CombatState = "ON_HIT"
                 return
             end
         end
@@ -226,7 +226,7 @@ script BattleUnit extends Component
             self._T.hitStopRemaining = self.HitStopDuration
             local hitStopMovement = self.Entity:GetComponent("MovementComponent")
             if isvalid(hitStopMovement) then hitStopMovement:Stop() end
-            self.CombatState = "HIT"
+            self.CombatState = "ON_HIT"
             return
         end
 

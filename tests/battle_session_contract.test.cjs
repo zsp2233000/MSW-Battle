@@ -115,8 +115,10 @@ test("battle phase keeps the Tank profile and adds Shooter to the player formati
 
   assert.match(presentation, /a95cfed2c8fe4d2cb64cbb62db051f92/);
   assert.match(presentation, /8257566e41aa4234929e81c6c2dab2e4/);
+  assert.match(presentation, /OnHitAnimationRUID/);
   assert.match(presentation, /5ebbdaf503964f3e87de155d16650805/);
   assert.match(presentation, /dddbe2f162184ec89add7440da56eb75/);
+  assert.match(presentation, /OnHitSoundRUID/);
   assert.match(presentation, /6eb2ef8a783c4393bd7ee6a2c199bda7/);
   assert.match(presentation, /c49646f7299e4c6e81e953c96e20b294/);
   assert.match(presentation, /PlaySoundAtPos/);
