@@ -82,7 +82,7 @@ test("Issue #3 starts one tank and one assault with the fixed tank profile", () 
   assert.match(session, /TankContactCooldown = 2\.0/);
   assert.match(session, /TankKnockbackDistance = 0\.8/);
   assert.match(session, /HitStopDuration = 0\.2/);
-  assert.match(session, /QueueTankContactKnockback/);
+  assert.match(session, /QueueKnockback/);
   assert.match(session, /ApplyPendingKnockbacks/);
   assert.match(session, /ArenaMinX/);
   assert.doesNotMatch(session, /CameraComponent|CameraZoomPercent|CameraOffset/);
@@ -91,8 +91,8 @@ test("Issue #3 starts one tank and one assault with the fixed tank profile", () 
 
   assert.match(unit, /@Sync property string UnitKind = "ASSAULT"/);
   assert.match(unit, /if self\.UnitKind == "TANK" then/);
-  assert.match(unit, /contact:TryContact\(\)/);
-  assert.match(unit, /movingContact:TryContact\(\)/);
+  assert.match(unit, /self:DriveAttack\(target, false\)/);
+  assert.match(unit, /self:DriveAttack\(target, true\)/);
   assert.match(unit, /HitStopDuration = 0\.2/);
   assert.match(unit, /hitStopRemaining/);
   assert.match(unit, /hitStopMovement:Stop\(\)/);
@@ -107,7 +107,7 @@ test("Issue #3 starts one tank and one assault with the fixed tank profile", () 
   assert.doesNotMatch(contact, /TryContact\(Entity target\)/);
   assert.match(contact, /targetCooldowns/);
   assert.match(contact, /return self\.ContactDamage/);
-  assert.match(contact, /session:QueueTankContactKnockback/);
+  assert.match(contact, /session:QueueKnockback/);
   assert.doesNotMatch(contact, /_SoundService|VFX|Effect/);
 
   assert.match(presentation, /a95cfed2c8fe4d2cb64cbb62db051f92/);
@@ -125,6 +125,29 @@ test("Issue #3 starts one tank and one assault with the fixed tank profile", () 
   assert.match(runtimeProbe, /_TimerService:SetTimerOnce/);
   assert.match(runtimeProbe, /session:EnterResult\("WIN"\)/);
   assert.match(runtimeProbe, /\[M1\]\[TankProbe\] PASS/);
+});
+
+test("BattleUnit owns attack dispatch while BattleSession stays adapter-agnostic", () => {
+  const session = read("RootDesk/MyDesk/Combat/BattleSession.mlua");
+  const unit = read("RootDesk/MyDesk/Combat/BattleUnit.mlua");
+  const contact = read("RootDesk/MyDesk/Combat/TankContactAttack.mlua");
+  const assault = read("RootDesk/MyDesk/Combat/AssaultAttack.mlua");
+  const runtimeProbe = read("tests/tank_contact_runtime_probe.lua");
+
+  assert.match(unit, /method void DriveAttack\(Entity target, boolean targetInRange\)/);
+  assert.match(unit, /method void AdvanceAttack\(number delta\)/);
+  assert.match(unit, /method void CancelAttack\(\)/);
+  assert.match(unit, /attackAdapter/);
+  assert.match(assault, /method void TryEngage\(Entity target, boolean targetInRange\)/);
+  assert.match(assault, /method void Cancel\(\)/);
+  assert.match(contact, /method void TryEngage\(Entity target, boolean targetInRange\)/);
+  assert.match(contact, /method void Cancel\(\)/);
+  assert.match(contact, /session:QueueKnockback\(/);
+  assert.match(runtimeProbe, /tankUnit:DriveAttack\(tank, true\)/);
+  assert.doesNotMatch(runtimeProbe, /GetComponent\("script\.(TankContactAttack|AssaultAttack)"\)/);
+  assert.match(session, /record\.unit:AdvanceAttack\(delta\)/);
+  assert.doesNotMatch(session, /script\.AssaultAttack|script\.TankContactAttack/);
+  assert.doesNotMatch(session, /QueueTankContactKnockback/);
 });
 
 test("Issue #3 keeps the existing battle group UI available without binding it to runtime", () => {

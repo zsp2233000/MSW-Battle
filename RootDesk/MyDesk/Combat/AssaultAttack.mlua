@@ -54,6 +54,13 @@ script AssaultAttack extends AttackComponent
     end
 
     @ExecSpace("ServerOnly")
+    method void TryEngage(Entity target, boolean targetInRange)
+        -- Adapt the unit-level attack request to the assault timing implementation.
+        if targetInRange ~= true then return end
+        self:TryStart(target)
+    end
+
+    @ExecSpace("ServerOnly")
     method void Advance(number delta)
         -- Advance cooldown and impact timers; used by live OnUpdate and AdvanceForTest.
         if self.CooldownRemaining > 0 then
@@ -109,6 +116,12 @@ script AssaultAttack extends AttackComponent
         -- Cancel any delayed impact when target, attacker, or session becomes invalid.
         self.PendingTarget = nil
         self.ImpactRemaining = -1
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Cancel()
+        -- Expose the common adapter cancellation operation to BattleUnit.
+        self:CancelImpact()
     end
 
     method integer CalcDamage(Entity attacker, Entity defender, string attackInfo)

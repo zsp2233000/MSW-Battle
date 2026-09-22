@@ -26,7 +26,7 @@ script TankContactAttack extends AttackComponent
     method void TryContact()
         -- Resolve the native contact area at the current body position without target gating.
         local unit = self.Entity:GetComponent("script.BattleUnit")
-        if not isvalid(unit) or not unit:IsAlive() or unit.UnitKind ~= "TANK" then return end
+        if not isvalid(unit) or not unit:IsAlive() then return end
         local map = self.Entity.CurrentMap
         if not isvalid(map) then return end
         local session = map:GetComponent("script.BattleSession")
@@ -35,6 +35,12 @@ script TankContactAttack extends AttackComponent
         if not isvalid(transform) then return end
         local position = transform.WorldPosition
         self:AttackFrom(self.ContactSize, Vector2(position.x, position.y), "tank_contact", nil)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void TryEngage(Entity target, boolean targetInRange)
+        -- Adapt the unit-level attack request to the tank's area contact implementation.
+        self:TryContact()
     end
 
     @ExecSpace("ServerOnly")
@@ -67,6 +73,12 @@ script TankContactAttack extends AttackComponent
         self._T.targetCooldowns = {}
     end
 
+    @ExecSpace("ServerOnly")
+    method void Cancel()
+        -- Expose the common adapter cancellation operation to BattleUnit.
+        self:CancelContact()
+    end
+
     method integer CalcDamage(Entity attacker, Entity defender, string attackInfo)
         -- Supply fixed 40 damage through the native Attack to Hit pipeline.
         return self.ContactDamage
@@ -77,7 +89,7 @@ script TankContactAttack extends AttackComponent
         local attackerUnit = self.Entity:GetComponent("script.BattleUnit")
         local defenderUnit = nil
         if isvalid(defender) then defenderUnit = defender:GetComponent("script.BattleUnit") end
-        if not isvalid(attackerUnit) or not attackerUnit:IsAlive() or attackerUnit.UnitKind ~= "TANK" then return false end
+        if not isvalid(attackerUnit) or not attackerUnit:IsAlive() then return false end
         if not isvalid(defenderUnit) or not defenderUnit:IsAlive() or attackerUnit.Faction == defenderUnit.Faction then return false end
         local targetName = defender.Name
         local remaining = self._T.targetCooldowns[targetName]
@@ -97,7 +109,7 @@ script TankContactAttack extends AttackComponent
         if not isvalid(session) or not session:IsBattleActive() then return end
         unit.AttackSerial = unit.AttackSerial + 1
         session:EmitPresentation("TANK_CONTACT_HIT", self.Entity, defender, self.ContactDamage)
-        session:QueueTankContactKnockback(self.Entity, defender, self.KnockbackDistance)
+        session:QueueKnockback(self.Entity, defender, self.KnockbackDistance)
     end
 
 end

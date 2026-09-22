@@ -5,7 +5,6 @@ local session = map:GetComponent("script.BattleSession")
 local tank = _EntityService:GetEntityByPath("/maps/map01/M1_PlayerTank")
 local tankUnit = tank:GetComponent("script.BattleUnit")
 local tankBody = tank:GetComponent("KinematicbodyComponent")
-local contact = tank:GetComponent("script.TankContactAttack")
 local failures = 0
 local probes = {}
 
@@ -58,12 +57,9 @@ local initialPosition = getProbePosition(tank)
 for index = 1, 2 do
     local enemy = session:SpawnUnit(session.EnemyModelId, "M1_TankProbeEnemy" .. tostring(index), "ENEMY", "ASSAULT", Vector3(10, 10, 0))
     local enemyUnit = enemy:GetComponent("script.BattleUnit")
-    local enemyAttack = enemy:GetComponent("script.AssaultAttack")
     enemyUnit.MoveSpeed = 0
     enemyUnit.RetargetInterval = 99
-    enemyAttack.AttackDamage = 0
-    enemyAttack.AttackInterval = 99
-    enemyAttack.CooldownRemaining = 99
+    enemyUnit:Configure("ENEMY", enemy.Name, "ASSAULT", 220, 0, 0, 99, 0.6, 99, 0.18, 0.6, 0, 2.0, Vector2(1.2, 1.2), 0.8, 0.2)
     table.insert(probes, enemy)
 end
 session.EnemyAlive = session.EnemyAlive + 2
@@ -71,7 +67,7 @@ session.EnemyAlive = session.EnemyAlive + 2
 _TimerService:SetTimerOnce(function()
     -- Trigger the first native contact, then wait a frame for HitEvent and session batch resolution.
     placeProbesAtTank()
-    contact:TryContact()
+    tankUnit:DriveAttack(tank, true)
     _TimerService:SetTimerOnce(function()
         -- First contact proves fixed 40 damage, two overlapping targets, semantic event emission, and no Tank recoil.
         local firstUnit = probes[1]:GetComponent("script.BattleUnit")
@@ -86,7 +82,7 @@ _TimerService:SetTimerOnce(function()
 
         -- Re-overlap before the cooldown expires; neither target may take a second hit.
         placeProbesAtTank()
-        contact:TryContact()
+        tankUnit:DriveAttack(tank, true)
         _TimerService:SetTimerOnce(function()
             local firstBefore = probes[1]:GetComponent("script.BattleUnit").Hp
             local secondBefore = probes[2]:GetComponent("script.BattleUnit").Hp
@@ -95,7 +91,7 @@ _TimerService:SetTimerOnce(function()
             -- Retry after the full cooldown and wait for the next HitEvent batch.
             _TimerService:SetTimerOnce(function()
                 placeProbesAtTank()
-                contact:TryContact()
+                tankUnit:DriveAttack(tank, true)
                 _TimerService:SetTimerOnce(function()
                     local firstAfter = probes[1]:GetComponent("script.BattleUnit").Hp
                     local secondAfter = probes[2]:GetComponent("script.BattleUnit").Hp
@@ -113,7 +109,7 @@ _TimerService:SetTimerOnce(function()
                             local offset = index == 1 and 0.1 or -0.1
                             entity:GetComponent("KinematicbodyComponent"):SetWorldPosition(Vector2(session.ArenaMaxX - 0.1 + offset, 0))
                         end
-                        contact:TryContact()
+                        tankUnit:DriveAttack(tank, true)
                         _TimerService:SetTimerOnce(function()
                             -- The actual production knockback must move only enemies and clamp at ArenaMaxX.
                             local tankPosition = getProbePosition(tank)
@@ -127,7 +123,7 @@ _TimerService:SetTimerOnce(function()
                             local secondAtResult = probes[2]:GetComponent("script.BattleUnit").Hp
                             session:EnterResult("WIN")
                             placeProbesAtTank()
-                            contact:TryContact()
+                            tankUnit:DriveAttack(tank, true)
                             _TimerService:SetTimerOnce(function()
                                 -- The terminal phase must block future contact damage.
                                 check(probes[1]:GetComponent("script.BattleUnit").Hp == firstAtResult and probes[2]:GetComponent("script.BattleUnit").Hp == secondAtResult, "RESULT blocks future contact damage")

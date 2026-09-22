@@ -24,6 +24,8 @@ script BattleUnit extends Component
     method void OnBeginPlay()
         -- Initialize a unit before the session supplies its faction and tuned combat values.
         self._T.currentTarget = nil
+        self._T.attackAdapter = nil
+        self._T.attackConfigured = false
         self._T.retargetRemaining = 0
         self._T.deathRemaining = 0
         self._T.deathFinished = false
@@ -34,7 +36,7 @@ script BattleUnit extends Component
 
     @ExecSpace("ServerOnly")
     method void Configure(string faction, string displayName, string unitKind, integer maxHp, number speed, integer damage, number interval, number range, number retarget, number impact, number deathHold, number openingDelay, number contactCooldown, Vector2 contactSize, number knockbackDistance, number hitStopDuration)
-        -- Apply either the fixed tank contact profile or the existing assault profile.
+        -- Apply the unit profile and bind the only attack adapter used by this unit.
         self.Faction = faction
         self.UnitKind = unitKind
         self.MaxHp = maxHp
@@ -54,13 +56,54 @@ script BattleUnit extends Component
         self._T.currentTarget = nil
         self._T.retargetRemaining = 0
         self._T.hitStopRemaining = 0
+        self._T.attackAdapter = nil
+        self._T.attackConfigured = false
+        local adapterType = "script.AssaultAttack"
         if unitKind == "TANK" then
-            local contact = self.Entity:GetComponent("script.TankContactAttack")
-            if isvalid(contact) then contact:Configure(damage, contactCooldown, contactSize, knockbackDistance) end
-        else
-            local attack = self.Entity:GetComponent("script.AssaultAttack")
-            if isvalid(attack) then attack:Configure(damage, range, interval, impact, openingDelay) end
+            adapterType = "script.TankContactAttack"
         end
+        local adapter = self.Entity:GetComponent(adapterType)
+        if not isvalid(adapter) then
+            self.Entity:AddComponent(adapterType)
+            adapter = self.Entity:GetComponent(adapterType)
+        end
+        if not isvalid(adapter) then
+            log_error("[M1][BattleUnit] attack adapter missing for " .. unitKind)
+            return
+        end
+        self._T.attackAdapter = adapter
+        if unitKind == "TANK" then
+            adapter:Configure(damage, contactCooldown, contactSize, knockbackDistance)
+        else
+            adapter:Configure(damage, range, interval, impact, openingDelay)
+        end
+        self._T.attackConfigured = true
+    end
+
+    method boolean HasAttackAdapter()
+        -- Expose whether Configure successfully installed the unit's attack adapter.
+        return self._T.attackConfigured == true and isvalid(self._T.attackAdapter)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void DriveAttack(Entity target, boolean targetInRange)
+        -- Drive the bound attack adapter without exposing its concrete type to the unit loop.
+        if not self:HasAttackAdapter() then return end
+        self._T.attackAdapter:TryEngage(target, targetInRange)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void AdvanceAttack(number delta)
+        -- Advance the bound attack adapter through the same seam used by live and test loops.
+        if not self:HasAttackAdapter() then return end
+        self._T.attackAdapter:Advance(delta)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void CancelAttack()
+        -- Cancel any pending attack work when the unit enters the terminal result state.
+        if not self:HasAttackAdapter() then return end
+        self._T.attackAdapter:Cancel()
     end
 
     method boolean IsAlive()
@@ -141,22 +184,16 @@ script BattleUnit extends Component
                 movement:MoveToDirection(direction, delta)
             end
             self.CombatState = "MOVE"
-            if self.UnitKind == "TANK" then
-                local movingContact = self.Entity:GetComponent("script.TankContactAttack")
-                if isvalid(movingContact) then movingContact:TryContact() end
-            end
+            self:DriveAttack(target, false)
         else
             local movement = self.Entity:GetComponent("MovementComponent")
             if isvalid(movement) then movement:Stop() end
             if self.UnitKind == "TANK" then
                 self.CombatState = "IDLE"
-                local contact = self.Entity:GetComponent("script.TankContactAttack")
-                if isvalid(contact) then contact:TryContact() end
             else
                 self.CombatState = "ATTACK"
-                local attack = self.Entity:GetComponent("script.AssaultAttack")
-                if isvalid(attack) then attack:TryStart(target) end
             end
+            self:DriveAttack(target, true)
         end
     end
 
@@ -215,10 +252,7 @@ script BattleUnit extends Component
         self.CurrentTargetName = ""
         local movement = self.Entity:GetComponent("MovementComponent")
         if isvalid(movement) then movement:Stop() end
-        local attack = self.Entity:GetComponent("script.AssaultAttack")
-        if isvalid(attack) then attack:CancelImpact() end
-        local contact = self.Entity:GetComponent("script.TankContactAttack")
-        if isvalid(contact) then contact:CancelContact() end
+        self:CancelAttack()
     end
 
     @ExecSpace("ServerOnly")
