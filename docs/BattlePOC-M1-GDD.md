@@ -1,9 +1,9 @@
 # Battle POC — 單局陣型自動戰鬥設計文件（GDD）
 
 > 🔖 **AI 接續提醒**：若在新工作階段接續本遊戲，先載入 `msw-planning`，依恢復流程讀取 `BattlePOC-Roadmap.md` 與 `Archive/As-built.md`。開始實作或修改 `⬜/🟡/✅` 前，必須完整閱讀 `references/build-management.md`。
-> 最後更新：2026-09-23／階段：M1 Issue #3 坦克固定自動戰鬥已實作；怪物資料與具名選單契約已更新，仍待實作
+> 最後更新：2026-09-23／階段：M1 Issue #5 混合六對六自動戰鬥可行性已實作；具名部署選單與結果 UI 仍待人類交付
 
-> M1 current runtime scope（Issue #3）固定一隻 player `坦克` 對一隻 fixed enemy `戰士`，自動進入 `BATTLE`；本次只交付坦克規則，部署 UI 與六對六內容保留為後續工作。
+> M1 current runtime scope（Issue #5）在沒有部署 UI 的前提下，固定 player 與 enemy 各六隻（坦克／戰士／射手各二），從 `MonsterData` 讀取同一份數值與資產欄位，自動進入 `BATTLE`；具名部署選單與結果 UI 仍保留給後續階段。
 
 ## 1. 一句話概念
 
@@ -112,13 +112,14 @@
 
 ## 5. 系統 ↔ MSW 對應（既有實作紀錄）
 
-本表記錄目前程式狀態；尚未完成的 `MonsterData`、具名怪物選單與死亡動畫結束事件，以 §7 的新契約為準。
+本表記錄目前程式狀態；具名怪物選單、結果 UI 與死亡動畫結束事件仍以 §7 的新契約為準。
 
 | 遊戲系統 | MSW 實作 |
 |---|---|
-| 全局階段與結果 | 伺服器權威 `BattleSession` 管理固定 `BATTLE/RESULT`、存活數與同批結果判定；同步客戶端必要狀態 |
-| 玩家輸入 | Issue #3 不接入部署輸入；`BattleGroup.ui` 保留並隱藏，Phase 2 adapter 留待後續 |
-| 單位模型 | 沿用 `battleunit` `.model`；固定生成一隻坦克與一隻戰士，共同掛載生命、陣營與 AI |
+| 全局階段與結果 | 伺服器權威 `BattleSession` 管理固定六對六 `BATTLE/RESULT`、存活數與同批結果判定；同步客戶端必要狀態 |
+| 玩家輸入 | Issue #5 不接入部署輸入；`BattleGroup.ui` 保留並隱藏，具名選單與 Phase 2 adapter 留待後續 |
+| 怪物資料 | `MonsterData` UserDataSet／CSV 以 `MonsterId` 索引三個初始資料列；固定敵軍位置與六個 player ID 仍由 session 設定管理 |
+| 單位模型 | 沿用 `battleunit` `.model`；固定生成 player／enemy 各六隻，依 `MonsterType` 掛載生命、陣營與 AI |
 | 地圖物理 | `RectTile` 搭配 `KinematicbodyComponent`；不使用重力、跳躍或 foothold |
 | 移動 | `MovementComponent` 逐幀朝目標方向移動；禁止用計時器跳位置或直接改 Transform 模擬移動 |
 | 索敵與狀態 | 自訂 `@Component` 保存陣營、目前目標與 `IDLE/MOVE/ATTACK/HIT/DEAD`；每 0.5 秒掃描最近存活敵人 |
@@ -129,7 +130,7 @@
 | HP 條 | 單位下的世界空間子 Entity；兩個人類提供的 Sprite RUID，填充值依 HP 比例縮放 |
 | 傷害數字 | 使用人類提供的 DamageSkin RUID 與 MSW 傷害數字機制 |
 | 特效／音效 | `BattleHitEffectPresentation` 將攻擊者的 hit Effect RUID 掛到受擊目標；`TankPresentation` 播放坦克 attack／onhit／die SFX；`ShooterPresentation` 播放射手 attack／onhit／die SFX；碰撞音效仍不使用 |
-| UI | `BattleGroup.ui` 保留但隱藏；Issue #3 不綁定部署按鈕或開始按鈕 |
+| UI | `BattleGroup.ui` 保留但隱藏；Issue #5 不綁定部署按鈕、開始按鈕或結果 UI |
 | 相機與玩家 | 固定相機顯示完整戰場；停用 DefaultPlayer 移動與碰撞，使其不進入戰鬥查詢 |
 
 ## 6. Roadmap（本里程碑 Phases）
@@ -142,7 +143,14 @@
 - ✅ Tested 固定全場相機，保留但停用 DefaultPlayer 的移動、碰撞與戰鬥資格；使用者已完成 Maker Play 視覺／互動確認。
 - ✅ Tested 提供結果判定、AI 停止、Hit 流程及死亡後不可再次受傷的契約測試；Node 靜態契約與 Maker Play start/result/stop 均 PASS。
 
-### Phase 2 — 玩家部署與六對六編隊（保留，非 Issue #3 runtime）
+### M1 Issue #5 — 混合六對六可行性
+
+- ✅ Tested `MonsterData` UserDataSet／CSV 的穩定 ID、三種初始資料列、嚴格驗證與資料驅動生成。
+- ✅ Tested 固定 player／enemy 各六隻、每 0.5 秒索敵、同距離保留目標、死亡重選、直線移動與無單位阻擋／推擠。
+- ✅ Tested Win、Lose、同批 Draw，以及 RESULT 後移動、索敵、攻擊與傷害全部停止；不部署 UI、不增加 formation dataset。
+- 🟡 具名怪物選單、玩家 1–6 自由部署、結果 UI 與視覺／操作手感仍等待人類交付與 Maker Play 驗收。
+
+### Phase 2 — 玩家部署與六對六編隊（保留，非 Issue #5 runtime）
 
 - 🟡 既有種類按鈕 `BtnTank`、`BtnAssault`、`BtnShooter` 與 `BtnStart` 已綁定並經 Maker Play 確認；新契約的具名怪物選單尚未建立，待人類交付選項樣板並完成點擊驗收。
 - 🟡 完成左側自由放置、點擊移除、0.6 最小間距、一至六隻限制與伺服器驗證；server gate／roster API 與既有種類 UI 已具備，待接上具名怪物選單並做 Maker Play 輸入驗證。

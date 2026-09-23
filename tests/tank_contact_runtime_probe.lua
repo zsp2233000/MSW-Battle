@@ -51,6 +51,22 @@ if not isvalid(map) or not isvalid(session) or not isvalid(tank) or not isvalid(
     return
 end
 
+-- Disable every fixed unit except the Tank under test so the six-versus-six session cannot consume the contact fixtures.
+for _, name in ipairs({"M1_PlayerTank2", "M1_PlayerWarrior", "M1_PlayerWarrior2", "M1_PlayerShooter", "M1_PlayerShooter2", "M1_EnemyTank", "M1_EnemyTank2", "M1_EnemyAssault", "M1_EnemyAssault2", "M1_EnemyShooter", "M1_EnemyShooter2"}) do
+    local entity = _EntityService:GetEntityByPath("/maps/map01/" .. name)
+    if isvalid(entity) then
+        local unit = entity:GetComponent("script.BattleUnit")
+        local movement = entity:GetComponent("MovementComponent")
+        if isvalid(unit) then
+            unit:CancelAttack()
+            unit.MoveSpeed = 0
+            unit.RetargetInterval = 99
+        end
+        if isvalid(movement) then movement:Stop() end
+        entity:SetEnable(false)
+    end
+end
+
 -- Freeze the fixed shooter so its ranged adapter cannot affect the tank contact fixtures.
 if isvalid(fixedShooter) then
     local shooterUnit = fixedShooter:GetComponent("script.BattleUnit")

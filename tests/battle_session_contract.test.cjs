@@ -77,18 +77,17 @@ test("battle phase keeps the Tank profile and adds Shooter to the player formati
   const shooterAttack = read("RootDesk/MyDesk/Combat/ShooterAttack.mlua");
   const runtimeProbe = read("tests/tank_contact_runtime_probe.lua");
   const resources = read("resources.md");
+  const monsterData = read("RootDesk/MyDesk/Combat/MonsterData.csv");
 
-  assert.match(session, /SpawnUnit\(self\.PlayerModelId, "M1_PlayerTank", "PLAYER", "TANK"/);
-  assert.match(session, /SpawnUnit\(self\.PlayerModelId, "M1_PlayerShooter", "PLAYER", "SHOOTER"/);
-  assert.match(session, /SpawnUnit\(self\.EnemyModelId, "M1_EnemyAssault", "ENEMY", "ASSAULT"/);
-  assert.match(session, /self\.PlayerAlive = 2/);
+  assert.match(session, /PlayerMonsterId1 = "monster_tank"/);
+  assert.match(session, /PlayerMonsterId5 = "monster_shooter"/);
+  assert.match(session, /EnemyMonsterId3 = "monster_warrior"/);
+  assert.match(session, /self\.PlayerAlive = 6/);
+  assert.match(session, /self\.EnemyAlive = 6/);
   assert.match(session, /EventHistory/);
-  assert.match(session, /TankMaxHp = 500/);
-  assert.match(session, /TankMoveSpeed = 1\.1/);
-  assert.match(session, /TankContactDamage = 40/);
-  assert.match(session, /TankContactCooldown = 2\.0/);
-  assert.match(session, /TankKnockbackDistance = 0\.8/);
-  assert.match(session, /HitStopDuration = 0\.2/);
+  assert.match(monsterData, /monster_tank,Tank,TANK,battleunit,500,1\.1,40,2\.0,0\.65/);
+  assert.match(monsterData, /monster_warrior,Warrior,ASSAULT,battleunit,220,2\.0,35,0\.7,0\.6/);
+  assert.match(monsterData, /monster_shooter,Shooter,SHOOTER,battleunit,120,0\.8,30,0\.8,4\.0/);
   assert.match(session, /QueueKnockback/);
   assert.match(session, /ApplyPendingKnockbacks/);
   assert.match(session, /ArenaMinX/);
@@ -184,16 +183,12 @@ test("Issue #4 adds a configurable hitscan shooter adapter", () => {
   const unit = read("RootDesk/MyDesk/Combat/BattleUnit.mlua");
   const shooter = read("RootDesk/MyDesk/Combat/ShooterAttack.mlua");
   const runtimeProbe = read("tests/shooter_runtime_probe.lua");
+  const monsterData = read("RootDesk/MyDesk/Combat/MonsterData.csv");
 
-  assert.match(session, /ShooterMaxHp = 120/);
-  assert.match(session, /ShooterMoveSpeed = 0\.8/);
-  assert.match(session, /ShooterDamage = 30/);
-  assert.match(session, /ShooterAttackInterval = 0\.8/);
-  assert.match(session, /ShooterAttackRange = 4\.0/);
-  assert.match(session, /ShooterImpactDelay/);
-  assert.match(session, /unitKind == "SHOOTER"/);
-  assert.match(session, /self\.ShooterMaxHp/);
-  assert.match(session, /self\.ShooterAttackRange/);
+  assert.match(monsterData, /monster_shooter,Shooter,SHOOTER,battleunit,120,0\.8,30,0\.8,4\.0,9,/);
+  assert.match(session, /profile\.MonsterType == "SHOOTER"/);
+  assert.match(session, /profile\.MaxHp/);
+  assert.match(session, /profile\.AttackRange/);
 
   assert.match(composition, /unitKind == "SHOOTER"/);
   assert.match(composition, /script\.ShooterAttack/);
@@ -269,4 +264,103 @@ test("Issue #3 keeps the existing battle group UI available without binding it t
   assert.match(ui, /BtnTank/);
   const parsed = JSON.parse(ui);
   assert.equal(parsed.ContentProto.Entities[0].jsonString.visible, false);
+});
+
+test("Issue #5 publishes one strict MonsterData dataset for the three initial monsters", () => {
+  const metadata = JSON.parse(read("RootDesk/MyDesk/Combat/MonsterData.userdataset"));
+  const dataset = metadata.ContentProto.Json;
+  const csvRows = read("RootDesk/MyDesk/Combat/MonsterData.csv")
+    .trim()
+    .split(/\r?\n/)
+    .map((line) => line.split(","));
+  const [header, ...rows] = csvRows;
+  const requiredColumns = [
+    "MonsterId",
+    "MonsterName",
+    "MonsterType",
+    "ModelId",
+    "MaxHp",
+    "MoveSpeed",
+    "AttackDamage",
+    "AttackIntervalSeconds",
+    "AttackRange",
+    "AttackImpactFrame",
+    "ContactDamage",
+    "ContactCooldownSeconds",
+    "ContactSizeX",
+    "ContactSizeY",
+    "KnockbackDistance",
+    "StandAnimationRUID",
+    "MoveAnimationRUID",
+    "AttackAnimationRUID",
+    "HitAnimationRUID",
+    "DieAnimationRUID",
+    "HitEffectRUID",
+    "AttackSoundRUID",
+    "OnHitSoundRUID",
+    "DieSoundRUID",
+  ];
+
+  assert.equal(dataset.name, "MonsterData");
+  assert.equal(dataset.serveronly, true);
+  assert.match(metadata.EntryKey, new RegExp(dataset.id));
+  for (const column of requiredColumns) assert.ok(header.includes(column), `missing ${column}`);
+  assert.equal(rows.length, 3);
+
+  const columnIndex = new Map(header.map((column, index) => [column, index]));
+  const value = (row, column) => row[columnIndex.get(column)];
+  const ids = rows.map((row) => value(row, "MonsterId"));
+  assert.equal(new Set(ids).size, ids.length);
+  assert.deepEqual(
+    rows.map((row) => value(row, "MonsterType")).sort(),
+    ["ASSAULT", "SHOOTER", "TANK"],
+  );
+  for (const row of rows) {
+    assert.ok(value(row, "MonsterName"));
+    assert.ok(value(row, "ModelId"));
+    for (const column of ["MaxHp", "MoveSpeed", "AttackDamage", "AttackIntervalSeconds", "AttackRange"]) {
+      assert.ok(Number(value(row, column)) > 0, `${column} must be positive`);
+    }
+  }
+});
+
+test("Issue #5 starts a fixed data-driven six-versus-six battle and exposes the required seams", () => {
+  const session = read("RootDesk/MyDesk/Combat/BattleSession.mlua");
+  const unit = read("RootDesk/MyDesk/Combat/BattleUnit.mlua");
+  const probe = read("tests/six_vs_six_runtime_probe.lua");
+
+  assert.match(session, /MonsterDataSetName = "MonsterData"/);
+  assert.match(session, /method boolean LoadMonsterData\(\)/);
+  assert.match(session, /_DataService:GetTable\(self\.MonsterDataSetName\)/);
+  assert.match(session, /MonsterType/);
+  assert.match(session, /AttackFramesPerSecond = 60/);
+  assert.match(session, /profile\.ImpactDelaySeconds = profile\.AttackImpactFrame/);
+  assert.match(session, /duplicate MonsterId/);
+  assert.match(session, /invalid MonsterType/);
+  assert.match(session, /invalid numeric value/);
+  assert.match(session, /method Entity SpawnMonster\(string monsterId/);
+  assert.match(session, /fixedEnemyRoster/);
+  assert.match(session, /self\.PlayerAlive = 6/);
+  assert.match(session, /self\.EnemyAlive = 6/);
+  assert.match(session, /self:EmitPresentation\("RESULT"/);
+  assert.match(session, /self\._T\.resultEntered == true/);
+  assert.doesNotMatch(session, /BattleDeploymentInput/);
+
+  assert.match(unit, /@Sync property string MonsterId = ""/);
+  assert.match(unit, /@Sync property string MonsterName = ""/);
+  assert.match(unit, /monsterId/);
+  assert.match(unit, /MonsterName/);
+
+  for (const scenario of [
+    "same-distance target is retained",
+    "dead target is reacquired",
+    "crowded units do not block or push each other",
+    "WIN",
+    "LOSE",
+    "same-batch DRAW",
+    "RESULT stops the battle",
+  ]) {
+    assert.match(probe, new RegExp(scenario.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+  assert.match(probe, /\[M1\]\[SixVsSixProbe\] PASS/);
 });

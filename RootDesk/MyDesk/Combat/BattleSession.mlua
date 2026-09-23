@@ -5,6 +5,8 @@ script BattleSession extends Component
     @Sync property string Result = ""
     @Sync property integer PlayerAlive = 0
     @Sync property integer EnemyAlive = 0
+    @Sync property integer InitialPlayerAlive = 0
+    @Sync property integer InitialEnemyAlive = 0
     @Sync property string Snapshot = ""
     @Sync property string UnitSnapshots = ""
     @Sync property integer SnapshotSerial = 0
@@ -14,35 +16,38 @@ script BattleSession extends Component
     @Sync property string LastEventSourceName = ""
     @Sync property string LastEventTargetName = ""
     @Sync property integer LastEventAmount = 0
+    @Sync property string ConfigurationError = ""
 
     property string PlayerModelId = "battleunit"
     property string EnemyModelId = "battleunit"
-    property Vector3 PlayerSpawnPosition = Vector3(-2.4, 0, 0)
-    property Vector3 ShooterSpawnPosition = Vector3(-3.4, 0.8, 0)
-    property Vector3 EnemySpawnPosition = Vector3(2.6, 0, 0)
-    property integer UnitMaxHp = 220
-    property number UnitMoveSpeed = 2.0 -- RectTile world speed; controller converts to InputSpeed * 1.2.
-    property integer UnitDamage = 35
-    property number UnitAttackInterval = 0.7
-    property number UnitAttackRange = 0.6
-    property integer ShooterMaxHp = 120
-    property number ShooterMoveSpeed = 0.8 -- RectTile world speed; controller converts to InputSpeed * 1.2.
-    property integer ShooterDamage = 30
-    property number ShooterAttackInterval = 0.8
-    property number ShooterAttackRange = 4.0
-    property number ShooterImpactDelay = 0.18
-    property number RetargetInterval = 0.5
-    property number ImpactDelay = 0.18
+    property string MonsterDataSetName = "MonsterData"
+    property string PlayerMonsterId1 = "monster_tank"
+    property string PlayerMonsterId2 = "monster_tank"
+    property string PlayerMonsterId3 = "monster_warrior"
+    property string PlayerMonsterId4 = "monster_warrior"
+    property string PlayerMonsterId5 = "monster_shooter"
+    property string PlayerMonsterId6 = "monster_shooter"
+    property string EnemyMonsterId1 = "monster_tank"
+    property string EnemyMonsterId2 = "monster_tank"
+    property string EnemyMonsterId3 = "monster_warrior"
+    property string EnemyMonsterId4 = "monster_warrior"
+    property string EnemyMonsterId5 = "monster_shooter"
+    property string EnemyMonsterId6 = "monster_shooter"
+    property Vector3 PlayerPosition1 = Vector3(-4.4, 1.0, 0)
+    property Vector3 PlayerPosition2 = Vector3(-4.4, 0.0, 0)
+    property Vector3 PlayerPosition3 = Vector3(-4.4, -1.0, 0)
+    property Vector3 PlayerPosition4 = Vector3(-4.4, -2.0, 0)
+    property Vector3 PlayerPosition5 = Vector3(-4.4, -3.0, 0)
+    property Vector3 PlayerPosition6 = Vector3(-3.4, -1.0, 0)
+    property Vector3 EnemyPosition1 = Vector3(2.6, 1.0, 0)
+    property Vector3 EnemyPosition2 = Vector3(2.6, 0.0, 0)
+    property Vector3 EnemyPosition3 = Vector3(2.6, -1.0, 0)
+    property Vector3 EnemyPosition4 = Vector3(2.6, -2.0, 0)
+    property Vector3 EnemyPosition5 = Vector3(2.6, -3.0, 0)
+    property Vector3 EnemyPosition6 = Vector3(1.6, -1.0, 0)
     property number DeathHold = 0.6
-    property number HitStopDuration = 0.2
     property number EnemyOpeningDelay = 0.12 -- Deterministic M1 lead; DRAW remains for same-batch edge cases.
-    property integer TankMaxHp = 500
-    property number TankMoveSpeed = 1.1 -- RectTile world speed; controller converts to InputSpeed * 1.2.
-    property integer TankContactDamage = 40
-    property number TankContactCooldown = 2.0
-    property number TankContactRange = 0.65
-    property Vector2 TankContactSize = Vector2(1.2, 1.2)
-    property number TankKnockbackDistance = 0.8
+    property number AttackFramesPerSecond = 60
     property number ArenaMinX = -5.5
     property number ArenaMaxX = 3.5
     property number ArenaMinY = -3.5
@@ -50,16 +55,24 @@ script BattleSession extends Component
 
     @ExecSpace("ServerOnly")
     method void OnBeginPlay()
-        -- Start the battle phase with the player Tank and Shooter against the fixed enemy Assault.
+        -- Load the authoritative monster rows before creating the fixed six-versus-six battle.
         self._T.units = {}
         self._T.pendingDamage = {}
         self._T.pendingKnockbacks = {}
+        self._T.monstersById = {}
+        self._T.fixedPlayerRoster = {}
+        self._T.fixedEnemyRoster = {}
+        self._T.eventHistory = {}
+        self._T.dataReady = false
         self._T.initialized = true
         self._T.resultEntered = false
         self.Phase = "BATTLE"
         self.Result = ""
+        self.ConfigurationError = ""
         self.PlayerAlive = 0
         self.EnemyAlive = 0
+        self.InitialPlayerAlive = 0
+        self.InitialEnemyAlive = 0
         self.UnitSnapshots = ""
         self.SnapshotSerial = 0
         self.EventSerial = 0
@@ -70,24 +83,27 @@ script BattleSession extends Component
         self.LastEventAmount = 0
         self:DisableDefaultPlayer()
 
-        local player = self:SpawnUnit(self.PlayerModelId, "M1_PlayerTank", "PLAYER", "TANK", self.PlayerSpawnPosition)
-        local shooter = self:SpawnUnit(self.PlayerModelId, "M1_PlayerShooter", "PLAYER", "SHOOTER", self.ShooterSpawnPosition)
-        local enemy = self:SpawnUnit(self.EnemyModelId, "M1_EnemyAssault", "ENEMY", "ASSAULT", self.EnemySpawnPosition)
-        if player == nil or shooter == nil or enemy == nil then
-            log_error("[M1][BattleSession] fixed battle roster spawn failed")
-            self.Phase = "RESULT"
-            self.Result = "DRAW"
-            self._T.resultEntered = true
-            self:EmitPresentation("RESULT", nil, nil, 0)
+        if self:LoadMonsterData() == false then
             self:RefreshSnapshot()
             return
         end
 
-        self.PlayerAlive = 2
-        self.EnemyAlive = 1
-        self:EmitPresentation("SESSION_START", player, enemy, 0)
+        self._T.fixedPlayerRoster = self:BuildFixedRoster("PLAYER")
+        self._T.fixedEnemyRoster = self:BuildFixedRoster("ENEMY")
+        if self:SpawnRoster(self._T.fixedPlayerRoster, "PLAYER") == false or self:SpawnRoster(self._T.fixedEnemyRoster, "ENEMY") == false then
+            self:ClearUnits()
+            self:FailConfiguration("fixed six-versus-six roster spawn failed")
+            self:RefreshSnapshot()
+            return
+        end
+
+        self.PlayerAlive = 6
+        self.EnemyAlive = 6
+        self.InitialPlayerAlive = self.PlayerAlive
+        self.InitialEnemyAlive = self.EnemyAlive
+        self:EmitPresentation("SESSION_START", nil, nil, 0)
         self:RefreshSnapshot()
-        log("[M1][BattleSession] BATTLE started: PLAYER tank + shooter vs fixed ENEMY assault")
+        log("[M1][BattleSession] BATTLE started: fixed PLAYER 2 TANK + 2 ASSAULT + 2 SHOOTER vs fixed ENEMY 2 TANK + 2 ASSAULT + 2 SHOOTER")
     end
 
     @ExecSpace("ServerOnly")
@@ -100,10 +116,27 @@ script BattleSession extends Component
     @ExecSpace("ServerOnly")
     method void OnEndPlay()
         -- Release session-only references when the map instance ends.
-        self._T.units = {}
+        self:ClearUnits()
         self._T.pendingDamage = {}
         self._T.pendingKnockbacks = {}
+        self._T.monstersById = {}
+        self._T.fixedPlayerRoster = {}
+        self._T.fixedEnemyRoster = {}
+        self._T.dataReady = false
         self._T.initialized = false
+    end
+
+    @ExecSpace("ServerOnly")
+    method void ClearUnits()
+        -- Destroy any partially-created or completed roster so configuration failures leave no live units behind.
+        if self._T.units == nil then
+            self._T.units = {}
+            return
+        end
+        for _, record in ipairs(self._T.units) do
+            if isvalid(record.entity) then record.entity:Destroy() end
+        end
+        self._T.units = {}
     end
 
     @ExecSpace("ServerOnly")
@@ -142,12 +175,282 @@ script BattleSession extends Component
         return map
     end
 
-    method Entity SpawnUnit(string modelId, string name, string faction, string unitKind, Vector3 position)
-        -- Spawn a native-body unit and inject the composition module that creates its adapter.
+    method boolean IsBlank(any value)
+        -- Treat missing and empty dataset cells as invalid rather than silently selecting a script default.
+        return value == nil or value == ""
+    end
+
+    method boolean FailConfiguration(string message)
+        -- Stop the session at the configuration boundary and expose the explicit failure reason.
+        self.ConfigurationError = message
+        self.Phase = "RESULT"
+        self.Result = ""
+        self._T.resultEntered = true
+        self:EmitPresentation("CONFIG_ERROR", nil, nil, 0)
+        log_error("[M1][BattleSession] CONFIG_ERROR: " .. message)
+        return false
+    end
+
+    method number ReadNumber(any raw, string fieldName, string monsterId, number minimum)
+        -- Parse one required numeric cell and reject missing, malformed, or out-of-range values.
+        if self:IsBlank(raw) then
+            self:FailConfiguration("invalid numeric value " .. fieldName .. " for " .. monsterId)
+            return 0
+        end
+        local parsed = tonumber(raw)
+        if parsed == nil or parsed < minimum then
+            self:FailConfiguration("invalid numeric value " .. fieldName .. " for " .. monsterId)
+            return 0
+        end
+        return parsed
+    end
+
+    method integer ReadInteger(any raw, string fieldName, string monsterId, integer minimum)
+        -- Parse one required integer cell without accepting fractional or negative values.
+        local parsed = self:ReadNumber(raw, fieldName, monsterId, minimum)
+        if self.ConfigurationError ~= "" then return 0 end
+        if parsed % 1 ~= 0 then
+            self:FailConfiguration("invalid numeric value " .. fieldName .. " for " .. monsterId)
+            return 0
+        end
+        return math.floor(parsed)
+    end
+
+    method any ParseMonsterRow(any row, integer rowIndex)
+        -- Convert and validate one MonsterData row into the profile consumed by BattleUnit.
+        if row == nil then
+            self:FailConfiguration("MonsterData row missing at index " .. tostring(rowIndex))
+            return nil
+        end
+        local monsterId = row:GetItem("MonsterId")
+        if self:IsBlank(monsterId) then
+            self:FailConfiguration("MonsterData row " .. tostring(rowIndex) .. " missing MonsterId")
+            return nil
+        end
+        if self._T.monstersById[monsterId] ~= nil then
+            self:FailConfiguration("duplicate MonsterId " .. monsterId)
+            return nil
+        end
+
+        local monsterName = row:GetItem("MonsterName")
+        local monsterType = row:GetItem("MonsterType")
+        local modelId = row:GetItem("ModelId")
+        if self:IsBlank(monsterName) or self:IsBlank(modelId) then
+            self:FailConfiguration("MonsterData row " .. monsterId .. " missing name or ModelId")
+            return nil
+        end
+        if monsterType ~= "TANK" and monsterType ~= "ASSAULT" and monsterType ~= "SHOOTER" then
+            self:FailConfiguration("invalid MonsterType " .. tostring(monsterType) .. " for " .. monsterId)
+            return nil
+        end
+
+        local profile = {
+            MonsterId = monsterId,
+            MonsterName = monsterName,
+            MonsterType = monsterType,
+            ModelId = modelId,
+        }
+        profile.MaxHp = self:ReadInteger(row:GetItem("MaxHp"), "MaxHp", monsterId, 1)
+        profile.MoveSpeed = self:ReadNumber(row:GetItem("MoveSpeed"), "MoveSpeed", monsterId, 0.0001)
+        profile.AttackDamage = self:ReadInteger(row:GetItem("AttackDamage"), "AttackDamage", monsterId, 1)
+        profile.AttackIntervalSeconds = self:ReadNumber(row:GetItem("AttackIntervalSeconds"), "AttackIntervalSeconds", monsterId, 0.0001)
+        profile.AttackRange = self:ReadNumber(row:GetItem("AttackRange"), "AttackRange", monsterId, 0.0001)
+        local attackImpactFrame = row:GetItem("AttackImpactFrame")
+        if monsterType == "TANK" and self:IsBlank(attackImpactFrame) then
+            profile.AttackImpactFrame = 0
+        else
+            profile.AttackImpactFrame = self:ReadInteger(attackImpactFrame, "AttackImpactFrame", monsterId, 0)
+        end
+        profile.RetargetIntervalSeconds = self:ReadNumber(row:GetItem("RetargetIntervalSeconds"), "RetargetIntervalSeconds", monsterId, 0.0001)
+        profile.HitStopDurationSeconds = self:ReadNumber(row:GetItem("HitStopDurationSeconds"), "HitStopDurationSeconds", monsterId, 0)
+        if self.ConfigurationError ~= "" then return nil end
+        profile.ImpactDelaySeconds = profile.AttackImpactFrame / self.AttackFramesPerSecond
+
+        local contactMinimum = 0
+        if monsterType == "TANK" then contactMinimum = 0.0001 end
+        profile.ContactDamage = self:ReadInteger(row:GetItem("ContactDamage"), "ContactDamage", monsterId, 0)
+        profile.ContactCooldownSeconds = self:ReadNumber(row:GetItem("ContactCooldownSeconds"), "ContactCooldownSeconds", monsterId, contactMinimum)
+        profile.ContactSizeX = self:ReadNumber(row:GetItem("ContactSizeX"), "ContactSizeX", monsterId, contactMinimum)
+        profile.ContactSizeY = self:ReadNumber(row:GetItem("ContactSizeY"), "ContactSizeY", monsterId, contactMinimum)
+        profile.KnockbackDistance = self:ReadNumber(row:GetItem("KnockbackDistance"), "KnockbackDistance", monsterId, contactMinimum)
+        if monsterType == "TANK" and profile.ContactDamage <= 0 then
+            self:FailConfiguration("invalid numeric value ContactDamage for " .. monsterId)
+            return nil
+        end
+        if monsterType ~= "TANK" and profile.AttackImpactFrame <= 0 then
+            self:FailConfiguration("invalid numeric value AttackImpactFrame for " .. monsterId)
+            return nil
+        end
+        if self.ConfigurationError ~= "" then return nil end
+
+        local assetFields = {
+            "StandAnimationRUID",
+            "MoveAnimationRUID",
+            "AttackAnimationRUID",
+            "HitAnimationRUID",
+            "DieAnimationRUID",
+            "HitEffectRUID",
+            "AttackSoundRUID",
+            "OnHitSoundRUID",
+            "DieSoundRUID",
+        }
+        for _, fieldName in ipairs(assetFields) do
+            local assetRUID = row:GetItem(fieldName)
+            if self:IsBlank(assetRUID) then
+                self:FailConfiguration("MonsterData row " .. monsterId .. " missing " .. fieldName)
+                return nil
+            end
+            profile[fieldName] = assetRUID
+        end
+        return profile
+    end
+
+    method boolean RequireMonsterProfile(string monsterId, string expectedType)
+        -- Ensure every fixed roster reference resolves to a valid row of the intended behavior type.
+        local profile = self._T.monstersById[monsterId]
+        if profile == nil then
+            return self:FailConfiguration("missing configured MonsterId " .. monsterId)
+        end
+        if profile.MonsterType ~= expectedType then
+            return self:FailConfiguration("MonsterId " .. monsterId .. " has unexpected MonsterType")
+        end
+        return true
+    end
+
+    method boolean LoadMonsterData()
+        -- Load and strictly validate the single authoritative MonsterData UserDataSet before spawning.
+        local dataset = _DataService:GetTable(self.MonsterDataSetName)
+        if dataset == nil then return self:FailConfiguration("MonsterData table unavailable") end
+        local requiredColumns = {
+            "MonsterId", "MonsterName", "MonsterType", "ModelId", "MaxHp", "MoveSpeed", "AttackDamage",
+            "AttackIntervalSeconds", "AttackRange", "AttackImpactFrame",
+            "RetargetIntervalSeconds", "HitStopDurationSeconds", "ContactDamage", "ContactCooldownSeconds",
+            "ContactSizeX", "ContactSizeY", "KnockbackDistance", "StandAnimationRUID", "MoveAnimationRUID",
+            "AttackAnimationRUID", "HitAnimationRUID", "DieAnimationRUID", "HitEffectRUID", "AttackSoundRUID",
+            "OnHitSoundRUID", "DieSoundRUID",
+        }
+        for _, columnName in ipairs(requiredColumns) do
+            if dataset:GetColumn(columnName) == nil then
+                return self:FailConfiguration("MonsterData missing column " .. columnName)
+            end
+        end
+        local rowCount = dataset:GetRowCount()
+        if rowCount == nil or rowCount <= 0 then return self:FailConfiguration("MonsterData has no rows") end
+        for rowIndex = 1, rowCount do
+            local profile = self:ParseMonsterRow(dataset:GetRow(rowIndex), rowIndex)
+            if profile == nil then return false end
+            self._T.monstersById[profile.MonsterId] = profile
+        end
+        if self:RequireMonsterProfile(self.PlayerMonsterId1, "TANK") == false then return false end
+        if self:RequireMonsterProfile(self.PlayerMonsterId3, "ASSAULT") == false then return false end
+        if self:RequireMonsterProfile(self.PlayerMonsterId5, "SHOOTER") == false then return false end
+        if self:RequireMonsterProfile(self.EnemyMonsterId1, "TANK") == false then return false end
+        if self:RequireMonsterProfile(self.EnemyMonsterId3, "ASSAULT") == false then return false end
+        if self:RequireMonsterProfile(self.EnemyMonsterId5, "SHOOTER") == false then return false end
+        self._T.dataReady = true
+        log("[M1][BattleSession] MonsterData loaded rows=" .. tostring(rowCount))
+        return true
+    end
+
+    method any GetMonsterProfile(string monsterId)
+        -- Return the validated profile for a stable MonsterId without introducing script fallbacks.
+        if self._T.monstersById == nil then return nil end
+        return self._T.monstersById[monsterId]
+    end
+
+    method string FindMonsterIdByType(string monsterType)
+        -- Resolve legacy test calls by type while production rosters always use explicit MonsterIds.
+        if self._T.monstersById == nil then return "" end
+        for monsterId, profile in pairs(self._T.monstersById) do
+            if profile.MonsterType == monsterType then return monsterId end
+        end
+        return ""
+    end
+
+    method table BuildFixedRoster(string faction)
+        -- Build six fixed entries from session settings; enemy IDs and positions never come from a formation dataset.
+        local monsterIds = {}
+        local positions = {}
+        local names = {}
+        if faction == "PLAYER" then
+            monsterIds = { self.PlayerMonsterId1, self.PlayerMonsterId2, self.PlayerMonsterId3, self.PlayerMonsterId4, self.PlayerMonsterId5, self.PlayerMonsterId6 }
+            positions = { self.PlayerPosition1, self.PlayerPosition2, self.PlayerPosition3, self.PlayerPosition4, self.PlayerPosition5, self.PlayerPosition6 }
+            names = { "M1_PlayerTank", "M1_PlayerTank2", "M1_PlayerWarrior", "M1_PlayerWarrior2", "M1_PlayerShooter", "M1_PlayerShooter2" }
+        else
+            monsterIds = { self.EnemyMonsterId1, self.EnemyMonsterId2, self.EnemyMonsterId3, self.EnemyMonsterId4, self.EnemyMonsterId5, self.EnemyMonsterId6 }
+            positions = { self.EnemyPosition1, self.EnemyPosition2, self.EnemyPosition3, self.EnemyPosition4, self.EnemyPosition5, self.EnemyPosition6 }
+            names = { "M1_EnemyTank", "M1_EnemyTank2", "M1_EnemyAssault", "M1_EnemyAssault2", "M1_EnemyShooter", "M1_EnemyShooter2" }
+        end
+        local roster = {}
+        for index = 1, 6 do
+            table.insert(roster, { monsterId = monsterIds[index], position = positions[index], name = names[index] })
+        end
+        return roster
+    end
+
+    method boolean SpawnRoster(table roster, string faction)
+        -- Spawn every fixed entry only after its MonsterId profile has passed validation.
+        for _, entry in ipairs(roster) do
+            local entity = self:SpawnMonster(entry.monsterId, entry.name, faction, entry.position)
+            if not isvalid(entity) then return false end
+        end
+        return true
+    end
+
+    method void ApplyPresentationProfile(Entity entity, table profile)
+        -- Apply only the RUIDs already present in MonsterData; no asset search or fallback selection occurs here.
+        if profile.MonsterType == "TANK" then
+            local presentation = entity:GetComponent("script.TankPresentation")
+            if isvalid(presentation) then
+                presentation.StandAnimationRUID = profile.StandAnimationRUID
+                presentation.MoveAnimationRUID = profile.MoveAnimationRUID
+                presentation.OnHitAnimationRUID = profile.HitAnimationRUID
+                presentation.DeathAnimationRUID = profile.DieAnimationRUID
+                presentation.AttackSoundRUID = profile.AttackSoundRUID
+                presentation.OnHitSoundRUID = profile.OnHitSoundRUID
+                presentation.DeathSoundRUID = profile.DieSoundRUID
+            end
+        elseif profile.MonsterType == "SHOOTER" then
+            local presentation = entity:GetComponent("script.ShooterPresentation")
+            if isvalid(presentation) then
+                presentation.AttackSoundRUID = profile.AttackSoundRUID
+                presentation.OnHitSoundRUID = profile.OnHitSoundRUID
+                presentation.DeathSoundRUID = profile.DieSoundRUID
+            end
+        end
+    end
+
+    method Entity SpawnMonster(string monsterId, string name, string faction, Vector3 position)
+        -- Spawn a unit from one validated MonsterData row and never from hard-coded combat numbers.
+        if self._T.dataReady ~= true then return nil end
+        local profile = self:GetMonsterProfile(monsterId)
+        if profile == nil then
+            log_error("[M1][BattleSession] configured MonsterId missing: " .. tostring(monsterId))
+            return nil
+        end
+        return self:SpawnConfiguredUnit(profile.ModelId, name, faction, profile, position)
+    end
+
+    method Entity SpawnUnit(string modelId, string name, string faction, string monsterKey, Vector3 position)
+        -- Preserve the existing high-level test seam while resolving its key through MonsterData.
+        local profile = self:GetMonsterProfile(monsterKey)
+        if profile == nil then
+            local legacyMonsterId = self:FindMonsterIdByType(monsterKey)
+            profile = self:GetMonsterProfile(legacyMonsterId)
+        end
+        if profile == nil then
+            log_error("[M1][BattleSession] MonsterData profile missing for " .. tostring(monsterKey))
+            return nil
+        end
+        return self:SpawnConfiguredUnit(profile.ModelId, name, faction, profile, position)
+    end
+
+    method Entity SpawnConfiguredUnit(string modelId, string name, string faction, table profile, Vector3 position)
+        -- Create, validate, configure, and register one unit atomically before it enters the roster.
         local map = self:GetMapEntity()
         if not isvalid(map) then return nil end
         local entity = _SpawnService:SpawnByModelId(modelId, name, position, map)
-        if entity == nil then
+        if not isvalid(entity) then
             log_error("[M1][BattleSession] SpawnByModelId returned nil for " .. modelId)
             return nil
         end
@@ -155,47 +458,31 @@ script BattleSession extends Component
         entity:AddComponent("script.BattleUnit")
         entity:AddComponent("script.BattleHitEffectPresentation")
         entity:AddComponent("script.BattleAttackComposition")
-        local maxHp = self.UnitMaxHp
-        local speed = self.UnitMoveSpeed
-        local damage = self.UnitDamage
-        local interval = self.UnitAttackInterval
-        local range = self.UnitAttackRange
-        local impact = self.ImpactDelay
-        if unitKind == "TANK" then
-            maxHp = self.TankMaxHp
-            speed = self.TankMoveSpeed
-            damage = self.TankContactDamage
-            interval = self.TankContactCooldown
-            range = self.TankContactRange
+        if profile.MonsterType == "TANK" then
             entity:AddComponent("script.TankPresentation")
-        elseif unitKind == "SHOOTER" then
-            maxHp = self.ShooterMaxHp
-            speed = self.ShooterMoveSpeed
-            damage = self.ShooterDamage
-            interval = self.ShooterAttackInterval
-            range = self.ShooterAttackRange
-            impact = self.ShooterImpactDelay
+        elseif profile.MonsterType == "SHOOTER" then
             entity:AddComponent("script.ShooterPresentation")
         end
         local unit = entity:GetComponent("script.BattleUnit")
-        if not isvalid(unit) then
-            log_error("[M1][BattleSession] BattleUnit component missing on " .. name)
-            return nil
-        end
         local attackFactory = entity:GetComponent("script.BattleAttackComposition")
-        if not isvalid(attackFactory) then
-            log_error("[M1][BattleSession] attack composition missing on " .. name)
+        if not isvalid(unit) or not isvalid(attackFactory) then
+            log_error("[M1][BattleSession] required combat component missing on " .. name)
+            entity:Destroy()
             return nil
         end
+
         local openingDelay = 0
         if faction == "ENEMY" then openingDelay = self.EnemyOpeningDelay end
         unit:BindAttackFactory(attackFactory)
-        unit:Configure(faction, name, unitKind, maxHp, speed, damage, interval, range, self.RetargetInterval, impact, self.DeathHold, openingDelay, self.TankContactCooldown, self.TankContactSize, self.TankKnockbackDistance, self.HitStopDuration)
+        unit:SetMonsterIdentity(profile.MonsterId, profile.MonsterName, profile.HitEffectRUID)
+        unit:Configure(faction, profile.MonsterName, profile.MonsterType, profile.MaxHp, profile.MoveSpeed, profile.AttackDamage, profile.AttackIntervalSeconds, profile.AttackRange, profile.RetargetIntervalSeconds, profile.ImpactDelaySeconds, self.DeathHold, openingDelay, profile.ContactCooldownSeconds, Vector2(profile.ContactSizeX, profile.ContactSizeY), profile.KnockbackDistance, profile.HitStopDurationSeconds)
         if not unit:HasAttackAdapter() then
             log_error("[M1][BattleSession] attack adapter missing on " .. name)
+            entity:Destroy()
             return nil
         end
-        local record = { entity = entity, unit = unit, faction = faction, unitKind = unitKind, dead = false }
+        self:ApplyPresentationProfile(entity, profile)
+        local record = { entity = entity, unit = unit, faction = faction, monsterId = profile.MonsterId, monsterName = profile.MonsterName, unitKind = profile.MonsterType, dead = false }
         table.insert(self._T.units, record)
         return entity
     end
@@ -240,12 +527,12 @@ script BattleSession extends Component
 
     method void QueueKnockback(Entity attacker, Entity defender, number distance)
         -- Queue an adapter-requested knockback so movement cannot overwrite it in the same frame.
-        if not self:IsBattleActive() or not isvalid(attacker) or not isvalid(defender) then return end
+        if not self:IsBattleActive() or not isvalid(attacker) or not isvalid(defender) or distance == nil or distance <= 0 then return end
         local attackerUnit = attacker:GetComponent("script.BattleUnit")
         local defenderUnit = defender:GetComponent("script.BattleUnit")
         if not isvalid(attackerUnit) or not isvalid(defenderUnit) or attackerUnit.UnitKind ~= "TANK" then return end
         if not defenderUnit:IsAlive() or attackerUnit.Faction == defenderUnit.Faction then return end
-        table.insert(self._T.pendingKnockbacks, { attacker = attacker, defender = defender, distance = distance or self.TankKnockbackDistance })
+        table.insert(self._T.pendingKnockbacks, { attacker = attacker, defender = defender, distance = distance })
     end
 
     method number Clamp(number value, number minimum, number maximum)
@@ -276,11 +563,13 @@ script BattleSession extends Component
                         dy = 0
                         length = 1
                     end
-                    local distance = item.distance or self.TankKnockbackDistance
-                    local nextX = self:Clamp(defenderPosition.x + dx / length * distance, self.ArenaMinX, self.ArenaMaxX)
-                    local nextY = self:Clamp(defenderPosition.y + dy / length * distance, self.ArenaMinY, self.ArenaMaxY)
-                    kinematic:SetWorldPosition(Vector2(nextX, nextY))
-                    self:EmitPresentation("KNOCKBACK", item.attacker, item.defender, 0)
+                    local distance = item.distance
+                    if distance ~= nil and distance > 0 then
+                        local nextX = self:Clamp(defenderPosition.x + dx / length * distance, self.ArenaMinX, self.ArenaMaxX)
+                        local nextY = self:Clamp(defenderPosition.y + dy / length * distance, self.ArenaMinY, self.ArenaMaxY)
+                        kinematic:SetWorldPosition(Vector2(nextX, nextY))
+                        self:EmitPresentation("KNOCKBACK", item.attacker, item.defender, 0)
+                    end
                 end
             end
         end
@@ -354,16 +643,19 @@ script BattleSession extends Component
         end
     end
 
+    method string DetermineResult(integer playerAlive, integer enemyAlive)
+        -- Classify the completed damage batch independently so high-level tests can observe all three outcomes.
+        if playerAlive <= 0 and enemyAlive <= 0 then return "DRAW" end
+        if enemyAlive <= 0 then return "WIN" end
+        if playerAlive <= 0 then return "LOSE" end
+        return ""
+    end
+
     method void EvaluateResult()
         -- Enter RESULT once after all same-frame damage has been applied.
         if self.Phase ~= "BATTLE" or self._T.resultEntered == true then return end
-        if self.PlayerAlive <= 0 and self.EnemyAlive <= 0 then
-            self:EnterResult("DRAW")
-        elseif self.EnemyAlive <= 0 then
-            self:EnterResult("WIN")
-        elseif self.PlayerAlive <= 0 then
-            self:EnterResult("LOSE")
-        end
+        local result = self:DetermineResult(self.PlayerAlive, self.EnemyAlive)
+        if result ~= "" then self:EnterResult(result) end
     end
 
     method void EnterResult(string result)
@@ -411,7 +703,7 @@ script BattleSession extends Component
                 end
             end
             if isvalid(unit) and isvalid(entity) then
-                table.insert(unitParts, record.faction .. ":" .. entity.Name .. ",kind=" .. record.unitKind .. ",hp=" .. tostring(unit.Hp) .. ",alive=" .. tostring(unit:IsAlive()) .. ",state=" .. unit.CombatState .. ",target=" .. unit.CurrentTargetName .. "," .. positionText)
+                table.insert(unitParts, record.faction .. ":" .. entity.Name .. ",monsterId=" .. record.monsterId .. ",name=" .. record.monsterName .. ",kind=" .. record.unitKind .. ",hp=" .. tostring(unit.Hp) .. ",alive=" .. tostring(unit:IsAlive()) .. ",state=" .. unit.CombatState .. ",target=" .. unit.CurrentTargetName .. "," .. positionText)
             end
         end
         self.UnitSnapshots = table.concat(unitParts, ";")

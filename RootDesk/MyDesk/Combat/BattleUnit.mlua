@@ -2,6 +2,8 @@
 script BattleUnit extends Component
 
     @Sync property string Faction = ""
+    @Sync property string MonsterId = ""
+    @Sync property string MonsterName = ""
     @Sync property string UnitKind = "ASSAULT"
     @Sync property string CombatState = "IDLE"
     @Sync property string CurrentTargetName = ""
@@ -33,14 +35,24 @@ script BattleUnit extends Component
         self._T.deathRemaining = 0
         self._T.deathFinished = false
         self._T.hitStopRemaining = 0
+        self._T.hitEffectRUID = "TBD"
         if self.Hp <= 0 then self.Hp = self.MaxHp end
         self.CombatState = "IDLE"
+    end
+
+    @ExecSpace("ServerOnly")
+    method void SetMonsterIdentity(string monsterId, string monsterName, string hitEffectRUID)
+        -- Bind the stable MonsterId, editable display name, and attacker-owned hit effect from MonsterData.
+        self.MonsterId = monsterId
+        self.MonsterName = monsterName
+        self._T.hitEffectRUID = hitEffectRUID
     end
 
     @ExecSpace("ServerOnly")
     method void Configure(string faction, string displayName, string unitKind, integer maxHp, number speed, integer damage, number interval, number range, number retarget, number impact, number deathHold, number openingDelay, number contactCooldown, Vector2 contactSize, number knockbackDistance, number hitStopDuration)
         -- Apply the unit profile and bind the only attack adapter used by this unit.
         self.Faction = faction
+        self.MonsterName = displayName
         self.UnitKind = unitKind
         self.MaxHp = maxHp
         self.Hp = maxHp
@@ -91,7 +103,8 @@ script BattleUnit extends Component
     end
 
     method string GetHitEffectRUID()
-        -- Return the attacker's hit effect RUID so the defender can render it on itself.
+        -- Return the attacker-owned dataset effect so the defender can render it on itself.
+        if self._T.hitEffectRUID ~= nil and self._T.hitEffectRUID ~= "" then return self._T.hitEffectRUID end
         if not isvalid(self._T.attackAdapter) then return "TBD" end
         local effectRUID = self._T.attackAdapter.HitEffectRUID
         if effectRUID == nil or effectRUID == "" then return "TBD" end

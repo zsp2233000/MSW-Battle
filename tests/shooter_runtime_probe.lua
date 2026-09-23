@@ -57,6 +57,22 @@ if not isvalid(map) or not isvalid(session) or not session:IsBattleActive() then
     return
 end
 
+-- Disable every fixed unit so the spawned shooter fixtures are the only active combat participants.
+for _, name in ipairs({"M1_PlayerTank", "M1_PlayerTank2", "M1_PlayerWarrior", "M1_PlayerWarrior2", "M1_PlayerShooter", "M1_PlayerShooter2", "M1_EnemyTank", "M1_EnemyTank2", "M1_EnemyAssault", "M1_EnemyAssault2", "M1_EnemyShooter", "M1_EnemyShooter2"}) do
+    local entity = _EntityService:GetEntityByPath("/maps/map01/" .. name)
+    if isvalid(entity) then
+        local unit = entity:GetComponent("script.BattleUnit")
+        local movement = entity:GetComponent("MovementComponent")
+        if isvalid(unit) then
+            unit:CancelAttack()
+            unit.MoveSpeed = 0
+            unit.RetargetInterval = 99
+        end
+        if isvalid(movement) then movement:Stop() end
+        entity:SetEnable(false)
+    end
+end
+
 local fixedTank = _EntityService:GetEntityByPath("/maps/map01/M1_PlayerTank")
 local fixedShooter = _EntityService:GetEntityByPath("/maps/map01/M1_PlayerShooter")
 local fixedAssault = _EntityService:GetEntityByPath("/maps/map01/M1_EnemyAssault")
