@@ -341,11 +341,10 @@ script BattleSession extends Component
             if profile == nil then return false end
             self._T.monstersById[profile.MonsterId] = profile
         end
-        local expectedTypes = { "TANK", "TANK", "ASSAULT", "ASSAULT", "SHOOTER", "SHOOTER" }
         for _, faction in ipairs({ "PLAYER", "ENEMY" }) do
             local roster = self:BuildFixedRoster(faction)
-            for index, entry in ipairs(roster) do
-                if self:RequireMonsterProfile(entry.monsterId, expectedTypes[index]) == false then return false end
+            for _, entry in ipairs(roster) do
+                if self:RequireMonsterProfile(entry.monsterId, entry.expectedType) == false then return false end
             end
         end
         self._T.dataReady = true
@@ -383,8 +382,9 @@ script BattleSession extends Component
             names = { "M1_EnemyTank", "M1_EnemyTank2", "M1_EnemyAssault", "M1_EnemyAssault2", "M1_EnemyShooter", "M1_EnemyShooter2" }
         end
         local roster = {}
+        local expectedTypes = { "TANK", "TANK", "ASSAULT", "ASSAULT", "SHOOTER", "SHOOTER" }
         for index = 1, 6 do
-            table.insert(roster, { monsterId = monsterIds[index], position = positions[index], name = names[index] })
+            table.insert(roster, { monsterId = monsterIds[index], expectedType = expectedTypes[index], position = positions[index], name = names[index] })
         end
         return roster
     end

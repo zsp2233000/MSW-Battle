@@ -18,7 +18,7 @@
 | Battle map | `.map` | `map/map01.map` | `TileMapMode=1` (`RectTile`); map root owns only `script.BattleSession` for the active Issue #5 runtime. |
 | DefaultPlayer / camera | runtime logic | `BattleSession.mlua` (`DisableDefaultPlayer`) | DefaultPlayer remains visible while controller, body, collision, trigger, hit, and target participation are disabled; camera is centered, zoomed out, and offset down to show the full field. |
 | Battle UI | `.ui` / parked adapter | `ui/BattleGroup.ui`, `RootDesk/MyDesk/Combat/BattleDeploymentInput.mlua` | Existing deployment UI remains parked and hidden; Issue #5 starts without deployment input or result UI. |
-| Regression contract | Node contract + Maker runtime probes | `tests/battle_session_contract.test.cjs`, `tests/six_vs_six_runtime_probe.lua`, `tests/six_vs_six_full_battle_probe.lua` | Covers RectTile/model invariants, strict data loading, fixed six-versus-six spawn, target retention/reacquisition, no blocking/pushing, Win/Lose/Draw, a natural complete battle, and terminal result stop. |
+| Regression contract | Node contract + Maker runtime probes | `tests/battle_session_contract.test.cjs`, `tests/six_vs_six_runtime_probe.lua`, `tests/six_vs_six_full_battle_probe.lua`, `tests/six_vs_six_batch_outcome_probe.lua` | Covers RectTile/model invariants, strict data loading, fixed six-versus-six spawn, target retention/reacquisition, no blocking/pushing, Win/Lose/Draw including a resolved same-batch Draw, a natural complete battle, and terminal result stop. |
 
 ## Standing issues & handoff rules (update in place — never re-append)
 
@@ -36,6 +36,7 @@
 - Added strict configuration failures for unavailable columns, missing/duplicate IDs, invalid types, invalid required numbers, missing configured IDs, and failed component/adapter setup. Snapshots now expose MonsterId and editable MonsterName.
 - Added the Maker high-level probe for equal-distance target retention, dead-target reacquisition, crowd movement without blocking/pushing, Win/Lose/Draw classification, and one-way RESULT stop. Node contract is 9/9; Maker build has no error-level entries; runtime probe ends with `[M1][SixVsSixProbe] PASS`.
 - Validated all twelve fixed roster slots against their expected MonsterType and made a missing MonsterId report an explicit configuration error. Added a separate Maker probe that observes an untouched fixed battle through its natural result, one RESULT event, and one second without further damage, attacks, or movement. Node contract remains 9/9; Maker build has no error-level entries; both runtime probes pass.
+- Kept each roster slot's expected type with its MonsterId, position, and name. A Maker batch probe now queues simultaneous lethal hits for opposing production units, confirms the result waits for the completed batch, then verifies one Draw result. The batch probe passes.
 
 ### 2026-09-21 Issue #3 Tank slice
 
