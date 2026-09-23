@@ -22,7 +22,7 @@
           "path": "/ui/BattleGroup",
           "nameEditable": true,
           "enable": true,
-          "visible": false,
+          "visible": true,
           "localize": true,
           "displayOrder": 3,
           "pathConstraints": "//",
@@ -105,12 +105,12 @@
         }
       },
       {
-        "id": "e8ece61f-c458-49db-94cd-e218d4009416",
-        "path": "/ui/BattleGroup/BtnTank",
-        "componentNames": "MOD.Core.UITransformComponent,MOD.Core.SpriteGUIRendererComponent,MOD.Core.ButtonComponent,MOD.Core.TextComponent",
+        "id": "18438b27-153d-40ff-8b66-b9c182441e89",
+        "path": "/ui/BattleGroup/BtnStart",
+        "componentNames": "MOD.Core.UITransformComponent,MOD.Core.SpriteGUIRendererComponent,MOD.Core.ButtonComponent",
         "jsonString": {
-          "name": "BtnTank",
-          "path": "/ui/BattleGroup/BtnTank",
+          "name": "BtnStart",
+          "path": "/ui/BattleGroup/BtnStart",
           "nameEditable": true,
           "enable": true,
           "visible": true,
@@ -140,20 +140,20 @@
               },
               "MobileOnly": false,
               "OffsetMax": {
-                "x": -195.749756,
-                "y": -335.126617
+                "x": 444.895782,
+                "y": -302.465576
               },
               "OffsetMin": {
-                "x": -299.71344,
-                "y": -432.59256
+                "x": 177.865631,
+                "y": -406.3106
               },
               "Pivot": {
                 "x": 0.5,
                 "y": 0.5
               },
               "RectSize": {
-                "x": 103.963684,
-                "y": 97.46595
+                "x": 267.030151,
+                "y": 103.845055
               },
               "UIMode": 1,
               "UIScale": {
@@ -163,8 +163,8 @@
               },
               "UIVersion": 2,
               "anchoredPosition": {
-                "x": -247.7316,
-                "y": -383.8596
+                "x": 311.3807,
+                "y": -354.3881
               },
               "Rotation": {
                 "x": 0.0,
@@ -172,8 +172,8 @@
                 "z": 0.0
               },
               "Position": {
-                "x": -247.7316,
-                "y": -383.8596,
+                "x": 311.3807,
+                "y": -354.3881,
                 "z": 0.0
               },
               "QuaternionRotation": {
@@ -192,7 +192,11 @@
             },
             {
               "@type": "MOD.Core.SpriteGUIRendererComponent",
+              "ImageRUID": {
+                "DataId": "95dbeb8afcc440e0938cdf95d7ac5a74"
+              },
               "OverrideSorting": false,
+              "SortingLayer": "MapLayer0",
               "Enable": true
             },
             {
@@ -205,9 +209,9 @@
                   "a": 1.0
                 },
                 "HighlightedColor": {
-                  "r": 0.9607843,
-                  "g": 0.9607843,
-                  "b": 0.9607843,
+                  "r": 0.933333337,
+                  "g": 0.933333337,
+                  "b": 0.933333337,
                   "a": 1.0
                 },
                 "PressedColor": {
@@ -239,34 +243,18 @@
               },
               "OverrideSorting": false,
               "Enable": true
-            },
-            {
-              "@type": "MOD.Core.TextComponent",
-              "FontColor": {
-                "r": 1.0,
-                "g": 1.0,
-                "b": 1.0,
-                "a": 1.0
-              },
-              "OutlineDistance": {
-                "x": 1.0,
-                "y": -1.0
-              },
-              "OverrideSorting": false,
-              "Text": "坦克",
-              "Enable": true
             }
           ],
           "@version": 1
         }
       },
       {
-        "id": "b0e99dfd-d395-4662-a412-e9b4be9bc90e",
-        "path": "/ui/BattleGroup/BtnShooter",
-        "componentNames": "MOD.Core.UITransformComponent,MOD.Core.SpriteGUIRendererComponent,MOD.Core.ButtonComponent,MOD.Core.TextComponent",
+        "id": "4c4825a8-6d82-490a-bfe8-890822e192f1",
+        "path": "/ui/BattleGroup/MonsterOptionContainer",
+        "componentNames": "MOD.Core.UITransformComponent",
         "jsonString": {
-          "name": "BtnShooter",
-          "path": "/ui/BattleGroup/BtnShooter",
+          "name": "MonsterOptionContainer",
+          "path": "/ui/BattleGroup/MonsterOptionContainer",
           "nameEditable": true,
           "enable": true,
           "visible": true,
@@ -276,9 +264,89 @@
           "revision": 1,
           "origin": {
             "type": "Model",
+            "entry_id": "uiempty",
+            "sub_entity_id": null,
+            "root_entity_id": "4c4825a8-6d82-490a-bfe8-890822e192f1",
+            "replaced_model_id": null
+          },
+          "modelId": "uiempty",
+          "@components": [
+            {
+              "@type": "MOD.Core.UITransformComponent",
+              "AlignmentOption": 0,
+              "AnchorsMax": {
+                "x": 0.5,
+                "y": 0.5
+              },
+              "AnchorsMin": {
+                "x": 0.5,
+                "y": 0.5
+              },
+              "MobileOnly": false,
+              "OffsetMax": {
+                "x": 12.1777954,
+                "y": -255.7677
+              },
+              "OffsetMin": {
+                "x": -547.8222,
+                "y": -485.7677
+              },
+              "Pivot": {
+                "x": 0.5,
+                "y": 0.5
+              },
+              "RectSize": {
+                "x": 560.0,
+                "y": 230.0
+              },
+              "UIMode": 1,
+              "UIVersion": 2,
+              "anchoredPosition": {
+                "x": -267.8222,
+                "y": -370.7677
+              },
+              "Rotation": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              },
+              "Position": {
+                "x": -267.8222,
+                "y": -370.7677,
+                "z": 0.0
+              },
+              "QuaternionRotation": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0,
+                "w": 1.0
+              },
+              "ZRotation": 0.0,
+              "Enable": true
+            }
+          ],
+          "@version": 1
+        }
+      },
+      {
+        "id": "55f79c74-275e-4e4c-9889-b442b3d0f38b",
+        "path": "/ui/BattleGroup/MonsterOptionContainer/MonsterOptionTemplate",
+        "componentNames": "MOD.Core.UITransformComponent,MOD.Core.SpriteGUIRendererComponent,MOD.Core.ButtonComponent",
+        "jsonString": {
+          "name": "MonsterOptionTemplate",
+          "path": "/ui/BattleGroup/MonsterOptionContainer/MonsterOptionTemplate",
+          "nameEditable": true,
+          "enable": true,
+          "visible": true,
+          "localize": true,
+          "displayOrder": 0,
+          "pathConstraints": "////",
+          "revision": 1,
+          "origin": {
+            "type": "Model",
             "entry_id": "uibutton",
             "sub_entity_id": null,
-            "root_entity_id": "e8ece61f-c458-49db-94cd-e218d4009416",
+            "root_entity_id": "55f79c74-275e-4e4c-9889-b442b3d0f38b",
             "replaced_model_id": null
           },
           "modelId": "uibutton",
@@ -296,31 +364,26 @@
               },
               "MobileOnly": false,
               "OffsetMax": {
-                "x": -91.785965,
-                "y": -335.126617
+                "x": -85.27251,
+                "y": 110.3213
               },
               "OffsetMin": {
-                "x": -195.749649,
-                "y": -432.59256
+                "x": -253.2725,
+                "y": -99.6787
               },
               "Pivot": {
                 "x": 0.5,
                 "y": 0.5
               },
               "RectSize": {
-                "x": 103.963684,
-                "y": 97.46595
+                "x": 168.0,
+                "y": 210.0
               },
               "UIMode": 1,
-              "UIScale": {
-                "x": 1.0,
-                "y": 1.0,
-                "z": 1.0
-              },
               "UIVersion": 2,
               "anchoredPosition": {
-                "x": -143.7678,
-                "y": -383.8596
+                "x": -169.2725,
+                "y": 5.3213
               },
               "Rotation": {
                 "x": 0.0,
@@ -328,8 +391,8 @@
                 "z": 0.0
               },
               "Position": {
-                "x": -143.7678,
-                "y": -383.8596,
+                "x": -169.2725,
+                "y": 5.3213,
                 "z": 0.0
               },
               "QuaternionRotation": {
@@ -338,18 +401,12 @@
                 "z": 0.0,
                 "w": 1.0
               },
-              "Scale": {
-                "x": 1.0,
-                "y": 1.0,
-                "z": 1.0
-              },
               "ZRotation": 0.0,
               "Enable": true
             },
             {
               "@type": "MOD.Core.SpriteGUIRendererComponent",
               "OverrideSorting": false,
-              "SortingLayer": "MapLayer0",
               "Enable": true
             },
             {
@@ -362,21 +419,21 @@
                   "a": 1.0
                 },
                 "HighlightedColor": {
-                  "r": 0.9607843,
-                  "g": 0.9607843,
-                  "b": 0.9607843,
+                  "r": 0.9356805,
+                  "g": 0.9902344,
+                  "b": 0.508655548,
                   "a": 1.0
                 },
                 "PressedColor": {
-                  "r": 0.784313738,
-                  "g": 0.784313738,
-                  "b": 0.784313738,
+                  "r": 0.585095,
+                  "g": 0.585095,
+                  "b": 0.585095,
                   "a": 1.0
                 },
                 "SelectedColor": {
-                  "r": 0.9607843,
-                  "g": 0.9607843,
-                  "b": 0.9607843,
+                  "r": 0.8592218,
+                  "g": 0.8592218,
+                  "b": 0.8592218,
                   "a": 1.0
                 },
                 "DisabledColor": {
@@ -386,7 +443,7 @@
                   "a": 0.5019608
                 },
                 "ColorMultiplier": 1.0,
-                "FadeDuration": 0.1
+                "FadeDuration": 0.2
               },
               "ImageRUIDs": {
                 "HighlightedSprite": null,
@@ -394,24 +451,9 @@
                 "SelectedSprite": null,
                 "DisabledSprite": null
               },
+              "KeyCode": 39,
               "OverrideSorting": false,
-              "Enable": true
-            },
-            {
-              "@type": "MOD.Core.TextComponent",
-              "AllowAutomaticTranslation": false,
-              "FontColor": {
-                "r": 1.0,
-                "g": 1.0,
-                "b": 1.0,
-                "a": 1.0
-              },
-              "OutlineDistance": {
-                "x": 1.0,
-                "y": -1.0
-              },
-              "OverrideSorting": false,
-              "Text": "射手",
+              "Transition": 1,
               "Enable": true
             }
           ],
@@ -419,14 +461,288 @@
         }
       },
       {
-        "id": "072a7618-e2b3-4fb0-ba3e-7b9d7a4cd7bf",
-        "path": "/ui/BattleGroup/BtnAssault",
-        "componentNames": "MOD.Core.UITransformComponent,MOD.Core.SpriteGUIRendererComponent,MOD.Core.ButtonComponent,MOD.Core.TextComponent",
+        "id": "575c768e-09a1-4fa9-bed2-89f3c1fd42f5",
+        "path": "/ui/BattleGroup/MonsterOptionContainer/MonsterOptionTemplate/Portrait",
+        "componentNames": "MOD.Core.UITransformComponent,MOD.Core.SpriteGUIRendererComponent",
         "jsonString": {
-          "name": "BtnAssault",
-          "path": "/ui/BattleGroup/BtnAssault",
+          "name": "Portrait",
+          "path": "/ui/BattleGroup/MonsterOptionContainer/MonsterOptionTemplate/Portrait",
           "nameEditable": true,
           "enable": true,
+          "visible": true,
+          "localize": true,
+          "displayOrder": 0,
+          "pathConstraints": "/////",
+          "revision": 1,
+          "origin": {
+            "type": "Model",
+            "entry_id": "uiempty",
+            "sub_entity_id": null,
+            "root_entity_id": "575c768e-09a1-4fa9-bed2-89f3c1fd42f5",
+            "replaced_model_id": null
+          },
+          "modelId": "uiempty",
+          "@components": [
+            {
+              "@type": "MOD.Core.UITransformComponent",
+              "AlignmentOption": 0,
+              "AnchorsMax": {
+                "x": 0.5,
+                "y": 0.5
+              },
+              "AnchorsMin": {
+                "x": 0.5,
+                "y": 0.5
+              },
+              "MobileOnly": false,
+              "OffsetMax": {
+                "x": 62.30982,
+                "y": 80.77574
+              },
+              "OffsetMin": {
+                "x": -61.28522,
+                "y": -52.05214
+              },
+              "Pivot": {
+                "x": 0.5,
+                "y": 0.5
+              },
+              "RectSize": {
+                "x": 123.595039,
+                "y": 132.827881
+              },
+              "UIMode": 1,
+              "UIVersion": 2,
+              "anchoredPosition": {
+                "x": 0.5123,
+                "y": 14.3618
+              },
+              "Rotation": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              },
+              "Position": {
+                "x": 0.5123,
+                "y": 14.3618,
+                "z": 0.0
+              },
+              "QuaternionRotation": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0,
+                "w": 1.0
+              },
+              "ZRotation": 0.0,
+              "Enable": true
+            },
+            {
+              "@type": "MOD.Core.SpriteGUIRendererComponent",
+              "ImageRUID": {
+                "DataId": "a95cfed2c8fe4d2cb64cbb62db051f92"
+              },
+              "OverrideSorting": false,
+              "Enable": true
+            }
+          ],
+          "@version": 1
+        }
+      },
+      {
+        "id": "4a3d976b-9116-4d07-849a-67f57c2d67c5",
+        "path": "/ui/BattleGroup/MonsterOptionContainer/MonsterOptionTemplate/MonsterName",
+        "componentNames": "MOD.Core.UITransformComponent,MOD.Core.TextGUIRendererComponent",
+        "jsonString": {
+          "name": "MonsterName",
+          "path": "/ui/BattleGroup/MonsterOptionContainer/MonsterOptionTemplate/MonsterName",
+          "nameEditable": true,
+          "enable": true,
+          "visible": true,
+          "localize": true,
+          "displayOrder": 1,
+          "pathConstraints": "/////",
+          "revision": 1,
+          "origin": {
+            "type": "Model",
+            "entry_id": "uitextguirenderer",
+            "sub_entity_id": null,
+            "root_entity_id": "4a3d976b-9116-4d07-849a-67f57c2d67c5",
+            "replaced_model_id": null
+          },
+          "modelId": "uitextguirenderer",
+          "@components": [
+            {
+              "@type": "MOD.Core.UITransformComponent",
+              "AlignmentOption": 0,
+              "AnchorsMax": {
+                "x": 0.5,
+                "y": 0.5
+              },
+              "AnchorsMin": {
+                "x": 0.5,
+                "y": 0.5
+              },
+              "MobileOnly": false,
+              "OffsetMax": {
+                "x": 48.9732,
+                "y": -50.13884
+              },
+              "OffsetMin": {
+                "x": -51.0268,
+                "y": -88.58656
+              },
+              "Pivot": {
+                "x": 0.5,
+                "y": 0.5
+              },
+              "RectSize": {
+                "x": 100.0,
+                "y": 38.4477234
+              },
+              "UIMode": 1,
+              "UIVersion": 2,
+              "anchoredPosition": {
+                "x": -1.0268,
+                "y": -69.3627
+              },
+              "Rotation": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              },
+              "Position": {
+                "x": -1.0268,
+                "y": -69.3627,
+                "z": 0.0
+              },
+              "QuaternionRotation": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0,
+                "w": 1.0
+              },
+              "ZRotation": 0.0,
+              "Enable": true
+            },
+            {
+              "@type": "MOD.Core.TextGUIRendererComponent",
+              "OverrideSorting": false,
+              "Text": "怪物名稱",
+              "Enable": true
+            }
+          ],
+          "@version": 1
+        }
+      },
+      {
+        "id": "b72b6388-0cfd-4815-a637-c5132f2d75df",
+        "path": "/ui/BattleGroup/MonsterOptionContainer/MonsterOptionTemplate/SelectedGlow",
+        "componentNames": "MOD.Core.UITransformComponent,MOD.Core.SpriteGUIRendererComponent",
+        "jsonString": {
+          "name": "SelectedGlow",
+          "path": "/ui/BattleGroup/MonsterOptionContainer/MonsterOptionTemplate/SelectedGlow",
+          "nameEditable": true,
+          "enable": false,
+          "visible": true,
+          "localize": true,
+          "displayOrder": 2,
+          "pathConstraints": "/////",
+          "revision": 1,
+          "origin": {
+            "type": "Model",
+            "entry_id": "uisprite",
+            "sub_entity_id": null,
+            "root_entity_id": "b72b6388-0cfd-4815-a637-c5132f2d75df",
+            "replaced_model_id": null
+          },
+          "modelId": "uisprite",
+          "@components": [
+            {
+              "@type": "MOD.Core.UITransformComponent",
+              "AlignmentOption": 0,
+              "AnchorsMax": {
+                "x": 0.5,
+                "y": 0.5
+              },
+              "AnchorsMin": {
+                "x": 0.5,
+                "y": 0.5
+              },
+              "MobileOnly": false,
+              "OffsetMax": {
+                "x": 118.171188,
+                "y": 98.6842
+              },
+              "OffsetMin": {
+                "x": -121.852188,
+                "y": -98.6052
+              },
+              "Pivot": {
+                "x": 0.5,
+                "y": 0.5
+              },
+              "RectSize": {
+                "x": 240.023376,
+                "y": 197.2894
+              },
+              "UIMode": 1,
+              "UIVersion": 2,
+              "anchoredPosition": {
+                "x": -1.8405,
+                "y": 0.0395
+              },
+              "Rotation": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 270.999969
+              },
+              "Position": {
+                "x": -1.8405,
+                "y": 0.0395,
+                "z": 0.0
+              },
+              "QuaternionRotation": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": -0.700909436,
+                "w": 0.7132503
+              },
+              "ZRotation": 270.999969,
+              "Enable": true
+            },
+            {
+              "@type": "MOD.Core.SpriteGUIRendererComponent",
+              "ImageRUID": {
+                "DataId": "f9a0f2113c114136836de0b35a027c53"
+              },
+              "OverrideSorting": false,
+              "PlayRate": 0.2,
+              "PreserveSprite": 0,
+              "Color": {
+                "r": 1.0,
+                "g": 1.0,
+                "b": 1.0,
+                "a": 0.7
+              },
+              "DropShadow": false,
+              "FlipY": true,
+              "Outline": false,
+              "Type": 1,
+              "Enable": true
+            }
+          ],
+          "@version": 1
+        }
+      },
+      {
+        "id": "8cf02510-14db-4107-b74a-fa1f3182304b",
+        "path": "/ui/BattleGroup/ResultWin",
+        "componentNames": "MOD.Core.UITransformComponent,MOD.Core.SpriteGUIRendererComponent",
+        "jsonString": {
+          "name": "ResultWin",
+          "path": "/ui/BattleGroup/ResultWin",
+          "nameEditable": true,
+          "enable": false,
           "visible": true,
           "localize": true,
           "displayOrder": 2,
@@ -434,12 +750,12 @@
           "revision": 1,
           "origin": {
             "type": "Model",
-            "entry_id": "uibutton",
+            "entry_id": "uisprite",
             "sub_entity_id": null,
-            "root_entity_id": "e8ece61f-c458-49db-94cd-e218d4009416",
+            "root_entity_id": "8cf02510-14db-4107-b74a-fa1f3182304b",
             "replaced_model_id": null
           },
-          "modelId": "uibutton",
+          "modelId": "uisprite",
           "@components": [
             {
               "@type": "MOD.Core.UITransformComponent",
@@ -454,31 +770,26 @@
               },
               "MobileOnly": false,
               "OffsetMax": {
-                "x": 12.1778412,
-                "y": -333.215424
+                "x": 549.6738,
+                "y": 604.704
               },
               "OffsetMin": {
-                "x": -91.78584,
-                "y": -430.681366
+                "x": -678.3262,
+                "y": 136.70401
               },
               "Pivot": {
                 "x": 0.5,
                 "y": 0.5
               },
               "RectSize": {
-                "x": 103.963684,
-                "y": 97.46595
+                "x": 1228.0,
+                "y": 468.0
               },
               "UIMode": 1,
-              "UIScale": {
-                "x": 1.0,
-                "y": 1.0,
-                "z": 1.0
-              },
               "UIVersion": 2,
               "anchoredPosition": {
-                "x": -39.804,
-                "y": -381.9484
+                "x": -64.3262,
+                "y": 370.704
               },
               "Rotation": {
                 "x": 0.0,
@@ -486,8 +797,8 @@
                 "z": 0.0
               },
               "Position": {
-                "x": -39.804,
-                "y": -381.9484,
+                "x": -64.3262,
+                "y": 370.704,
                 "z": 0.0
               },
               "QuaternionRotation": {
@@ -496,79 +807,15 @@
                 "z": 0.0,
                 "w": 1.0
               },
-              "Scale": {
-                "x": 1.0,
-                "y": 1.0,
-                "z": 1.0
-              },
               "ZRotation": 0.0,
               "Enable": true
             },
             {
               "@type": "MOD.Core.SpriteGUIRendererComponent",
-              "OverrideSorting": false,
-              "SortingLayer": "MapLayer0",
-              "Enable": true
-            },
-            {
-              "@type": "MOD.Core.ButtonComponent",
-              "Colors": {
-                "NormalColor": {
-                  "r": 1.0,
-                  "g": 1.0,
-                  "b": 1.0,
-                  "a": 1.0
-                },
-                "HighlightedColor": {
-                  "r": 0.9607843,
-                  "g": 0.9607843,
-                  "b": 0.9607843,
-                  "a": 1.0
-                },
-                "PressedColor": {
-                  "r": 0.784313738,
-                  "g": 0.784313738,
-                  "b": 0.784313738,
-                  "a": 1.0
-                },
-                "SelectedColor": {
-                  "r": 0.9607843,
-                  "g": 0.9607843,
-                  "b": 0.9607843,
-                  "a": 1.0
-                },
-                "DisabledColor": {
-                  "r": 0.784313738,
-                  "g": 0.784313738,
-                  "b": 0.784313738,
-                  "a": 0.5019608
-                },
-                "ColorMultiplier": 1.0,
-                "FadeDuration": 0.1
-              },
-              "ImageRUIDs": {
-                "HighlightedSprite": null,
-                "PressedSprite": null,
-                "SelectedSprite": null,
-                "DisabledSprite": null
+              "ImageRUID": {
+                "DataId": "f37f29f993884aaea7238a2fe8b93ec0"
               },
               "OverrideSorting": false,
-              "Enable": true
-            },
-            {
-              "@type": "MOD.Core.TextComponent",
-              "FontColor": {
-                "r": 1.0,
-                "g": 1.0,
-                "b": 1.0,
-                "a": 1.0
-              },
-              "OutlineDistance": {
-                "x": 1.0,
-                "y": -1.0
-              },
-              "OverrideSorting": false,
-              "Text": "戰士",
               "Enable": true
             }
           ],
@@ -576,14 +823,14 @@
         }
       },
       {
-        "id": "18438b27-153d-40ff-8b66-b9c182441e89",
-        "path": "/ui/BattleGroup/BtnStart",
-        "componentNames": "MOD.Core.UITransformComponent,MOD.Core.SpriteGUIRendererComponent,MOD.Core.ButtonComponent,MOD.Core.TextComponent",
+        "id": "b24d75ee-1f2b-4453-9e78-a294cfb7ecd1",
+        "path": "/ui/BattleGroup/ResultLose",
+        "componentNames": "MOD.Core.UITransformComponent,MOD.Core.SpriteGUIRendererComponent",
         "jsonString": {
-          "name": "BtnStart",
-          "path": "/ui/BattleGroup/BtnStart",
+          "name": "ResultLose",
+          "path": "/ui/BattleGroup/ResultLose",
           "nameEditable": true,
-          "enable": true,
+          "enable": false,
           "visible": true,
           "localize": true,
           "displayOrder": 3,
@@ -591,12 +838,12 @@
           "revision": 1,
           "origin": {
             "type": "Model",
-            "entry_id": "uibutton",
+            "entry_id": "uisprite",
             "sub_entity_id": null,
-            "root_entity_id": "e8ece61f-c458-49db-94cd-e218d4009416",
+            "root_entity_id": "8cf02510-14db-4107-b74a-fa1f3182304b",
             "replaced_model_id": null
           },
-          "modelId": "uibutton",
+          "modelId": "uisprite",
           "@components": [
             {
               "@type": "MOD.Core.UITransformComponent",
@@ -611,31 +858,26 @@
               },
               "MobileOnly": false,
               "OffsetMax": {
-                "x": 310.851929,
-                "y": -335.126617
+                "x": 518.5,
+                "y": 439.0
               },
               "OffsetMin": {
-                "x": 105.610672,
-                "y": -432.59256
+                "x": -646.5,
+                "y": 305.0
               },
               "Pivot": {
                 "x": 0.5,
                 "y": 0.5
               },
               "RectSize": {
-                "x": 205.241241,
-                "y": 97.46595
+                "x": 1165.0,
+                "y": 134.0
               },
               "UIMode": 1,
-              "UIScale": {
-                "x": 1.0,
-                "y": 1.0,
-                "z": 1.0
-              },
               "UIVersion": 2,
               "anchoredPosition": {
-                "x": 208.2313,
-                "y": -383.8596
+                "x": -64.0,
+                "y": 372.0
               },
               "Rotation": {
                 "x": 0.0,
@@ -643,8 +885,8 @@
                 "z": 0.0
               },
               "Position": {
-                "x": 208.2313,
-                "y": -383.8596,
+                "x": -64.0,
+                "y": 372.0,
                 "z": 0.0
               },
               "QuaternionRotation": {
@@ -653,79 +895,103 @@
                 "z": 0.0,
                 "w": 1.0
               },
-              "Scale": {
-                "x": 1.0,
-                "y": 1.0,
-                "z": 1.0
+              "ZRotation": 0.0,
+              "Enable": true
+            },
+            {
+              "@type": "MOD.Core.SpriteGUIRendererComponent",
+              "ImageRUID": {
+                "DataId": "e5070b89bdb34ce68a922fa30dc1a169"
+              },
+              "OverrideSorting": false,
+              "Enable": true
+            }
+          ],
+          "@version": 1
+        }
+      },
+      {
+        "id": "b5fc5f47-7bdc-4887-ac60-0123fd2d0d03",
+        "path": "/ui/BattleGroup/ResultDraw",
+        "componentNames": "MOD.Core.UITransformComponent,MOD.Core.SpriteGUIRendererComponent",
+        "jsonString": {
+          "name": "ResultDraw",
+          "path": "/ui/BattleGroup/ResultDraw",
+          "nameEditable": true,
+          "enable": false,
+          "visible": true,
+          "localize": true,
+          "displayOrder": 4,
+          "pathConstraints": "///",
+          "revision": 1,
+          "origin": {
+            "type": "Model",
+            "entry_id": "uisprite",
+            "sub_entity_id": null,
+            "root_entity_id": "8cf02510-14db-4107-b74a-fa1f3182304b",
+            "replaced_model_id": null
+          },
+          "modelId": "uisprite",
+          "@components": [
+            {
+              "@type": "MOD.Core.UITransformComponent",
+              "AlignmentOption": 0,
+              "AnchorsMax": {
+                "x": 0.5,
+                "y": 0.5
+              },
+              "AnchorsMin": {
+                "x": 0.5,
+                "y": 0.5
+              },
+              "MobileOnly": false,
+              "OffsetMax": {
+                "x": 518.5,
+                "y": 439.0
+              },
+              "OffsetMin": {
+                "x": -646.5,
+                "y": 305.0
+              },
+              "Pivot": {
+                "x": 0.5,
+                "y": 0.5
+              },
+              "RectSize": {
+                "x": 1165.0,
+                "y": 134.0
+              },
+              "UIMode": 1,
+              "UIVersion": 2,
+              "anchoredPosition": {
+                "x": -64.0,
+                "y": 372.0
+              },
+              "Rotation": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              },
+              "Position": {
+                "x": -64.0,
+                "y": 372.0,
+                "z": 0.0
+              },
+              "QuaternionRotation": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0,
+                "w": 1.0
               },
               "ZRotation": 0.0,
               "Enable": true
             },
             {
               "@type": "MOD.Core.SpriteGUIRendererComponent",
-              "OverrideSorting": false,
-              "SortingLayer": "MapLayer0",
-              "Enable": true
-            },
-            {
-              "@type": "MOD.Core.ButtonComponent",
-              "Colors": {
-                "NormalColor": {
-                  "r": 1.0,
-                  "g": 1.0,
-                  "b": 1.0,
-                  "a": 1.0
-                },
-                "HighlightedColor": {
-                  "r": 0.9607843,
-                  "g": 0.9607843,
-                  "b": 0.9607843,
-                  "a": 1.0
-                },
-                "PressedColor": {
-                  "r": 0.784313738,
-                  "g": 0.784313738,
-                  "b": 0.784313738,
-                  "a": 1.0
-                },
-                "SelectedColor": {
-                  "r": 0.9607843,
-                  "g": 0.9607843,
-                  "b": 0.9607843,
-                  "a": 1.0
-                },
-                "DisabledColor": {
-                  "r": 0.784313738,
-                  "g": 0.784313738,
-                  "b": 0.784313738,
-                  "a": 0.5019608
-                },
-                "ColorMultiplier": 1.0,
-                "FadeDuration": 0.1
-              },
-              "ImageRUIDs": {
-                "HighlightedSprite": null,
-                "PressedSprite": null,
-                "SelectedSprite": null,
-                "DisabledSprite": null
+              "ImageRUID": {
+                "DataId": "e5070b89bdb34ce68a922fa30dc1a169"
               },
               "OverrideSorting": false,
-              "Enable": true
-            },
-            {
-              "@type": "MOD.Core.TextComponent",
-              "FontColor": {
-                "r": 1.0,
-                "g": 1.0,
-                "b": 1.0,
-                "a": 1.0
-              },
-              "OutlineDistance": {
-                "x": 1.0,
-                "y": -1.0
-              },
-              "OverrideSorting": false,
-              "Text": "開始",
               "Enable": true
             }
           ],
