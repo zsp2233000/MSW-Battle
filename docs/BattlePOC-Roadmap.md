@@ -15,7 +15,7 @@
 |---|---|---|
 | M1 | 單人對固定六隻敵軍的完整 POC → `BattlePOC-M1-GDD.md` | 🔨 active (Phase 1/5 done) |
 | M2 | 雙方玩家一次布陣與對戰同步 | planned |
-| M3 | 依 POC 測試結果擴充關卡、兵種與平衡資料化 | candidate |
+| M3 | 依 POC 測試結果擴充關卡、怪物種類與既有怪物資料表 | candidate |
 
 ## Backlog（需要，但尚未排入）
 

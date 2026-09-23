@@ -3,6 +3,7 @@
 > 目的：收集「讓坦克加入固定自動戰鬥」所需的人類資產資訊。
 > 
 > 本表只建立資源契約，不會自動搜尋、生成、上傳或套用資產。`BattleGroup.ui` 保留在專案中，但 Issue #3 不依賴部署 UI。
+> 本表保留 Issue #3／#4 的資產交付紀錄。新 M1 設計以每隻具名怪物為 `MonsterData` 的一列，個別保存 RUID 與命中影格；同一 RUID 可填在多列。HP 條與 DamageSkin 維持固定 component 設定。
 
 ## 填寫規則
 
@@ -14,7 +15,7 @@
 
 ## Issue #3 必填資源
 
-### 坦克（戰士）
+### 坦克
 
 坦克沒有一般攻擊，因此不需要 `attack` 動畫。接觸傷害、冷卻與擊退規則由程式處理。
 
@@ -31,9 +32,9 @@
 | Tank die SFX      | Sound RUID         | `c49646f7299e4c6e81e953c96e20b294` | ✅    | 已接入坦克死亡時播放                 |
 | Tank `attack`     | AnimationClip RUID | `N/A`                              | ⏸    | Issue #3 要求坦克沒有一般攻擊        |
 
-### 固定敵方突擊單位（戰士）
+### 固定敵方戰士
 
-Issue #3 延續既有一對一自動戰鬥，若敵方突擊仍使用人類動畫，請填入下列資源。
+Issue #3 延續既有一對一自動戰鬥，若敵方戰士仍使用人類動畫，請填入下列資源。
 
 | 欄位                        | 資產類型           | RUID／值                           | 狀態 | 備註                                  |
 | --------------------------- | ------------------ | ---------------------------------- | ---- | ------------------------------------- |
@@ -44,7 +45,7 @@ Issue #3 延續既有一對一自動戰鬥，若敵方突擊仍使用人類動�
 | Assault `onhit`             | AnimationClip RUID | `9a8d4f661f3944a4a8d2b97eaa6c4191` | ⬜    | 被擊中                                |
 | Assault `die`               | AnimationClip RUID | `18a17c37dd4f4b11b5a41452d4d5e7ef` | ⬜    | 死亡                                  |
 | Assault `hit` effect        | Effect RUID        | `a848d7b003434dd09cb6eb9d91c54fce` | ⬜    | 攻擊命中對方時，顯示在被擊中的目標身上 |
-| Assault attack impact frame | Frame／秒數        | `3`                                | ⬜    | 攻擊動畫中實際造成命中的時間點        |
+| Assault attack impact frame | 影格（第 1 幀起算） | `3`                                | ⬜    | 攻擊動畫中實際造成命中的影格；怪物資料欄空白預設為 1 |
 | Assault attack SFX          | Sound RUID         | `3d5f172ea5cf43c4ab3ad6228b7666cd` | ⬜    | 戰士攻擊時播放                        |
 | Assault onhit SFX           | Sound RUID         | `2b511b5a593949748ccff01e35db54c5` | ✅    | 已接入坦克被敵方攻擊時播放            |
 | Assault die SFX             | Sound RUID         | `c11a5fe2a6d64731885daee991380e51` | ⬜    | 戰士死亡時播放                        |
@@ -58,14 +59,14 @@ Issue #3 延續既有一對一自動戰鬥，若敵方突擊仍使用人類動�
 
 | 欄位                        | 資產類型           | RUID／值     | 狀態 | 備註                                          |
 | --------------------------- | ------------------ | ------------ | ---- | --------------------------------------------- |
-| Shooter ModelId             | Model ID           | `battleunit` | ✅    | 可與坦克（戰士）共用模型，或填入專用 Model ID |
+| Shooter ModelId             | Model ID           | `battleunit` | ✅    | 可與坦克、戰士共用模型，或填入專用 Model ID |
 | Shooter `stand`             | AnimationClip RUID | `8c2ec5bf58894061a19479ed7545637b`        | ⬜    | 待機                                          |
 | Shooter `move`              | AnimationClip RUID | `5004df97436a49458160b2c48e9f3748`        | ⬜    | 直線移動                                      |
 | Shooter `attack`            | AnimationClip RUID | `db9d6c0a6d0b42b6a4032d0cc46a2526`        | ⬜    | 遠距攻擊                                      |
 | Shooter `onhit`             | AnimationClip RUID | `8fed6100596948f5aa8075509117a58f`        | ⬜    | 被擊中                                        |
 | Shooter `die`               | AnimationClip RUID | `38832c224bdd4fdb8419a011dbc47b67`        | ⬜    | 死亡                                          |
 | Shooter `hit` effect        | Effect RUID        | `1f2bdb3b15a145ea8f3db3fbfb61296b`        | ⬜    | hitscan 命中對方時，顯示在被擊中的目標身上      |
-| Shooter attack impact frame | Frame／秒數        | `9`        | ⬜    | 攻擊動畫中實際觸發 hitscan 命中的時間點       |
+| Shooter attack impact frame | 影格（第 1 幀起算） | `9`        | ⬜    | 攻擊動畫中實際觸發 hitscan 命中的影格；怪物資料欄空白預設為 1 |
 | Shooter attack SFX          | Sound RUID         | `ef19be8747764615ba48d1f0c8dc6f5d`        | ⬜    | 射手開始攻擊時播放                            |
 | Shooter onhit SFX           | Sound RUID         | `c29a8a3c724d45b8b5fe7a51a7877e24`        | ⬜    | 射手被擊中時播放                              |
 | Shooter die SFX             | Sound RUID         | `0348f6fd3f194e3b975e8aa9bcab112f`        | ⬜    | 射手死亡時播放                                |
