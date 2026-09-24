@@ -486,9 +486,15 @@ script BattleSession extends Component
     end
 
     @ExecSpace("ServerOnly")
+    method boolean CanStartBattleWithPlayerCount(integer playerCount)
+        -- Keep the accepted roster range explicit and independently verifiable.
+        return self.Phase == "DEPLOYMENT" and playerCount >= 1 and playerCount <= self.DeploymentMaxUnits
+    end
+
+    @ExecSpace("ServerOnly")
     method boolean TryStartBattle()
         -- Keep the phase gate available to both the player RPC and Maker probes.
-        if self.Phase ~= "DEPLOYMENT" or self.PlayerAlive < 1 then return false end
+        if not self:CanStartBattleWithPlayerCount(self.PlayerAlive) then return false end
         self.InitialPlayerAlive = self.PlayerAlive
         self.InitialEnemyAlive = self.EnemyAlive
         self.Phase = "BATTLE"

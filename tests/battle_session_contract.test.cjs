@@ -270,6 +270,7 @@ test("Issue #7 keeps deployment authority on the map session and uses IDs for ca
   assert.match(session, /DeploymentMinDistance = 0\.6/);
   assert.match(session, /DeploymentMaxUnits = 6/);
   assert.match(session, /method boolean TryStartBattle\(\)/);
+  assert.match(session, /method boolean CanStartBattleWithPlayerCount\(integer playerCount\)/);
   assert.match(input, /self\.optionTemplate:Clone\(/);
   assert.match(input, /portrait\.ImageRUID = DataRef\(standRUID\)/);
   assert.match(input, /self\.selectedMonsterId = monsterId/);
@@ -281,6 +282,17 @@ test("Issue #7 keeps deployment authority on the map session and uses IDs for ca
   assert.match(uiProbe, /#adapter\.optionCards == #adapter\.optionData/);
   assert.match(uiProbe, /portrait\.ImageRUID\.DataId == option\[3\]/);
   assert.match(uiProbe, /enabledGlows == 1/);
+  assert.match(input, /method void SyncDeploymentControls\(\)/);
+  assert.match(input, /self\.optionContainer:SetEnable\(enabled\)/);
+  assert.match(input, /self\.startButton:SetEnable\(enabled\)/);
+  assert.match(input, /glow = glowEntity, clickAction = clickAction/);
+  assert.match(input, /method void HandleBattlefieldClick\(Vector3 position\)/);
+  assert.match(uiProbe, /selectedCard\.clickAction\(\)/);
+  assert.match(uiProbe, /HandleBattlefieldClick\(Vector3\(-4, 0, 0\)\)/);
+  assert.match(uiProbe, /startButtonAction\(\)/);
+  assert.match(uiProbe, /natural one-unit battle reaches a result/);
+  assert.match(uiProbe, /exactly its matching result entity/);
+  assert.match(probe, /for playerCount = 1, 6 do/);
 });
 
 test("Issue #5 publishes one strict MonsterData dataset for the three initial monsters", () => {

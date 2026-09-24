@@ -1,5 +1,5 @@
--- Run in Maker Play with context=server_main during deployment.
--- Leave the production roster untouched; observe a complete natural battle and its terminal state.
+-- Run in Maker Play with context=server_main after the UI has started a six-versus-six battle.
+-- Observe the production roster; observe a complete natural battle and terminal state.
 local map = _EntityService:GetEntityByPath("/maps/map01")
 local session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
 local failures = 0
@@ -18,19 +18,14 @@ if not isvalid(session) then
     return
 end
 
-local roster = { "monster_tank", "monster_tank", "monster_warrior", "monster_warrior", "monster_shooter", "monster_shooter" }
-local positions = { Vector3(-4.4, 1, 0), Vector3(-4.4, 0, 0), Vector3(-4.4, -1, 0), Vector3(-4.4, -2, 0), Vector3(-4.4, -3, 0), Vector3(-3.4, -1, 0) }
-for index, monsterId in ipairs(roster) do session:TryDeployMonster(monsterId, positions[index]) end
-session:TryStartBattle()
-
 check(session.InitialPlayerAlive == 6 and session.InitialEnemyAlive == 6 and session:IsBattleActive(),
-    "mixed six-versus-six starts after deployment")
+    "UI-started mixed six-versus-six battle is active")
 
-local rosterNames = {
-    "M1_Player_1", "M1_Player_2", "M1_Player_3", "M1_Player_4",
-    "M1_Player_5", "M1_Player_6", "M1_EnemyTank", "M1_EnemyTank2",
-    "M1_EnemyAssault", "M1_EnemyAssault2", "M1_EnemyShooter", "M1_EnemyShooter2",
-}
+local rosterRecords = {}
+for _, record in ipairs(session._T.units) do
+    if record.faction == "PLAYER" or record.faction == "ENEMY" then table.insert(rosterRecords, record) end
+end
+check(#rosterRecords == 12, "observer captures all twelve production roster members")
 local elapsed = 0
 
 local function observe()
@@ -54,31 +49,33 @@ local function observe()
     check(resultEvents == 1, "exactly one RESULT event is published")
 
     local terminal = {}
-    for _, name in ipairs(rosterNames) do
-        local entity = _EntityService:GetEntityByPath("/maps/map01/" .. name)
-        local unit = isvalid(entity) and entity:GetComponent("script.BattleUnit") or nil
+    for index, record in ipairs(rosterRecords) do
+        local entity = record.entity
+        local unit = record.unit
+        local label = record.faction .. " " .. record.monsterId .. " #" .. tostring(index)
         if isvalid(unit) then
             local position = entity:GetComponent("TransformComponent").WorldPosition
-            terminal[name] = { hp = unit.Hp, attacks = unit.AttackSerial, x = position.x, y = position.y }
+            terminal[index] = { hp = unit.Hp, attacks = unit.AttackSerial, x = position.x, y = position.y }
             check(unit.CurrentTargetName == "" and unit.CombatState == "RESULT_STOP",
-                name .. " has stopped targeting and movement")
+                label .. " has stopped targeting and movement")
         else
-            check(false, name .. " remains inspectable after RESULT")
+            check(false, label .. " remains inspectable after RESULT")
         end
     end
 
     _TimerService:SetTimerOnce(function()
-        for _, name in ipairs(rosterNames) do
-            local entity = _EntityService:GetEntityByPath("/maps/map01/" .. name)
-            local unit = isvalid(entity) and entity:GetComponent("script.BattleUnit") or nil
-            local before = terminal[name]
+        for index, record in ipairs(rosterRecords) do
+            local entity = record.entity
+            local unit = record.unit
+            local before = terminal[index]
+            local label = record.faction .. " " .. record.monsterId .. " #" .. tostring(index)
             if isvalid(unit) and before ~= nil then
                 local position = entity:GetComponent("TransformComponent").WorldPosition
                 check(unit.Hp == before.hp and unit.AttackSerial == before.attacks and
                     position.x == before.x and position.y == before.y,
-                    name .. " has no damage, attacks, or movement after RESULT")
+                    label .. " has no damage, attacks, or movement after RESULT")
             else
-                check(false, name .. " remains inspectable after RESULT")
+                check(false, label .. " remains inspectable after RESULT")
             end
         end
         if failures == 0 then

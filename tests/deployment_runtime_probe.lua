@@ -43,6 +43,11 @@ check(session:TryDeployMonster("monster_warrior", Vector3(-3.8, 1, 0)), "differe
 check(session:TryDeployMonster("monster_shooter", Vector3(-3.2, 1, 0)), "third type deploys")
 check(session:TryDeployMonster("monster_tank", Vector3(-2.6, 1, 0)), "same MonsterId can repeat")
 check(session:TryDeployMonster("monster_warrior", Vector3(-2, 1, 0)), "inclusive right boundary accepts sixth unit")
+for playerCount = 1, 6 do
+    check(session:CanStartBattleWithPlayerCount(playerCount), "start accepts player count " .. tostring(playerCount))
+end
+check(not session:CanStartBattleWithPlayerCount(0), "start rejects player count zero")
+check(not session:CanStartBattleWithPlayerCount(7), "start rejects player count above capacity")
 check(not session:TryDeployMonster("monster_shooter", Vector3(-2, 0, 0)), "seventh unit is rejected")
 check(session.PlayerAlive == 6 and session.EnemyAlive == 6, "rejections preserve roster counts")
 
@@ -51,6 +56,7 @@ check(session.PlayerAlive == 5, "removal releases one roster slot")
 check(session:TryDeployMonster("monster_shooter", Vector3(-2, -3, 0)), "inclusive bottom boundary accepts replacement")
 check(session:TryStartBattle(), "one to six units can start battle")
 check(session.Phase == "BATTLE" and session.InitialPlayerAlive == 6, "start locks six-unit roster")
+check(not session:CanStartBattleWithPlayerCount(1), "start gate closes after battle begins")
 check(not session:TryDeployMonster("monster_tank", Vector3(-4, -2, 0)), "deployment after start is rejected")
 local beforeRemove = session.PlayerAlive
 session:RemoveDeployedUnit(#session._T.units)

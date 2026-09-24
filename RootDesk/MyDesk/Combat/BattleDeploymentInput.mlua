@@ -5,6 +5,7 @@ script BattleDeploymentInput extends Component
     property any optionTemplate = nil
     property any optionContainer = nil
     property any startButton = nil
+    property any startButtonAction = nil
     property any resultWin = nil
     property any resultLose = nil
     property any resultDraw = nil
@@ -14,6 +15,7 @@ script BattleDeploymentInput extends Component
     property any screenTouchHandler = nil
     property string selectedMonsterId = ""
     property string displayedResult = ""
+    property string observedPhase = "__UNINITIALIZED__"
     property boolean optionsReady = false
     property number optionsRetryCountdown = 0
 
@@ -31,9 +33,12 @@ script BattleDeploymentInput extends Component
         self.resultLose = self:FindNamedUiEntity("ResultLose")
         self.resultDraw = self:FindNamedUiEntity("ResultDraw")
         self:SetResultEntities("")
+        self.observedPhase = "__UNINITIALIZED__"
+        self:SyncDeploymentControls()
         if isvalid(self.optionTemplate) then self.optionTemplate:SetEnable(false) end
         if isvalid(self.startButton) and isvalid(self.startButton:GetComponent("ButtonComponent")) then
-            local callback = self.startButton:ConnectEvent(ButtonClickEvent, function() self:HandleStartButton() end)
+            self.startButtonAction = function() self:HandleStartButton() end
+            local callback = self.startButton:ConnectEvent(ButtonClickEvent, self.startButtonAction)
             table.insert(self.buttonBindings, { entity = self.startButton, eventCallback = callback })
         end
         self.screenTouchHandler = _InputService:ConnectEvent(ScreenTouchEvent, self.HandleScreenTouch)
@@ -45,6 +50,7 @@ script BattleDeploymentInput extends Component
     method void OnUpdate(number delta)
         -- Retry the catalog request until server initialization completes and follow the synced result.
         if not isvalid(self.session) then return end
+        self:SyncDeploymentControls()
         if not self.optionsReady and self.session.Phase == "DEPLOYMENT" then
             self.optionsRetryCountdown = self.optionsRetryCountdown - delta
             if self.optionsRetryCountdown <= 0 then
@@ -75,6 +81,7 @@ script BattleDeploymentInput extends Component
         end
         self.optionCards = {}
         self.optionData = {}
+        self.startButtonAction = nil
         self.session = nil
     end
 
@@ -89,7 +96,7 @@ script BattleDeploymentInput extends Component
     @ExecSpace("ClientOnly")
     method void ShowMonsterOptions(table options)
         -- Clone one card per validated MonsterData row and bind its stable ID.
-        if self.optionsReady or not isvalid(self.optionTemplate) or not isvalid(self.optionContainer) then return end
+        if self.optionsReady or not isvalid(self.session) or self.session.Phase ~= "DEPLOYMENT" or not isvalid(self.optionTemplate) or not isvalid(self.optionContainer) then return end
         self.optionData = options
         local containerTransform = self.optionContainer:GetComponent("UITransformComponent")
         local templateTransform = self.optionTemplate:GetComponent("UITransformComponent")
@@ -139,9 +146,10 @@ script BattleDeploymentInput extends Component
                     local glow = glowEntity:GetComponent("SpriteGUIRendererComponent")
                     if isvalid(glow) then glow.RaycastTarget = false end
                 end
-                local callback = card:ConnectEvent(ButtonClickEvent, function() self:SelectMonsterCard(monsterId, glowEntity) end)
+                local clickAction = function() self:SelectMonsterCard(monsterId, glowEntity) end
+                local callback = card:ConnectEvent(ButtonClickEvent, clickAction)
                 table.insert(self.buttonBindings, { entity = card, eventCallback = callback })
-                table.insert(self.optionCards, { entity = card, monsterId = monsterId, glow = glowEntity })
+                table.insert(self.optionCards, { entity = card, monsterId = monsterId, glow = glowEntity, clickAction = clickAction })
             end
         end
         self.optionsReady = true
@@ -166,12 +174,32 @@ script BattleDeploymentInput extends Component
     end
 
     @ExecSpace("ClientOnly")
+    method void SyncDeploymentControls()
+        -- Hide selection and start controls as soon as the synchronized phase leaves deployment.
+        if not isvalid(self.session) then return end
+        local phase = self.session.Phase
+        if phase == self.observedPhase then return end
+        self.observedPhase = phase
+        local enabled = phase == "DEPLOYMENT"
+        if isvalid(self.optionContainer) then self.optionContainer:SetEnable(enabled) end
+        if isvalid(self.startButton) then self.startButton:SetEnable(enabled) end
+        log("[M1][DeploymentUI] deployment controls=" .. tostring(enabled) .. " phase=" .. tostring(phase))
+    end
+
+    @ExecSpace("ClientOnly")
     method void HandleScreenTouch(ScreenTouchEvent event)
         -- Send a non-UI left click to the server for remove-or-deploy handling.
         if event == nil or event.TouchId ~= 1 or not isvalid(self.session) or self.session.Phase ~= "DEPLOYMENT" then return end
         if _InputService:IsPointerOverUI(event.TouchId) then return end
         local world = _UILogic:ScreenToWorldPosition(event.TouchPoint)
-        self.session:RequestBattlefieldClick(self.selectedMonsterId, Vector3(world.x, world.y, 0))
+        self:HandleBattlefieldClick(Vector3(world.x, world.y, 0))
+    end
+
+    @ExecSpace("ClientOnly")
+    method void HandleBattlefieldClick(Vector3 position)
+        -- Keep the production world-click RPC path callable by input and runtime probes.
+        if position == nil or not isvalid(self.session) or self.session.Phase ~= "DEPLOYMENT" then return end
+        self.session:RequestBattlefieldClick(self.selectedMonsterId, position)
     end
 
     @ExecSpace("ClientOnly")
