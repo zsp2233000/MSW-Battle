@@ -6,7 +6,7 @@
 
 | System | Built | Where (key files) | Notes / gotchas |
 |---|---|---|---|
-| Battle session | `@Component` | `RootDesk/MyDesk/Combat/BattleSession.mlua` | Server-authoritative Issue #5 session; loads one strict `MonsterData` table, starts fixed six-versus-six (2 Tank + 2 Warrior + 2 Shooter per faction), batches damage, and guards the single result boundary. |
+| Battle session | `@Component` | `RootDesk/MyDesk/Combat/BattleSession.mlua` | Issue #7 file-side flow loads strict `MonsterData`, spawns the fixed six enemies, accepts server-validated deployment of 1–6 player units, then starts the existing battle and result boundary. Maker verification pending. |
 | Monster data | UserDataSet / CSV | `RootDesk/MyDesk/Combat/MonsterData.userdataset`, `RootDesk/MyDesk/Combat/MonsterData.csv` | Stable `MonsterId` rows hold names, types, combat values, impact frames, and explicit presentation RUIDs; missing, duplicate, invalid, or mismatched rows fail configuration. |
 | Battle unit | `@Component` | `RootDesk/MyDesk/Combat/BattleUnit.mlua` | Retargets every 0.5s, moves with `MovementComponent`, branches Tank contact from Assault/Shooter attack, carries synced `MonsterId`/name, applies hit stop, death hold, and post-result stop. |
 | Tank contact attack | `@Component` / `AttackComponent` | `RootDesk/MyDesk/Combat/TankContactAttack.mlua` | Native `AttackFrom` → `Hit` path; fixed 40 damage, independent 2.0s per-target cooldown, enemy-only 0.8 knockback queue; presentation owns attack SFX while collision SFX/VFX remain unused. |
@@ -15,10 +15,10 @@
 | Hit effect presentation | `@Component` | `RootDesk/MyDesk/Combat/BattleHitEffectPresentation.mlua` | Client-side attached hit effect; the attacker's RUID is resolved on the server and rendered on the defender entity. |
 | Assault attack | `@Component` / `AttackComponent` | `RootDesk/MyDesk/Combat/AssaultAttack.mlua` | Existing native Attack→Hit path with 0.7s interval, 0.18s impact delay, fixed 35 damage, and faction filtering. |
 | Unit model | `.model` | `RootDesk/MyDesk/Models/Monsters/BattleUnit.model` | `KinematicbodyComponent` for `RectTile`; placeholder `SpriteRUID` remains the model contract, while Tank presentation applies supplied clips at runtime. |
-| Battle map | `.map` | `map/map01.map` | `TileMapMode=1` (`RectTile`); map root owns only `script.BattleSession` for the active Issue #5 runtime. |
+| Battle map | `.map` | `map/map01.map` | `TileMapMode=1` (`RectTile`); map root owns `script.BattleSession`, `script.BattleFixedCamera`, and `script.BattleDeploymentInput`. |
 | DefaultPlayer / camera | runtime logic | `BattleSession.mlua` (`DisableDefaultPlayer`) | DefaultPlayer remains visible while controller, body, collision, trigger, hit, and target participation are disabled; camera is centered, zoomed out, and offset down to show the full field. |
-| Battle UI | `.ui` / parked adapter | `ui/BattleGroup.ui`, `RootDesk/MyDesk/Combat/BattleDeploymentInput.mlua` | Existing deployment UI remains parked and hidden; Issue #5 starts without deployment input or result UI. |
-| Regression contract | Node contract + Maker runtime probes | `tests/battle_session_contract.test.cjs`, `tests/six_vs_six_runtime_probe.lua`, `tests/six_vs_six_full_battle_probe.lua`, `tests/six_vs_six_batch_outcome_probe.lua` | Covers RectTile/model invariants, strict data loading, fixed six-versus-six spawn, target retention/reacquisition, no blocking/pushing, Win/Lose/Draw including a resolved same-batch Draw, a natural complete battle, and terminal result stop. |
+| Battle UI | `.ui` / client adapter | `ui/BattleGroup.ui`, `RootDesk/MyDesk/Combat/BattleDeploymentInput.mlua` | Client adapter clones the human-delivered card template from the limited server catalog, sends deployment/start intents, and toggles the delivered result entities. Maker verification pending. |
+| Regression contract | Node contract + Maker runtime probes | `tests/battle_session_contract.test.cjs`, `tests/deployment_runtime_probe.lua`, `tests/deployment_ui_runtime_probe.lua`, `tests/six_vs_six_runtime_probe.lua`, `tests/six_vs_six_full_battle_probe.lua`, `tests/six_vs_six_batch_outcome_probe.lua` | Node contract checks map/data/UI wiring; deployment and legacy combat probes are prepared for Maker execution. Runtime verification of Issue #7 is pending. |
 
 ## Standing issues & handoff rules (update in place — never re-append)
 

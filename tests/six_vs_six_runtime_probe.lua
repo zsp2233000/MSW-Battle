@@ -1,4 +1,4 @@
--- Execute this probe in Maker Play mode with context=server_main shortly after the fixed battle starts.
+-- Execute this probe in Maker Play mode with context=server_main during deployment.
 -- It observes the production six-versus-six BattleSession seams without adding UI or alternate combat logic.
 local map = _EntityService:GetEntityByPath("/maps/map01")
 local session = map:GetComponent("script.BattleSession")
@@ -49,13 +49,18 @@ if not isvalid(map) or not isvalid(session) then
     return
 end
 
+local roster = { "monster_tank", "monster_tank", "monster_warrior", "monster_warrior", "monster_shooter", "monster_shooter" }
+local positions = { Vector3(-4.4, 1, 0), Vector3(-4.4, 0, 0), Vector3(-4.4, -1, 0), Vector3(-4.4, -2, 0), Vector3(-4.4, -3, 0), Vector3(-3.4, -1, 0) }
+for index, monsterId in ipairs(roster) do session:TryDeployMonster(monsterId, positions[index]) end
+session:TryStartBattle()
+
 check(session.InitialPlayerAlive == 6 and session.InitialEnemyAlive == 6, "fixed six-versus-six roster starts with six alive units per faction")
-check(session:IsBattleActive(), "fixed six-versus-six battle enters BATTLE without deployment UI")
+check(session:IsBattleActive(), "six-versus-six battle starts after deployment")
 local snapshots = session:GetUnitSnapshots()
 check(string.find(snapshots, "monsterId=monster_tank") ~= nil and string.find(snapshots, "monsterId=monster_warrior") ~= nil and string.find(snapshots, "monsterId=monster_shooter") ~= nil, "snapshot exposes MonsterId, editable name, and kind for all initial rows")
 
 -- Freeze the production roster so the high-level fixtures are not consumed by the live battle while this probe runs.
-for _, name in ipairs({"M1_PlayerTank", "M1_PlayerTank2", "M1_PlayerWarrior", "M1_PlayerWarrior2", "M1_PlayerShooter", "M1_PlayerShooter2", "M1_EnemyTank", "M1_EnemyTank2", "M1_EnemyAssault", "M1_EnemyAssault2", "M1_EnemyShooter", "M1_EnemyShooter2"}) do
+for _, name in ipairs({"M1_Player_1", "M1_Player_2", "M1_Player_3", "M1_Player_4", "M1_Player_5", "M1_Player_6", "M1_EnemyTank", "M1_EnemyTank2", "M1_EnemyAssault", "M1_EnemyAssault2", "M1_EnemyShooter", "M1_EnemyShooter2"}) do
     local entity = getEntity(name)
     if isvalid(entity) then
         freezeUnit(entity)

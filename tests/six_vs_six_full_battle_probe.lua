@@ -1,4 +1,4 @@
--- Run in Maker Play with context=server_main immediately after the fixed battle starts.
+-- Run in Maker Play with context=server_main during deployment.
 -- Leave the production roster untouched; observe a complete natural battle and its terminal state.
 local map = _EntityService:GetEntityByPath("/maps/map01")
 local session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
@@ -18,12 +18,17 @@ if not isvalid(session) then
     return
 end
 
+local roster = { "monster_tank", "monster_tank", "monster_warrior", "monster_warrior", "monster_shooter", "monster_shooter" }
+local positions = { Vector3(-4.4, 1, 0), Vector3(-4.4, 0, 0), Vector3(-4.4, -1, 0), Vector3(-4.4, -2, 0), Vector3(-4.4, -3, 0), Vector3(-3.4, -1, 0) }
+for index, monsterId in ipairs(roster) do session:TryDeployMonster(monsterId, positions[index]) end
+session:TryStartBattle()
+
 check(session.InitialPlayerAlive == 6 and session.InitialEnemyAlive == 6 and session:IsBattleActive(),
-    "fixed mixed six-versus-six starts in BATTLE without deployment UI")
+    "mixed six-versus-six starts after deployment")
 
 local rosterNames = {
-    "M1_PlayerTank", "M1_PlayerTank2", "M1_PlayerWarrior", "M1_PlayerWarrior2",
-    "M1_PlayerShooter", "M1_PlayerShooter2", "M1_EnemyTank", "M1_EnemyTank2",
+    "M1_Player_1", "M1_Player_2", "M1_Player_3", "M1_Player_4",
+    "M1_Player_5", "M1_Player_6", "M1_EnemyTank", "M1_EnemyTank2",
     "M1_EnemyAssault", "M1_EnemyAssault2", "M1_EnemyShooter", "M1_EnemyShooter2",
 }
 local elapsed = 0

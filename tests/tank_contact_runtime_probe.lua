@@ -1,9 +1,13 @@
--- Execute this probe in Maker Play mode with context=server_main after the fixed battle starts.
+-- Execute this probe in Maker Play mode with context=server_main during deployment.
 -- It drives the production BattleSession, BattleUnit, TankContactAttack, Hit, and knockback paths.
 local map = _EntityService:GetEntityByPath("/maps/map01")
 local session = map:GetComponent("script.BattleSession")
-local tank = _EntityService:GetEntityByPath("/maps/map01/M1_PlayerTank")
-local fixedShooter = _EntityService:GetEntityByPath("/maps/map01/M1_PlayerShooter")
+if isvalid(session) and session.Phase == "DEPLOYMENT" then
+    session:TryDeployMonster("monster_tank", Vector3(-4.4, 0, 0))
+    session:TryStartBattle()
+end
+local tank = _EntityService:GetEntityByPath("/maps/map01/M1_Player_1")
+local fixedShooter = nil
 local tankUnit = tank:GetComponent("script.BattleUnit")
 local tankBody = tank:GetComponent("KinematicbodyComponent")
 local failures = 0
@@ -47,7 +51,7 @@ local function logProbeState(label)
 end
 
 if not isvalid(map) or not isvalid(session) or not isvalid(tank) or not isvalid(tankUnit) or not isvalid(tankBody) or not session:IsBattleActive() then
-    log_error("[M1][TankProbe][FAIL] fixed battle session is not ready")
+    log_error("[M1][TankProbe][FAIL] battle session is not ready")
     return
 end
 

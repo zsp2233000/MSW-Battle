@@ -2,119 +2,186 @@
 script BattleDeploymentInput extends Component
 
     property any session = nil
+    property any optionTemplate = nil
+    property any optionContainer = nil
+    property any startButton = nil
+    property any resultWin = nil
+    property any resultLose = nil
+    property any resultDraw = nil
     property any buttonBindings = nil
+    property any optionCards = nil
+    property any optionData = nil
     property any screenTouchHandler = nil
-    property integer boundButtonCount = 0
-    property integer missingButtonCount = 0
+    property string selectedMonsterId = ""
+    property string displayedResult = ""
+    property boolean optionsReady = false
+    property number optionsRetryCountdown = 0
 
     @ExecSpace("ClientOnly")
     method void OnBeginPlay()
-        -- Bind named deployment UI and battlefield clicks on the client.
+        -- Bind the delivered UI and request the server's limited card catalog.
         self.session = self.Entity:GetComponent("script.BattleSession")
         self.buttonBindings = {}
-        self.boundButtonCount = 0
-        self.missingButtonCount = 0
-        self:BindUnitButton("BtnTank", "TANK")
-        self:BindUnitButton("BtnAssault", "ASSAULT")
-        self:BindUnitButton("BtnShooter", "SHOOTER")
-        self:BindStartButton("BtnStart")
-        self.screenTouchHandler = _InputService:ConnectEvent(ScreenTouchEvent, self.HandleScreenTouch)
-        if self.boundButtonCount == 0 then
-            log("[M1][Phase2][Input] deployment UI not present; waiting for named buttons")
-        else
-            log("[M1][Phase2][Input] bound deployment buttons=" .. tostring(self.boundButtonCount))
+        self.optionCards = {}
+        self.optionData = {}
+        self.optionContainer = self:FindNamedUiEntity("MonsterOptionContainer")
+        self.optionTemplate = self:FindNamedUiEntity("MonsterOptionTemplate")
+        self.startButton = self:FindNamedUiEntity("BtnStart")
+        self.resultWin = self:FindNamedUiEntity("ResultWin")
+        self.resultLose = self:FindNamedUiEntity("ResultLose")
+        self.resultDraw = self:FindNamedUiEntity("ResultDraw")
+        self:SetResultEntities("")
+        if isvalid(self.optionTemplate) then self.optionTemplate:SetEnable(false) end
+        if isvalid(self.startButton) and isvalid(self.startButton:GetComponent("ButtonComponent")) then
+            local callback = self.startButton:ConnectEvent(ButtonClickEvent, function() self:HandleStartButton() end)
+            table.insert(self.buttonBindings, { entity = self.startButton, eventCallback = callback })
         end
+        self.screenTouchHandler = _InputService:ConnectEvent(ScreenTouchEvent, self.HandleScreenTouch)
+        self.optionsRetryCountdown = 0
+        log("[M1][DeploymentUI] initialized")
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnUpdate(number delta)
+        -- Retry the catalog request until server initialization completes and follow the synced result.
+        if not isvalid(self.session) then return end
+        if not self.optionsReady and self.session.Phase == "DEPLOYMENT" then
+            self.optionsRetryCountdown = self.optionsRetryCountdown - delta
+            if self.optionsRetryCountdown <= 0 then
+                self.optionsRetryCountdown = 0.5
+                self.session:RequestMonsterOptions()
+            end
+        end
+        local result = ""
+        if self.session.Phase == "RESULT" then result = self.session.Result end
+        if result ~= self.displayedResult then self:SetResultEntities(result) end
     end
 
     @ExecSpace("ClientOnly")
     method void OnEndPlay()
-        -- Release every client input handler before the map instance ends.
+        -- Disconnect input and release every cloned card when the map ends.
         if self.screenTouchHandler ~= nil then
             _InputService:DisconnectEvent(ScreenTouchEvent, self.screenTouchHandler)
             self.screenTouchHandler = nil
         end
-        if self.buttonBindings ~= nil then
-            for _, binding in ipairs(self.buttonBindings) do
-                if isvalid(binding.entity) and binding.eventCallback ~= nil then
-                    binding.entity:DisconnectEvent(ButtonClickEvent, binding.eventCallback)
-                end
+        for _, binding in ipairs(self.buttonBindings or {}) do
+            if isvalid(binding.entity) and binding.eventCallback ~= nil then
+                binding.entity:DisconnectEvent(ButtonClickEvent, binding.eventCallback)
             end
         end
         self.buttonBindings = {}
+        for _, card in ipairs(self.optionCards or {}) do
+            if isvalid(card.entity) then card.entity:Destroy() end
+        end
+        self.optionCards = {}
+        self.optionData = {}
         self.session = nil
     end
 
     @ExecSpace("ClientOnly")
     method Entity FindNamedUiEntity(string entityName)
-        -- Find a named UI entity anywhere below the shared UI root.
+        -- Resolve a delivered UI entity without editing its layout or appearance.
         local root = _EntityService:GetEntityByPath("/ui")
         if not isvalid(root) then return nil end
-        if root.Name == entityName then return root end
         return root:GetChildByName(entityName, true)
     end
 
     @ExecSpace("ClientOnly")
-    method void BindUnitButton(string buttonName, string unitKind)
-        -- Connect one human-provided unit button without changing its appearance.
-        local button = self:FindNamedUiEntity(buttonName)
-        if not isvalid(button) then
-            self.missingButtonCount = self.missingButtonCount + 1
-            return
+    method void ShowMonsterOptions(table options)
+        -- Clone one card per validated MonsterData row and bind its stable ID.
+        if self.optionsReady or not isvalid(self.optionTemplate) or not isvalid(self.optionContainer) then return end
+        self.optionData = options
+        local containerTransform = self.optionContainer:GetComponent("UITransformComponent")
+        local templateTransform = self.optionTemplate:GetComponent("UITransformComponent")
+        if not isvalid(containerTransform) or not isvalid(templateTransform) then return end
+        local cardWidth = templateTransform.RectSize.x
+        local cardHeight = templateTransform.RectSize.y
+        local columns = math.max(1, math.floor(containerTransform.RectSize.x / cardWidth))
+        local origin = templateTransform.anchoredPosition
+        local rows = math.ceil(#options / columns)
+        if rows > 1 then
+            local extraHeight = (rows - 1) * cardHeight
+            local containerPosition = containerTransform.anchoredPosition
+            local containerSize = containerTransform.RectSize
+            containerTransform.RectSize = Vector2(containerSize.x, containerSize.y + extraHeight)
+            containerTransform.anchoredPosition = Vector2(containerPosition.x, containerPosition.y + extraHeight / 2)
+            origin = Vector2(origin.x, origin.y + extraHeight / 2)
         end
-        if not isvalid(button:GetComponent("ButtonComponent")) then
-            self.missingButtonCount = self.missingButtonCount + 1
-            return
+        for index, option in ipairs(options) do
+            local monsterId = option[1]
+            local monsterName = option[2]
+            local standRUID = option[3]
+            local card = self.optionTemplate:Clone("MonsterOption_" .. tostring(index))
+            if isvalid(card) then
+                card:SetEnable(true)
+                local cardTransform = card:GetComponent("UITransformComponent")
+                if isvalid(cardTransform) then
+                    cardTransform.anchoredPosition = Vector2(origin.x + ((index - 1) % columns) * cardWidth, origin.y - math.floor((index - 1) / columns) * cardHeight)
+                end
+                local nameEntity = card:GetChildByName("MonsterName", true)
+                local portraitEntity = card:GetChildByName("Portrait", true)
+                local glowEntity = card:GetChildByName("SelectedGlow", true)
+                if isvalid(nameEntity) then
+                    local label = nameEntity:GetComponent("TextGUIRendererComponent")
+                    if isvalid(label) then label.Text = monsterName end
+                    local nameImage = nameEntity:GetComponent("SpriteGUIRendererComponent")
+                    if isvalid(nameImage) then nameImage.RaycastTarget = false end
+                end
+                if isvalid(portraitEntity) then
+                    local portrait = portraitEntity:GetComponent("SpriteGUIRendererComponent")
+                    if isvalid(portrait) then
+                        portrait.ImageRUID = DataRef(standRUID)
+                        portrait.RaycastTarget = false
+                    end
+                end
+                if isvalid(glowEntity) then
+                    glowEntity:SetEnable(false)
+                    local glow = glowEntity:GetComponent("SpriteGUIRendererComponent")
+                    if isvalid(glow) then glow.RaycastTarget = false end
+                end
+                local callback = card:ConnectEvent(ButtonClickEvent, function() self:SelectMonsterCard(monsterId, glowEntity) end)
+                table.insert(self.buttonBindings, { entity = card, eventCallback = callback })
+                table.insert(self.optionCards, { entity = card, monsterId = monsterId, glow = glowEntity })
+            end
         end
-        local eventCallback = function(event)
-            self:HandleUnitButton(unitKind)
-        end
-        local eventHandler = button:ConnectEvent(ButtonClickEvent, eventCallback)
-        table.insert(self.buttonBindings, { entity = button, eventCallback = eventHandler })
-        self.boundButtonCount = self.boundButtonCount + 1
+        self.optionsReady = true
+        log("[M1][DeploymentUI] cards=" .. tostring(#self.optionCards))
     end
 
     @ExecSpace("ClientOnly")
-    method void BindStartButton(string buttonName)
-        -- Connect the human-provided start button to the server-owned phase gate.
-        local button = self:FindNamedUiEntity(buttonName)
-        if not isvalid(button) then
-            self.missingButtonCount = self.missingButtonCount + 1
-            return
+    method void SelectMonsterCard(string monsterId, Entity glowEntity)
+        -- Move the persistent selection glow to the card carrying this MonsterId.
+        if not isvalid(self.session) or self.session.Phase ~= "DEPLOYMENT" then return end
+        self.selectedMonsterId = monsterId
+        for _, card in ipairs(self.optionCards) do
+            if isvalid(card.glow) then card.glow:SetEnable(card.glow == glowEntity) end
         end
-        if not isvalid(button:GetComponent("ButtonComponent")) then
-            self.missingButtonCount = self.missingButtonCount + 1
-            return
-        end
-        local eventCallback = function(event)
-            self:HandleStartButton()
-        end
-        local eventHandler = button:ConnectEvent(ButtonClickEvent, eventCallback)
-        table.insert(self.buttonBindings, { entity = button, eventCallback = eventHandler })
-        self.boundButtonCount = self.boundButtonCount + 1
-    end
-
-    @ExecSpace("ClientOnly")
-    method void HandleUnitButton(string unitKind)
-        -- Send a unit selection request to the authoritative battle session.
-        if not isvalid(self.session) then return end
-        self.session:RequestSelectUnit(unitKind)
+        log("[M1][DeploymentUI] selected MonsterId=" .. monsterId)
     end
 
     @ExecSpace("ClientOnly")
     method void HandleStartButton()
-        -- Send the start request and let the server validate the roster and phase.
-        if not isvalid(self.session) then return end
-        self.session:RequestStartBattle()
+        -- Ask the server to start only while deployment is open.
+        if isvalid(self.session) and self.session.Phase == "DEPLOYMENT" then self.session:RequestStartBattle() end
     end
 
     @ExecSpace("ClientOnly")
     method void HandleScreenTouch(ScreenTouchEvent event)
-        -- Convert a non-UI screen click into a server-validated deployment or removal request.
-        if event == nil or event.TouchId < 1 then return end
+        -- Send a non-UI left click to the server for remove-or-deploy handling.
+        if event == nil or event.TouchId ~= 1 or not isvalid(self.session) or self.session.Phase ~= "DEPLOYMENT" then return end
         if _InputService:IsPointerOverUI(event.TouchId) then return end
-        if not isvalid(self.session) then return end
-        local worldPosition = _UILogic:ScreenToWorldPosition(event.TouchPoint)
-        self.session:RequestDeployAtWorld(Vector3(worldPosition.x, worldPosition.y, 0))
+        local world = _UILogic:ScreenToWorldPosition(event.TouchPoint)
+        self.session:RequestBattlefieldClick(self.selectedMonsterId, Vector3(world.x, world.y, 0))
+    end
+
+    @ExecSpace("ClientOnly")
+    method void SetResultEntities(string result)
+        -- Keep exactly the matching delivered result entity enabled.
+        if isvalid(self.resultWin) then self.resultWin:SetEnable(result == "WIN") end
+        if isvalid(self.resultLose) then self.resultLose:SetEnable(result == "LOSE") end
+        if isvalid(self.resultDraw) then self.resultDraw:SetEnable(result == "DRAW") end
+        self.displayedResult = result
+        if result ~= "" then log("[M1][DeploymentUI] result=" .. result) end
     end
 
 end

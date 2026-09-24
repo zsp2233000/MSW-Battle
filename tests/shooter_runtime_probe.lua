@@ -1,7 +1,11 @@
--- Execute this probe in Maker Play mode with context=server_main after the fixed battle starts.
+-- Execute this probe in Maker Play mode with context=server_main during deployment.
 -- It drives the production BattleSession, BattleUnit, ShooterAttack, Hit, and result-stop paths.
 local map = _EntityService:GetEntityByPath("/maps/map01")
 local session = map:GetComponent("script.BattleSession")
+if isvalid(session) and session.Phase == "DEPLOYMENT" then
+    session:TryDeployMonster("monster_tank", Vector3(-4.4, 0, 0))
+    session:TryStartBattle()
+end
 local failures = 0
 
 local function check(condition, message)
@@ -53,12 +57,12 @@ local function hasProjectileEntity(entity)
 end
 
 if not isvalid(map) or not isvalid(session) or not session:IsBattleActive() then
-    log_error("[M1][ShooterProbe][FAIL] fixed battle session is not ready")
+    log_error("[M1][ShooterProbe][FAIL] battle session is not ready")
     return
 end
 
 -- Disable every fixed unit so the spawned shooter fixtures are the only active combat participants.
-for _, name in ipairs({"M1_PlayerTank", "M1_PlayerTank2", "M1_PlayerWarrior", "M1_PlayerWarrior2", "M1_PlayerShooter", "M1_PlayerShooter2", "M1_EnemyTank", "M1_EnemyTank2", "M1_EnemyAssault", "M1_EnemyAssault2", "M1_EnemyShooter", "M1_EnemyShooter2"}) do
+for _, name in ipairs({"M1_Player_1", "M1_EnemyTank", "M1_EnemyTank2", "M1_EnemyAssault", "M1_EnemyAssault2", "M1_EnemyShooter", "M1_EnemyShooter2"}) do
     local entity = _EntityService:GetEntityByPath("/maps/map01/" .. name)
     if isvalid(entity) then
         local unit = entity:GetComponent("script.BattleUnit")
@@ -73,8 +77,8 @@ for _, name in ipairs({"M1_PlayerTank", "M1_PlayerTank2", "M1_PlayerWarrior", "M
     end
 end
 
-local fixedTank = _EntityService:GetEntityByPath("/maps/map01/M1_PlayerTank")
-local fixedShooter = _EntityService:GetEntityByPath("/maps/map01/M1_PlayerShooter")
+local fixedTank = _EntityService:GetEntityByPath("/maps/map01/M1_Player_1")
+local fixedShooter = nil
 local fixedAssault = _EntityService:GetEntityByPath("/maps/map01/M1_EnemyAssault")
 if isvalid(fixedTank) then freezeUnit(fixedTank) end
 if isvalid(fixedShooter) then freezeUnit(fixedShooter) end

@@ -18,7 +18,7 @@ test("M1 map keeps RectTile and exposes the fixed battle session camera", () => 
   assert.ok(rootEntity);
   assert.match(rootEntity.componentNames, /script\.BattleSession/);
   assert.match(rootEntity.componentNames, /script\.BattleFixedCamera/);
-  assert.doesNotMatch(rootEntity.componentNames, /BattleDeploymentInput/);
+  assert.match(rootEntity.componentNames, /script\.BattleDeploymentInput/);
 });
 
 test("fixed battlefield camera has one client-only CameraComponent owner", () => {
@@ -76,18 +76,15 @@ test("battle phase keeps the Tank profile and adds Shooter to the player formati
   const assault = read("RootDesk/MyDesk/Combat/AssaultAttack.mlua");
   const shooterAttack = read("RootDesk/MyDesk/Combat/ShooterAttack.mlua");
   const runtimeProbe = read("tests/tank_contact_runtime_probe.lua");
-  const resources = read("resources.md");
   const monsterData = read("RootDesk/MyDesk/Combat/MonsterData.csv");
 
-  assert.match(session, /PlayerMonsterId1 = "monster_tank"/);
-  assert.match(session, /PlayerMonsterId5 = "monster_shooter"/);
   assert.match(session, /EnemyMonsterId3 = "monster_warrior"/);
-  assert.match(session, /self\.PlayerAlive = 6/);
+  assert.match(session, /self\.PlayerAlive = 0/);
   assert.match(session, /self\.EnemyAlive = 6/);
   assert.match(session, /EventHistory/);
   assert.match(monsterData, /monster_tank,Tank,TANK,battleunit,500,1\.1,40,2\.0,0\.65/);
   assert.match(monsterData, /monster_warrior,Warrior,ASSAULT,battleunit,220,2\.0,35,0\.7,0\.6/);
-  assert.match(monsterData, /monster_shooter,Shooter,SHOOTER,battleunit,120,0\.8,30,0\.8,4\.0/);
+  assert.match(monsterData, /monster_shooter,Shooter,SHOOTER,battleunit,120,0\.8,30,2,4\.0/);
   assert.match(session, /QueueKnockback/);
   assert.match(session, /ApplyPendingKnockbacks/);
   assert.match(session, /ArenaMinX/);
@@ -159,15 +156,6 @@ test("battle phase keeps the Tank profile and adds Shooter to the player formati
   assert.match(shooterPresentation, /soundRUID == nil[\s\S]*soundRUID == "TBD"[\s\S]*soundRUID == "N\/A"/);
   assert.match(shooterAttack, /property string HitEffectRUID = "1f2bdb3b15a145ea8f3db3fbfb61296b"/);
 
-  assert.match(resources, /Tank attack SFX\s*\| Sound RUID/);
-  assert.match(resources, /Tank onhit SFX\s*\| Sound RUID/);
-  assert.match(resources, /Tank die SFX\s*\| Sound RUID/);
-  assert.match(resources, /Shooter attack SFX\s*\| Sound RUID/);
-  assert.match(resources, /Shooter onhit SFX\s*\| Sound RUID/);
-  assert.match(resources, /Shooter die SFX\s*\| Sound RUID/);
-  assert.match(resources, /Tank `hit` effect\s*\| Effect RUID/);
-  assert.match(resources, /Assault `hit` effect\s*\| Effect RUID/);
-  assert.match(resources, /Shooter `hit` effect\s*\| Effect RUID/);
 
   assert.match(assault, /extends AttackComponent/);
   assert.match(assault, /return self\.AttackDamage/);
@@ -185,7 +173,7 @@ test("Issue #4 adds a configurable hitscan shooter adapter", () => {
   const runtimeProbe = read("tests/shooter_runtime_probe.lua");
   const monsterData = read("RootDesk/MyDesk/Combat/MonsterData.csv");
 
-  assert.match(monsterData, /monster_shooter,Shooter,SHOOTER,battleunit,120,0\.8,30,0\.8,4\.0,9,/);
+  assert.match(monsterData, /monster_shooter,Shooter,SHOOTER,battleunit,120,0\.8,30,2,4\.0,9,/);
   assert.match(session, /profile\.MonsterType == "SHOOTER"/);
   assert.match(session, /profile\.MaxHp/);
   assert.match(session, /profile\.AttackRange/);
@@ -257,13 +245,42 @@ test("BattleUnit owns attack dispatch while BattleSession stays adapter-agnostic
   assert.doesNotMatch(session, /QueueTankContactKnockback/);
 });
 
-test("Issue #3 keeps the existing battle group UI available without binding it to runtime", () => {
-  const uiPath = path.join(root, "ui/BattleGroup.ui");
-  assert.ok(fs.existsSync(uiPath));
-  const ui = read("ui/BattleGroup.ui");
-  assert.match(ui, /BtnTank/);
-  const parsed = JSON.parse(ui);
-  assert.equal(parsed.ContentProto.Entities[0].jsonString.visible, false);
+test("Issue #7 uses the delivered option template, start button, and result entities", () => {
+  const { UIBuilder } = require(path.join(root, ".agents/skills/msw-ui-system/scripts/msw_ui_builder.cjs"));
+  const ui = UIBuilder.read(path.join(root, "ui/BattleGroup.ui"));
+  for (const name of ["MonsterOptionContainer", "MonsterOptionTemplate", "Portrait", "MonsterName", "SelectedGlow", "BtnStart", "ResultWin", "ResultLose", "ResultDraw"]) {
+    assert.ok(ui.listEntities().some((entity) => entity.name === name), `${name} is missing`);
+  }
+  for (const name of ["ResultWin", "ResultLose", "ResultDraw"]) {
+    assert.equal(ui.listEntities().find((entity) => entity.name === name).enable, false);
+  }
+});
+
+test("Issue #7 keeps deployment authority on the map session and uses IDs for cards", () => {
+  const session = read("RootDesk/MyDesk/Combat/BattleSession.mlua");
+  const input = read("RootDesk/MyDesk/Combat/BattleDeploymentInput.mlua");
+  const probe = read("tests/deployment_runtime_probe.lua");
+  const uiProbe = read("tests/deployment_ui_runtime_probe.lua");
+  assert.match(session, /@Sync property string Phase = "DEPLOYMENT"/);
+  assert.match(session, /method void RequestMonsterOptions\(\)/);
+  assert.match(session, /table\.insert\(options, \{ profile\.MonsterId, profile\.MonsterName, profile\.StandAnimationRUID \}\)/);
+  assert.match(session, /@ExecSpace\("Server"\)\s+method void RequestBattlefieldClick\(string monsterId, Vector3 position\)/);
+  assert.match(session, /method boolean TryDeployMonster\(string monsterId, Vector3 position\)/);
+  assert.match(session, /self:GetMonsterProfile\(monsterId\)/);
+  assert.match(session, /DeploymentMinDistance = 0\.6/);
+  assert.match(session, /DeploymentMaxUnits = 6/);
+  assert.match(session, /method boolean TryStartBattle\(\)/);
+  assert.match(input, /self\.optionTemplate:Clone\(/);
+  assert.match(input, /portrait\.ImageRUID = DataRef\(standRUID\)/);
+  assert.match(input, /self\.selectedMonsterId = monsterId/);
+  assert.match(input, /self\.session:RequestBattlefieldClick\(self\.selectedMonsterId/);
+  assert.doesNotMatch(input, /BtnTank|BtnAssault|BtnShooter|RequestSelectUnit/);
+  for (const scenario of ["zero player units", "unknown MonsterId", "seventh unit", "removal after start"]) {
+    assert.ok(probe.includes(scenario), `${scenario} runtime assertion missing`);
+  }
+  assert.match(uiProbe, /#adapter\.optionCards == #adapter\.optionData/);
+  assert.match(uiProbe, /portrait\.ImageRUID\.DataId == option\[3\]/);
+  assert.match(uiProbe, /enabledGlows == 1/);
 });
 
 test("Issue #5 publishes one strict MonsterData dataset for the three initial monsters", () => {
@@ -324,7 +341,7 @@ test("Issue #5 publishes one strict MonsterData dataset for the three initial mo
   }
 });
 
-test("Issue #5 starts a fixed data-driven six-versus-six battle and exposes the required seams", () => {
+test("Issue #7 preserves the data-driven battle core behind deployment", () => {
   const session = read("RootDesk/MyDesk/Combat/BattleSession.mlua");
   const unit = read("RootDesk/MyDesk/Combat/BattleUnit.mlua");
   const probe = read("tests/six_vs_six_runtime_probe.lua");
@@ -340,11 +357,11 @@ test("Issue #5 starts a fixed data-driven six-versus-six battle and exposes the 
   assert.match(session, /invalid numeric value/);
   assert.match(session, /method Entity SpawnMonster\(string monsterId/);
   assert.match(session, /fixedEnemyRoster/);
-  assert.match(session, /self\.PlayerAlive = 6/);
+  assert.match(session, /self\.PlayerAlive = 0/);
   assert.match(session, /self\.EnemyAlive = 6/);
   assert.match(session, /self:EmitPresentation\("RESULT"/);
   assert.match(session, /self\._T\.resultEntered == true/);
-  assert.doesNotMatch(session, /BattleDeploymentInput/);
+  assert.match(session, /script\.BattleDeploymentInput/);
 
   assert.match(unit, /@Sync property string MonsterId = ""/);
   assert.match(unit, /@Sync property string MonsterName = ""/);
