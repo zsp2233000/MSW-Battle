@@ -76,4 +76,4 @@
 - `SpawnByModelId` 產生的每個單位都要先加入並確認 `BattleUnit`／攻擊元件，再加入 session roster；不存在的 model 或 script component 必須讓請求失敗而不是留下半初始化單位。
 - Client 點擊座標不能直接成為可信世界座標；伺服器必須重驗證部署範圍、最小間距、數量、擁有者與 phase。
 - 既有 `BtnTank`／`BtnAssault`／`BtnShooter` 可保留為舊實作紀錄，但在怪物選項樣板／容器與 `BtnStart` 完成新契約並經 Maker Play 驗證前，Task 1 不能標記 ✅。
-- 不要把 Phase 3 的坦克接觸傷害、射手遠距攻擊或 Phase 4 的資產串接偷偷塞入本階段；若實作時發現必要的新範圍，先更新 GDD 與本文件 checklist。
+- 不要把 Phase 3 的坦克接觸攻擊、射手遠距攻擊或 Phase 4 的資產串接偷偷塞入本階段；若實作時發現必要的新範圍，先更新 GDD 與本文件 checklist。

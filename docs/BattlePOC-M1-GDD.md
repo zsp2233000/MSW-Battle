@@ -33,7 +33,7 @@
 |---|---|
 | `DEPLOYMENT` | 玩家可配置玩家編隊；固定敵軍已存在；戰鬥 AI 停止 |
 | `BATTLE` | 部署鎖定；雙方 AI 啟動；不可新增、移除或換位 |
-| `RESULT` | 判定結果；所有移動、索敵、攻擊及接觸傷害停止 |
+| `RESULT` | 判定結果；所有移動、索敵、攻擊及坦克接觸命中停止 |
 
 - 玩家未部署任何單位時不能開始。
 - 玩家可部署一至六隻，同一怪物可重複選用，沒有種類配額。
@@ -62,19 +62,19 @@
 
 | 初始怪物名稱／種類 | HP | 移速 | 傷害 | 間隔 | 距離 | 行為 |
 |---|---:|---:|---:|---:|---:|---|
-| 坦克 | 500 | 1.1 | 40 | 每目標 2.0 秒 | 接觸 | 無一般攻擊；與敵方重疊時造成固定傷害並將敵方擊退約 0.8 世界單位 |
+| 坦克 | 500 | 1.1 | 40 | 每目標 2.0 秒 | 接觸 | 接觸命中沿用 `AttackDamage`，並將敵方擊退約 0.8 世界單位；不使用一般攻擊動畫 |
 | 戰士 | 220 | 2.0 | 35 | 0.7 秒 | 0.6 | 近戰攻擊；命中時間由人類提供的攻擊動畫命中影格決定 |
 | 射手 | 120 | 0.8 | 30 | 0.8 秒 | 4.0 | 瞬發命中，不建立投射物；命中時間由人類提供的攻擊動畫命中影格決定 |
 
 - 表格是三筆初始怪物資料，不是種類預設值。同種類可新增多隻具名怪物，並各自設定數值與 RUID；種類只決定坦克、戰士或射手的戰鬥行為。
 - 所有傷害固定；沒有護甲、暴擊、隨機浮動或兵種剋制。
-- 坦克接觸可同時傷害所有重疊的敵方單位，各目標分別計算兩秒冷卻。
+- 坦克接觸命中可同時傷害所有重疊的敵方單位，各目標分別計算兩秒冷卻；傷害值使用共用的 `AttackDamage`。
 - 坦克碰撞時只有敵方被擊退；坦克不後退。
 - 擊退不造成暈眩；目標以速度與衰減完成擊退，位置限制於戰場內。
 - 任何單位經 HitEvent 成功受傷後，受擊單位在原地停止 0.2 秒，再恢復索敵與移動；死亡狀態優先於 hit stop。
 - 坦克接觸仍不播放碰撞特效或碰撞音效；坦克／射手的 attack、onhit、die SFX 僅在各自 RUID 有值時播放。
 - 坦克接觸依陣營判定目標：同陣營 Tank 不會互相造成 Hit；若未來生成敵對陣營 Tank，則會依相同接觸 Hit 流程處理。
-- 戰士與射手的傷害經由標準 Attack → Hit 流程處理，不直接改寫 HP。
+- 所有兵種的傷害都經由標準 Attack → Hit 流程處理，不直接改寫 HP；坦克以接觸觸發命中。
 
 ### 4.5 動畫與呈現資產契約
 
@@ -124,7 +124,7 @@
 | 移動 | `MovementComponent` 逐幀朝目標方向移動；禁止用計時器跳位置或直接改 Transform 模擬移動 |
 | 索敵與狀態 | 自訂 `@Component` 保存陣營、目前目標與 `IDLE/MOVE/ATTACK/HIT/DEAD`；每 0.5 秒掃描最近存活敵人 |
 | 一般攻擊 | `AttackComponent`、`HitComponent` 與 Hit 事件鏈；攻擊動畫命中影格觸發固定傷害 |
-| 坦克接觸 | `TankContactAttack` 使用 `AttackComponent:AttackFrom` 與每目標冷卻表；經 Hit 流程造成傷害，使用 Kinematicbody 位移並夾在邊界內擊退敵方 |
+| 坦克接觸 | `TankContactAttack` 使用 `AttackComponent:AttackFrom` 與每目標冷卻表；以共用 `AttackDamage` 經 Hit 流程造成傷害，再使用 Kinematicbody 位移並夾在邊界內擊退敵方 |
 | 射手 | 距離驗證後於命中影格直接命中目標；不建立投射物 Entity |
 | 動畫 | `TankPresentation` 在客戶端依坦克狀態切換人類提供的 stand／move／hit／die AnimationClip RUID；目前仍以 death hold 延遲移除，待改為動畫結束事件 |
 | HP 條 | 單位下的世界空間子 Entity；兩個人類提供的 Sprite RUID，填充值依 HP 比例縮放 |
@@ -160,7 +160,7 @@
 
 ### Phase 3 — 三兵種完整規則
 
-- ✅ 完成坦克高 HP、無一般攻擊、每目標兩秒接觸傷害；Issue #3 runtime 已驗證。
+- ✅ 坦克高 HP、接觸觸發攻擊與每目標兩秒冷卻；傷害共用 `AttackDamage`，不設 `ContactDamage`。Maker TankProbe 已驗證通過。
 - ✅ 完成只擊退敵方約 0.8 世界單位、無暈眩、無單位阻擋及戰場邊界限制；Issue #3 runtime 已驗證。
 - ✅ 完成受擊單位原地停止 0.2 秒；Hit stop 接在正式 Hit→HP 流程，Maker runtime probe 已驗證。
 - ⬜ 完成戰士的近戰距離、攻擊間隔與命中影格傷害。
@@ -187,8 +187,8 @@
 ## 7. 怪物資料契約
 
 - M1 建立一份 `MonsterData` UserDataSet／CSV，每個 `MonsterId` 一列；初始三列分別顯示為坦克、戰士、射手。`MonsterId` 是不隨名稱變更的查找鍵，`MonsterName` 可修改，`MonsterType` 目前只接受 `TANK`、`ASSAULT`（顯示為戰士）、`SHOOTER`。
-- 每列獨立保存 `MaxHp`、`MoveSpeed`、`AttackDamage`、`AttackIntervalSeconds`、`AttackRange`、`AttackImpactFrame`、相關接觸傷害／冷卻／擊退數值，以及該怪物的 `stand`／`move`／`attack`／`hit`／`die` 動畫、命中特效、攻擊／受擊／死亡音效 RUID。`HitEffectRUID` 與三個 SFX 欄位可各自留空；其他欄位仍依資料驗證規則處理。各欄分開保存；不同怪物可重複使用相同 RUID，不從種類繼承數值或資產。
-- `AttackImpactFrame` 由人類填寫，空白時以第 1 幀為預設。坦克沒有一般攻擊，不要求攻擊動畫或命中影格。傷害仍由伺服器權威結算；必須在 Maker Play 驗證動畫影格到伺服器命中時間的換算，不能以固定秒數冒充命中影格。
+- 每列獨立保存 `MaxHp`、`MoveSpeed`、`AttackDamage`、`AttackIntervalSeconds`、`AttackRange`、`AttackImpactFrame`、接觸冷卻／範圍／擊退數值，以及該怪物的 `stand`／`move`／`attack`／`hit`／`die` 動畫、命中特效、攻擊／受擊／死亡音效 RUID。所有攻擊共用 `AttackDamage`；坦克保留接觸觸發，沒有另一個接觸傷害欄位。`HitEffectRUID` 與三個 SFX 欄位可各自留空；其他欄位仍依資料驗證規則處理。各欄分開保存；不同怪物可重複使用相同 RUID，不從種類繼承數值或資產。
+- `AttackImpactFrame` 由人類填寫，空白時以第 1 幀為預設。坦克接觸命中不依賴一般攻擊動畫或命中影格，可留空或填 `0`。傷害仍由伺服器權威結算；戰士／射手須在 Maker Play 驗證動畫影格到伺服器命中時間的換算，不能以固定秒數冒充命中影格。
 - 怪物資料列缺少 `MonsterId`、重複 ID、種類非法或必要數值無效時拒絕使用並給出明確錯誤。`HitEffectRUID`、`AttackSoundRUID`、`OnHitSoundRUID`、`DieSoundRUID` 可留空；資料表欄位仍須保留。其他資產不由程式搜尋、生成或猜測。
 - 玩家與敵軍可引用同一個 `MonsterId`。玩家從依資料列產生的名稱選單選怪物；目前固定六隻敵軍的 ID 與位置、部署邊界和索敵間隔仍由戰局設定管理，不建立編隊 dataset。
 - HP 條與 DamageSkin 目前各只有一種固定樣式，由既有／人類交付的 component 配置，不放入怪物 dataset，也不建立共用呈現 dataset。
@@ -204,7 +204,7 @@
 | 索敵 | 已決定：每 0.5 秒重新評估最近存活敵人 |
 | 戰鬥數值 | 已決定：三筆初始怪物採 §4.4 數值；每隻具名怪物的數值由 `MonsterData` 管理，無剋制／護甲／暴擊 |
 | 怪物資料 | 已決定：M1 使用一份怪物 UserDataSet／CSV；無編隊或共用呈現 dataset |
-| 坦克 | 已決定：無一般攻擊；接觸傷害只擊退敵方，有設定時播放 attack SFX；無碰撞特效／音效；坦克被攻擊與死亡有設定時播放各自 onhit／die SFX |
+| 坦克 | 已決定：接觸觸發攻擊，傷害使用共用 `AttackDamage`，並擊退敵方；不使用一般攻擊動畫或碰撞特效／音效；相關 SFX 有設定時才播放 |
 | 射手 | 已決定：命中影格直接命中，不建立投射物 |
 | 動畫時序 | 已決定：戰士／射手由人類提供命中影格；死亡播完才移除 |
 | 美術與 UI | 已決定：全部由人類設計及提供；AI 僅串接功能 |
@@ -223,3 +223,4 @@
 | 2026-09-21 | 實作 | 新增受擊後 0.2 秒 hit stop | 加強受擊時序與視覺辨識 | 受擊單位停止移動與索敵 0.2 秒；死亡與 RESULT 優先停止 |
 | 2026-09-23 | 修改 | 每隻具名怪物的數值與 RUID 改由單一 `MonsterData` dataset 管理；部署改選怪物名稱 | 支援同種類多隻怪物各自調整資料 | 修改 M1 規格與未完成 tickets；固定敵軍位置及固定 HP 條／DamageSkin 不移入 dataset |
 | 2026-09-24 | 修改 | 命中特效與 attack／onhit／die SFX RUID 改為可選 | 未使用的呈現資產不應阻止怪物資料載入 | 空白特效沿用攻擊器預設值，空白音效略過播放；對應 dataset 欄位仍保留 |
+| 2026-09-24 | 修改 | 坦克接觸命中改用共用 `AttackDamage`，移除獨立 `ContactDamage` 欄位 | 避免同一怪物資料保存兩個傷害值 | 保留接觸觸發、每目標冷卻、接觸範圍與擊退；傷害仍經標準 Attack → Hit 流程 |

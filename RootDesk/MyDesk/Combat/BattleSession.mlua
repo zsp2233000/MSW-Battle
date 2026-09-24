@@ -261,15 +261,10 @@ script BattleSession extends Component
 
         local contactMinimum = 0
         if monsterType == "TANK" then contactMinimum = 0.0001 end
-        profile.ContactDamage = self:ReadInteger(row:GetItem("ContactDamage"), "ContactDamage", monsterId, 0)
         profile.ContactCooldownSeconds = self:ReadNumber(row:GetItem("ContactCooldownSeconds"), "ContactCooldownSeconds", monsterId, contactMinimum)
         profile.ContactSizeX = self:ReadNumber(row:GetItem("ContactSizeX"), "ContactSizeX", monsterId, contactMinimum)
         profile.ContactSizeY = self:ReadNumber(row:GetItem("ContactSizeY"), "ContactSizeY", monsterId, contactMinimum)
         profile.KnockbackDistance = self:ReadNumber(row:GetItem("KnockbackDistance"), "KnockbackDistance", monsterId, contactMinimum)
-        if monsterType == "TANK" and profile.ContactDamage <= 0 then
-            self:FailConfiguration("invalid numeric value ContactDamage for " .. monsterId)
-            return nil
-        end
         if monsterType ~= "TANK" and profile.AttackImpactFrame <= 0 then
             self:FailConfiguration("invalid numeric value AttackImpactFrame for " .. monsterId)
             return nil
@@ -324,7 +319,7 @@ script BattleSession extends Component
         local requiredColumns = {
             "MonsterId", "MonsterName", "MonsterType", "ModelId", "MaxHp", "MoveSpeed", "AttackDamage",
             "AttackIntervalSeconds", "AttackRange", "AttackImpactFrame",
-            "RetargetIntervalSeconds", "HitStopDurationSeconds", "ContactDamage", "ContactCooldownSeconds",
+            "RetargetIntervalSeconds", "HitStopDurationSeconds", "ContactCooldownSeconds",
             "ContactSizeX", "ContactSizeY", "KnockbackDistance", "StandAnimationRUID", "MoveAnimationRUID",
             "AttackAnimationRUID", "HitAnimationRUID", "DieAnimationRUID", "HitEffectRUID", "AttackSoundRUID",
             "OnHitSoundRUID", "DieSoundRUID",
