@@ -13,6 +13,7 @@ script BattleDeploymentInput extends Component
     property any optionCards = nil
     property any optionData = nil
     property any screenTouchHandler = nil
+    property any keyDownHandler = nil
     property string selectedMonsterId = ""
     property string displayedResult = ""
     property string observedPhase = "__UNINITIALIZED__"
@@ -42,6 +43,7 @@ script BattleDeploymentInput extends Component
             table.insert(self.buttonBindings, { entity = self.startButton, eventCallback = callback })
         end
         self.screenTouchHandler = _InputService:ConnectEvent(ScreenTouchEvent, self.HandleScreenTouch)
+        self.keyDownHandler = _InputService:ConnectEvent(KeyDownEvent, self.HandleRightClick)
         self.optionsRetryCountdown = 0
         log("[M1][DeploymentUI] initialized")
     end
@@ -69,6 +71,10 @@ script BattleDeploymentInput extends Component
         if self.screenTouchHandler ~= nil then
             _InputService:DisconnectEvent(ScreenTouchEvent, self.screenTouchHandler)
             self.screenTouchHandler = nil
+        end
+        if self.keyDownHandler ~= nil then
+            _InputService:DisconnectEvent(KeyDownEvent, self.keyDownHandler)
+            self.keyDownHandler = nil
         end
         for _, binding in ipairs(self.buttonBindings or {}) do
             if isvalid(binding.entity) and binding.eventCallback ~= nil then
@@ -188,7 +194,7 @@ script BattleDeploymentInput extends Component
 
     @ExecSpace("ClientOnly")
     method void HandleScreenTouch(ScreenTouchEvent event)
-        -- Send a non-UI left click to the server for remove-or-deploy handling.
+        -- Keep left-clicks dedicated to deploying the selected monster.
         if event == nil or event.TouchId ~= 1 or not isvalid(self.session) or self.session.Phase ~= "DEPLOYMENT" then return end
         if _InputService:IsPointerOverUI(event.TouchId) then return end
         local world = _UILogic:ScreenToWorldPosition(event.TouchPoint)
@@ -196,10 +202,27 @@ script BattleDeploymentInput extends Component
     end
 
     @ExecSpace("ClientOnly")
+    method void HandleRightClick(KeyDownEvent event)
+        -- Use Mouse1 and the cursor location to request removal only on right-click.
+        if event == nil or event.key ~= KeyboardKey.Mouse1 or not isvalid(self.session) or self.session.Phase ~= "DEPLOYMENT" then return end
+        if _InputService:IsPointerOverUI() then return end
+        local cursor = _InputService:GetCursorPosition()
+        local world = _UILogic:ScreenToWorldPosition(cursor)
+        self:HandleBattlefieldRemovalClick(Vector3(world.x, world.y, 0))
+    end
+
+    @ExecSpace("ClientOnly")
     method void HandleBattlefieldClick(Vector3 position)
-        -- Keep the production world-click RPC path callable by input and runtime probes.
+        -- Send a left-click deployment request to the authoritative map session.
         if position == nil or not isvalid(self.session) or self.session.Phase ~= "DEPLOYMENT" then return end
         self.session:RequestBattlefieldClick(self.selectedMonsterId, position)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void HandleBattlefieldRemovalClick(Vector3 position)
+        -- Send a right-click removal request to the authoritative map session.
+        if position == nil or not isvalid(self.session) or self.session.Phase ~= "DEPLOYMENT" then return end
+        self.session:RequestRemoveDeployedUnit(position)
     end
 
     @ExecSpace("ClientOnly")

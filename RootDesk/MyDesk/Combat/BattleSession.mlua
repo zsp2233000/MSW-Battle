@@ -405,7 +405,15 @@ script BattleSession extends Component
 
     @ExecSpace("Server")
     method void RequestBattlefieldClick(string monsterId, Vector3 position)
-        -- Remove a clicked player unit, or deploy the selected MonsterId at the clicked point.
+        -- A left-click can deploy the selected MonsterId but never removes a deployed unit.
+        if not self:IsSenderInMap(senderUserId) or self.Phase ~= "DEPLOYMENT" then return end
+        if position == nil or position.x ~= position.x or position.y ~= position.y then return end
+        self:TryDeployMonster(monsterId, position)
+    end
+
+    @ExecSpace("Server")
+    method void RequestRemoveDeployedUnit(Vector3 position)
+        -- A right-click removes the nearest deployed player unit and never deploys.
         if not self:IsSenderInMap(senderUserId) or self.Phase ~= "DEPLOYMENT" then return end
         if position == nil or position.x ~= position.x or position.y ~= position.y then return end
         local removeRadiusSquared = self.DeploymentRemoveRadius * self.DeploymentRemoveRadius
@@ -428,9 +436,7 @@ script BattleSession extends Component
         end
         if nearestIndex ~= nil then
             self:RemoveDeployedUnit(nearestIndex)
-            return
         end
-        self:TryDeployMonster(monsterId, position)
     end
 
     @ExecSpace("ServerOnly")
@@ -656,11 +662,66 @@ script BattleSession extends Component
         return math.max(minimum, math.min(maximum, value))
     end
 
+    @ExecSpace("ServerOnly")
+    method void ConstrainUnitToArena(Entity entity)
+        -- Correct any physics movement that carried a battle unit beyond the arena limits.
+        if not isvalid(entity) then return end
+        local transform = entity:GetComponent("TransformComponent")
+        local kinematic = entity:GetComponent("KinematicbodyComponent")
+        if not isvalid(transform) or not isvalid(kinematic) then return end
+        local position = transform.WorldPosition
+        local nextX = self:Clamp(position.x, self.ArenaMinX, self.ArenaMaxX)
+        local nextY = self:Clamp(position.y, self.ArenaMinY, self.ArenaMaxY)
+        if nextX == position.x and nextY == position.y then return end
+        local movement = entity:GetComponent("MovementComponent")
+        if isvalid(movement) then movement:Stop() end
+        kinematic:SetWorldPosition(Vector2(nextX, nextY))
+    end
+
+    method any GetRectTileMapComponent()
+        -- Resolve the current map's RectTileMap so knockback can respect blocking tiles.
+        local map = self:GetMapEntity()
+        if not isvalid(map) then return nil end
+        local tileMapEntity = map:GetChildByName("RectTileMap", true)
+        if not isvalid(tileMapEntity) then return nil end
+        return tileMapEntity:GetComponent("RectTileMapComponent")
+    end
+
+    method boolean IsRectTilePositionBlocked(any tileMap, Vector3 position)
+        -- RectTileInfo.IsCollidable marks tiles that units cannot pass through.
+        if not isvalid(tileMap) or position == nil then return false end
+        local cellPosition = tileMap:ToCellPosition(position)
+        if cellPosition == nil then return false end
+        local tileInfo = tileMap:GetTile(cellPosition)
+        return tileInfo ~= nil and tileInfo.IsCollidable == true
+    end
+
+    method Vector2 GetSafeKnockbackPosition(any tileMap, number fromX, number fromY, number toX, number toY)
+        -- Stop at the last free point before the knockback path enters a collidable tile.
+        if not isvalid(tileMap) then return Vector2(toX, toY) end
+        local deltaX = toX - fromX
+        local deltaY = toY - fromY
+        local distance = math.sqrt(deltaX * deltaX + deltaY * deltaY)
+        local stepCount = math.max(1, math.ceil(distance / 0.05))
+        local safeX = fromX
+        local safeY = fromY
+        for step = 1, stepCount do
+            local progress = step / stepCount
+            local candidateX = fromX + deltaX * progress
+            local candidateY = fromY + deltaY * progress
+            if self:IsRectTilePositionBlocked(tileMap, Vector3(candidateX, candidateY, 0)) then break end
+            safeX = candidateX
+            safeY = candidateY
+        end
+        return Vector2(safeX, safeY)
+    end
+
     method void ApplyPendingKnockbacks()
         -- Apply queued displacement to the enemy Kinematicbody without changing the tank position.
         if self._T.pendingKnockbacks == nil or #self._T.pendingKnockbacks == 0 then return end
         local pending = self._T.pendingKnockbacks
         self._T.pendingKnockbacks = {}
+        local tileMap = self:GetRectTileMapComponent()
         for _, item in ipairs(pending) do
             if isvalid(item.attacker) and isvalid(item.defender) then
                 local attackerUnit = item.attacker:GetComponent("script.BattleUnit")
@@ -683,7 +744,11 @@ script BattleSession extends Component
                     if distance ~= nil and distance > 0 then
                         local nextX = self:Clamp(defenderPosition.x + dx / length * distance, self.ArenaMinX, self.ArenaMaxX)
                         local nextY = self:Clamp(defenderPosition.y + dy / length * distance, self.ArenaMinY, self.ArenaMaxY)
-                        kinematic:SetWorldPosition(Vector2(nextX, nextY))
+                        local safePosition = self:GetSafeKnockbackPosition(tileMap, defenderPosition.x, defenderPosition.y, nextX, nextY)
+                        if math.abs(safePosition.x - nextX) > 0.0001 or math.abs(safePosition.y - nextY) > 0.0001 then
+                            log("[M1][BattleSession] KNOCKBACK blocked by RectTile collision")
+                        end
+                        defenderUnit:ApplyKnockback(safePosition)
                         self:EmitPresentation("KNOCKBACK", item.attacker, item.defender, 0)
                     end
                 end

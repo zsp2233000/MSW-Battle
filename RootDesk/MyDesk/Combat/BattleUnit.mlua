@@ -23,6 +23,7 @@ script BattleUnit extends Component
     property number ImpactDelay = 0.18
     property number DeathHold = 0.6
     property number HitStopDuration = 0.2
+    property number KnockbackRecoveryDuration = 0.35
 
     @ExecSpace("ServerOnly")
     method void OnBeginPlay()
@@ -35,6 +36,7 @@ script BattleUnit extends Component
         self._T.deathRemaining = 0
         self._T.deathFinished = false
         self._T.hitStopRemaining = 0
+        self._T.knockbackRemaining = 0
         self._T.hitEffectRUID = "TBD"
         if self.Hp <= 0 then self.Hp = self.MaxHp end
         self.CombatState = "IDLE"
@@ -71,6 +73,7 @@ script BattleUnit extends Component
         self._T.currentTarget = nil
         self._T.retargetRemaining = 0
         self._T.hitStopRemaining = 0
+        self._T.knockbackRemaining = 0
         self._T.attackAdapter = nil
         self._T.attackConfigured = false
         if not isvalid(self._T.attackFactory) then
@@ -164,6 +167,17 @@ script BattleUnit extends Component
             self:StopForResult()
             return
         end
+        session:ConstrainUnitToArena(self.Entity)
+
+        if self._T.knockbackRemaining > 0 then
+            self._T.knockbackRemaining = math.max(0, self._T.knockbackRemaining - delta)
+            local knockbackMovement = self.Entity:GetComponent("MovementComponent")
+            if isvalid(knockbackMovement) then knockbackMovement:Stop() end
+            if self._T.knockbackRemaining > 0 then
+                self.CombatState = "ON_HIT"
+                return
+            end
+        end
 
         if self._T.hitStopRemaining > 0 then
             self._T.hitStopRemaining = math.max(0, self._T.hitStopRemaining - delta)
@@ -203,11 +217,20 @@ script BattleUnit extends Component
         local distanceSquared = dx * dx + dy * dy
         if distanceSquared > self.AttackRange * self.AttackRange then
             local distance = math.sqrt(distanceSquared)
-            local direction = Vector2(dx / distance, dy / distance)
+            local directionX = dx / distance
+            local directionY = dy / distance
+            local maximumStep = self.MoveSpeed * delta
+            if position.x + directionX * maximumStep < session.ArenaMinX or position.x + directionX * maximumStep > session.ArenaMaxX then directionX = 0 end
+            if position.y + directionY * maximumStep < session.ArenaMinY or position.y + directionY * maximumStep > session.ArenaMaxY then directionY = 0 end
+            local directionLength = math.sqrt(directionX * directionX + directionY * directionY)
             local movement = self.Entity:GetComponent("MovementComponent")
             if isvalid(movement) then
-                movement.InputSpeed = self.MoveSpeed * 1.2
-                movement:MoveToDirection(direction, delta)
+                if directionLength > 0.0001 then
+                    movement.InputSpeed = self.MoveSpeed * 1.2
+                    movement:MoveToDirection(Vector2(directionX / directionLength, directionY / directionLength), delta)
+                else
+                    movement:Stop()
+                end
             end
             self.CombatState = "MOVE"
             self:DriveAttack(target, false)
@@ -256,6 +279,7 @@ script BattleUnit extends Component
         self.IsDead = true
         self.CombatState = "DEAD"
         self._T.hitStopRemaining = 0
+        self._T.knockbackRemaining = 0
         self._T.currentTarget = nil
         self.CurrentTargetName = ""
         self._T.deathRemaining = self.DeathHold
@@ -274,11 +298,28 @@ script BattleUnit extends Component
         -- Stop all unit-side target, movement, and attack work after RESULT is entered.
         self.CombatState = "RESULT_STOP"
         self._T.hitStopRemaining = 0
+        self._T.knockbackRemaining = 0
         self._T.currentTarget = nil
         self.CurrentTargetName = ""
         local movement = self.Entity:GetComponent("MovementComponent")
         if isvalid(movement) then movement:Stop() end
         self:CancelAttack()
+    end
+
+    @ExecSpace("ServerOnly")
+    method void ApplyKnockback(Vector2 position)
+        -- Apply a safe world position and hold movement briefly so AI cannot erase the push immediately.
+        if position == nil or self.IsDead then return end
+        local transform = self.Entity:GetComponent("TransformComponent")
+        local kinematic = self.Entity:GetComponent("KinematicbodyComponent")
+        if not isvalid(transform) or not isvalid(kinematic) then return end
+        local current = transform.WorldPosition
+        if math.abs(position.x - current.x) + math.abs(position.y - current.y) <= 0.0001 then return end
+        local movement = self.Entity:GetComponent("MovementComponent")
+        if isvalid(movement) then movement:Stop() end
+        kinematic:SetWorldPosition(position)
+        self._T.knockbackRemaining = math.max(self._T.knockbackRemaining or 0, self.KnockbackRecoveryDuration)
+        self.CombatState = "ON_HIT"
     end
 
     @ExecSpace("ServerOnly")
