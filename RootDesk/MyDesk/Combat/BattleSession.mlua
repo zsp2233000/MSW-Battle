@@ -449,7 +449,8 @@ script BattleSession extends Component
                     local current = transform.WorldPosition
                     local dx = position.x - current.x
                     local dy = position.y - current.y
-                    if dx * dx + dy * dy + 0.000000001 < minimumSquared then return false end
+                    -- Vector3 stores positions as float32; 0.6 can round slightly below the boundary.
+                    if dx * dx + dy * dy + 0.000001 < minimumSquared then return false end
                 end
             end
         end
