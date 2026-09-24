@@ -287,13 +287,20 @@ script BattleSession extends Component
             "OnHitSoundRUID",
             "DieSoundRUID",
         }
+        local optionalAssetFields = {
+            HitEffectRUID = true,
+            AttackSoundRUID = true,
+            OnHitSoundRUID = true,
+            DieSoundRUID = true,
+        }
         for _, fieldName in ipairs(assetFields) do
             local assetRUID = row:GetItem(fieldName)
-            if self:IsBlank(assetRUID) then
+            if optionalAssetFields[fieldName] ~= true and self:IsBlank(assetRUID) then
                 self:FailConfiguration("MonsterData row " .. monsterId .. " missing " .. fieldName)
                 return nil
             end
-            profile[fieldName] = assetRUID
+            -- Normalize optional nil cells to an empty string for typed consumers and skip guards.
+            profile[fieldName] = assetRUID or ""
         end
         return profile
     end
