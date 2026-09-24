@@ -277,3 +277,6 @@ Use the default five canonical labels: `needs-triage`, `needs-info`, `ready-for-
 ### Domain docs
 
 Single-context: root `CONTEXT.md` and `docs/adr/`. See `docs/agents/domain.md`.
+
+# Codegrpah
+This project does not use CodeGraph.

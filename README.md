@@ -33,14 +33,13 @@ CSV 是方便編輯與檢視的檔案；執行時讀取的是 Maker 中的 UserD
 | `ModelId` | 生成時使用的專案 Model ID；不可空白。 |
 | `MaxHp` | 最大生命值；正整數。 |
 | `MoveSpeed` | 移動速度；大於 0。 |
-| `AttackDamage` | 攻擊傷害；正整數。坦克接觸傷害也使用此值。 |
+| `AttackDamage` | 攻擊傷害；正整數。坦克接觸命中也使用此值。 |
 | `AttackIntervalSeconds` | 攻擊間隔秒數；大於 0。 |
 | `AttackRange` | 一般攻擊距離；大於 0。 |
 | `AttackImpactFrame` | 戰士／射手結算命中的影格；正整數。坦克可留空或填 `0`，因坦克沒有一般攻擊。 |
 | `RetargetIntervalSeconds` | 重新尋找目標的間隔秒數；大於 0。 |
 | `HitStopDurationSeconds` | 受擊停頓秒數；大於或等於 0。 |
-| `ContactDamage` | 坦克接觸傷害；整數。坦克必須大於 0，其他種類可填 `0`。 |
-| `ContactCooldownSeconds` | 同一目標的接觸傷害冷卻秒數；坦克必須大於 0，其他種類可填 `0`。 |
+| `ContactCooldownSeconds` | 同一目標的坦克接觸攻擊冷卻秒數；坦克必須大於 0，其他種類可填 `0`。 |
 | `ContactSizeX` | 坦克接觸範圍寬度；坦克必須大於 0，其他種類可填 `0`。 |
 | `ContactSizeY` | 坦克接觸範圍高度；坦克必須大於 0，其他種類可填 `0`。 |
 | `KnockbackDistance` | 坦克接觸擊退距離；坦克必須大於 0，其他種類可填 `0`。 |
@@ -57,8 +56,8 @@ CSV 是方便編輯與檢視的檔案；執行時讀取的是 Maker 中的 UserD
 ## 數值規則摘要
 
 - 所有種類：`MaxHp`、`AttackDamage` 為正整數；`MoveSpeed`、`AttackIntervalSeconds`、`AttackRange`、`RetargetIntervalSeconds` 必須大於 0；`HitStopDurationSeconds` 不可小於 0。
-- `TANK`：`ContactDamage`、`ContactCooldownSeconds`、`ContactSizeX`、`ContactSizeY`、`KnockbackDistance` 必須大於 0；`AttackImpactFrame` 可空白或為 `0`。
-- `ASSAULT`、`SHOOTER`：`AttackImpactFrame` 必須是正整數；接觸傷害相關數值可填 `0`。
+- `TANK`：`ContactCooldownSeconds`、`ContactSizeX`、`ContactSizeY`、`KnockbackDistance` 必須大於 0；接觸命中傷害使用 `AttackDamage`；`AttackImpactFrame` 可空白或為 `0`。
+- `ASSAULT`、`SHOOTER`：`AttackImpactFrame` 必須是正整數；坦克接觸設定欄位可填 `0`。
 
 ## 新增或修改資料列
 
