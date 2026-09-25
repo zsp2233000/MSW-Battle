@@ -23,7 +23,10 @@
         "MOD.Core.KinematicbodyComponent",
         "MOD.Core.MovementComponent",
         "MOD.Core.StateComponent",
-        "MOD.Core.HitComponent"
+        "MOD.Core.HitComponent",
+        "MOD.Core.DamageSkinSettingComponent",
+        "MOD.Core.DamageSkinSpawnerComponent",
+        "MOD.Core.DamageSkinComponent"
       ],
       "Properties": [],
       "Values": [
@@ -36,9 +39,9 @@
           },
           "Value": {
             "$type": "MOD.Core.MODVector3, MOD.Core",
-            "x": 0.0,
-            "y": 0.0,
-            "z": 0.0
+            "x": 0,
+            "y": 0,
+            "z": 0
           }
         },
         {
@@ -77,8 +80,8 @@
           },
           "Value": {
             "$type": "MOD.Core.MODVector2, MOD.Core",
-            "x": 1.0,
-            "y": 1.0
+            "x": 1,
+            "y": 1
           }
         },
         {
@@ -130,7 +133,7 @@
           },
           "Value": {
             "$type": "MOD.Core.MODVector2, MOD.Core",
-            "x": 0.0,
+            "x": 0,
             "y": 0.4
           }
         },
@@ -173,10 +176,10 @@
           },
           "Value": {
             "$type": "MOD.Core.MODQuaternion, MOD.Core",
-            "x": 0.0,
-            "y": 0.0,
-            "z": 0.0,
-            "w": 1.0
+            "x": 0,
+            "y": 0,
+            "z": 0,
+            "w": 1
           }
         },
         {
@@ -235,8 +238,8 @@
           },
           "Value": {
             "$type": "MOD.Core.MODVector2, MOD.Core",
-            "x": 0.0,
-            "y": 0.0
+            "x": 0,
+            "y": 0
           }
         },
         {
@@ -292,6 +295,31 @@
             "type": "System.Boolean, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089"
           },
           "Value": true
+        },
+        {
+          "TargetType": "MOD.Core.DamageSkinSettingComponent",
+          "Name": "DamageSkinId",
+          "ValueType": {
+            "$type": "MODNativeType",
+            "type": "MOD.Core.MODDataRef, MOD.Core, Version=26.7.0.0, Culture=neutral, PublicKeyToken=null"
+          },
+          "Value": {
+            "$type": "MOD.Core.MODDataRef, MOD.Core",
+            "DataId": "3271c3e79bf04ecba9a107d55495970d"
+          }
+        },
+        {
+          "TargetType": "MOD.Core.DamageSkinSpawnerComponent",
+          "Name": "DamageSkinOffset",
+          "ValueType": {
+            "$type": "MODNativeType",
+            "type": "MOD.Core.MODVector2, MOD.Core, Version=26.7.0.0, Culture=neutral, PublicKeyToken=null"
+          },
+          "Value": {
+            "$type": "MOD.Core.MODVector2, MOD.Core",
+            "x": 0,
+            "y": 0.8
+          }
         }
       ],
       "EventLinks": [],
@@ -340,7 +368,7 @@
                   "$type": "MOD.Core.MODVector3, MOD.Core",
                   "x": -0.4389,
                   "y": 1.0555,
-                  "z": 0.0
+                  "z": 0
                 }
               },
               {
@@ -352,9 +380,9 @@
                 },
                 "Value": {
                   "$type": "MOD.Core.MODVector3, MOD.Core",
-                  "x": 1.0,
-                  "y": 1.0,
-                  "z": 1.0
+                  "x": 1,
+                  "y": 1,
+                  "z": 1
                 }
               },
               {
@@ -384,10 +412,10 @@
                 },
                 "Value": {
                   "$type": "MOD.Core.MODQuaternion, MOD.Core",
-                  "x": 0.0,
-                  "y": 0.0,
-                  "z": 0.0,
-                  "w": 1.0
+                  "x": 0,
+                  "y": 0,
+                  "z": 0,
+                  "w": 1
                 }
               },
               {
@@ -504,7 +532,7 @@
                   "$type": "MOD.Core.MODVector3, MOD.Core",
                   "x": 0.0059,
                   "y": 0.9805,
-                  "z": 0.0
+                  "z": 0
                 }
               },
               {
@@ -518,7 +546,7 @@
                   "$type": "MOD.Core.MODVector3, MOD.Core",
                   "x": 1.45402253,
                   "y": 1.39695954,
-                  "z": 1.0
+                  "z": 1
                 }
               },
               {
@@ -548,10 +576,10 @@
                 },
                 "Value": {
                   "$type": "MOD.Core.MODQuaternion, MOD.Core",
-                  "x": 0.0,
-                  "y": 0.0,
-                  "z": 0.0,
-                  "w": 1.0
+                  "x": 0,
+                  "y": 0,
+                  "z": 0,
+                  "w": 1
                 }
               },
               {
