@@ -33,7 +33,6 @@ script BattleSession extends Component
     property Vector3 EnemyPosition4 = Vector3(2.6, -2.0, 0)
     property Vector3 EnemyPosition5 = Vector3(2.6, -3.0, 0)
     property Vector3 EnemyPosition6 = Vector3(1.6, -1.0, 0)
-    property number DeathHold = 0.6
     property number EnemyOpeningDelay = 0.12 -- Deterministic M1 lead; DRAW remains for same-batch edge cases.
     property number AttackFramesPerSecond = 60
     property number ArenaMinX = -5.5
@@ -529,7 +528,6 @@ script BattleSession extends Component
                 presentation.StandAnimationRUID = profile.StandAnimationRUID
                 presentation.MoveAnimationRUID = profile.MoveAnimationRUID
                 presentation.OnHitAnimationRUID = profile.HitAnimationRUID
-                presentation.DeathAnimationRUID = profile.DieAnimationRUID
                 presentation.AttackSoundRUID = profile.AttackSoundRUID
                 presentation.OnHitSoundRUID = profile.OnHitSoundRUID
                 presentation.DeathSoundRUID = profile.DieSoundRUID
@@ -599,7 +597,7 @@ script BattleSession extends Component
         if faction == "ENEMY" then openingDelay = self.EnemyOpeningDelay end
         unit:BindAttackFactory(attackFactory)
         unit:SetMonsterIdentity(profile.MonsterId, profile.MonsterName, profile.HitEffectRUID)
-        unit:Configure(faction, profile.MonsterName, profile.MonsterType, profile.MaxHp, profile.MoveSpeed, profile.AttackDamage, profile.AttackIntervalSeconds, profile.AttackRange, profile.RetargetIntervalSeconds, profile.ImpactDelaySeconds, self.DeathHold, openingDelay, profile.ContactCooldownSeconds, Vector2(profile.ContactSizeX, profile.ContactSizeY), profile.KnockbackDistance, profile.HitStopDurationSeconds)
+        unit:Configure(faction, profile.MonsterName, profile.MonsterType, profile.MaxHp, profile.MoveSpeed, profile.AttackDamage, profile.AttackIntervalSeconds, profile.AttackRange, profile.RetargetIntervalSeconds, profile.ImpactDelaySeconds, profile.DieAnimationRUID, openingDelay, profile.ContactCooldownSeconds, Vector2(profile.ContactSizeX, profile.ContactSizeY), profile.KnockbackDistance, profile.HitStopDurationSeconds)
         if not unit:HasAttackAdapter() then
             log_error("[M1][BattleSession] attack adapter missing on " .. name)
             entity:Destroy()

@@ -6,6 +6,7 @@ script BattleUnit extends Component
     @Sync property string MonsterName = ""
     @Sync property string UnitKind = "ASSAULT"
     @Sync property string CombatState = "IDLE"
+    @Sync property string DeathAnimationRUID = ""
     @Sync property string CurrentTargetName = ""
     @Sync property integer Hp = 0
     @Sync property integer MaxHp = 220
@@ -21,7 +22,6 @@ script BattleUnit extends Component
     property number AttackRange = 0.6
     property number RetargetInterval = 0.5
     property number ImpactDelay = 0.18
-    property number DeathHold = 0.6
     property number HitStopDuration = 0.2
     property number KnockbackRecoveryDuration = 0.35
 
@@ -33,8 +33,18 @@ script BattleUnit extends Component
         self._T.attackAdapter = nil
         self._T.attackConfigured = false
         self._T.retargetRemaining = 0
-        self._T.deathRemaining = 0
-        self._T.deathFinished = false
+        self._T.deathDurationPendingRUID = ""
+        self._T.deathDurationFailedRUID = ""
+        self._T.deathDurationRUID = ""
+        self._T.deathDurationReady = false
+        self._T.deathAnimationRequested = false
+        self._T.deathAnimationStarted = false
+        self._T.deathAnimationFinished = false
+        self._T.deathAnimationPlayer = nil
+        self._T.deathAnimationSawFinalFrame = false
+        self._T.deathAnimationCycleCompleted = false
+        self._T.deathAnimationFrameCount = 0
+        self._T.deathAnimationCompletionSource = ""
         self._T.hitStopRemaining = 0
         self._T.knockbackRemaining = 0
         self._T.hitEffectRUID = "TBD"
@@ -51,7 +61,7 @@ script BattleUnit extends Component
     end
 
     @ExecSpace("ServerOnly")
-    method void Configure(string faction, string displayName, string unitKind, integer maxHp, number speed, integer damage, number interval, number range, number retarget, number impact, number deathHold, number openingDelay, number contactCooldown, Vector2 contactSize, number knockbackDistance, number hitStopDuration)
+    method void Configure(string faction, string displayName, string unitKind, integer maxHp, number speed, integer damage, number interval, number range, number retarget, number impact, string deathAnimationRUID, number openingDelay, number contactCooldown, Vector2 contactSize, number knockbackDistance, number hitStopDuration)
         -- Apply the unit profile and bind the only attack adapter used by this unit.
         self.Faction = faction
         self.MonsterName = displayName
@@ -64,7 +74,7 @@ script BattleUnit extends Component
         self.AttackRange = range
         self.RetargetInterval = retarget
         self.ImpactDelay = impact
-        self.DeathHold = deathHold
+        self.DeathAnimationRUID = deathAnimationRUID
         self.HitStopDuration = hitStopDuration
         self.IsDead = false
         self.CurrentTargetName = ""
@@ -157,9 +167,8 @@ script BattleUnit extends Component
 
     @ExecSpace("ServerOnly")
     method void Tick(number delta)
-        -- Retarget on the cadence, move per frame, and use only the unit's configured attack path.
+        -- Keep dead units inert on the server; clients own the visual death-animation completion.
         if self.IsDead then
-            self:TickDeathHold(delta)
             return
         end
         local session = self:GetSession()
@@ -247,20 +256,6 @@ script BattleUnit extends Component
     end
 
     @ExecSpace("ServerOnly")
-    method void TickDeathHold(number delta)
-        -- Hold the dead presentation briefly, then remove the unit from the active world.
-        if self._T.deathFinished == true then return end
-        self._T.deathRemaining = self._T.deathRemaining - delta
-        if self._T.deathRemaining <= 0 then
-            self._T.deathFinished = true
-            self.Entity:SetVisible(false)
-            self.Entity:SetEnable(false)
-            local session = self:GetSession()
-            if isvalid(session) then session:EmitPresentation("DEATH_FINISHED", self.Entity, nil, 0) end
-        end
-    end
-
-    @ExecSpace("ServerOnly")
     method void ApplyResolvedDamage(integer amount, Entity attacker)
         -- Apply only coalesced HitEvent damage and transition to DEAD once at zero HP.
         if amount == nil or amount <= 0 or not self:IsAlive() then return end
@@ -282,15 +277,229 @@ script BattleUnit extends Component
         self._T.knockbackRemaining = 0
         self._T.currentTarget = nil
         self.CurrentTargetName = ""
-        self._T.deathRemaining = self.DeathHold
-        self._T.deathFinished = false
         local movement = self.Entity:GetComponent("MovementComponent")
         if isvalid(movement) then movement:Stop() end
         local hit = self.Entity:GetComponent("HitComponent")
         if isvalid(hit) then hit.Enable = false end
+        local body = self.Entity:GetComponent("KinematicbodyComponent")
+        if isvalid(body) then body.Enable = false end
+        local trigger = self.Entity:GetComponent("TriggerComponent")
+        if isvalid(trigger) then trigger.Enable = false end
         local state = self.Entity:GetComponent("StateComponent")
         if isvalid(state) then state:ChangeState("DEAD") end
         if isvalid(session) then session:NotifyDeath(self.Entity) end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnUpdate(number delta)
+        -- Resolve the clip metadata, then start its real playback after the server marks death.
+        self:PreloadDeathAnimationDuration()
+        if self.IsDead ~= true then return end
+        if self._T.deathAnimationRequested == true then return end
+
+        local sprite = self.Entity:GetComponent("SpriteRendererComponent")
+        if not isvalid(sprite) then return end
+        if self.DeathAnimationRUID == nil or self.DeathAnimationRUID == "" or self.DeathAnimationRUID == "TBD" or self.DeathAnimationRUID == "N/A" then
+            return
+        end
+        self._T.deathAnimationRequested = true
+        self._T.deathAnimationStarted = false
+        self._T.deathAnimationFinished = false
+        self._T.deathAnimationPlayer = nil
+        self._T.deathAnimationSawFinalFrame = false
+        self._T.deathAnimationCycleCompleted = false
+        self._T.deathAnimationFrameCount = 0
+        sprite.StartFrameIndex = 0
+        sprite.EndFrameIndex = 2147483647
+        sprite.PlayRate = 1
+        sprite.SpriteRUID = self.DeathAnimationRUID
+    end
+
+    @ExecSpace("ClientOnly")
+    method void PreloadDeathAnimationDuration()
+        -- Cache the assigned die clip timing for diagnostics; playback events determine when it is complete.
+        local ruid = self.DeathAnimationRUID
+        if ruid == nil or ruid == "" or ruid == "TBD" or ruid == "N/A" then return end
+        if self._T.deathDurationRUID == ruid and self._T.deathDurationReady == true then return end
+        if self._T.deathDurationFailedRUID == ruid then return end
+        if self._T.deathDurationPendingRUID ~= "" and self._T.deathDurationPendingRUID ~= ruid then
+            self._T.deathDurationPendingRUID = ""
+        end
+        if self._T.deathDurationPendingRUID == ruid then return end
+
+        self._T.deathDurationPendingRUID = ruid
+        _ResourceService:PreloadAsync({ ruid }, function()
+            if not isvalid(self.Entity) then return end
+            if self.DeathAnimationRUID ~= ruid then
+                if self._T.deathDurationPendingRUID == ruid then self._T.deathDurationPendingRUID = "" end
+                return
+            end
+
+            local clip = _ResourceService:LoadAnimationClipAndWait(ruid)
+            if not isvalid(self.Entity) or self.DeathAnimationRUID ~= ruid then return end
+            if self._T.deathDurationPendingRUID == ruid then self._T.deathDurationPendingRUID = "" end
+            if not isvalid(clip) then
+                self._T.deathDurationFailedRUID = ruid
+                log_error("[M1][BattleUnit] death animation resource failed to load: " .. self.Entity.Name .. ", ruid=" .. ruid)
+                return
+            end
+            local frames = clip.Frames:ToTable()
+            if frames == nil or #frames == 0 then
+                self._T.deathDurationFailedRUID = ruid
+                log_error("[M1][BattleUnit] death animation has no frames: " .. self.Entity.Name .. ", ruid=" .. ruid)
+                return
+            end
+
+            local frameDelaySum = 0
+            for _, frame in ipairs(frames) do
+                if frame == nil or frame.Delay == nil or not (frame.Delay >= 0) or not (frame.Delay < math.huge) then
+                    self._T.deathDurationFailedRUID = ruid
+                    log_error("[M1][BattleUnit] death animation has invalid frame timing: " .. self.Entity.Name .. ", ruid=" .. ruid)
+                    return
+                end
+                frameDelaySum = frameDelaySum + frame.Delay
+            end
+            if not (frameDelaySum > 0) or not (frameDelaySum < math.huge) then
+                self._T.deathDurationFailedRUID = ruid
+                log_error("[M1][BattleUnit] death animation duration is not positive: " .. self.Entity.Name .. ", ruid=" .. ruid)
+                return
+            end
+
+            self._T.deathDurationFrameDelaySum = frameDelaySum
+            self._T.deathDurationFrameCount = #frames
+            self._T.deathDurationRUID = ruid
+            self._T.deathDurationReady = true
+            self:ResolveDeathAnimationDuration()
+        end)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ResolveDeathAnimationDuration()
+        -- Adjust the clip frame-delay sum by the actual playback rate reported at start.
+        if self._T.deathDurationReady ~= true or self._T.deathAnimationStarted ~= true then return end
+        if self._T.deathDurationRUID ~= self.DeathAnimationRUID then return end
+        if self._T.deathAnimationPlayRate == nil
+            or not (self._T.deathAnimationPlayRate > 0)
+            or not (self._T.deathAnimationPlayRate < math.huge) then
+            self._T.deathDurationReady = false
+            self._T.deathDurationFailedRUID = self._T.deathDurationRUID
+            log_error("[M1][BattleUnit] death animation playback rate must be positive: " .. self.Entity.Name)
+            return
+        end
+
+        self._T.deathAnimationDuration = self._T.deathDurationFrameDelaySum / self._T.deathAnimationPlayRate
+        if not (self._T.deathAnimationDuration > 0) or not (self._T.deathAnimationDuration < math.huge) then
+            self._T.deathDurationReady = false
+            self._T.deathDurationFailedRUID = self._T.deathDurationRUID
+            log_error("[M1][BattleUnit] computed death animation duration is invalid: " .. self.Entity.Name)
+            return
+        end
+
+        log("[M1][BattleUnit] DIE_DURATION_READY: " .. self.Entity.Name
+            .. ", frameDelaySum=" .. tostring(self._T.deathDurationFrameDelaySum)
+            .. ", playRate=" .. tostring(self._T.deathAnimationPlayRate)
+            .. ", duration=" .. tostring(self._T.deathAnimationDuration))
+        self:TryFinishDeathAnimation()
+    end
+
+    @ExecSpace("ClientOnly")
+    @EventSender("Self")
+    handler HandleSpriteAnimPlayerStartEvent(SpriteAnimPlayerStartEvent event)
+        -- Begin measuring from the renderer's death-clip start event, including its actual play rate.
+        if self.IsDead ~= true or self._T.deathAnimationRequested ~= true then return end
+        local sprite = self.Entity:GetComponent("SpriteRendererComponent")
+        if not isvalid(sprite) or sprite.SpriteRUID ~= self.DeathAnimationRUID then return end
+        self._T.deathAnimationStarted = true
+        self._T.deathAnimationPlayRate = event.ClipPlayRate
+        self._T.deathAnimationPlayer = event.AnimPlayer
+        self._T.deathAnimationSawFinalFrame = false
+        self._T.deathAnimationCycleCompleted = false
+        self._T.deathAnimationFrameCount = 0
+        self._T.deathAnimationSingleFrameLastFrameSeen = false
+        log("[M1][BattleUnit] death animation started: " .. self.Entity.Name
+            .. ", playType=" .. tostring(event.ClipPlayType)
+            .. ", playRate=" .. tostring(event.ClipPlayRate))
+        self:ResolveDeathAnimationDuration()
+    end
+
+    @ExecSpace("ClientOnly")
+    @EventSender("Self")
+    handler HandleSpriteAnimPlayerChangeFrameEvent(SpriteAnimPlayerChangeFrameEvent event)
+        -- Loop clips have no EndEvent; the first frame-zero wrap after the final frame marks one full playback.
+        if self.IsDead ~= true or self._T.deathAnimationStarted ~= true then return end
+        if self._T.deathAnimationCycleCompleted == true then return end
+        if event.AnimPlayer ~= self._T.deathAnimationPlayer then return end
+        if event.ReversePlaying == true or event.TotalFrameCount < 2 then return end
+
+        if self._T.deathAnimationFrameCount == 0 then
+            self._T.deathAnimationFrameCount = event.TotalFrameCount
+        elseif self._T.deathAnimationFrameCount ~= event.TotalFrameCount then
+            return
+        end
+
+        if event.FrameIndex == event.TotalFrameCount - 1 then
+            self._T.deathAnimationSawFinalFrame = true
+            return
+        end
+        if event.FrameIndex ~= 0 or self._T.deathAnimationSawFinalFrame ~= true then return end
+
+        self._T.deathAnimationCycleCompleted = true
+        self._T.deathAnimationCompletionSource = "SpriteAnimPlayerChangeFrameEvent(loop-wrap)"
+        log("[M1][BattleUnit] death animation playback cycle completed: " .. self.Entity.Name
+            .. ", frameCount=" .. tostring(event.TotalFrameCount)
+            .. ", boundary=loop-wrap")
+        self:TryFinishDeathAnimation()
+    end
+
+    @ExecSpace("ClientOnly")
+    @EventSender("Self")
+    handler HandleSpriteAnimPlayerEndFrameEvent(SpriteAnimPlayerEndFrameEvent event)
+        -- A one-frame Loop never changes frames; two last-frame entries prove one complete cycle.
+        if self.IsDead ~= true or self._T.deathAnimationStarted ~= true then return end
+        if self._T.deathAnimationCycleCompleted == true then return end
+        if event.AnimPlayer ~= self._T.deathAnimationPlayer or event.ReversePlaying == true then return end
+        if event.TotalFrameCount > 1 and self._T.deathDurationFrameCount ~= 1 then return end
+
+        if self._T.deathAnimationSingleFrameLastFrameSeen ~= true then
+            self._T.deathAnimationSingleFrameLastFrameSeen = true
+            return
+        end
+        self._T.deathAnimationCycleCompleted = true
+        self._T.deathAnimationCompletionSource = "SpriteAnimPlayerEndFrameEvent(single-frame-repeat)"
+        log("[M1][BattleUnit] death animation playback cycle completed: " .. self.Entity.Name
+            .. ", frameCount=1, boundary=single-frame-repeat")
+        self:TryFinishDeathAnimation()
+    end
+
+    @ExecSpace("ClientOnly")
+    @EventSender("Self")
+    handler HandleSpriteAnimPlayerEndEvent(SpriteAnimPlayerEndEvent event)
+        -- Support clips configured for one-time playback if the asset is changed from its current Loop mode.
+        if self.IsDead ~= true or self._T.deathAnimationStarted ~= true then return end
+        if self._T.deathAnimationCycleCompleted == true then return end
+        if event.AnimPlayer ~= self._T.deathAnimationPlayer then return end
+
+        self._T.deathAnimationCycleCompleted = true
+        self._T.deathAnimationCompletionSource = "SpriteAnimPlayerEndEvent"
+        log("[M1][BattleUnit] death animation playback cycle completed: " .. self.Entity.Name
+            .. ", boundary=end-event")
+        self:TryFinishDeathAnimation()
+    end
+
+    @ExecSpace("ClientOnly")
+    method void TryFinishDeathAnimation()
+        -- Hide as soon as the assigned animation player proves a full playback has completed.
+        if self._T.deathAnimationFinished == true then return end
+        if self._T.deathAnimationCycleCompleted ~= true then return end
+        if not isvalid(self.Entity) then return end
+        local sprite = self.Entity:GetComponent("SpriteRendererComponent")
+        if not isvalid(sprite) or sprite.SpriteRUID ~= self.DeathAnimationRUID then return end
+
+        self._T.deathAnimationFinished = true
+        self.Entity:SetVisible(false, false, false)
+        log("[M1][BattleUnit] death animation finished; hidden locally: " .. self.Entity.Name
+            .. ", duration=" .. tostring(self._T.deathAnimationDuration or "unavailable")
+            .. ", source=" .. tostring(self._T.deathAnimationCompletionSource))
     end
 
     @ExecSpace("ServerOnly")
