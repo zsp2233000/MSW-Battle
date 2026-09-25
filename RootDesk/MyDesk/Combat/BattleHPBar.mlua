@@ -1,7 +1,7 @@
 @Component
 script BattleHPBar extends Component
 	-- Match BarWidth to the full bar width configured in Maker.
-	property number BarWidth = 0.65
+	property number BarWidth = 0.96
 	property number FillWidthRatio = 0.90625
 
 	@ExecSpace("ClientOnly")
@@ -34,8 +34,8 @@ script BattleHPBar extends Component
 		fillScale.x = self._T.fillFullScaleX * ratio
 		fillTransform.Scale = fillScale
 
-		-- Preserve the left edge while the sprite scales around its center.
-		fillPosition.x = self._T.fillStartX + self.BarWidth * self.FillWidthRatio * (1 - ratio) * 0.5
+		-- Anchor the left edge so damage drains the visible fill from right to left.
+		fillPosition.x = self._T.fillStartX - self.BarWidth * self.FillWidthRatio * (1 - ratio) * 0.5
 		fillTransform.Position = fillPosition
 		self._T.lastRatio = ratio
 		log("[M1][BattleHPBar] FILL " .. self.Entity.Name .. ", hp=" .. tostring(battleUnit.Hp)
