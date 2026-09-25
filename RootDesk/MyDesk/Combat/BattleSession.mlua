@@ -250,6 +250,8 @@ script BattleSession extends Component
         local attackImpactFrame = row:GetItem("AttackImpactFrame")
         if monsterType == "TANK" and self:IsBlank(attackImpactFrame) then
             profile.AttackImpactFrame = 0
+        elseif monsterType ~= "TANK" and self:IsBlank(attackImpactFrame) then
+            profile.AttackImpactFrame = 1
         else
             profile.AttackImpactFrame = self:ReadInteger(attackImpactFrame, "AttackImpactFrame", monsterId, 0)
         end
