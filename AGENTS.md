@@ -15,7 +15,7 @@ Before analyzing, planning, searching, or editing, all of the Foundation context
 
 | # | Skill identifier | What it covers |
 |:-:|---|---|
-| 1 | `msw-general` | Workspace structure, platform rules (`TileMapMode↔Body`, world unit, `SpriteRUID`, spawn), MCP tools, `.model`/`.map`/`.ui`/`.dataset` authoring, validated template catalog. Every other MSW skill assumes this is loaded. |
+| 1 | `msw-general` | Workspace structure, platform rules (`TileMapMode↔Body`, world unit, `SpriteRUID`, spawn), ModelBuilder, MCP tools, `.model`/`.map`/`.ui`/`.dataset` authoring, validated template catalog. Every other MSW skill assumes this is loaded. |
 | 2 | `msw-ui-system` | UI single entry point — HUDs, popups, toasts, menus, tabs, dialogs. Even "Galaga" needs a score/lives HUD. `.ui` files MUST go through a builder; never edit raw JSON. |
 
 > ⛔ **Never** load a skill by path (`Read("plugins/msw-maker-base-skill/skills/...")`, `Glob`, `ls`, `Grep`). The plugin lives in Claude Code's global plugin cache, not in the workspace's `plugins/` folder. Use the `Skill` tool — it resolves the absolute path automatically.
@@ -112,27 +112,6 @@ When a sub-trigger fires, the listed `references/*.md` is **required** in additi
 - `Global/` — engine defaults + world settings. **Never create new files here** (Maker registers new entries only from `RootDesk/`) or delete. Existing `Global/*.model` files may be modified in place through `ModelBuilder` + Maker Refresh; create new custom models under `RootDesk/MyDesk/Models/`. `.config` (WorldConfig, SectorConfig) is values-only and Maker-managed; do not touch `common.gamelogic` or the `common` entity.
   - `Global/NativeModel/` — MSW built-in `.model` templates (monsters, NPCs, items). Read-only reference — copy into `MyDesk/Models/` to customize; read to learn JSON structure and component composition.
 - `Environment/` — `.d.mlua` API definitions. Read-only.
-
-### Cross-platform tool rules
-
-⛔ **Never use shell commands to inspect the workspace.** Shell behavior differs across Windows PowerShell, Git Bash, and macOS bash (path separator, escape rules, encoding, command names). Cursor / Claude Code's built-in tools are the only portable choice.
-
-| To do this | ✅ Use this | ❌ Never use |
-|---|---|---|
-| List files | `Glob("RootDesk/MyDesk/**/*.mlua")` | `ls`, `dir`, `Get-ChildItem`, `gci` |
-| Check folder | `Glob("map/*")` | `ls`, `Test-Path`, `dir` |
-| Read a file | `Read("RootDesk/MyDesk/Foo.mlua")`; for `.map` use `MapBuilder.read(...)` | `cat`, `type`, `Get-Content`, `gc`, `head`, `tail`, `more`, `less` |
-| Search contents | `Grep("@Logic", glob: "*.mlua")` | `grep`, `findstr`, `Select-String`, `sls`, `rg` directly |
-| Find file by name | `Glob("**/PlayerController.mlua")` | `find`, `where`, `Get-ChildItem -Recurse` |
-
-The `Bash` / shell tool is reserved for actual programs (`git`, `npm`, MCP, build scripts). When you must invoke one:
-
-1. Prefer workspace-relative paths (`git add RootDesk/MyDesk/Foo.mlua`).
-2. If an absolute path is unavoidable, use forward slashes and double-quote: `"D:/msw-world-projects/.../map/"` — never `D:\...`. In bash on Windows, `\` is an escape character; `D:\foo\bar\` collapses to `D:foobar`.
-3. Always double-quote paths containing spaces or non-ASCII.
-4. Prefer POSIX commands (`ls`, `mv`, `cp`, `rm`) over OS-specific (`dir`, `type`, `del`).
-
-> Symptom of violation: `ls: cannot access 'D:msw-world-projects...'` — the backslashes were eaten by bash. Stop and re-issue as `Glob` / `Read` / `Grep`.
 
 ### Runtime interaction requires MCP — no exceptions
 
