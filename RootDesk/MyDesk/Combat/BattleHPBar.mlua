@@ -6,9 +6,10 @@ script BattleHPBar extends Component
 
 	@ExecSpace("ClientOnly")
 	method void OnUpdate(number delta)
-		local battleUnit = self.Entity.BattleUnit
+		-- Follow the owning unit's synced health without changing the fixed bar art.
+		local battleUnit = self.Entity:GetComponent("script.BattleUnit")
 		local fillEntity = self.Entity:GetChildByName("HPBarFill")
-		if battleUnit == nil or fillEntity == nil then
+		if not isvalid(battleUnit) or not isvalid(fillEntity) then
 			return
 		end
 
@@ -37,5 +38,7 @@ script BattleHPBar extends Component
 		fillPosition.x = self._T.fillStartX + self.BarWidth * self.FillWidthRatio * (1 - ratio) * 0.5
 		fillTransform.Position = fillPosition
 		self._T.lastRatio = ratio
+		log("[M1][BattleHPBar] FILL " .. self.Entity.Name .. ", hp=" .. tostring(battleUnit.Hp)
+			.. "/" .. tostring(battleUnit.MaxHp) .. ", ratio=" .. tostring(ratio))
 	end
 end

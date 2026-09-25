@@ -312,6 +312,7 @@ script BattleSession extends Component
             "DieSoundRUID",
         }
         local optionalAssetFields = {
+            AttackAnimationRUID = monsterType == "TANK",
             HitEffectRUID = true,
             AttackSoundRUID = true,
             OnHitSoundRUID = true,
@@ -605,6 +606,7 @@ script BattleSession extends Component
         end
 
         entity:AddComponent("script.BattleUnit")
+        entity:AddComponent("script.BattleHPBar")
         entity:AddComponent("script.BattleHitEffectPresentation")
         entity:AddComponent("script.BattleAttackComposition")
         local unit = entity:GetComponent("script.BattleUnit")
@@ -783,7 +785,10 @@ script BattleSession extends Component
         self:DisableDefaultPlayer()
         if self.Phase == "BATTLE" then
             for _, record in ipairs(self._T.units) do
-                if isvalid(record.unit) then record.unit:Tick(delta) end
+                if isvalid(record.unit) then
+                    record.unit:Tick(delta)
+                    record.unit:AdvanceKnockback(delta)
+                end
             end
             if advanceAttacks == true then
                 for _, record in ipairs(self._T.units) do
@@ -808,6 +813,9 @@ script BattleSession extends Component
         self._T.pendingDamage = {}
         local resolved = {}
         for _, hit in ipairs(pending) do
+            local attackerUnit = nil
+            if isvalid(hit.attacker) then attackerUnit = hit.attacker:GetComponent("script.BattleUnit") end
+            local isTankContact = isvalid(attackerUnit) and attackerUnit.UnitKind == "TANK"
             local found = nil
             for _, item in ipairs(resolved) do
                 if item.target == hit.target then
@@ -816,16 +824,18 @@ script BattleSession extends Component
                 end
             end
             if found == nil then
-                table.insert(resolved, { target = hit.target, amount = hit.amount, attacker = hit.attacker })
+                table.insert(resolved, { target = hit.target, amount = hit.amount, attacker = hit.attacker,
+                    allowHitStop = not isTankContact })
             else
                 found.amount = found.amount + hit.amount
                 found.attacker = hit.attacker
+                found.allowHitStop = found.allowHitStop or not isTankContact
             end
         end
         for _, hit in ipairs(resolved) do
             if isvalid(hit.target) then
                 local unit = hit.target:GetComponent("script.BattleUnit")
-                if isvalid(unit) then unit:ApplyResolvedDamage(hit.amount, hit.attacker) end
+                if isvalid(unit) then unit:ApplyResolvedDamage(hit.amount, hit.attacker, hit.allowHitStop) end
             end
         end
     end

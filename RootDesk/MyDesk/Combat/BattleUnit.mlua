@@ -24,7 +24,8 @@ script BattleUnit extends Component
     @Sync property integer OnHitSoundSerial = 0
     @Sync property integer AttackSerial = 0
     @Sync property integer HitEffectSerial = 0
-    @Sync property string LastHitEffectRUID = "TBD"
+    @Sync property string LastHitEffectRUID = ""
+    @Sync property boolean KnockbackActive = false
 
     property number MoveSpeed = 2.0
     property integer AttackDamage = 35
@@ -33,7 +34,7 @@ script BattleUnit extends Component
     property number RetargetInterval = 0.5
     property number ImpactDelay = 0.18
     property number HitStopDuration = 0.2
-    property number KnockbackRecoveryDuration = 0.35
+    property number KnockbackRecoveryDuration = 0.06
 
     @ExecSpace("ServerOnly")
     method void OnBeginPlay()
@@ -57,7 +58,10 @@ script BattleUnit extends Component
         self._T.deathAnimationCompletionSource = ""
         self._T.hitStopRemaining = 0
         self._T.knockbackRemaining = 0
-        self._T.hitEffectRUID = "TBD"
+        self._T.knockbackStepX = 0
+        self._T.knockbackStepY = 0
+        self.KnockbackActive = false
+        self._T.hitEffectRUID = ""
         if self.Hp <= 0 then self.Hp = self.MaxHp end
         self.CombatState = "IDLE"
     end
@@ -94,6 +98,9 @@ script BattleUnit extends Component
         self._T.retargetRemaining = 0
         self._T.hitStopRemaining = 0
         self._T.knockbackRemaining = 0
+        self._T.knockbackStepX = 0
+        self._T.knockbackStepY = 0
+        self.KnockbackActive = false
         self._T.attackAdapter = nil
         self._T.attackConfigured = false
         if not isvalid(self._T.attackFactory) then
@@ -127,11 +134,7 @@ script BattleUnit extends Component
 
     method string GetHitEffectRUID()
         -- Return the attacker-owned dataset effect so the defender can render it on itself.
-        if self._T.hitEffectRUID ~= nil and self._T.hitEffectRUID ~= "" then return self._T.hitEffectRUID end
-        if not isvalid(self._T.attackAdapter) then return "TBD" end
-        local effectRUID = self._T.attackAdapter.HitEffectRUID
-        if effectRUID == nil or effectRUID == "" then return "TBD" end
-        return effectRUID
+        return self._T.hitEffectRUID or ""
     end
 
     @ExecSpace("ServerOnly")
@@ -187,16 +190,6 @@ script BattleUnit extends Component
             return
         end
         session:ConstrainUnitToArena(self.Entity)
-
-        if self._T.knockbackRemaining > 0 then
-            self._T.knockbackRemaining = math.max(0, self._T.knockbackRemaining - delta)
-            local knockbackMovement = self.Entity:GetComponent("MovementComponent")
-            if isvalid(knockbackMovement) then knockbackMovement:Stop() end
-            if self._T.knockbackRemaining > 0 then
-                self.CombatState = "ON_HIT"
-                return
-            end
-        end
 
         if self._T.hitStopRemaining > 0 then
             self._T.hitStopRemaining = math.max(0, self._T.hitStopRemaining - delta)
@@ -266,23 +259,23 @@ script BattleUnit extends Component
     end
 
     @ExecSpace("ServerOnly")
-    method void ApplyResolvedDamage(integer amount, Entity attacker)
+    method void ApplyResolvedDamage(integer amount, Entity attacker, boolean allowHitStop)
         -- Apply only coalesced HitEvent damage and transition to DEAD once at zero HP.
         if amount == nil or amount <= 0 or not self:IsAlive() then return end
         self.Hp = math.max(0, self.Hp - amount)
         self.DamageTakenSerial = self.DamageTakenSerial + 1
-        local attackerUnit = nil
-        if isvalid(attacker) then attackerUnit = attacker:GetComponent("script.BattleUnit") end
-        if not isvalid(attackerUnit) or attackerUnit.UnitKind ~= "TANK" then
+        if self.OnHitSoundRUID ~= nil and self.OnHitSoundRUID ~= "" then
             self.OnHitSoundSerial = self.OnHitSoundSerial + 1
         end
         local session = self:GetSession()
         if isvalid(session) then session:EmitPresentation("DAMAGE", attacker, self.Entity, amount) end
         if self.Hp > 0 then
-            self._T.hitStopRemaining = self.HitStopDuration
-            local hitStopMovement = self.Entity:GetComponent("MovementComponent")
-            if isvalid(hitStopMovement) then hitStopMovement:Stop() end
-            self.CombatState = "ON_HIT"
+            if allowHitStop then
+                self._T.hitStopRemaining = self.HitStopDuration
+                local hitStopMovement = self.Entity:GetComponent("MovementComponent")
+                if isvalid(hitStopMovement) then hitStopMovement:Stop() end
+                self.CombatState = "ON_HIT"
+            end
             return
         end
 
@@ -290,10 +283,14 @@ script BattleUnit extends Component
         self.CombatState = "DEAD"
         self._T.hitStopRemaining = 0
         self._T.knockbackRemaining = 0
+        self._T.knockbackStepX = 0
+        self._T.knockbackStepY = 0
+        self.KnockbackActive = false
         self._T.currentTarget = nil
         self.CurrentTargetName = ""
         local movement = self.Entity:GetComponent("MovementComponent")
         if isvalid(movement) then movement:Stop() end
+        self:CancelAttack()
         local hit = self.Entity:GetComponent("HitComponent")
         if isvalid(hit) then hit.Enable = false end
         local body = self.Entity:GetComponent("KinematicbodyComponent")
@@ -382,8 +379,11 @@ script BattleUnit extends Component
         self._T.lastAnimationDamageSerial = self.DamageTakenSerial
         self._T.lastAnimationAttackSerial = self.AttackSerial
 
-        if self.CombatState == "ON_HIT" and (stateChanged or damageChanged) then
+        if damageChanged or (self.CombatState == "ON_HIT" and stateChanged) then
             self:PlayPresentationAnimation(self.HitAnimationRUID, "ON_HIT", damageChanged)
+        elseif self._T.presentationAction == "ON_HIT" then
+            -- Keep the hit clip visible while server movement continues during knockback.
+            self._T.lastPresentationState = "ON_HIT"
         elseif self.CombatState == "MOVE" and stateChanged then
             self:PlayPresentationAnimation(self.MoveAnimationRUID, "MOVE", false)
         elseif self.CombatState == "ATTACK" and self.UnitKind ~= "TANK" and attackChanged then
@@ -429,6 +429,7 @@ script BattleUnit extends Component
     method void FinishPresentationAction()
         local action = self._T.presentationAction
         if action == nil or action == "" or self.IsDead == true then return end
+        if action == "ON_HIT" and self.KnockbackActive then return end
         local sprite = self.Entity:GetComponent("SpriteRendererComponent")
         if not isvalid(sprite) then return end
         local actionRUID = self.AttackAnimationRUID
@@ -696,6 +697,9 @@ script BattleUnit extends Component
         self.CombatState = "RESULT_STOP"
         self._T.hitStopRemaining = 0
         self._T.knockbackRemaining = 0
+        self._T.knockbackStepX = 0
+        self._T.knockbackStepY = 0
+        self.KnockbackActive = false
         self._T.currentTarget = nil
         self.CurrentTargetName = ""
         local movement = self.Entity:GetComponent("MovementComponent")
@@ -705,18 +709,49 @@ script BattleUnit extends Component
 
     @ExecSpace("ServerOnly")
     method void ApplyKnockback(Vector2 position)
-        -- Apply a safe world position and hold movement briefly so AI cannot erase the push immediately.
+        -- Travel toward the already validated destination while normal AI keeps running.
         if position == nil or self.IsDead then return end
         local transform = self.Entity:GetComponent("TransformComponent")
         local kinematic = self.Entity:GetComponent("KinematicbodyComponent")
         if not isvalid(transform) or not isvalid(kinematic) then return end
         local current = transform.WorldPosition
         if math.abs(position.x - current.x) + math.abs(position.y - current.y) <= 0.0001 then return end
-        local movement = self.Entity:GetComponent("MovementComponent")
-        if isvalid(movement) then movement:Stop() end
-        kinematic:SetWorldPosition(position)
-        self._T.knockbackRemaining = math.max(self._T.knockbackRemaining or 0, self.KnockbackRecoveryDuration)
-        self.CombatState = "ON_HIT"
+        self._T.knockbackStepX = position.x - current.x
+        self._T.knockbackStepY = position.y - current.y
+        self._T.knockbackRemaining = self.KnockbackRecoveryDuration
+        self.KnockbackActive = true
+    end
+
+    @ExecSpace("ServerOnly")
+    method void AdvanceKnockback(number delta)
+        if self.IsDead or self._T.knockbackRemaining <= 0 or delta <= 0 then return end
+        local kinematic = self.Entity:GetComponent("KinematicbodyComponent")
+        local transform = self.Entity:GetComponent("TransformComponent")
+        if not isvalid(kinematic) or not isvalid(transform) then return end
+        local fraction = math.min(1, delta / self._T.knockbackRemaining)
+        local stepX = self._T.knockbackStepX * fraction
+        local stepY = self._T.knockbackStepY * fraction
+        local current = transform.WorldPosition
+        local session = self:GetSession()
+        if isvalid(session) then
+            local nextX = session:Clamp(current.x + stepX, session.ArenaMinX, session.ArenaMaxX)
+            local nextY = session:Clamp(current.y + stepY, session.ArenaMinY, session.ArenaMaxY)
+            local safe = session:GetSafeKnockbackPosition(
+                session:GetRectTileMapComponent(), current.x, current.y, nextX, nextY)
+            kinematic:SetWorldPosition(safe)
+            if math.abs(safe.x - nextX) + math.abs(safe.y - nextY) > 0.0001 then
+                -- The AI may have moved since the original route was checked.
+                self._T.knockbackStepX = 0
+                self._T.knockbackStepY = 0
+                self._T.knockbackRemaining = 0
+                self.KnockbackActive = false
+                return
+            end
+        end
+        self._T.knockbackStepX = self._T.knockbackStepX - stepX
+        self._T.knockbackStepY = self._T.knockbackStepY - stepY
+        self._T.knockbackRemaining = math.max(0, self._T.knockbackRemaining - delta)
+        if self._T.knockbackRemaining == 0 then self.KnockbackActive = false end
     end
 
     @ExecSpace("ServerOnly")
@@ -725,13 +760,15 @@ script BattleUnit extends Component
         -- Forward native HitEvent damage to the map session; never mutate HP in the handler.
         local session = self:GetSession()
         if not isvalid(session) or not session:IsBattleActive() or self.IsDead then return end
-        local hitEffectRUID = "TBD"
+        local hitEffectRUID = ""
         if isvalid(event.AttackerEntity) then
             local attackerUnit = event.AttackerEntity:GetComponent("script.BattleUnit")
             if isvalid(attackerUnit) then hitEffectRUID = attackerUnit:GetHitEffectRUID() end
         end
-        self.LastHitEffectRUID = hitEffectRUID
-        self.HitEffectSerial = self.HitEffectSerial + 1
+        if hitEffectRUID ~= nil and hitEffectRUID ~= "" then
+            self.LastHitEffectRUID = hitEffectRUID
+            self.HitEffectSerial = self.HitEffectSerial + 1
+        end
         session:EmitPresentation("TARGET_HIT", event.AttackerEntity, self.Entity, event.TotalDamage)
         session:QueueDamage(self.Entity, event.TotalDamage, event.AttackerEntity)
     end

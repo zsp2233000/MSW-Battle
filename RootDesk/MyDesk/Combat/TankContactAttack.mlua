@@ -2,7 +2,6 @@
 script TankContactAttack extends AttackComponent
 
     property integer AttackDamage = 40
-    property string HitEffectRUID = "TBD"
     property number ContactCooldown = 2.0
     property Vector2 ContactSize = Vector2(1.2, 1.2)
     property number KnockbackDistance = 0.8
