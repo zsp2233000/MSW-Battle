@@ -1,7 +1,7 @@
 @Component
 script TankContactAttack extends AttackComponent
 
-    property integer ContactDamage = 40
+    property integer AttackDamage = 40
     property string HitEffectRUID = "TBD"
     property number ContactCooldown = 2.0
     property Vector2 ContactSize = Vector2(1.2, 1.2)
@@ -15,8 +15,8 @@ script TankContactAttack extends AttackComponent
 
     @ExecSpace("ServerOnly")
     method void Configure(integer damage, number cooldown, Vector2 size, number knockbackDistance)
-        -- Apply the fixed tank contact profile supplied by the battle session.
-        self.ContactDamage = damage
+        -- Apply the shared attack damage and tank contact profile supplied by the battle session.
+        self.AttackDamage = damage
         self.ContactCooldown = cooldown
         self.ContactSize = size
         self.KnockbackDistance = knockbackDistance
@@ -81,8 +81,8 @@ script TankContactAttack extends AttackComponent
     end
 
     method integer CalcDamage(Entity attacker, Entity defender, string attackInfo)
-        -- Supply fixed 40 damage through the native Attack to Hit pipeline.
-        return self.ContactDamage
+        -- Use the shared attack damage value through the native Attack to Hit pipeline.
+        return self.AttackDamage
     end
 
     method boolean IsAttackTarget(Entity defender, string attackInfo)
@@ -109,7 +109,7 @@ script TankContactAttack extends AttackComponent
         local session = map:GetComponent("script.BattleSession")
         if not isvalid(session) or not session:IsBattleActive() then return end
         unit.AttackSerial = unit.AttackSerial + 1
-        session:EmitPresentation("TANK_CONTACT_HIT", self.Entity, defender, self.ContactDamage)
+        session:EmitPresentation("TANK_CONTACT_HIT", self.Entity, defender, self.AttackDamage)
         session:QueueKnockback(self.Entity, defender, self.KnockbackDistance)
     end
 

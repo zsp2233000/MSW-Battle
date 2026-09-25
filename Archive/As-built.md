@@ -7,9 +7,9 @@
 | System | Built | Where (key files) | Notes / gotchas |
 |---|---|---|---|
 | Battle session | `@Component` | `RootDesk/MyDesk/Combat/BattleSession.mlua` | Issue #7 file-side flow loads strict `MonsterData`, spawns the fixed six enemies, accepts server-validated deployment of 1–6 player units, then starts the existing battle and result boundary. Maker verification pending. |
-| Monster data | UserDataSet / CSV | `RootDesk/MyDesk/Combat/MonsterData.userdataset`, `RootDesk/MyDesk/Combat/MonsterData.csv` | Stable `MonsterId` rows hold names, types, combat values, impact frames, and explicit presentation RUIDs; missing, duplicate, invalid, or mismatched rows fail configuration. |
+| Monster data | UserDataSet / CSV | `RootDesk/MyDesk/Data/MonsterData.userdataset`, `RootDesk/MyDesk/Data/MonsterData.csv` | Stable `MonsterId` rows hold names, types, shared `AttackDamage`, contact cooldown/size/knockback, impact frames, and explicit presentation RUIDs; there is no `ContactDamage` column. Missing, duplicate, invalid, or mismatched rows fail configuration. |
 | Battle unit | `@Component` | `RootDesk/MyDesk/Combat/BattleUnit.mlua` | Retargets every 0.5s, moves with `MovementComponent`, branches Tank contact from Assault/Shooter attack, carries synced `MonsterId`/name, applies hit stop, death hold, and post-result stop. |
-| Tank contact attack | `@Component` / `AttackComponent` | `RootDesk/MyDesk/Combat/TankContactAttack.mlua` | Native `AttackFrom` → `Hit` path; fixed 40 damage, independent 2.0s per-target cooldown, enemy-only 0.8 knockback queue; presentation owns attack SFX while collision SFX/VFX remain unused. |
+| Tank contact attack | `@Component` / `AttackComponent` | `RootDesk/MyDesk/Combat/TankContactAttack.mlua` | Native `AttackFrom` → `Hit` path using the row's shared `AttackDamage` (Tank is 40); independent 2.0s per-target cooldown and enemy-only 0.8 knockback queue; presentation owns attack SFX while collision SFX/VFX remain unused. Maker TankProbe passes. |
 | Tank presentation | `@Component` | `RootDesk/MyDesk/Combat/TankPresentation.mlua` | Client-side Tank stand/move/hit/die AnimationClip switching plus attack/onhit/die SFX hooks. Tank has no attack animation. |
 | Shooter presentation | `@Component` | `RootDesk/MyDesk/Combat/ShooterPresentation.mlua` | Client-side attack/onhit/die SFX hooks driven by synced attack and damage serials. |
 | Hit effect presentation | `@Component` | `RootDesk/MyDesk/Combat/BattleHitEffectPresentation.mlua` | Client-side attached hit effect; the attacker's RUID is resolved on the server and rendered on the defender entity. |
@@ -18,7 +18,7 @@
 | Battle map | `.map` | `map/map01.map` | `TileMapMode=1` (`RectTile`); map root owns `script.BattleSession`, `script.BattleFixedCamera`, and `script.BattleDeploymentInput`. |
 | DefaultPlayer / camera | runtime logic | `BattleSession.mlua` (`DisableDefaultPlayer`) | DefaultPlayer remains visible while controller, body, collision, trigger, hit, and target participation are disabled; camera is centered, zoomed out, and offset down to show the full field. |
 | Battle UI | `.ui` / client adapter | `ui/BattleGroup.ui`, `RootDesk/MyDesk/Combat/BattleDeploymentInput.mlua` | Client adapter clones the human-delivered card template from the limited server catalog, sends deployment/start intents, and toggles the delivered result entities. Maker verification pending. |
-| Regression contract | Node contract + Maker runtime probes | `tests/battle_session_contract.test.cjs`, `tests/deployment_runtime_probe.lua`, `tests/deployment_ui_runtime_probe.lua`, `tests/six_vs_six_runtime_probe.lua`, `tests/six_vs_six_full_battle_probe.lua`, `tests/six_vs_six_batch_outcome_probe.lua` | Node contract checks map/data/UI wiring; deployment and legacy combat probes are prepared for Maker execution. Runtime verification of Issue #7 is pending. |
+| Regression contract | Node contract + Maker runtime probes | `tests/battle_session_contract.test.cjs`, `tests/tank_contact_runtime_probe.lua`, `tests/deployment_runtime_probe.lua`, `tests/deployment_ui_runtime_probe.lua`, `tests/six_vs_six_runtime_probe.lua`, `tests/six_vs_six_full_battle_probe.lua`, `tests/six_vs_six_batch_outcome_probe.lua` | Node contract checks map/data/UI wiring; Tank contact probe verifies shared damage, per-target cooldown, knockback, and result stop in Maker. Deployment and other Issue #7 runtime verification status remains tracked with that work. |
 
 ## Standing issues & handoff rules (update in place — never re-append)
 
@@ -41,7 +41,7 @@
 ### 2026-09-21 Issue #3 Tank slice
 
 - Rebased the active runtime to the ticket scope: one fixed player Tank versus one fixed enemy Assault, auto-entering `BATTLE`; the Phase 2 deployment UI remains parked and hidden.
-- Added `TankContactAttack` with fixed 500 HP / 1.1 movement / 40 contact damage / independent 2.0s target cooldown. Contact uses the native `AttackComponent` → `HitEvent` path and can damage every overlapping enemy.
+- Added `TankContactAttack` with 500 HP / 1.1 movement / shared `AttackDamage` 40 / independent 2.0s target cooldown. Contact uses the native `AttackComponent` → `HitEvent` path and can damage every overlapping enemy; the dataset has no separate `ContactDamage` field.
 - Added queued enemy-only 0.8 world-unit knockback with RectTile boundary clamping. The Tank position is never displaced by its own contact attack; collision SFX/VFX remain unused while the presentation layer owns attack SFX.
 - Added a 0.2s server-side hit stop after each resolved non-lethal HitEvent; the damaged unit remains in place before resuming targeting and movement.
 - Applied the supplied Tank stand/move/hit/die AnimationClip RUIDs and onhit/die sound RUIDs through `TankPresentation`; added attack sound and Shooter attack/onhit/die sound hooks with `TBD` placeholders where RUIDs are not yet supplied.

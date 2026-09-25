@@ -1,0 +1,41 @@
+@Component
+script BattleHPBar extends Component
+	-- Match BarWidth to the full bar width configured in Maker.
+	property number BarWidth = 0.65
+	property number FillWidthRatio = 0.90625
+
+	@ExecSpace("ClientOnly")
+	method void OnUpdate(number delta)
+		local battleUnit = self.Entity.BattleUnit
+		local fillEntity = self.Entity:GetChildByName("HPBarFill")
+		if battleUnit == nil or fillEntity == nil then
+			return
+		end
+
+		local ratio = 0
+		if battleUnit.MaxHp > 0 then
+			ratio = battleUnit.Hp / battleUnit.MaxHp
+		end
+		ratio = math.max(0, math.min(1, ratio))
+
+		if self._T.lastRatio == ratio then
+			return
+		end
+
+		local fillTransform = fillEntity.TransformComponent
+		local fillScale = fillTransform.Scale
+		local fillPosition = fillTransform.Position
+		if self._T.fillFullScaleX == nil then
+			self._T.fillFullScaleX = fillScale.x
+			self._T.fillStartX = fillPosition.x
+		end
+
+		fillScale.x = self._T.fillFullScaleX * ratio
+		fillTransform.Scale = fillScale
+
+		-- Preserve the left edge while the sprite scales around its center.
+		fillPosition.x = self._T.fillStartX + self.BarWidth * self.FillWidthRatio * (1 - ratio) * 0.5
+		fillTransform.Position = fillPosition
+		self._T.lastRatio = ratio
+	end
+end

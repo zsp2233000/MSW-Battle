@@ -33,9 +33,7 @@ script BattleSession extends Component
     property Vector3 EnemyPosition4 = Vector3(2.6, -2.0, 0)
     property Vector3 EnemyPosition5 = Vector3(2.6, -3.0, 0)
     property Vector3 EnemyPosition6 = Vector3(1.6, -1.0, 0)
-    property number DeathHold = 0.6
     property number EnemyOpeningDelay = 0.12 -- Deterministic M1 lead; DRAW remains for same-batch edge cases.
-    property number AttackFramesPerSecond = 60
     property number ArenaMinX = -5.5
     property number ArenaMaxX = 3.5
     property number ArenaMinY = -3.5
@@ -209,6 +207,37 @@ script BattleSession extends Component
         return math.floor(parsed)
     end
 
+    method any ReadPresentationClip(string ruid, string monsterId, string fieldName)
+        local clip = _ResourceService:LoadAnimationClipAndWait(ruid)
+        if not isvalid(clip) or clip.IsLoadComplete ~= true then
+            self:FailConfiguration(fieldName .. " failed to load for " .. monsterId)
+            return nil
+        end
+        local frames = clip.Frames:ToTable()
+        if frames == nil or #frames == 0 then
+            self:FailConfiguration(fieldName .. " has no frames for " .. monsterId)
+            return nil
+        end
+        if clip.PlayRate == nil or not (clip.PlayRate > 0) or not (clip.PlayRate < math.huge) then
+            self:FailConfiguration(fieldName .. " has invalid PlayRate for " .. monsterId)
+            return nil
+        end
+        local total = 0
+        for _, frame in ipairs(frames) do
+            local delay = frame and frame.Delay or nil
+            if delay == nil or not (delay >= 0) or not (delay < math.huge) then
+                self:FailConfiguration(fieldName .. " has invalid frame timing for " .. monsterId)
+                return nil
+            end
+            total = total + delay
+        end
+        if not (total > 0) or not (total < math.huge) then
+            self:FailConfiguration(fieldName .. " has no positive duration for " .. monsterId)
+            return nil
+        end
+        return { frames = frames, playRate = clip.PlayRate, duration = total / clip.PlayRate }
+    end
+
     method any ParseMonsterRow(any row, integer rowIndex)
         -- Convert and validate one MonsterData row into the profile consumed by BattleUnit.
         if row == nil then
@@ -251,25 +280,20 @@ script BattleSession extends Component
         local attackImpactFrame = row:GetItem("AttackImpactFrame")
         if monsterType == "TANK" and self:IsBlank(attackImpactFrame) then
             profile.AttackImpactFrame = 0
+        elseif monsterType ~= "TANK" and self:IsBlank(attackImpactFrame) then
+            profile.AttackImpactFrame = 1
         else
             profile.AttackImpactFrame = self:ReadInteger(attackImpactFrame, "AttackImpactFrame", monsterId, 0)
         end
         profile.RetargetIntervalSeconds = self:ReadNumber(row:GetItem("RetargetIntervalSeconds"), "RetargetIntervalSeconds", monsterId, 0.0001)
         profile.HitStopDurationSeconds = self:ReadNumber(row:GetItem("HitStopDurationSeconds"), "HitStopDurationSeconds", monsterId, 0)
         if self.ConfigurationError ~= "" then return nil end
-        profile.ImpactDelaySeconds = profile.AttackImpactFrame / self.AttackFramesPerSecond
-
         local contactMinimum = 0
         if monsterType == "TANK" then contactMinimum = 0.0001 end
-        profile.ContactDamage = self:ReadInteger(row:GetItem("ContactDamage"), "ContactDamage", monsterId, 0)
         profile.ContactCooldownSeconds = self:ReadNumber(row:GetItem("ContactCooldownSeconds"), "ContactCooldownSeconds", monsterId, contactMinimum)
         profile.ContactSizeX = self:ReadNumber(row:GetItem("ContactSizeX"), "ContactSizeX", monsterId, contactMinimum)
         profile.ContactSizeY = self:ReadNumber(row:GetItem("ContactSizeY"), "ContactSizeY", monsterId, contactMinimum)
         profile.KnockbackDistance = self:ReadNumber(row:GetItem("KnockbackDistance"), "KnockbackDistance", monsterId, contactMinimum)
-        if monsterType == "TANK" and profile.ContactDamage <= 0 then
-            self:FailConfiguration("invalid numeric value ContactDamage for " .. monsterId)
-            return nil
-        end
         if monsterType ~= "TANK" and profile.AttackImpactFrame <= 0 then
             self:FailConfiguration("invalid numeric value AttackImpactFrame for " .. monsterId)
             return nil
@@ -287,13 +311,39 @@ script BattleSession extends Component
             "OnHitSoundRUID",
             "DieSoundRUID",
         }
+        local optionalAssetFields = {
+            HitEffectRUID = true,
+            AttackSoundRUID = true,
+            OnHitSoundRUID = true,
+            DieSoundRUID = true,
+        }
         for _, fieldName in ipairs(assetFields) do
             local assetRUID = row:GetItem(fieldName)
-            if self:IsBlank(assetRUID) then
+            if optionalAssetFields[fieldName] ~= true and self:IsBlank(assetRUID) then
                 self:FailConfiguration("MonsterData row " .. monsterId .. " missing " .. fieldName)
                 return nil
             end
-            profile[fieldName] = assetRUID
+            -- Normalize optional nil cells to an empty string for typed consumers and skip guards.
+            profile[fieldName] = assetRUID or ""
+        end
+        local hitClip = self:ReadPresentationClip(profile.HitAnimationRUID, monsterId, "HitAnimationRUID")
+        if hitClip == nil then return nil end
+        profile.HitAnimationDurationSeconds = hitClip.duration
+        profile.ImpactDelaySeconds = 0
+        profile.AttackAnimationDurationSeconds = 0
+        if monsterType ~= "TANK" then
+            local attackClip = self:ReadPresentationClip(profile.AttackAnimationRUID, monsterId, "AttackAnimationRUID")
+            if attackClip == nil then return nil end
+            if profile.AttackImpactFrame > #attackClip.frames then
+                self:FailConfiguration("AttackImpactFrame exceeds attack clip for " .. monsterId)
+                return nil
+            end
+            profile.AttackAnimationDurationSeconds = attackClip.duration
+            for frameIndex = 1, profile.AttackImpactFrame - 1 do
+                profile.ImpactDelaySeconds = profile.ImpactDelaySeconds + attackClip.frames[frameIndex].Delay
+            end
+            profile.ImpactDelaySeconds = profile.ImpactDelaySeconds / attackClip.playRate
+            log("[M1][BattleSession] IMPACT_DELAY monsterId=" .. monsterId .. ", frame=" .. tostring(profile.AttackImpactFrame) .. ", seconds=" .. tostring(profile.ImpactDelaySeconds))
         end
         return profile
     end
@@ -317,7 +367,7 @@ script BattleSession extends Component
         local requiredColumns = {
             "MonsterId", "MonsterName", "MonsterType", "ModelId", "MaxHp", "MoveSpeed", "AttackDamage",
             "AttackIntervalSeconds", "AttackRange", "AttackImpactFrame",
-            "RetargetIntervalSeconds", "HitStopDurationSeconds", "ContactDamage", "ContactCooldownSeconds",
+            "RetargetIntervalSeconds", "HitStopDurationSeconds", "ContactCooldownSeconds",
             "ContactSizeX", "ContactSizeY", "KnockbackDistance", "StandAnimationRUID", "MoveAnimationRUID",
             "AttackAnimationRUID", "HitAnimationRUID", "DieAnimationRUID", "HitEffectRUID", "AttackSoundRUID",
             "OnHitSoundRUID", "DieSoundRUID",
@@ -519,29 +569,6 @@ script BattleSession extends Component
         return true
     end
 
-    method void ApplyPresentationProfile(Entity entity, table profile)
-        -- Apply only the RUIDs already present in MonsterData; no asset search or fallback selection occurs here.
-        if profile.MonsterType == "TANK" then
-            local presentation = entity:GetComponent("script.TankPresentation")
-            if isvalid(presentation) then
-                presentation.StandAnimationRUID = profile.StandAnimationRUID
-                presentation.MoveAnimationRUID = profile.MoveAnimationRUID
-                presentation.OnHitAnimationRUID = profile.HitAnimationRUID
-                presentation.DeathAnimationRUID = profile.DieAnimationRUID
-                presentation.AttackSoundRUID = profile.AttackSoundRUID
-                presentation.OnHitSoundRUID = profile.OnHitSoundRUID
-                presentation.DeathSoundRUID = profile.DieSoundRUID
-            end
-        elseif profile.MonsterType == "SHOOTER" then
-            local presentation = entity:GetComponent("script.ShooterPresentation")
-            if isvalid(presentation) then
-                presentation.AttackSoundRUID = profile.AttackSoundRUID
-                presentation.OnHitSoundRUID = profile.OnHitSoundRUID
-                presentation.DeathSoundRUID = profile.DieSoundRUID
-            end
-        end
-    end
-
     method Entity SpawnMonster(string monsterId, string name, string faction, Vector3 position)
         -- Spawn a unit from one validated MonsterData row and never from hard-coded combat numbers.
         if self._T.dataReady ~= true then return nil end
@@ -580,11 +607,6 @@ script BattleSession extends Component
         entity:AddComponent("script.BattleUnit")
         entity:AddComponent("script.BattleHitEffectPresentation")
         entity:AddComponent("script.BattleAttackComposition")
-        if profile.MonsterType == "TANK" then
-            entity:AddComponent("script.TankPresentation")
-        elseif profile.MonsterType == "SHOOTER" then
-            entity:AddComponent("script.ShooterPresentation")
-        end
         local unit = entity:GetComponent("script.BattleUnit")
         local attackFactory = entity:GetComponent("script.BattleAttackComposition")
         if not isvalid(unit) or not isvalid(attackFactory) then
@@ -597,13 +619,13 @@ script BattleSession extends Component
         if faction == "ENEMY" then openingDelay = self.EnemyOpeningDelay end
         unit:BindAttackFactory(attackFactory)
         unit:SetMonsterIdentity(profile.MonsterId, profile.MonsterName, profile.HitEffectRUID)
-        unit:Configure(faction, profile.MonsterName, profile.MonsterType, profile.MaxHp, profile.MoveSpeed, profile.AttackDamage, profile.AttackIntervalSeconds, profile.AttackRange, profile.RetargetIntervalSeconds, profile.ImpactDelaySeconds, self.DeathHold, openingDelay, profile.ContactCooldownSeconds, Vector2(profile.ContactSizeX, profile.ContactSizeY), profile.KnockbackDistance, profile.HitStopDurationSeconds)
+        unit:Configure(faction, profile.MonsterName, profile.MonsterType, profile.MaxHp, profile.MoveSpeed, profile.AttackDamage, profile.AttackIntervalSeconds, profile.AttackRange, profile.RetargetIntervalSeconds, profile.ImpactDelaySeconds, profile.DieAnimationRUID, openingDelay, profile.ContactCooldownSeconds, Vector2(profile.ContactSizeX, profile.ContactSizeY), profile.KnockbackDistance, profile.HitStopDurationSeconds)
         if not unit:HasAttackAdapter() then
             log_error("[M1][BattleSession] attack adapter missing on " .. name)
             entity:Destroy()
             return nil
         end
-        self:ApplyPresentationProfile(entity, profile)
+        unit:ConfigurePresentation(profile)
         local record = { entity = entity, unit = unit, faction = faction, monsterId = profile.MonsterId, monsterName = profile.MonsterName, unitKind = profile.MonsterType, dead = false }
         table.insert(self._T.units, record)
         return entity

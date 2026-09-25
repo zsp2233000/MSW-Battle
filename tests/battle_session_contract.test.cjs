@@ -11,6 +11,14 @@ function read(relativePath) {
   return fs.readFileSync(path.join(root, relativePath), "utf8");
 }
 
+function readCsvRows(relativePath) {
+  return read(relativePath)
+    .replace(/^\uFEFF/, "")
+    .trim()
+    .split(/\r?\n/)
+    .map((line) => line.split(",").map((cell) => cell.trim()));
+}
+
 test("M1 map keeps RectTile and exposes the fixed battle session camera", () => {
   const map = MapBuilder.read(path.join(root, "map/map01.map"));
   assert.equal(map.getMapInfo().TileMapMode, 1);
@@ -76,7 +84,9 @@ test("battle phase keeps the Tank profile and adds Shooter to the player formati
   const assault = read("RootDesk/MyDesk/Combat/AssaultAttack.mlua");
   const shooterAttack = read("RootDesk/MyDesk/Combat/ShooterAttack.mlua");
   const runtimeProbe = read("tests/tank_contact_runtime_probe.lua");
-  const monsterData = read("RootDesk/MyDesk/Combat/MonsterData.csv");
+  const monsterData = readCsvRows("RootDesk/MyDesk/Data/MonsterData.csv")
+    .map((row) => row.join(","))
+    .join("\n");
 
   assert.match(session, /EnemyMonsterId3 = "monster_warrior"/);
   assert.match(session, /self\.PlayerAlive = 0/);
@@ -106,15 +116,17 @@ test("battle phase keeps the Tank profile and adds Shooter to the player formati
   assert.match(unit, /self\.LastHitEffectRUID = hitEffectRUID/);
   assert.match(unit, /self\.HitEffectSerial = self\.HitEffectSerial \+ 1/);
   assert.match(unit, /session:QueueDamage\(self\.Entity, event\.TotalDamage, event\.AttackerEntity\)/);
-  assert.doesNotMatch(unit, /SetWorldPosition|SetPosition\(/);
+  assert.match(unit, /kinematic:SetWorldPosition\(position\)/);
+  assert.doesNotMatch(unit, /transform:SetWorldPosition|transform:SetPosition\(/);
 
   assert.match(contact, /extends AttackComponent/);
-  assert.match(contact, /ContactDamage = 40/);
+  assert.match(contact, /AttackDamage = 40/);
+  assert.doesNotMatch(contact, /ContactDamage/);
   assert.match(contact, /ContactCooldown = 2\.0/);
   assert.match(contact, /self:AttackFrom\(self\.ContactSize/);
   assert.doesNotMatch(contact, /TryContact\(Entity target\)/);
   assert.match(contact, /targetCooldowns/);
-  assert.match(contact, /return self\.ContactDamage/);
+  assert.match(contact, /return self\.AttackDamage/);
   assert.match(contact, /session:QueueKnockback/);
   assert.doesNotMatch(contact, /_SoundService|VFX|PlayEffect/);
 
@@ -171,7 +183,9 @@ test("Issue #4 adds a configurable hitscan shooter adapter", () => {
   const unit = read("RootDesk/MyDesk/Combat/BattleUnit.mlua");
   const shooter = read("RootDesk/MyDesk/Combat/ShooterAttack.mlua");
   const runtimeProbe = read("tests/shooter_runtime_probe.lua");
-  const monsterData = read("RootDesk/MyDesk/Combat/MonsterData.csv");
+  const monsterData = readCsvRows("RootDesk/MyDesk/Data/MonsterData.csv")
+    .map((row) => row.join(","))
+    .join("\n");
 
   assert.match(monsterData, /monster_shooter,Shooter,SHOOTER,battleunit,120,0\.8,30,2,4\.0,9,/);
   assert.match(session, /profile\.MonsterType == "SHOOTER"/);
@@ -296,13 +310,11 @@ test("Issue #7 keeps deployment authority on the map session and uses IDs for ca
 });
 
 test("Issue #5 publishes one strict MonsterData dataset for the three initial monsters", () => {
-  const metadata = JSON.parse(read("RootDesk/MyDesk/Combat/MonsterData.userdataset"));
+  const metadata = JSON.parse(read("RootDesk/MyDesk/Data/MonsterData.userdataset"));
   const dataset = metadata.ContentProto.Json;
-  const csvRows = read("RootDesk/MyDesk/Combat/MonsterData.csv")
-    .trim()
-    .split(/\r?\n/)
-    .map((line) => line.split(","));
+  const csvRows = readCsvRows("RootDesk/MyDesk/Data/MonsterData.csv");
   const [header, ...rows] = csvRows;
+  assert.doesNotMatch(header.join(","), /\bContactDamage\b/);
   const requiredColumns = [
     "MonsterId",
     "MonsterName",
@@ -314,7 +326,6 @@ test("Issue #5 publishes one strict MonsterData dataset for the three initial mo
     "AttackIntervalSeconds",
     "AttackRange",
     "AttackImpactFrame",
-    "ContactDamage",
     "ContactCooldownSeconds",
     "ContactSizeX",
     "ContactSizeY",
