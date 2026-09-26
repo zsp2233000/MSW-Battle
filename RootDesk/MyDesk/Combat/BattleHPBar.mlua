@@ -6,12 +6,21 @@ script BattleHPBar extends Component
 
 	@ExecSpace("ClientOnly")
 	method void OnUpdate(number delta)
-		-- Follow the owning unit's synced health without changing the fixed bar art.
-		local battleUnit = self.Entity:GetComponent("script.BattleUnit")
-		local fillEntity = self.Entity:GetChildByName("HPBarFill")
-		if not isvalid(battleUnit) or not isvalid(fillEntity) then
-			return
+		-- Resolve dynamic children once, then follow the owning unit's synced health.
+		if not isvalid(self._T.battleUnit) then
+			self._T.battleUnit = self.Entity:GetComponent("script.BattleUnit")
 		end
+		if not isvalid(self._T.fillTransform) then
+			local fillEntity = self.Entity:GetChildByName("HPBarFill")
+			if isvalid(fillEntity) then
+				self._T.fillTransform = fillEntity.TransformComponent
+				self._T.fillFullScaleX = nil
+				self._T.lastRatio = nil
+			end
+		end
+		local battleUnit = self._T.battleUnit
+		local fillTransform = self._T.fillTransform
+		if not isvalid(battleUnit) or not isvalid(fillTransform) then return end
 
 		local ratio = 0
 		if battleUnit.MaxHp > 0 then
@@ -23,7 +32,6 @@ script BattleHPBar extends Component
 			return
 		end
 
-		local fillTransform = fillEntity.TransformComponent
 		local fillScale = fillTransform.Scale
 		local fillPosition = fillTransform.Position
 		if self._T.fillFullScaleX == nil then

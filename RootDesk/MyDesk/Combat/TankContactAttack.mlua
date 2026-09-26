@@ -108,6 +108,7 @@ script TankContactAttack extends AttackComponent
         local session = map:GetComponent("script.BattleSession")
         if not isvalid(session) or not session:IsBattleActive() then return end
         unit.AttackSerial = unit.AttackSerial + 1
+        unit:PlayCombatSound(unit.AttackSoundRUID)
         session:EmitPresentation("TANK_CONTACT_HIT", self.Entity, defender, self.AttackDamage)
         session:QueueKnockback(self.Entity, defender, self.KnockbackDistance)
     end

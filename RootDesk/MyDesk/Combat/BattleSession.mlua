@@ -807,35 +807,17 @@ script BattleSession extends Component
     end
 
     method void ResolveDamageBatch()
-        -- Coalesce same-frame HitEvents so simultaneous deaths produce one deterministic result.
+        -- Resolve each HitEvent separately; EvaluateResult runs after the full batch.
         if self._T.pendingDamage == nil or #self._T.pendingDamage == 0 then return end
         local pending = self._T.pendingDamage
         self._T.pendingDamage = {}
-        local resolved = {}
         for _, hit in ipairs(pending) do
             local attackerUnit = nil
             if isvalid(hit.attacker) then attackerUnit = hit.attacker:GetComponent("script.BattleUnit") end
             local isTankContact = isvalid(attackerUnit) and attackerUnit.UnitKind == "TANK"
-            local found = nil
-            for _, item in ipairs(resolved) do
-                if item.target == hit.target then
-                    found = item
-                    break
-                end
-            end
-            if found == nil then
-                table.insert(resolved, { target = hit.target, amount = hit.amount, attacker = hit.attacker,
-                    allowHitStop = not isTankContact })
-            else
-                found.amount = found.amount + hit.amount
-                found.attacker = hit.attacker
-                found.allowHitStop = found.allowHitStop or not isTankContact
-            end
-        end
-        for _, hit in ipairs(resolved) do
             if isvalid(hit.target) then
                 local unit = hit.target:GetComponent("script.BattleUnit")
-                if isvalid(unit) then unit:ApplyResolvedDamage(hit.amount, hit.attacker, hit.allowHitStop) end
+                if isvalid(unit) then unit:ApplyResolvedDamage(hit.amount, hit.attacker, not isTankContact) end
             end
         end
     end
