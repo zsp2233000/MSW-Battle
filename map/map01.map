@@ -904,6 +904,438 @@
           ],
           "@version": 1
         }
+      },
+      {
+        "id": "32b7570e-081f-4df2-9429-2e5e50078d00",
+        "path": "/maps/map01/M1_EnemyTank",
+        "componentNames": "MOD.Core.TransformComponent,MOD.Core.SpriteRendererComponent,script.BattlePlacement",
+        "jsonString": {
+          "name": "M1_EnemyTank",
+          "path": "/maps/map01/M1_EnemyTank",
+          "nameEditable": true,
+          "enable": true,
+          "visible": true,
+          "localize": false,
+          "displayOrder": 5,
+          "pathConstraints": "///",
+          "revision": 1,
+          "modelId": "battleplacement",
+          "@components": [
+            {
+              "@type": "MOD.Core.TransformComponent",
+              "Position": {
+                "x": 2.6,
+                "y": 1,
+                "z": 0
+              },
+              "QuaternionRotation": {
+                "x": 0,
+                "y": 0,
+                "z": 0,
+                "w": 1
+              },
+              "Scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "Enable": true
+            },
+            {
+              "@type": "MOD.Core.SpriteRendererComponent",
+              "SpriteRUID": "a95cfed2c8fe4d2cb64cbb62db051f92",
+              "Color": {
+                "r": 1,
+                "g": 1,
+                "b": 1,
+                "a": 1
+              },
+              "DrawMode": 0,
+              "FlipX": false,
+              "FlipY": false,
+              "PlayRate": 1,
+              "OrderInLayer": 2,
+              "StartFrameIndex": 0,
+              "EndFrameIndex": 2147483647,
+              "Enable": true,
+              "SortingLayer": "MapLayer0"
+            },
+            {
+              "@type": "script.BattlePlacement",
+              "Enable": true,
+              "MonsterId": "monster_tank",
+              "Faction": "ENEMY"
+            }
+          ],
+          "@version": 1,
+          "origin": {
+            "type": "Model",
+            "entry_id": "battleplacement",
+            "sub_entity_id": null,
+            "root_entity_id": "32b7570e-081f-4df2-9429-2e5e50078d00",
+            "replaced_model_id": null
+          }
+        }
+      },
+      {
+        "id": "4bc721f1-76b5-4c9f-8d29-753ab0dc0248",
+        "path": "/maps/map01/M1_EnemyTank2",
+        "componentNames": "MOD.Core.TransformComponent,MOD.Core.SpriteRendererComponent,script.BattlePlacement",
+        "jsonString": {
+          "name": "M1_EnemyTank2",
+          "path": "/maps/map01/M1_EnemyTank2",
+          "nameEditable": true,
+          "enable": true,
+          "visible": true,
+          "localize": false,
+          "displayOrder": 6,
+          "pathConstraints": "///",
+          "revision": 1,
+          "modelId": "battleplacement",
+          "@components": [
+            {
+              "@type": "MOD.Core.TransformComponent",
+              "Position": {
+                "x": 2.6,
+                "y": 0,
+                "z": 0
+              },
+              "QuaternionRotation": {
+                "x": 0,
+                "y": 0,
+                "z": 0,
+                "w": 1
+              },
+              "Scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "Enable": true
+            },
+            {
+              "@type": "MOD.Core.SpriteRendererComponent",
+              "SpriteRUID": "a95cfed2c8fe4d2cb64cbb62db051f92",
+              "Color": {
+                "r": 1,
+                "g": 1,
+                "b": 1,
+                "a": 1
+              },
+              "DrawMode": 0,
+              "FlipX": false,
+              "FlipY": false,
+              "PlayRate": 1,
+              "OrderInLayer": 2,
+              "StartFrameIndex": 0,
+              "EndFrameIndex": 2147483647,
+              "Enable": true,
+              "SortingLayer": "MapLayer0"
+            },
+            {
+              "@type": "script.BattlePlacement",
+              "Enable": true,
+              "MonsterId": "monster_tank",
+              "Faction": "ENEMY"
+            }
+          ],
+          "@version": 1,
+          "origin": {
+            "type": "Model",
+            "entry_id": "battleplacement",
+            "sub_entity_id": null,
+            "root_entity_id": "4bc721f1-76b5-4c9f-8d29-753ab0dc0248",
+            "replaced_model_id": null
+          }
+        }
+      },
+      {
+        "id": "da8749d2-6a56-456b-9d47-4d6dd26901b3",
+        "path": "/maps/map01/M1_EnemyAssault",
+        "componentNames": "MOD.Core.TransformComponent,MOD.Core.SpriteRendererComponent,script.BattlePlacement",
+        "jsonString": {
+          "name": "M1_EnemyAssault",
+          "path": "/maps/map01/M1_EnemyAssault",
+          "nameEditable": true,
+          "enable": true,
+          "visible": true,
+          "localize": false,
+          "displayOrder": 7,
+          "pathConstraints": "///",
+          "revision": 1,
+          "modelId": "battleplacement",
+          "@components": [
+            {
+              "@type": "MOD.Core.TransformComponent",
+              "Position": {
+                "x": 2.6,
+                "y": -1,
+                "z": 0
+              },
+              "QuaternionRotation": {
+                "x": 0,
+                "y": 0,
+                "z": 0,
+                "w": 1
+              },
+              "Scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "Enable": true
+            },
+            {
+              "@type": "MOD.Core.SpriteRendererComponent",
+              "SpriteRUID": "a95cfed2c8fe4d2cb64cbb62db051f92",
+              "Color": {
+                "r": 1,
+                "g": 1,
+                "b": 1,
+                "a": 1
+              },
+              "DrawMode": 0,
+              "FlipX": false,
+              "FlipY": false,
+              "PlayRate": 1,
+              "OrderInLayer": 2,
+              "StartFrameIndex": 0,
+              "EndFrameIndex": 2147483647,
+              "Enable": true,
+              "SortingLayer": "MapLayer0"
+            },
+            {
+              "@type": "script.BattlePlacement",
+              "Enable": true,
+              "MonsterId": "monster_warrior",
+              "Faction": "ENEMY"
+            }
+          ],
+          "@version": 1,
+          "origin": {
+            "type": "Model",
+            "entry_id": "battleplacement",
+            "sub_entity_id": null,
+            "root_entity_id": "da8749d2-6a56-456b-9d47-4d6dd26901b3",
+            "replaced_model_id": null
+          }
+        }
+      },
+      {
+        "id": "b77cb2f6-ca0e-44c3-84bf-eca86ed93cbe",
+        "path": "/maps/map01/M1_EnemyAssault2",
+        "componentNames": "MOD.Core.TransformComponent,MOD.Core.SpriteRendererComponent,script.BattlePlacement",
+        "jsonString": {
+          "name": "M1_EnemyAssault2",
+          "path": "/maps/map01/M1_EnemyAssault2",
+          "nameEditable": true,
+          "enable": true,
+          "visible": true,
+          "localize": false,
+          "displayOrder": 8,
+          "pathConstraints": "///",
+          "revision": 1,
+          "modelId": "battleplacement",
+          "@components": [
+            {
+              "@type": "MOD.Core.TransformComponent",
+              "Position": {
+                "x": 2.6,
+                "y": -2,
+                "z": 0
+              },
+              "QuaternionRotation": {
+                "x": 0,
+                "y": 0,
+                "z": 0,
+                "w": 1
+              },
+              "Scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "Enable": true
+            },
+            {
+              "@type": "MOD.Core.SpriteRendererComponent",
+              "SpriteRUID": "a95cfed2c8fe4d2cb64cbb62db051f92",
+              "Color": {
+                "r": 1,
+                "g": 1,
+                "b": 1,
+                "a": 1
+              },
+              "DrawMode": 0,
+              "FlipX": false,
+              "FlipY": false,
+              "PlayRate": 1,
+              "OrderInLayer": 2,
+              "StartFrameIndex": 0,
+              "EndFrameIndex": 2147483647,
+              "Enable": true,
+              "SortingLayer": "MapLayer0"
+            },
+            {
+              "@type": "script.BattlePlacement",
+              "Enable": true,
+              "MonsterId": "monster_warrior",
+              "Faction": "ENEMY"
+            }
+          ],
+          "@version": 1,
+          "origin": {
+            "type": "Model",
+            "entry_id": "battleplacement",
+            "sub_entity_id": null,
+            "root_entity_id": "b77cb2f6-ca0e-44c3-84bf-eca86ed93cbe",
+            "replaced_model_id": null
+          }
+        }
+      },
+      {
+        "id": "62de71ae-eff6-476c-9666-9a11ce6f12f8",
+        "path": "/maps/map01/M1_EnemyShooter",
+        "componentNames": "MOD.Core.TransformComponent,MOD.Core.SpriteRendererComponent,script.BattlePlacement",
+        "jsonString": {
+          "name": "M1_EnemyShooter",
+          "path": "/maps/map01/M1_EnemyShooter",
+          "nameEditable": true,
+          "enable": true,
+          "visible": true,
+          "localize": false,
+          "displayOrder": 9,
+          "pathConstraints": "///",
+          "revision": 1,
+          "modelId": "battleplacement",
+          "@components": [
+            {
+              "@type": "MOD.Core.TransformComponent",
+              "Position": {
+                "x": 2.6,
+                "y": -3,
+                "z": 0
+              },
+              "QuaternionRotation": {
+                "x": 0,
+                "y": 0,
+                "z": 0,
+                "w": 1
+              },
+              "Scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "Enable": true
+            },
+            {
+              "@type": "MOD.Core.SpriteRendererComponent",
+              "SpriteRUID": "a95cfed2c8fe4d2cb64cbb62db051f92",
+              "Color": {
+                "r": 1,
+                "g": 1,
+                "b": 1,
+                "a": 1
+              },
+              "DrawMode": 0,
+              "FlipX": false,
+              "FlipY": false,
+              "PlayRate": 1,
+              "OrderInLayer": 2,
+              "StartFrameIndex": 0,
+              "EndFrameIndex": 2147483647,
+              "Enable": true,
+              "SortingLayer": "MapLayer0"
+            },
+            {
+              "@type": "script.BattlePlacement",
+              "Enable": true,
+              "MonsterId": "monster_shooter",
+              "Faction": "ENEMY"
+            }
+          ],
+          "@version": 1,
+          "origin": {
+            "type": "Model",
+            "entry_id": "battleplacement",
+            "sub_entity_id": null,
+            "root_entity_id": "62de71ae-eff6-476c-9666-9a11ce6f12f8",
+            "replaced_model_id": null
+          }
+        }
+      },
+      {
+        "id": "fd607c8e-4fa0-4adb-8233-df92183636b7",
+        "path": "/maps/map01/M1_EnemyShooter2",
+        "componentNames": "MOD.Core.TransformComponent,MOD.Core.SpriteRendererComponent,script.BattlePlacement",
+        "jsonString": {
+          "name": "M1_EnemyShooter2",
+          "path": "/maps/map01/M1_EnemyShooter2",
+          "nameEditable": true,
+          "enable": true,
+          "visible": true,
+          "localize": false,
+          "displayOrder": 10,
+          "pathConstraints": "///",
+          "revision": 1,
+          "modelId": "battleplacement",
+          "@components": [
+            {
+              "@type": "MOD.Core.TransformComponent",
+              "Position": {
+                "x": 1.6,
+                "y": -1,
+                "z": 0
+              },
+              "QuaternionRotation": {
+                "x": 0,
+                "y": 0,
+                "z": 0,
+                "w": 1
+              },
+              "Scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "Enable": true
+            },
+            {
+              "@type": "MOD.Core.SpriteRendererComponent",
+              "SpriteRUID": "a95cfed2c8fe4d2cb64cbb62db051f92",
+              "Color": {
+                "r": 1,
+                "g": 1,
+                "b": 1,
+                "a": 1
+              },
+              "DrawMode": 0,
+              "FlipX": false,
+              "FlipY": false,
+              "PlayRate": 1,
+              "OrderInLayer": 2,
+              "StartFrameIndex": 0,
+              "EndFrameIndex": 2147483647,
+              "Enable": true,
+              "SortingLayer": "MapLayer0"
+            },
+            {
+              "@type": "script.BattlePlacement",
+              "Enable": true,
+              "MonsterId": "monster_shooter",
+              "Faction": "ENEMY"
+            }
+          ],
+          "@version": 1,
+          "origin": {
+            "type": "Model",
+            "entry_id": "battleplacement",
+            "sub_entity_id": null,
+            "root_entity_id": "fd607c8e-4fa0-4adb-8233-df92183636b7",
+            "replaced_model_id": null
+          }
+        }
       }
     ]
   }

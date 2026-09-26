@@ -6,7 +6,8 @@
 
 | System | Built | Where (key files) | Notes / gotchas |
 |---|---|---|---|
-| Battle session | `@Component` | `RootDesk/MyDesk/Combat/BattleSession.mlua` | Issue #7 file-side flow loads strict `MonsterData`, spawns the fixed six enemies, accepts server-validated deployment of 1–6 player units, then starts the existing battle and result boundary. Maker verification pending. |
+| Battle session | `@Component` | `RootDesk/MyDesk/Combat/BattleSession.mlua` | Loads strict `MonsterData`, validates Maker placements, spawns one battle unit per placement, accepts server-validated deployment up to six total player units, then starts the existing battle and result boundary. Placement generation and configuration error paths passed Maker Play. |
+| Battle placement | `.model` / `@Component` | `RootDesk/MyDesk/Models/MapObjects/BattlePlacement.model`, `RootDesk/MyDesk/Combat/BattlePlacement.mlua` | Maker sets `MonsterId`, `Faction` (default `ENEMY`), and position. Six prior enemy slots are now entities on `map01`; the server replaces valid placements with units at map entry. Maker Play passed six-enemy and one-player/five-enemy map configurations. |
 | Monster data | UserDataSet / CSV | `RootDesk/MyDesk/Data/MonsterData.userdataset`, `RootDesk/MyDesk/Data/MonsterData.csv` | Stable `MonsterId` rows hold names, types, shared `AttackDamage`, contact cooldown/size/knockback, impact frames, and explicit presentation RUIDs; there is no `ContactDamage` column. Missing, duplicate, invalid, or mismatched rows fail configuration. |
 | Battle unit | `@Component` | `RootDesk/MyDesk/Combat/BattleUnit.mlua` | Retargets every 0.5s, moves with `MovementComponent`, branches Tank contact from Assault/Shooter attack, carries synced `MonsterId`/name, applies hit stop, death hold, and post-result stop. |
 | Tank contact attack | `@Component` / `AttackComponent` | `RootDesk/MyDesk/Combat/TankContactAttack.mlua` | Native `AttackFrom` → `Hit` path using the row's shared `AttackDamage` (Tank is 40); independent 2.0s per-target cooldown and enemy-only 0.8 knockback queue; presentation owns attack SFX while collision SFX/VFX remain unused. Maker TankProbe passes. |
@@ -28,6 +29,12 @@
 | Maker build console retains informational LIA diagnostics | Treat `Info` LIA entries as static-analysis notices; confirm no error-level build entries and verify the runtime log/snapshot. | 1 | 09-21 → 09-21 |
 
 ## Log (entries: the ACTIVE milestone only + ONE summary per completed milestone)
+
+### 2026-09-26 Phase 2 map-configured roster
+
+- Added a reusable Maker placement model and component with `MonsterId` and `Faction` properties. Moved the original six enemy IDs and positions from `BattleSession` to six `map01` placements.
+- `BattleSession` now validates every placement against `MonsterData`, faction, arena, blocked tiles, minimum spacing, enemy minimum, and player cap before spawning any unit. Runtime units inherit the placement faction; all combat data and presentation come from the data row.
+- Preplaced player units count toward the six-unit cap and cannot be removed through deployment input. Manual placement checks spacing against both factions. Maker refresh and Play verified the original six enemies, then one preplaced player plus five enemies; the preplaced player could not be removed and could start battle. A deliberately invalid `MonsterId` produced `CONFIG_ERROR` with zero spawned units. The map was restored to the original six enemies and played again successfully. Build Console contained 116 informational notices and no error-level entries.
 
 ### 2026-09-23 Issue #5 mixed six-versus-six feasibility
 
