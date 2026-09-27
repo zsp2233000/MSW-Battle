@@ -1,21 +1,10 @@
 @Component
 script BattleHitEffectPresentation extends Component
 
-    @ExecSpace("ClientOnly")
-    method void OnBeginPlay()
-        -- Reset the client cursor before the first synced hit effect arrives.
-        self._T.lastHitEffectSerial = 0
-    end
-
-    @ExecSpace("ClientOnly")
-    method void OnUpdate(number delta)
-        -- Play each attacker's hit effect on this entity when it receives a native HitEvent.
-        local unit = self.Entity:GetComponent("script.BattleUnit")
-        if not isvalid(unit) then return end
-        if unit.HitEffectSerial ~= self._T.lastHitEffectSerial then
-            self._T.lastHitEffectSerial = unit.HitEffectSerial
-            self:PlayAtTarget(unit.LastHitEffectRUID)
-        end
+    @ExecSpace("Multicast")
+    method void PlayHitEffect(string effectRUID)
+        -- Deliver every successful non-tank hit with its attacker's exact effect RUID.
+        self:PlayAtTarget(effectRUID)
     end
 
     @ExecSpace("ClientOnly")
@@ -24,6 +13,7 @@ script BattleHitEffectPresentation extends Component
         if effectRUID == nil or effectRUID == "" or effectRUID == "TBD" or effectRUID == "N/A" then return end
         if not isvalid(self.Entity) then return end
         _EffectService:PlayEffectAttached(effectRUID, self.Entity, Vector3(0, 0, 0), 0, Vector3(1, 1, 1), false)
+        log("[M1][BattleHitEffectPresentation] EFFECT " .. self.Entity.Name .. ", ruid=" .. effectRUID)
     end
 
 end
