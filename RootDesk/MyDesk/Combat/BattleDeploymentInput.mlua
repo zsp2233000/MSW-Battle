@@ -9,8 +9,8 @@ script BattleDeploymentInput extends Component
     property any resultWin = nil
     property any resultLose = nil
     property any resultDraw = nil
-    property any configErrorPanel = nil
-    property any configErrorMessage = nil
+    property Entity configErrorGroup = "b54bf636-0511-441c-9947-d1a0f3c3fe34"
+    property Entity configErrorMessage = "0fd05f4a-9c88-4f4b-83e7-99dbae361488"
     property any buttonBindings = nil
     property any optionCards = nil
     property any optionData = nil
@@ -19,6 +19,8 @@ script BattleDeploymentInput extends Component
     property string selectedMonsterId = ""
     property string displayedResult = ""
     property string observedPhase = "__UNINITIALIZED__"
+    property boolean observedInMap = false
+    property integer observedGeneration = -1
     property boolean optionsReady = false
     property number optionsRetryCountdown = 0
 
@@ -35,10 +37,16 @@ script BattleDeploymentInput extends Component
         self.resultWin = self:FindNamedUiEntity("ResultWin")
         self.resultLose = self:FindNamedUiEntity("ResultLose")
         self.resultDraw = self:FindNamedUiEntity("ResultDraw")
-        self.configErrorPanel = self:FindNamedUiEntity("ConfigErrorPanel")
-        self.configErrorMessage = self:FindNamedUiEntity("ConfigErrorMessage")
+        if isvalid(self.optionContainer) then
+            local transform = self.optionContainer.UITransformComponent
+            self._T.optionContainerSize = Vector2(transform.RectSize.x, transform.RectSize.y)
+            self._T.optionContainerPosition = Vector2(transform.anchoredPosition.x, transform.anchoredPosition.y)
+        end
         self:SetResultEntities("")
         self.observedPhase = "__UNINITIALIZED__"
+        self.observedGeneration = -1
+        self.optionsReady = false
+        self.selectedMonsterId = ""
         self:SyncDeploymentControls()
         if isvalid(self.optionTemplate) then self.optionTemplate:SetEnable(false) end
         if isvalid(self.startButton) and isvalid(self.startButton:GetComponent("ButtonComponent")) then
@@ -56,7 +64,12 @@ script BattleDeploymentInput extends Component
     method void OnUpdate(number delta)
         -- Retry the catalog request until server initialization completes and follow the synced result.
         if not isvalid(self.session) then return end
+        if self.session.SessionGeneration ~= self.observedGeneration then
+            self:ClearMonsterOptions()
+            self.observedGeneration = self.session.SessionGeneration
+        end
         self:SyncDeploymentControls()
+        if not self.observedInMap then return end
         if not self.optionsReady and self.session.Phase == "DEPLOYMENT" then
             self.optionsRetryCountdown = self.optionsRetryCountdown - delta
             if self.optionsRetryCountdown <= 0 then
@@ -86,17 +99,14 @@ script BattleDeploymentInput extends Component
             _InputService:DisconnectEvent(KeyDownEvent, self.keyDownHandler)
             self.keyDownHandler = nil
         end
+        self:ClearMonsterOptions()
         for _, binding in ipairs(self.buttonBindings or {}) do
             if isvalid(binding.entity) and binding.eventCallback ~= nil then
                 binding.entity:DisconnectEvent(ButtonClickEvent, binding.eventCallback)
             end
         end
         self.buttonBindings = {}
-        for _, card in ipairs(self.optionCards or {}) do
-            if isvalid(card.entity) then card.entity:Destroy() end
-        end
-        self.optionCards = {}
-        self.optionData = {}
+        if isvalid(self.configErrorGroup) then self.configErrorGroup:SetEnable(false) end
         self.startButtonAction = nil
         self.session = nil
     end
@@ -110,9 +120,9 @@ script BattleDeploymentInput extends Component
     end
 
     @ExecSpace("ClientOnly")
-    method void ShowMonsterOptions(table options)
+    method void ShowMonsterOptions(table options, integer generation)
         -- Clone one card per validated MonsterData row and bind its stable ID.
-        if self.optionsReady or not isvalid(self.session) or self.session.Phase ~= "DEPLOYMENT" or not isvalid(self.optionTemplate) or not isvalid(self.optionContainer) then return end
+        if self.optionsReady or not isvalid(self.session) or self.session.Phase ~= "DEPLOYMENT" or generation ~= self.session.SessionGeneration or generation ~= self.observedGeneration or not isvalid(self.optionTemplate) or not isvalid(self.optionContainer) then return end
         self.optionData = options
         local containerTransform = self.optionContainer:GetComponent("UITransformComponent")
         local templateTransform = self.optionTemplate:GetComponent("UITransformComponent")
@@ -173,6 +183,32 @@ script BattleDeploymentInput extends Component
     end
 
     @ExecSpace("ClientOnly")
+    method void ClearMonsterOptions()
+        -- Release the previous catalog's cards, selection, and layout before a session rebuild.
+        local retainedBindings = {}
+        for _, binding in ipairs(self.buttonBindings or {}) do
+            if binding.entity == self.startButton then
+                table.insert(retainedBindings, binding)
+            elseif isvalid(binding.entity) and binding.eventCallback ~= nil then
+                binding.entity:DisconnectEvent(ButtonClickEvent, binding.eventCallback)
+            end
+        end
+        self.buttonBindings = retainedBindings
+        for _, card in ipairs(self.optionCards or {}) do
+            if isvalid(card.entity) then card.entity:Destroy() end
+        end
+        self.optionCards = {}
+        self.optionData = {}
+        self.optionsReady = false
+        self.selectedMonsterId = ""
+        self.optionsRetryCountdown = 0
+        if isvalid(self.optionContainer) and self._T.optionContainerSize ~= nil then
+            self.optionContainer.UITransformComponent.RectSize = self._T.optionContainerSize
+            self.optionContainer.UITransformComponent.anchoredPosition = self._T.optionContainerPosition
+        end
+    end
+
+    @ExecSpace("ClientOnly")
     method void SelectMonsterCard(string monsterId, Entity glowEntity)
         -- Move the persistent selection glow to the card carrying this MonsterId.
         if not isvalid(self.session) or self.session.Phase ~= "DEPLOYMENT" then return end
@@ -194,12 +230,15 @@ script BattleDeploymentInput extends Component
         -- Hide selection and start controls as soon as the synchronized phase leaves deployment.
         if not isvalid(self.session) then return end
         local phase = self.session.Phase
-        if phase == self.observedPhase then return end
+        local player = _UserService.LocalPlayer
+        local inMap = isvalid(player) and player.CurrentMap == self.Entity.CurrentMap
+        if phase == self.observedPhase and inMap == self.observedInMap then return end
         self.observedPhase = phase
-        local enabled = phase == "DEPLOYMENT"
+        self.observedInMap = inMap
+        local enabled = inMap and phase == "DEPLOYMENT"
         if isvalid(self.optionContainer) then self.optionContainer:SetEnable(enabled) end
         if isvalid(self.startButton) then self.startButton:SetEnable(enabled) end
-        if isvalid(self.configErrorPanel) then self.configErrorPanel:SetEnable(phase == "CONFIG_ERROR") end
+        if isvalid(self.configErrorGroup) then self.configErrorGroup:SetEnable(inMap and phase == "CONFIG_ERROR") end
         log("[M1][DeploymentUI] deployment controls=" .. tostring(enabled) .. " phase=" .. tostring(phase))
     end
 

@@ -5,20 +5,24 @@ script MonsterCatalog extends Component
 
     @ExecSpace("ServerOnly")
     method void OnInitialize()
+        -- Initialize the map-scoped catalog without exposing server diagnostics to clients.
         self._T.profilesById = {}
         self.ErrorMessage = ""
     end
 
     method boolean IsBlank(any value)
+        -- Treat missing cells and empty CSV cells as absent values.
         return value == nil or value == ""
     end
 
     method boolean SetError(string message)
+        -- Preserve the first validation failure for the session's server log.
         if self.ErrorMessage == "" then self.ErrorMessage = message end
         return false
     end
 
     method number ReadNumber(any raw, string fieldName, string monsterId, number minimum)
+        -- Parse a finite numeric cell and enforce the field's minimum value.
         if self:IsBlank(raw) then
             self:SetError("invalid numeric value " .. fieldName .. " for " .. monsterId)
             return 0
@@ -32,6 +36,7 @@ script MonsterCatalog extends Component
     end
 
     method integer ReadInteger(any raw, string fieldName, string monsterId, integer minimum)
+        -- Reject fractional values for fields requiring an integer.
         local parsed = self:ReadNumber(raw, fieldName, monsterId, minimum)
         if self.ErrorMessage ~= "" then return 0 end
         if parsed % 1 ~= 0 then
@@ -42,6 +47,7 @@ script MonsterCatalog extends Component
     end
 
     method any ReadPresentationClip(string ruid, string monsterId, string fieldName)
+        -- Load and validate clip frames before deriving presentation timing.
         local clip = _ResourceService:LoadAnimationClipAndWait(ruid)
         if not isvalid(clip) or clip.IsLoadComplete ~= true then
             self:SetError(fieldName .. " failed to load for " .. monsterId)
@@ -73,6 +79,7 @@ script MonsterCatalog extends Component
     end
 
     method boolean ValidateResource(string ruid, string monsterId, string fieldName, any expectedType)
+        -- Check the resource type of each nonblank animation or audio reference.
         if self:IsBlank(ruid) then return true end
         local actualType = _ResourceService:GetTypeAndWait(ruid)
         if actualType ~= expectedType then
@@ -85,6 +92,7 @@ script MonsterCatalog extends Component
     end
 
     method any ParseRow(any row, integer rowIndex)
+        -- Validate one complete monster row and build its authoritative profile.
         if row == nil then
             self:SetError("MonsterData row missing at index " .. tostring(rowIndex))
             return nil
@@ -209,6 +217,7 @@ script MonsterCatalog extends Component
     end
 
     method boolean ValidateRoster(table roster)
+        -- Require every configured enemy ID to exist with its expected combat type.
         for _, entry in ipairs(roster or {}) do
             local profile = self._T.profilesById[entry.monsterId]
             if profile == nil then
@@ -223,6 +232,7 @@ script MonsterCatalog extends Component
 
     @ExecSpace("ServerOnly")
     method boolean Load(string datasetName, table fixedRoster, table allowedModelIds)
+        -- Rebuild the catalog only when every row and fixed enemy entry passes validation.
         self.ErrorMessage = ""
         self._T.profilesById = {}
         self._T.allowedModelIds = allowedModelIds or {}
@@ -254,11 +264,13 @@ script MonsterCatalog extends Component
     end
 
     method any GetProfile(string monsterId)
+        -- Resolve a validated profile by its stable MonsterId.
         if self._T.profilesById == nil then return nil end
         return self._T.profilesById[monsterId]
     end
 
     method string FindIdByType(string monsterType)
+        -- Find an available validated monster of the requested combat type.
         for monsterId, profile in pairs(self._T.profilesById or {}) do
             if profile.MonsterType == monsterType then return monsterId end
         end
@@ -266,6 +278,7 @@ script MonsterCatalog extends Component
     end
 
     method table GetDeploymentOptions()
+        -- Return the sorted, limited fields needed to display deployment cards.
         local options = {}
         for _, profile in pairs(self._T.profilesById or {}) do
             table.insert(options, { profile.MonsterId, profile.MonsterName, profile.StandAnimationRUID })

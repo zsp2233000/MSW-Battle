@@ -17,6 +17,7 @@ script BattleSession extends Component
     @Sync property string LastEventTargetName = ""
     @Sync property integer LastEventAmount = 0
     @Sync property string ConfigurationError = ""
+    @Sync property integer SessionGeneration = 0
 
     property string PlayerModelId = "battleunit"
     property string EnemyModelId = "battleunit"
@@ -48,8 +49,23 @@ script BattleSession extends Component
 
     @ExecSpace("ServerOnly")
     method void OnBeginPlay()
-        -- Load the authoritative monster rows before creating the fixed six-versus-six battle.
-        self._T.units = {}
+        -- Initialize the map session and build its first validated enemy roster.
+        self._T.configurationUsers = {}
+        self._T.rebuilding = false
+        self.SnapshotSerial = 0
+        self.EventSerial = 0
+        self.SessionGeneration = 0
+        self:InitializeBattle()
+    end
+
+    @ExecSpace("ServerOnly")
+    method void InitializeBattle()
+        -- Rebuild once, keeping deployment closed until validation and spawning finish.
+        if self._T.rebuilding == true then return end
+        self._T.rebuilding = true
+        self._T.initialized = false
+        self:ClearConfigurationUsers()
+        self:ClearUnits()
         self._T.pendingDamage = {}
         self._T.pendingKnockbacks = {}
         self._T.monsterCatalog = nil
@@ -57,19 +73,14 @@ script BattleSession extends Component
         self._T.nextPlayerUnitNumber = 0
         self._T.eventHistory = {}
         self._T.dataReady = false
-        self._T.initialized = true
         self._T.resultEntered = false
-        self.Phase = "DEPLOYMENT"
         self.Result = ""
-        self.ConfigurationError = ""
         self._T.configurationErrorDetail = ""
         self.PlayerAlive = 0
         self.EnemyAlive = 0
         self.InitialPlayerAlive = 0
         self.InitialEnemyAlive = 0
         self.UnitSnapshots = ""
-        self.SnapshotSerial = 0
-        self.EventSerial = 0
         self.EventHistory = ""
         self.LastEvent = ""
         self.LastEventSourceName = ""
@@ -80,6 +91,8 @@ script BattleSession extends Component
         self._T.fixedEnemyRoster = self:BuildFixedEnemyRoster()
         if self:LoadMonsterData() == false then
             self:RefreshSnapshot()
+            self._T.initialized = true
+            self._T.rebuilding = false
             return
         end
 
@@ -87,6 +100,8 @@ script BattleSession extends Component
             self:ClearUnits()
             self:FailConfiguration("fixed enemy roster spawn failed")
             self:RefreshSnapshot()
+            self._T.initialized = true
+            self._T.rebuilding = false
             return
         end
 
@@ -94,6 +109,11 @@ script BattleSession extends Component
         self.EnemyAlive = 6
         self.InitialPlayerAlive = 0
         self.InitialEnemyAlive = 6
+        self.ConfigurationError = ""
+        self.SessionGeneration = self.SessionGeneration + 1
+        self.Phase = "DEPLOYMENT"
+        self._T.initialized = true
+        self._T.rebuilding = false
         self:EmitPresentation("DEPLOYMENT_START", nil, nil, 0)
         self:RefreshSnapshot()
         log("[M1][BattleSession] DEPLOYMENT ready: fixed six-unit enemy roster")
@@ -103,12 +123,14 @@ script BattleSession extends Component
     method void OnUpdate(number delta)
         -- Advance the live server simulation without bypassing native movement or hit resolution.
         if self._T.initialized ~= true then return end
+        if self.Phase == "CONFIG_ERROR" then self:CheckConfigurationReentry() end
         self:StepSimulation(delta, false)
     end
 
     @ExecSpace("ServerOnly")
     method void OnEndPlay()
         -- Release session-only references when the map instance ends.
+        self:ClearConfigurationUsers()
         self:ClearUnits()
         self._T.pendingDamage = {}
         self._T.pendingKnockbacks = {}
@@ -116,6 +138,109 @@ script BattleSession extends Component
         self._T.fixedEnemyRoster = {}
         self._T.dataReady = false
         self._T.initialized = false
+    end
+
+    @ExecSpace("ServerOnly")
+    method void ClearConfigurationUsers()
+        -- Release player map subscriptions and discard recovery state for the previous failure.
+        for _, record in pairs(self._T.configurationUsers or {}) do
+            if isvalid(record.entity) and record.eventCallback ~= nil then
+                record.entity:DisconnectEvent(EntityMapChangedEvent, record.eventCallback)
+                record.entity:DisconnectEvent(EntityChangedParentEvent, record.parentCallback)
+            end
+        end
+        self._T.configurationUsers = {}
+    end
+
+    @ExecSpace("ServerOnly")
+    method void WatchConfigurationUser(Entity player)
+        -- Track an affected player and preserve departure evidence across entity replacement.
+        if not isvalid(player) or not isvalid(player.PlayerComponent) then return end
+        local userId = player.PlayerComponent.UserId
+        local previous = self._T.configurationUsers[userId]
+        if previous ~= nil and previous.entity == player then return end
+        if previous ~= nil and isvalid(previous.entity) and previous.eventCallback ~= nil then
+            previous.entity:DisconnectEvent(EntityMapChangedEvent, previous.eventCallback)
+            previous.entity:DisconnectEvent(EntityChangedParentEvent, previous.parentCallback)
+        end
+        local callback = player:ConnectEvent(EntityMapChangedEvent, self.HandleConfigurationMapChanged)
+        local parentCallback = player:ConnectEvent(EntityChangedParentEvent, self.HandleConfigurationParentChanged)
+        self._T.configurationUsers[userId] = {
+            entity = player, eventCallback = callback, departed = previous ~= nil, disconnected = false,
+            parentCallback = parentCallback,
+        }
+    end
+
+    @ExecSpace("ServerOnly")
+    method void HandleConfigurationMapChanged(EntityMapChangedEvent event)
+        -- Record a real departure from the affected player's map.
+        if self.Phase ~= "CONFIG_ERROR" or not isvalid(event.Entity) or not isvalid(event.Entity.PlayerComponent) then return end
+        local record = self._T.configurationUsers[event.Entity.PlayerComponent.UserId]
+        if record ~= nil and event.OldMap == self:GetMapEntity() then record.departed = true end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void HandleConfigurationParentChanged(EntityChangedParentEvent event)
+        -- Capture rapid departures even when the engine coalesces map changes within one frame.
+        if self.Phase ~= "CONFIG_ERROR" or not isvalid(event.Entity) or not isvalid(event.Entity.PlayerComponent) then return end
+        local record = self._T.configurationUsers[event.Entity.PlayerComponent.UserId]
+        if record == nil then return end
+        local map = self:GetMapEntity()
+        local wasInMap = isvalid(event.OldParent) and (event.OldParent == map or event.OldParent.CurrentMap == map)
+        local nowInMap = isvalid(event.NewParent) and (event.NewParent == map or event.NewParent.CurrentMap == map)
+        if wasInMap and not nowInMap then record.departed = true end
+    end
+
+    @ExecSpace("ServerOnly")
+    @EventSender("Service", "UserService")
+    handler HandleConfigurationUserDisconnect(UserDisconnectEvent event)
+        -- Require reconnection before an offline player's retained entity can trigger recovery.
+        local record = (self._T.configurationUsers or {})[event.UserId]
+        if record ~= nil then record.departed = true; record.disconnected = true end
+    end
+
+    @ExecSpace("ServerOnly")
+    @EventSender("Service", "UserService")
+    handler HandleConfigurationUserLeave(UserLeaveEvent event)
+        -- Keep departure evidence when a player exits the surviving world instance.
+        local record = (self._T.configurationUsers or {})[event.UserId]
+        if record ~= nil then record.departed = true; record.disconnected = true end
+    end
+
+    @ExecSpace("ServerOnly")
+    @EventSender("Service", "UserService")
+    handler HandleConfigurationUserReconnect(UserReconnectEvent event)
+        -- Allow an affected player to recover after the service confirms reconnection.
+        local record = (self._T.configurationUsers or {})[event.UserId]
+        if record ~= nil then record.disconnected = false end
+    end
+
+    @ExecSpace("ServerOnly")
+    @EventSender("Service", "UserService")
+    handler HandleConfigurationUserEnter(UserEnterEvent event)
+        -- Allow a previously affected player to return with the same retained entity.
+        local record = (self._T.configurationUsers or {})[event.UserId]
+        if record ~= nil then record.disconnected = false end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void CheckConfigurationReentry()
+        -- Retry a stopped session once after an affected player leaves and returns to this map.
+        if self.Phase ~= "CONFIG_ERROR" or self._T.rebuilding == true then return end
+        local map = self:GetMapEntity()
+        for _, player in ipairs(_UserService.UserEntities.Values) do
+            if isvalid(player) and player.CurrentMap == map then self:WatchConfigurationUser(player) end
+        end
+        for userId, record in pairs(self._T.configurationUsers) do
+            local player = _UserService:GetUserEntityByUserId(userId)
+            if not isvalid(player) or player.CurrentMap ~= map then
+                record.departed = true
+            elseif record.departed and not record.disconnected then
+                log("[M1][BattleSession] rebuilding after player re-entry")
+                self:InitializeBattle()
+                return
+            end
+        end
     end
 
     @ExecSpace("ServerOnly")
@@ -176,7 +301,12 @@ script BattleSession extends Component
         self._T.resultEntered = true
         self._T.pendingDamage = {}
         self._T.pendingKnockbacks = {}
+        self._T.dataReady = false
         self:ClearUnits()
+        self:ClearConfigurationUsers()
+        for _, player in ipairs(_UserService.UserEntities.Values) do
+            if isvalid(player) and player.CurrentMap == self:GetMapEntity() then self:WatchConfigurationUser(player) end
+        end
         self:EmitPresentation("CONFIG_ERROR", nil, nil, 0)
         log_error("[M1][BattleSession] CONFIG_ERROR: " .. detail)
         return false
@@ -200,12 +330,14 @@ script BattleSession extends Component
     end
 
     method any GetMonsterProfile(string monsterId)
+        -- Resolve a validated profile through the map's catalog.
         local catalog = self._T.monsterCatalog
         if not isvalid(catalog) then return nil end
         return catalog:GetProfile(monsterId)
     end
 
     method string FindMonsterIdByType(string monsterType)
+        -- Delegate combat-type lookup to the validated catalog.
         local catalog = self._T.monsterCatalog
         if not isvalid(catalog) then return "" end
         return catalog:FindIdByType(monsterType)
@@ -228,18 +360,18 @@ script BattleSession extends Component
     @ExecSpace("Server")
     method void RequestMonsterOptions()
         -- Return only card fields to a player currently on this session's map.
-        if not self:IsSenderInMap(senderUserId) or self._T.dataReady ~= true or self.Phase ~= "DEPLOYMENT" then return end
+        if not self:IsSenderInMap(senderUserId) or self._T.initialized ~= true or self._T.dataReady ~= true or self.Phase ~= "DEPLOYMENT" then return end
         local catalog = self._T.monsterCatalog
         if not isvalid(catalog) then return end
         local options = catalog:GetDeploymentOptions()
-        self:ReceiveMonsterOptions(options, senderUserId)
+        self:ReceiveMonsterOptions(options, self.SessionGeneration, senderUserId)
     end
 
     @ExecSpace("Client")
-    method void ReceiveMonsterOptions(table options)
+    method void ReceiveMonsterOptions(table options, integer generation)
         -- Forward the server's limited card data to the client input adapter.
         local adapter = self.Entity:GetComponent("script.BattleDeploymentInput")
-        if isvalid(adapter) then adapter:ShowMonsterOptions(options) end
+        if isvalid(adapter) then adapter:ShowMonsterOptions(options, generation) end
     end
 
     @ExecSpace("ServerOnly")
@@ -295,7 +427,7 @@ script BattleSession extends Component
     @ExecSpace("ServerOnly")
     method boolean TryDeployMonster(string monsterId, Vector3 position)
         -- Check the phase, authoritative profile, capacity, bounds, and spacing before spawning.
-        if self.Phase ~= "DEPLOYMENT" or self._T.dataReady ~= true then return false end
+        if self.Phase ~= "DEPLOYMENT" or self._T.initialized ~= true or self._T.dataReady ~= true then return false end
         if position == nil or position.x ~= position.x or position.y ~= position.y then return false end
         local profile = self:GetMonsterProfile(monsterId)
         if profile == nil or self.PlayerAlive >= self.DeploymentMaxUnits then return false end
@@ -351,7 +483,7 @@ script BattleSession extends Component
     @ExecSpace("ServerOnly")
     method boolean CanStartBattleWithPlayerCount(integer playerCount)
         -- Keep the accepted roster range explicit and independently verifiable.
-        return self.Phase == "DEPLOYMENT" and playerCount >= 1 and playerCount <= self.DeploymentMaxUnits
+        return self._T.initialized == true and self.Phase == "DEPLOYMENT" and playerCount >= 1 and playerCount <= self.DeploymentMaxUnits
     end
 
     @ExecSpace("ServerOnly")
