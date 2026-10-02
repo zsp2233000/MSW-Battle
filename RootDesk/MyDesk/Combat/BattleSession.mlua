@@ -52,7 +52,7 @@ script BattleSession extends Component
         self._T.units = {}
         self._T.pendingDamage = {}
         self._T.pendingKnockbacks = {}
-        self._T.monstersById = {}
+        self._T.monsterCatalog = nil
         self._T.fixedEnemyRoster = {}
         self._T.nextPlayerUnitNumber = 0
         self._T.eventHistory = {}
@@ -62,6 +62,7 @@ script BattleSession extends Component
         self.Phase = "DEPLOYMENT"
         self.Result = ""
         self.ConfigurationError = ""
+        self._T.configurationErrorDetail = ""
         self.PlayerAlive = 0
         self.EnemyAlive = 0
         self.InitialPlayerAlive = 0
@@ -76,12 +77,12 @@ script BattleSession extends Component
         self.LastEventAmount = 0
         self:DisableDefaultPlayer()
 
+        self._T.fixedEnemyRoster = self:BuildFixedEnemyRoster()
         if self:LoadMonsterData() == false then
             self:RefreshSnapshot()
             return
         end
 
-        self._T.fixedEnemyRoster = self:BuildFixedEnemyRoster()
         if self:SpawnRoster(self._T.fixedEnemyRoster, "ENEMY") == false then
             self:ClearUnits()
             self:FailConfiguration("fixed enemy roster spawn failed")
@@ -111,7 +112,7 @@ script BattleSession extends Component
         self:ClearUnits()
         self._T.pendingDamage = {}
         self._T.pendingKnockbacks = {}
-        self._T.monstersById = {}
+        self._T.monsterCatalog = nil
         self._T.fixedEnemyRoster = {}
         self._T.dataReady = false
         self._T.initialized = false
@@ -166,247 +167,50 @@ script BattleSession extends Component
         return map
     end
 
-    method boolean IsBlank(any value)
-        -- Treat missing and empty dataset cells as invalid rather than silently selecting a script default.
-        return value == nil or value == ""
-    end
-
-    method boolean FailConfiguration(string message)
-        -- Stop the session at the configuration boundary and expose the explicit failure reason.
-        self.ConfigurationError = message
-        self.Phase = "RESULT"
+    method boolean FailConfiguration(string detail)
+        -- Keep diagnostic detail on the server while clients receive a stable recovery instruction.
+        self._T.configurationErrorDetail = detail
+        self.ConfigurationError = "本場戰鬥已停止。\n請離開後重新進入。"
+        self.Phase = "CONFIG_ERROR"
         self.Result = ""
         self._T.resultEntered = true
+        self._T.pendingDamage = {}
+        self._T.pendingKnockbacks = {}
+        self:ClearUnits()
         self:EmitPresentation("CONFIG_ERROR", nil, nil, 0)
-        log_error("[M1][BattleSession] CONFIG_ERROR: " .. message)
+        log_error("[M1][BattleSession] CONFIG_ERROR: " .. detail)
         return false
     end
 
-    method number ReadNumber(any raw, string fieldName, string monsterId, number minimum)
-        -- Parse one required numeric cell and reject missing, malformed, or out-of-range values.
-        if self:IsBlank(raw) then
-            self:FailConfiguration("invalid numeric value " .. fieldName .. " for " .. monsterId)
-            return 0
-        end
-        local parsed = tonumber(raw)
-        if parsed == nil or parsed ~= parsed or parsed == math.huge or parsed == -math.huge or parsed < minimum then
-            self:FailConfiguration("invalid numeric value " .. fieldName .. " for " .. monsterId)
-            return 0
-        end
-        return parsed
-    end
-
-    method integer ReadInteger(any raw, string fieldName, string monsterId, integer minimum)
-        -- Parse one required integer cell without accepting fractional or negative values.
-        local parsed = self:ReadNumber(raw, fieldName, monsterId, minimum)
-        if self.ConfigurationError ~= "" then return 0 end
-        if parsed % 1 ~= 0 then
-            self:FailConfiguration("invalid numeric value " .. fieldName .. " for " .. monsterId)
-            return 0
-        end
-        return math.floor(parsed)
-    end
-
-    method any ReadPresentationClip(string ruid, string monsterId, string fieldName)
-        local clip = _ResourceService:LoadAnimationClipAndWait(ruid)
-        if not isvalid(clip) or clip.IsLoadComplete ~= true then
-            self:FailConfiguration(fieldName .. " failed to load for " .. monsterId)
-            return nil
-        end
-        local frames = clip.Frames:ToTable()
-        if frames == nil or #frames == 0 then
-            self:FailConfiguration(fieldName .. " has no frames for " .. monsterId)
-            return nil
-        end
-        if clip.PlayRate == nil or not (clip.PlayRate > 0) or not (clip.PlayRate < math.huge) then
-            self:FailConfiguration(fieldName .. " has invalid PlayRate for " .. monsterId)
-            return nil
-        end
-        local total = 0
-        for _, frame in ipairs(frames) do
-            local delay = frame and frame.Delay or nil
-            if delay == nil or not (delay >= 0) or not (delay < math.huge) then
-                self:FailConfiguration(fieldName .. " has invalid frame timing for " .. monsterId)
-                return nil
-            end
-            total = total + delay
-        end
-        if not (total > 0) or not (total < math.huge) then
-            self:FailConfiguration(fieldName .. " has no positive duration for " .. monsterId)
-            return nil
-        end
-        return { frames = frames, playRate = clip.PlayRate, duration = total / clip.PlayRate }
-    end
-
-    method any ParseMonsterRow(any row, integer rowIndex)
-        -- Convert and validate one MonsterData row into the profile consumed by BattleUnit.
-        if row == nil then
-            self:FailConfiguration("MonsterData row missing at index " .. tostring(rowIndex))
-            return nil
-        end
-        local monsterId = row:GetItem("MonsterId")
-        if self:IsBlank(monsterId) then
-            self:FailConfiguration("MonsterData row " .. tostring(rowIndex) .. " missing MonsterId")
-            return nil
-        end
-        if self._T.monstersById[monsterId] ~= nil then
-            self:FailConfiguration("duplicate MonsterId " .. monsterId)
-            return nil
-        end
-
-        local monsterName = row:GetItem("MonsterName")
-        local monsterType = row:GetItem("MonsterType")
-        local modelId = row:GetItem("ModelId")
-        if self:IsBlank(monsterName) or self:IsBlank(modelId) then
-            self:FailConfiguration("MonsterData row " .. monsterId .. " missing name or ModelId")
-            return nil
-        end
-        if monsterType ~= "TANK" and monsterType ~= "ASSAULT" and monsterType ~= "SHOOTER" then
-            self:FailConfiguration("invalid MonsterType " .. tostring(monsterType) .. " for " .. monsterId)
-            return nil
-        end
-
-        local profile = {
-            MonsterId = monsterId,
-            MonsterName = monsterName,
-            MonsterType = monsterType,
-            ModelId = modelId,
-        }
-        profile.MaxHp = self:ReadInteger(row:GetItem("MaxHp"), "MaxHp", monsterId, 1)
-        profile.MoveSpeed = self:ReadNumber(row:GetItem("MoveSpeed"), "MoveSpeed", monsterId, 0.0001)
-        profile.AttackDamage = self:ReadInteger(row:GetItem("AttackDamage"), "AttackDamage", monsterId, 1)
-        profile.AttackIntervalSeconds = self:ReadNumber(row:GetItem("AttackIntervalSeconds"), "AttackIntervalSeconds", monsterId, 0.0001)
-        profile.AttackRange = self:ReadNumber(row:GetItem("AttackRange"), "AttackRange", monsterId, 0.0001)
-        local attackImpactFrame = row:GetItem("AttackImpactFrame")
-        if monsterType == "TANK" and self:IsBlank(attackImpactFrame) then
-            profile.AttackImpactFrame = 0
-        elseif monsterType ~= "TANK" and self:IsBlank(attackImpactFrame) then
-            profile.AttackImpactFrame = 1
-        else
-            profile.AttackImpactFrame = self:ReadInteger(attackImpactFrame, "AttackImpactFrame", monsterId, 0)
-        end
-        profile.RetargetIntervalSeconds = self:ReadNumber(row:GetItem("RetargetIntervalSeconds"), "RetargetIntervalSeconds", monsterId, 0.0001)
-        profile.HitStopDurationSeconds = self:ReadNumber(row:GetItem("HitStopDurationSeconds"), "HitStopDurationSeconds", monsterId, 0)
-        if self.ConfigurationError ~= "" then return nil end
-        local contactMinimum = 0
-        if monsterType == "TANK" then contactMinimum = 0.0001 end
-        profile.ContactCooldownSeconds = self:ReadNumber(row:GetItem("ContactCooldownSeconds"), "ContactCooldownSeconds", monsterId, contactMinimum)
-        profile.ContactSizeX = self:ReadNumber(row:GetItem("ContactSizeX"), "ContactSizeX", monsterId, contactMinimum)
-        profile.ContactSizeY = self:ReadNumber(row:GetItem("ContactSizeY"), "ContactSizeY", monsterId, contactMinimum)
-        profile.KnockbackDistance = self:ReadNumber(row:GetItem("KnockbackDistance"), "KnockbackDistance", monsterId, contactMinimum)
-        if monsterType ~= "TANK" and profile.AttackImpactFrame <= 0 then
-            self:FailConfiguration("invalid numeric value AttackImpactFrame for " .. monsterId)
-            return nil
-        end
-        if self.ConfigurationError ~= "" then return nil end
-
-        local assetFields = {
-            "StandAnimationRUID",
-            "MoveAnimationRUID",
-            "AttackAnimationRUID",
-            "HitAnimationRUID",
-            "DieAnimationRUID",
-            "HitEffectRUID",
-            "AttackSoundRUID",
-            "OnHitSoundRUID",
-            "DieSoundRUID",
-        }
-        local optionalAssetFields = {
-            AttackAnimationRUID = monsterType == "TANK",
-            HitEffectRUID = true,
-            AttackSoundRUID = true,
-            OnHitSoundRUID = true,
-            DieSoundRUID = true,
-        }
-        for _, fieldName in ipairs(assetFields) do
-            local assetRUID = row:GetItem(fieldName)
-            if optionalAssetFields[fieldName] ~= true and self:IsBlank(assetRUID) then
-                self:FailConfiguration("MonsterData row " .. monsterId .. " missing " .. fieldName)
-                return nil
-            end
-            -- Normalize optional nil cells to an empty string for typed consumers and skip guards.
-            profile[fieldName] = assetRUID or ""
-        end
-        local hitClip = self:ReadPresentationClip(profile.HitAnimationRUID, monsterId, "HitAnimationRUID")
-        if hitClip == nil then return nil end
-        profile.HitAnimationDurationSeconds = hitClip.duration
-        profile.ImpactDelaySeconds = 0
-        profile.AttackAnimationDurationSeconds = 0
-        if monsterType ~= "TANK" then
-            local attackClip = self:ReadPresentationClip(profile.AttackAnimationRUID, monsterId, "AttackAnimationRUID")
-            if attackClip == nil then return nil end
-            if profile.AttackImpactFrame > #attackClip.frames then
-                self:FailConfiguration("AttackImpactFrame exceeds attack clip for " .. monsterId)
-                return nil
-            end
-            profile.AttackAnimationDurationSeconds = attackClip.duration
-            for frameIndex = 1, profile.AttackImpactFrame - 1 do
-                profile.ImpactDelaySeconds = profile.ImpactDelaySeconds + attackClip.frames[frameIndex].Delay
-            end
-            profile.ImpactDelaySeconds = profile.ImpactDelaySeconds / attackClip.playRate
-            log("[M1][BattleSession] IMPACT_DELAY monsterId=" .. monsterId .. ", frame=" .. tostring(profile.AttackImpactFrame) .. ", seconds=" .. tostring(profile.ImpactDelaySeconds))
-        end
-        return profile
-    end
-
-    method boolean RequireMonsterProfile(string monsterId, string expectedType)
-        -- Ensure every fixed roster reference resolves to a valid row of the intended behavior type.
-        local profile = self._T.monstersById[monsterId]
-        if profile == nil then
-            return self:FailConfiguration("missing configured MonsterId " .. tostring(monsterId))
-        end
-        if profile.MonsterType ~= expectedType then
-            return self:FailConfiguration("MonsterId " .. tostring(monsterId) .. " has unexpected MonsterType")
-        end
-        return true
-    end
-
     method boolean LoadMonsterData()
-        -- Load and strictly validate the single authoritative MonsterData UserDataSet before spawning.
-        local dataset = _DataService:GetTable(self.MonsterDataSetName)
-        if dataset == nil then return self:FailConfiguration("MonsterData table unavailable") end
-        local requiredColumns = {
-            "MonsterId", "MonsterName", "MonsterType", "ModelId", "MaxHp", "MoveSpeed", "AttackDamage",
-            "AttackIntervalSeconds", "AttackRange", "AttackImpactFrame",
-            "RetargetIntervalSeconds", "HitStopDurationSeconds", "ContactCooldownSeconds",
-            "ContactSizeX", "ContactSizeY", "KnockbackDistance", "StandAnimationRUID", "MoveAnimationRUID",
-            "AttackAnimationRUID", "HitAnimationRUID", "DieAnimationRUID", "HitEffectRUID", "AttackSoundRUID",
-            "OnHitSoundRUID", "DieSoundRUID",
-        }
-        for _, columnName in ipairs(requiredColumns) do
-            if dataset:GetColumn(columnName) == nil then
-                return self:FailConfiguration("MonsterData missing column " .. columnName)
-            end
+        -- Delegate the whole data contract to one map-scoped catalog component.
+        local catalog = self.Entity:GetComponent("script.MonsterCatalog")
+        if not isvalid(catalog) then
+            self.Entity:AddComponent("script.MonsterCatalog")
+            catalog = self.Entity:GetComponent("script.MonsterCatalog")
         end
-        local rowCount = dataset:GetRowCount()
-        if rowCount == nil or rowCount <= 0 then return self:FailConfiguration("MonsterData has no rows") end
-        for rowIndex = 1, rowCount do
-            local profile = self:ParseMonsterRow(dataset:GetRow(rowIndex), rowIndex)
-            if profile == nil then return false end
-            self._T.monstersById[profile.MonsterId] = profile
-        end
-        for _, entry in ipairs(self:BuildFixedEnemyRoster()) do
-            if self:RequireMonsterProfile(entry.monsterId, entry.expectedType) == false then return false end
+        if not isvalid(catalog) then return self:FailConfiguration("MonsterCatalog component unavailable") end
+        self._T.monsterCatalog = catalog
+        local allowedModelIds = { [self.PlayerModelId] = true, [self.EnemyModelId] = true }
+        if catalog:Load(self.MonsterDataSetName, self._T.fixedEnemyRoster, allowedModelIds) == false then
+            return self:FailConfiguration(catalog.ErrorMessage)
         end
         self._T.dataReady = true
-        log("[M1][BattleSession] MonsterData loaded rows=" .. tostring(rowCount))
         return true
     end
 
     method any GetMonsterProfile(string monsterId)
-        -- Return the validated profile for a stable MonsterId without introducing script fallbacks.
-        if self._T.monstersById == nil then return nil end
-        return self._T.monstersById[monsterId]
+        local catalog = self._T.monsterCatalog
+        if not isvalid(catalog) then return nil end
+        return catalog:GetProfile(monsterId)
     end
 
     method string FindMonsterIdByType(string monsterType)
-        -- Resolve legacy test calls by type while production rosters always use explicit MonsterIds.
-        if self._T.monstersById == nil then return "" end
-        for monsterId, profile in pairs(self._T.monstersById) do
-            if profile.MonsterType == monsterType then return monsterId end
-        end
-        return ""
+        local catalog = self._T.monsterCatalog
+        if not isvalid(catalog) then return "" end
+        return catalog:FindIdByType(monsterType)
     end
+
 
     method table BuildFixedEnemyRoster()
         -- Build six enemy entries from session IDs and positions.
@@ -425,11 +229,9 @@ script BattleSession extends Component
     method void RequestMonsterOptions()
         -- Return only card fields to a player currently on this session's map.
         if not self:IsSenderInMap(senderUserId) or self._T.dataReady ~= true or self.Phase ~= "DEPLOYMENT" then return end
-        local options = {}
-        for _, profile in pairs(self._T.monstersById) do
-            table.insert(options, { profile.MonsterId, profile.MonsterName, profile.StandAnimationRUID })
-        end
-        table.sort(options, function(left, right) return left[1] < right[1] end)
+        local catalog = self._T.monsterCatalog
+        if not isvalid(catalog) then return end
+        local options = catalog:GetDeploymentOptions()
         self:ReceiveMonsterOptions(options, senderUserId)
     end
 
@@ -513,7 +315,11 @@ script BattleSession extends Component
         end
         self._T.nextPlayerUnitNumber = self._T.nextPlayerUnitNumber + 1
         local entity = self:SpawnMonster(monsterId, "M1_Player_" .. tostring(self._T.nextPlayerUnitNumber), "PLAYER", Vector3(position.x, position.y, 0))
-        if not isvalid(entity) then return false end
+        if not isvalid(entity) then
+            self:FailConfiguration("player unit spawn failed for " .. tostring(monsterId))
+            self:RefreshSnapshot()
+            return false
+        end
         self.PlayerAlive = self.PlayerAlive + 1
         self:EmitPresentation("DEPLOY", entity, nil, 0)
         self:RefreshSnapshot()

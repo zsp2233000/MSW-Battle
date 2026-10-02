@@ -9,6 +9,8 @@ script BattleDeploymentInput extends Component
     property any resultWin = nil
     property any resultLose = nil
     property any resultDraw = nil
+    property any configErrorPanel = nil
+    property any configErrorMessage = nil
     property any buttonBindings = nil
     property any optionCards = nil
     property any optionData = nil
@@ -33,6 +35,8 @@ script BattleDeploymentInput extends Component
         self.resultWin = self:FindNamedUiEntity("ResultWin")
         self.resultLose = self:FindNamedUiEntity("ResultLose")
         self.resultDraw = self:FindNamedUiEntity("ResultDraw")
+        self.configErrorPanel = self:FindNamedUiEntity("ConfigErrorPanel")
+        self.configErrorMessage = self:FindNamedUiEntity("ConfigErrorMessage")
         self:SetResultEntities("")
         self.observedPhase = "__UNINITIALIZED__"
         self:SyncDeploymentControls()
@@ -63,6 +67,12 @@ script BattleDeploymentInput extends Component
         local result = ""
         if self.session.Phase == "RESULT" then result = self.session.Result end
         if result ~= self.displayedResult then self:SetResultEntities(result) end
+        if self.session.Phase == "CONFIG_ERROR" and isvalid(self.configErrorMessage) then
+            local label = self.configErrorMessage:GetComponent("TextGUIRendererComponent")
+            if isvalid(label) and label.Text ~= self.session.ConfigurationError then
+                label.Text = self.session.ConfigurationError
+            end
+        end
     end
 
     @ExecSpace("ClientOnly")
@@ -189,6 +199,7 @@ script BattleDeploymentInput extends Component
         local enabled = phase == "DEPLOYMENT"
         if isvalid(self.optionContainer) then self.optionContainer:SetEnable(enabled) end
         if isvalid(self.startButton) then self.startButton:SetEnable(enabled) end
+        if isvalid(self.configErrorPanel) then self.configErrorPanel:SetEnable(phase == "CONFIG_ERROR") end
         log("[M1][DeploymentUI] deployment controls=" .. tostring(enabled) .. " phase=" .. tostring(phase))
     end
 
