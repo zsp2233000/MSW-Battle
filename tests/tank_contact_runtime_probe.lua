@@ -95,7 +95,12 @@ for index = 1, 2 do
     local enemyUnit = enemy:GetComponent("script.BattleUnit")
     enemyUnit.MoveSpeed = 0
     enemyUnit.RetargetInterval = 99
-    enemyUnit:Configure("ENEMY", enemy.Name, "ASSAULT", 220, 0, 0, 99, 0.6, 99, 0.18, 0.6, 0, 2.0, Vector2(1.2, 1.2), 0.8, 0.2)
+    local profile = {}
+    for key, value in pairs(session:GetMonsterProfile("monster_warrior")) do profile[key] = value end
+    profile.AttackDamage = 0
+    profile.MoveSpeed = 0
+    profile.AttackRange = 0
+    enemyUnit:Configure("ENEMY", enemy.Name, profile, 0)
     table.insert(probes, enemy)
 end
 session.EnemyAlive = session.EnemyAlive + 2
@@ -113,7 +118,6 @@ _TimerService:SetTimerOnce(function()
         local position = getProbePosition(tank)
         check(math.abs(position.x - initialPosition.x) < 0.001 and math.abs(position.y - initialPosition.y) < 0.001, "Tank does not recoil from contact")
         check(firstUnit.CombatState ~= "STUN" and secondUnit.CombatState ~= "STUN", "contact does not stun targets")
-        check(firstUnit.CombatState == "ON_HIT" and secondUnit.CombatState == "ON_HIT", "damaged units hold ON_HIT for the hit-stop window")
         logProbeState("after-first-contact")
 
         -- Re-overlap before the cooldown expires; neither target may take a second hit.

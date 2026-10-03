@@ -2,25 +2,163 @@
 script BattleAttackComposition extends Component
 
     @ExecSpace("ServerOnly")
-    method Component CreateAdapter(Entity owner, string unitKind)
-        -- Compose the concrete attack adapter so BattleUnit only consumes the seam.
-        if not isvalid(owner) then return nil end
-        local adapterType = "script.AssaultAttack"
-        if unitKind == "TANK" then
-            adapterType = "script.TankContactAttack"
-        elseif unitKind == "SHOOTER" then
-            adapterType = "script.ShooterAttack"
+    method boolean Configure(table profile, number openingDelay)
+        -- Replace attack work atomically while preserving the actor's observation counters.
+        self:Cancel("RECONFIGURE")
+        local previousType = self._T.adapterType
+        local previousAdapter = nil
+        if previousType ~= nil then previousAdapter = self.Entity:GetComponent(previousType) end
+        self._T.configured = false
+        self._T.adapter = nil
+        self._T.profile = nil
+        local adapterTypes = { ASSAULT = "script.AssaultAttack", SHOOTER = "script.ShooterAttack", TANK = "script.TankContactAttack" }
+        local adapterType = nil
+        if profile ~= nil then adapterType = adapterTypes[profile.MonsterType] end
+        if adapterType == nil then
+            log_error("[M1][BattleAttackComposition] unsupported attack profile")
+            return false
         end
-        local adapter = owner:GetComponent(adapterType)
+        if previousType ~= adapterType and isvalid(previousAdapter) then
+            if not self.Entity:RemoveComponent(previousType) then
+                log_error("[M1][BattleAttackComposition] previous native attack adapter could not be removed")
+                return false
+            end
+        end
+        local adapter = self.Entity:GetComponent(adapterType)
         if not isvalid(adapter) then
-            owner:AddComponent(adapterType)
-            adapter = owner:GetComponent(adapterType)
+            self.Entity:AddComponent(adapterType)
+            adapter = self.Entity:GetComponent(adapterType)
         end
         if not isvalid(adapter) then
-            log_error("[M1][BattleAttackComposition] attack adapter missing for " .. unitKind)
-            return nil
+            log_error("[M1][BattleAttackComposition] attack adapter missing for " .. profile.MonsterType)
+            return false
         end
-        return adapter
+        adapter:Configure(profile, self)
+        self._T.profile = {}
+        for key, value in pairs(profile) do self._T.profile[key] = value end
+        self._T.adapter = adapter
+        self._T.adapterType = adapterType
+        self._T.openingDelay = openingDelay or 0
+        self._T.openingDelayPending = self._T.openingDelay > 0
+        local unit = self.Entity:GetComponent("script.BattleUnit")
+        if isvalid(unit) then unit.UnitKind = profile.MonsterType end
+        self._T.configured = true
+        log("[M1][BattleAttackComposition] configured " .. profile.MonsterType .. ": " .. self.Entity.Name)
+        return true
+    end
+
+    @ExecSpace("ServerOnly")
+    method any GetActiveSession()
+        -- Require a configured, living actor in the active map battle.
+        if self._T.configured ~= true or not isvalid(self._T.adapter) then return nil end
+        local unit = self.Entity:GetComponent("script.BattleUnit")
+        local map = self.Entity.CurrentMap
+        if not isvalid(unit) or not unit:IsAlive() or not isvalid(map) then return nil end
+        local session = map:GetComponent("script.BattleSession")
+        if not isvalid(session) or not session:IsBattleActive() then return nil end
+        return session
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean IsCurrentAdapter(Component adapter)
+        -- Reject native hooks on an adapter left behind by reconfiguration.
+        return self._T.adapter == adapter and isvalid(self:GetActiveSession())
+    end
+
+    @ExecSpace("ServerOnly")
+    method void TryEngage(Entity target, boolean targetInRange)
+        -- Accept a delayed strike or query tank contact without exposing timing policy.
+        if not isvalid(self:GetActiveSession()) then return end
+        local profile = self._T.profile
+        if profile.MonsterType == "TANK" then
+            self._T.adapter:ResolveContact()
+            return
+        end
+        if targetInRange ~= true or not isvalid(target) then return end
+        if self._T.pendingTarget ~= nil or (self._T.cooldownRemaining or 0) > 0 then return end
+        if self._T.openingDelayPending == true then
+            self._T.openingDelayPending = false
+            self._T.cooldownRemaining = self._T.openingDelay
+            return
+        end
+        self._T.adapter:ResetTarget()
+        self._T.pendingTarget = target
+        self._T.impactRemaining = profile.ImpactDelaySeconds
+        self._T.cooldownRemaining = profile.AttackIntervalSeconds
+        self:PublishAttack("ATTACK_START", target)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Advance(number delta)
+        -- Advance existing work during actor hit stop using only the session clock.
+        if delta < 0 then
+            log_warning("[M1][BattleAttackComposition] negative delta rejected")
+            return
+        end
+        self._T.cooldownRemaining = math.max(0, (self._T.cooldownRemaining or 0) - delta)
+        for targetName, remaining in pairs(self._T.targetCooldowns or {}) do
+            local nextRemaining = remaining - delta
+            if nextRemaining <= 0 then self._T.targetCooldowns[targetName] = nil
+            else self._T.targetCooldowns[targetName] = nextRemaining end
+        end
+        if self._T.pendingTarget == nil then return end
+        local target = self._T.pendingTarget
+        if not isvalid(self:GetActiveSession()) or not isvalid(target) then
+            self:Cancel("INVALID")
+            return
+        end
+        if not self._T.adapter:CanContinue(target) then
+            self:Cancel("INVALID")
+            return
+        end
+        self._T.impactRemaining = self._T.impactRemaining - delta
+        if self._T.impactRemaining > 0 then return end
+        self._T.pendingTarget = nil
+        self._T.impactRemaining = -1
+        self._T.adapter:ResolveImpact(target)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Cancel(string reason)
+        -- Discard unaccepted work; session-owned damage batches survive cancellation.
+        self._T.pendingTarget = nil
+        self._T.impactRemaining = -1
+        if isvalid(self._T.adapter) then self._T.adapter:ResetTarget() end
+        if reason == "RECONFIGURE" or self._T.profile == nil or self._T.profile.MonsterType ~= "ASSAULT" then
+            self._T.cooldownRemaining = 0
+        end
+        self._T.targetCooldowns = {}
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean CanContact(Entity defender)
+        -- Keep tank contact cooldowns independent for each native defender name.
+        return (self._T.targetCooldowns[defender.Name] or 0) <= 0
+    end
+
+    @ExecSpace("ServerOnly")
+    method void OnNativeHit(Component adapter, Entity defender)
+        -- Publish hit semantics centrally while HitEvent owns damage enqueueing.
+        if not self:IsCurrentAdapter(adapter) or not isvalid(defender) then return end
+        local session = self:GetActiveSession()
+        if self._T.profile.MonsterType == "TANK" then
+            self._T.targetCooldowns[defender.Name] = self._T.profile.ContactCooldownSeconds
+            self:PublishAttack("TANK_CONTACT_HIT", defender)
+            session:QueueKnockback(self.Entity, defender, self._T.profile.KnockbackDistance)
+        else
+            session:EmitPresentation("HIT", self.Entity, defender, self._T.profile.AttackDamage)
+        end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void PublishAttack(string eventName, Entity target)
+        -- Announce one accepted strike or one successful tank contact defender.
+        local unit = self.Entity:GetComponent("script.BattleUnit")
+        local session = self:GetActiveSession()
+        if not isvalid(unit) or not isvalid(session) then return end
+        unit.AttackSerial = unit.AttackSerial + 1
+        unit:PlayCombatSound(self._T.profile.AttackSoundRUID)
+        session:EmitPresentation(eventName, self.Entity, target, self._T.profile.AttackDamage)
     end
 
 end

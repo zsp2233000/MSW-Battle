@@ -50,88 +50,96 @@ if not isvalid(map) or not isvalid(session) then
 end
 
 local roster = { "monster_tank", "monster_tank", "monster_warrior", "monster_warrior", "monster_shooter", "monster_shooter" }
-local positions = { Vector3(-4.4, 1, 0), Vector3(-4.4, 0, 0), Vector3(-4.4, -1, 0), Vector3(-4.4, -2, 0), Vector3(-4.4, -3, 0), Vector3(-3.4, -1, 0) }
-for index, monsterId in ipairs(roster) do session:TryDeployMonster(monsterId, positions[index]) end
-session:TryStartBattle()
+local ok, detail = pcall(function()
+    session:BeginManualSimulation()
+    local positions = { Vector3(-4.4, 1, 0), Vector3(-4.4, 0, 0), Vector3(-4.4, -1, 0), Vector3(-4.4, -2, 0), Vector3(-4.4, -3, 0), Vector3(-3.4, -1, 0) }
+    for index, monsterId in ipairs(roster) do session:TryDeployMonster(monsterId, positions[index]) end
+    session:TryStartBattle()
 
-check(session.InitialPlayerAlive == 6 and session.InitialEnemyAlive == 6, "fixed six-versus-six roster starts with six alive units per faction")
-check(session:IsBattleActive(), "six-versus-six battle starts after deployment")
-local snapshots = session:GetUnitSnapshots()
-check(string.find(snapshots, "monsterId=monster_tank") ~= nil and string.find(snapshots, "monsterId=monster_warrior") ~= nil and string.find(snapshots, "monsterId=monster_shooter") ~= nil, "snapshot exposes MonsterId, editable name, and kind for all initial rows")
+    check(session.InitialPlayerAlive == 6 and session.InitialEnemyAlive == 6, "fixed six-versus-six roster starts with six alive units per faction")
+    check(session:IsBattleActive(), "six-versus-six battle starts after deployment")
+    local snapshots = session:GetUnitSnapshots()
+    check(string.find(snapshots, "monsterId=monster_tank") ~= nil and string.find(snapshots, "monsterId=monster_warrior") ~= nil and string.find(snapshots, "monsterId=monster_shooter") ~= nil, "snapshot exposes MonsterId, editable name, and kind for all initial rows")
 
--- Freeze the production roster so the high-level fixtures are not consumed by the live battle while this probe runs.
-for _, name in ipairs({"M1_Player_1", "M1_Player_2", "M1_Player_3", "M1_Player_4", "M1_Player_5", "M1_Player_6", "M1_EnemyTank", "M1_EnemyTank2", "M1_EnemyAssault", "M1_EnemyAssault2", "M1_EnemyShooter", "M1_EnemyShooter2"}) do
-    local entity = getEntity(name)
-    if isvalid(entity) then
-        freezeUnit(entity)
-        entity:SetEnable(false)
+    -- Freeze the production roster so the high-level fixtures are not consumed by the live battle while this probe runs.
+    for _, name in ipairs({"M1_Player_1", "M1_Player_2", "M1_Player_3", "M1_Player_4", "M1_Player_5", "M1_Player_6", "M1_EnemyTank", "M1_EnemyTank2", "M1_EnemyAssault", "M1_EnemyAssault2", "M1_EnemyShooter", "M1_EnemyShooter2"}) do
+        local entity = getEntity(name)
+        if isvalid(entity) then
+            freezeUnit(entity)
+            entity:SetEnable(false)
+        end
     end
-end
 
--- Spawn isolated production BattleUnit fixtures so the assertions remain deterministic even if Maker dispatches the probe a few frames after Play starts.
-local source = session:SpawnUnit(session.PlayerModelId, "M1_ProbeSource", "PLAYER", "TANK", Vector3(-4, 0, 0))
-local preferred = session:SpawnUnit(session.EnemyModelId, "M1_ProbePreferred", "ENEMY", "ASSAULT", Vector3(0, 0, 0))
-local replacement = session:SpawnUnit(session.EnemyModelId, "M1_ProbeReplacement", "ENEMY", "ASSAULT", Vector3(0, 0, 0))
-local crowdA = session:SpawnUnit(session.PlayerModelId, "M1_ProbeCrowdA", "PLAYER", "TANK", Vector3(-4, -2, 0))
-local crowdB = session:SpawnUnit(session.PlayerModelId, "M1_ProbeCrowdB", "PLAYER", "TANK", Vector3(-4, -2, 0))
-if not isvalid(source) or not isvalid(preferred) or not isvalid(replacement) or not isvalid(crowdA) or not isvalid(crowdB) then
-    log_error("[M1][SixVsSixProbe][FAIL] isolated production fixtures are unavailable")
-    return
-end
+    -- Spawn isolated production BattleUnit fixtures so the assertions remain deterministic even if Maker dispatches the probe a few frames after Play starts.
+    local source = session:SpawnUnit(session.PlayerModelId, "M1_ProbeSource", "PLAYER", "TANK", Vector3(-4, 0, 0))
+    local preferred = session:SpawnUnit(session.EnemyModelId, "M1_ProbePreferred", "ENEMY", "ASSAULT", Vector3(0, 0, 0))
+    local replacement = session:SpawnUnit(session.EnemyModelId, "M1_ProbeReplacement", "ENEMY", "ASSAULT", Vector3(0, 0, 0))
+    local crowdA = session:SpawnUnit(session.PlayerModelId, "M1_ProbeCrowdA", "PLAYER", "TANK", Vector3(-4, -2, 0))
+    local crowdB = session:SpawnUnit(session.PlayerModelId, "M1_ProbeCrowdB", "PLAYER", "TANK", Vector3(-4, -2, 0))
+    if not isvalid(source) or not isvalid(preferred) or not isvalid(replacement) or not isvalid(crowdA) or not isvalid(crowdB) then
+        check(false, "isolated production fixtures are unavailable")
+        return
+    end
 
-freezeUnit(source)
-freezeUnit(preferred)
-freezeUnit(replacement)
-freezeUnit(crowdB)
-setPosition(source, -4, 0)
-setPosition(preferred, 0, 0)
-setPosition(replacement, 0, 0)
+    freezeUnit(source)
+    freezeUnit(preferred)
+    freezeUnit(replacement)
+    freezeUnit(crowdB)
+    setPosition(source, -4, 0)
+    setPosition(preferred, 0, 0)
+    setPosition(replacement, 0, 0)
 
--- same-distance target is retained
-check(session:FindNearestEnemy(source, preferred) == preferred, "same-distance target is retained")
+    -- same-distance target is retained
+    check(session:FindNearestEnemy(source, preferred) == preferred, "same-distance target is retained")
 
--- dead target is reacquired
-preferred:SetEnable(false)
-check(session:FindNearestEnemy(source, preferred) == replacement, "dead target is reacquired")
-preferred:SetEnable(true)
+    -- dead target is reacquired
+    preferred:SetEnable(false)
+    check(session:FindNearestEnemy(source, preferred) == replacement, "dead target is reacquired")
+    preferred:SetEnable(true)
 
--- crowded units do not block or push each other
-local crowdUnitA = crowdA:GetComponent("script.BattleUnit")
-local crowdUnitB = crowdB:GetComponent("script.BattleUnit")
-local crowdMovementA = crowdA:GetComponent("MovementComponent")
-local crowdMovementB = crowdB:GetComponent("MovementComponent")
-setPosition(crowdA, -4, -2)
-setPosition(crowdB, -4, -2)
-setPosition(replacement, 0, -2)
-crowdUnitA.MoveSpeed = 1.0
-crowdUnitB.MoveSpeed = 1.0
-crowdUnitA.RetargetInterval = 0
-crowdUnitB.RetargetInterval = 0
-session:AdvanceForTest(0.25)
-local crowdPositionA = getPosition(crowdA)
-local crowdPositionB = getPosition(crowdB)
-check(crowdPositionA.x > -4 and crowdPositionB.x > -4 and math.abs(crowdPositionA.x - crowdPositionB.x) < 0.01, "crowded units do not block or push each other")
-if isvalid(crowdMovementA) then crowdMovementA:Stop() end
-if isvalid(crowdMovementB) then crowdMovementB:Stop() end
+    -- crowded units do not block or push each other
+    local crowdUnitA = crowdA:GetComponent("script.BattleUnit")
+    local crowdUnitB = crowdB:GetComponent("script.BattleUnit")
+    local crowdMovementA = crowdA:GetComponent("MovementComponent")
+    local crowdMovementB = crowdB:GetComponent("MovementComponent")
+    setPosition(crowdA, -4, -2)
+    setPosition(crowdB, -4, -2)
+    setPosition(replacement, 0, -2)
+    crowdUnitA.MoveSpeed = 1.0
+    crowdUnitB.MoveSpeed = 1.0
+    crowdUnitA.RetargetInterval = 0
+    crowdUnitB.RetargetInterval = 0
+    session:EndManualSimulation()
+    wait(0.25) -- Native physics advances only with real Maker frames.
+    session:BeginManualSimulation()
+    local crowdPositionA = getPosition(crowdA)
+    local crowdPositionB = getPosition(crowdB)
+    check(crowdPositionA.x > -4 and crowdPositionB.x > -4 and math.abs(crowdPositionA.x - crowdPositionB.x) < 0.01, "crowded units do not block or push each other")
+    if isvalid(crowdMovementA) then crowdMovementA:Stop() end
+    if isvalid(crowdMovementB) then crowdMovementB:Stop() end
 
--- WIN
-check(session:DetermineResult(6, 0) == "WIN", "WIN is selected when the fixed enemy faction is depleted")
+    -- WIN
+    check(session:DetermineResult(6, 0) == "WIN", "WIN is selected when the fixed enemy faction is depleted")
 
--- LOSE
-check(session:DetermineResult(0, 6) == "LOSE", "LOSE is selected when the player faction is depleted")
+    -- LOSE
+    check(session:DetermineResult(0, 6) == "LOSE", "LOSE is selected when the player faction is depleted")
 
--- same-batch DRAW
-check(session:DetermineResult(0, 0) == "DRAW", "same-batch DRAW is selected when both factions are depleted")
+    -- same-batch DRAW
+    check(session:DetermineResult(0, 0) == "DRAW", "same-batch DRAW is selected when both factions are depleted")
 
--- RESULT stops the battle
-local positionAtResult = getPosition(crowdA)
-local attackSerialAtResult = crowdUnitA.AttackSerial
-session:EnterResult("WIN")
-session:EnterResult("LOSE")
-session:AdvanceForTest(1.0)
-local positionAfterResult = getPosition(crowdA)
-check(session.Phase == "RESULT" and session.Result == "WIN" and session:IsBattleActive() == false, "RESULT stops the battle")
-check(positionAfterResult.x == positionAtResult.x and positionAfterResult.y == positionAtResult.y and crowdUnitA.AttackSerial == attackSerialAtResult, "RESULT stops movement and future attacks")
+    -- RESULT stops the battle
+    local positionAtResult = getPosition(crowdA)
+    local attackSerialAtResult = crowdUnitA.AttackSerial
+    session:EnterResult("WIN")
+    session:EnterResult("LOSE")
+    session:AdvanceForTest(1.0)
+    local positionAfterResult = getPosition(crowdA)
+    check(session.Phase == "RESULT" and session.Result == "WIN" and session:IsBattleActive() == false, "RESULT stops the battle")
+    check(positionAfterResult.x == positionAtResult.x and positionAfterResult.y == positionAtResult.y and crowdUnitA.AttackSerial == attackSerialAtResult, "RESULT stops movement and future attacks")
+
+end)
+session:EndManualSimulation()
+if not ok then check(false, tostring(detail)) end
 
 if failures == 0 then
     log("[M1][SixVsSixProbe] PASS")

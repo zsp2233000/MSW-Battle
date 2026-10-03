@@ -1,5 +1,5 @@
 -- Run in Maker Play with context=server_main.
--- Replace the completed match with two isolated production units, then resolve simultaneous final hits.
+-- Queue both factions' final accepted hits, then step the complete production batch.
 local map = _EntityService:GetEntityByPath("/maps/map01")
 local session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
 local failures = 0
@@ -18,33 +18,42 @@ if not isvalid(session) then
     return
 end
 
-session:EnterResult("WIN")
-session:ClearUnits()
-local player = session:SpawnMonster("monster_tank", "M1_BatchPlayer", "PLAYER", Vector3(-4, 0, 0))
-local enemy = session:SpawnMonster("monster_tank", "M1_BatchEnemy", "ENEMY", Vector3(2, 0, 0))
-check(isvalid(player) and isvalid(enemy), "two production units spawn for the batch fixture")
-if not isvalid(player) or not isvalid(enemy) then return end
+local ok, detail = pcall(function()
+    session:InitializeBattle()
+    session:BeginManualSimulation()
+    session:TryDeployMonster("monster_tank", Vector3(-4, 0, 0))
+    session:TryStartBattle()
+    local player = _EntityService:GetEntityByPath("/maps/map01/M1_Player_1")
+    local enemy = _EntityService:GetEntityByPath("/maps/map01/M1_EnemyTank")
+    check(isvalid(player) and isvalid(enemy), "production factions spawn for the batch fixture")
+    if not isvalid(player) or not isvalid(enemy) then return end
 
-session.PlayerAlive = 1
-session.EnemyAlive = 1
-session._T.initialized = false -- Keep live OnUpdate out of the deterministic batch fixture.
-session.Phase = "BATTLE"
-session.Result = ""
-session._T.resultEntered = false
-session:QueueDamage(player, 10000, nil)
-session:QueueDamage(enemy, 10000, nil)
-session:ResolveDamageBatch()
-check(session.Phase == "BATTLE" and session.Result == "" and
-    session.PlayerAlive == 0 and session.EnemyAlive == 0,
-    "both factions die in one batch before result evaluation")
-local beforeResultSerial = session.EventSerial
-session:EvaluateResult()
-check(session.Phase == "RESULT" and session.Result == "DRAW",
-    "DRAW follows the completed damage batch")
-check(session.EventSerial == beforeResultSerial + 1, "DRAW publishes exactly one result")
-session:EnterResult("WIN")
-check(session.Result == "DRAW" and session.EventSerial == beforeResultSerial + 1,
-    "DRAW cannot be overwritten")
+    for _, entity in ipairs(map.Children:ToTable()) do
+        local unit = entity:GetComponent("script.BattleUnit")
+        if isvalid(unit) then
+            unit.MoveSpeed = 0
+            session:QueueDamage(entity, 10000, unit.Faction == "PLAYER" and enemy or player)
+        end
+    end
+    session:AdvanceForTest(0.001)
+    check(session.Phase == "RESULT" and
+        session.PlayerAlive == 0 and session.EnemyAlive == 0,
+        "accepted opposing hits survive attacker death in the same complete batch")
+    local beforeResultSerial = session.EventSerial
+    check(session.Phase == "RESULT" and session.Result == "DRAW",
+        "DRAW follows the completed damage batch")
+    local resultEvents = 0
+    for entry in string.gmatch(session.EventHistory, "[^;]+") do
+        if string.sub(entry, 1, 7) == "RESULT:" then resultEvents = resultEvents + 1 end
+    end
+    check(resultEvents == 1, "DRAW publishes exactly one result")
+    session:EnterResult("WIN")
+    session:AdvanceForTest(0.1)
+    check(session.Result == "DRAW" and session.EventSerial == beforeResultSerial,
+        "DRAW cannot be overwritten")
+end)
+session:EndManualSimulation()
+if not ok then check(false, tostring(detail)) end
 
 if failures == 0 then
     log("[M1][SixVsSixBatch] PASS")

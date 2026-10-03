@@ -40,8 +40,7 @@ script BattleUnit extends Component
     method void OnBeginPlay()
         -- Initialize a unit before the session supplies its faction and tuned combat values.
         self._T.currentTarget = nil
-        self._T.attackFactory = nil
-        self._T.attackAdapter = nil
+        self._T.attackExecution = nil
         self._T.attackConfigured = false
         self._T.retargetRemaining = 0
         self._T.deathDurationPendingRUID = ""
@@ -75,8 +74,18 @@ script BattleUnit extends Component
     end
 
     @ExecSpace("ServerOnly")
-    method void Configure(string faction, string displayName, string unitKind, integer maxHp, number speed, integer damage, number interval, number range, number retarget, number impact, string deathAnimationRUID, number openingDelay, number contactCooldown, Vector2 contactSize, number knockbackDistance, number hitStopDuration)
-        -- Apply the unit profile and bind the only attack adapter used by this unit.
+    method void Configure(string faction, string displayName, table profile, number openingDelay)
+        -- Apply the actor profile and configure its owned attack execution.
+        local unitKind = profile.MonsterType
+        local maxHp = profile.MaxHp
+        local speed = profile.MoveSpeed
+        local damage = profile.AttackDamage
+        local interval = profile.AttackIntervalSeconds
+        local range = profile.AttackRange
+        local retarget = profile.RetargetIntervalSeconds
+        local impact = profile.ImpactDelaySeconds
+        local deathAnimationRUID = profile.DieAnimationRUID
+        local hitStopDuration = profile.HitStopDurationSeconds
         self.Faction = faction
         self.MonsterName = displayName
         self.UnitKind = unitKind
@@ -101,35 +110,23 @@ script BattleUnit extends Component
         self._T.knockbackStepX = 0
         self._T.knockbackStepY = 0
         self.KnockbackActive = false
-        self._T.attackAdapter = nil
         self._T.attackConfigured = false
-        if not isvalid(self._T.attackFactory) then
+        if not isvalid(self._T.attackExecution) then
             log_error("[M1][BattleUnit] attack composition missing for " .. unitKind)
             return
         end
-        local adapter = self._T.attackFactory:CreateAdapter(self.Entity, unitKind)
-        if not isvalid(adapter) then
-            log_error("[M1][BattleUnit] attack adapter missing for " .. unitKind)
-            return
-        end
-        self._T.attackAdapter = adapter
-        if unitKind == "TANK" then
-            adapter:Configure(damage, contactCooldown, contactSize, knockbackDistance)
-        else
-            adapter:Configure(damage, range, interval, impact, openingDelay)
-        end
-        self._T.attackConfigured = true
+        self._T.attackConfigured = self._T.attackExecution:Configure(profile, openingDelay)
     end
 
     @ExecSpace("ServerOnly")
-    method void BindAttackFactory(Component factory)
-        -- Accept the composition dependency that owns concrete adapter creation.
-        self._T.attackFactory = factory
+    method void BindAttackExecution(Component execution)
+        -- Bind the component that owns the actor's complete attack lifecycle.
+        self._T.attackExecution = execution
     end
 
-    method boolean HasAttackAdapter()
-        -- Expose whether Configure successfully installed the unit's attack adapter.
-        return self._T.attackConfigured == true and isvalid(self._T.attackAdapter)
+    method boolean HasAttackExecution()
+        -- Expose whether actor configuration successfully installed attack execution.
+        return self._T.attackConfigured == true and isvalid(self._T.attackExecution)
     end
 
     method string GetHitEffectRUID()
@@ -139,23 +136,23 @@ script BattleUnit extends Component
 
     @ExecSpace("ServerOnly")
     method void DriveAttack(Entity target, boolean targetInRange)
-        -- Drive the bound attack adapter without exposing its concrete type to the unit loop.
-        if not self:HasAttackAdapter() then return end
-        self._T.attackAdapter:TryEngage(target, targetInRange)
+        -- Drive the owned attack execution without exposing its concrete type to the unit loop.
+        if not self:HasAttackExecution() then return end
+        self._T.attackExecution:TryEngage(target, targetInRange)
     end
 
     @ExecSpace("ServerOnly")
     method void AdvanceAttack(number delta)
-        -- Advance the bound attack adapter through the same seam used by live and test loops.
-        if not self:HasAttackAdapter() then return end
-        self._T.attackAdapter:Advance(delta)
+        -- Advance the owned attack execution through the same seam used by live and test loops.
+        if not self:HasAttackExecution() then return end
+        self._T.attackExecution:Advance(delta)
     end
 
     @ExecSpace("ServerOnly")
     method void CancelAttack()
         -- Cancel any pending attack work when the unit enters the terminal result state.
-        if not self:HasAttackAdapter() then return end
-        self._T.attackAdapter:Cancel()
+        if not self:HasAttackExecution() then return end
+        self._T.attackExecution:Cancel("ACTOR_STOP")
     end
 
     method boolean IsAlive()
@@ -259,7 +256,7 @@ script BattleUnit extends Component
     end
 
     @ExecSpace("ServerOnly")
-    method void ApplyResolvedDamage(integer amount, Entity attacker, boolean allowHitStop)
+    method void ApplyResolvedDamage(integer amount, Entity attacker, boolean allowHitStop, string hitEffectRUID)
         -- Apply each successful HitEvent and transition to DEAD once at zero HP.
         if amount == nil or amount <= 0 or not self:IsAlive() then return end
         self.Hp = math.max(0, self.Hp - amount)
@@ -268,17 +265,11 @@ script BattleUnit extends Component
             self.OnHitSoundSerial = self.OnHitSoundSerial + 1
             self:PlayCombatSound(self.OnHitSoundRUID)
         end
-        if isvalid(attacker) then
-            local attackerUnit = attacker:GetComponent("script.BattleUnit")
-            if isvalid(attackerUnit) and attackerUnit.UnitKind ~= "TANK" then
-                local hitEffectRUID = attackerUnit:GetHitEffectRUID()
-                if hitEffectRUID ~= nil and hitEffectRUID ~= "" then
-                    self.LastHitEffectRUID = hitEffectRUID
-                    self.HitEffectSerial = self.HitEffectSerial + 1
-                    local presentation = self.Entity:GetComponent("script.BattleHitEffectPresentation")
-                    if isvalid(presentation) then presentation:PlayHitEffect(hitEffectRUID) end
-                end
-            end
+        if hitEffectRUID ~= nil and hitEffectRUID ~= "" then
+            self.LastHitEffectRUID = hitEffectRUID
+            self.HitEffectSerial = self.HitEffectSerial + 1
+            local presentation = self.Entity:GetComponent("script.BattleHitEffectPresentation")
+            if isvalid(presentation) then presentation:PlayHitEffect(hitEffectRUID) end
         end
         local session = self:GetSession()
         if isvalid(session) then session:EmitPresentation("DAMAGE", attacker, self.Entity, amount) end

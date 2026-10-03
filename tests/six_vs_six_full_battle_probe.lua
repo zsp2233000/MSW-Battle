@@ -1,4 +1,4 @@
--- Run in Maker Play with context=server_main after the UI has started a six-versus-six battle.
+-- Run in a fresh Maker Play test with context=server_main.
 -- Observe the production roster; observe a complete natural battle and terminal state.
 local map = _EntityService:GetEntityByPath("/maps/map01")
 local session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
@@ -18,12 +18,21 @@ if not isvalid(session) then
     return
 end
 
+local roster = { "monster_tank", "monster_tank", "monster_warrior", "monster_warrior", "monster_shooter", "monster_shooter" }
+local positions = { Vector3(-4.4, 1, 0), Vector3(-4.4, 0, 0), Vector3(-4.4, -1, 0), Vector3(-4.4, -2, 0), Vector3(-4.4, -3, 0), Vector3(-3.4, -1, 0) }
+if session.Phase == "DEPLOYMENT" then
+    for index, monsterId in ipairs(roster) do session:TryDeployMonster(monsterId, positions[index]) end
+    session:TryStartBattle()
+end
 check(session.InitialPlayerAlive == 6 and session.InitialEnemyAlive == 6 and session:IsBattleActive(),
-    "UI-started mixed six-versus-six battle is active")
+    "mixed six-versus-six battle is active")
 
 local rosterRecords = {}
-for _, record in ipairs(session._T.units) do
-    if record.faction == "PLAYER" or record.faction == "ENEMY" then table.insert(rosterRecords, record) end
+for _, entity in ipairs(map.Children:ToTable()) do
+    local unit = entity:GetComponent("script.BattleUnit")
+    if isvalid(unit) then
+        table.insert(rosterRecords, { entity = entity, unit = unit, faction = unit.Faction, monsterId = unit.MonsterId })
+    end
 end
 check(#rosterRecords == 12, "observer captures all twelve production roster members")
 local elapsed = 0

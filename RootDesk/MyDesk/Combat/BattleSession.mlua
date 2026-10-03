@@ -63,6 +63,7 @@ script BattleSession extends Component
         -- Rebuild once, keeping deployment closed until validation and spawning finish.
         if self._T.rebuilding == true then return end
         self._T.rebuilding = true
+        self._T.manualSimulation = false
         self._T.initialized = false
         self:ClearConfigurationUsers()
         self:ClearUnits()
@@ -123,8 +124,9 @@ script BattleSession extends Component
     method void OnUpdate(number delta)
         -- Advance the live server simulation without bypassing native movement or hit resolution.
         if self._T.initialized ~= true then return end
+        if self._T.manualSimulation == true then return end
         if self.Phase == "CONFIG_ERROR" then self:CheckConfigurationReentry() end
-        self:StepSimulation(delta, false)
+        self:StepSimulation(delta)
     end
 
     @ExecSpace("ServerOnly")
@@ -138,6 +140,7 @@ script BattleSession extends Component
         self._T.fixedEnemyRoster = {}
         self._T.dataReady = false
         self._T.initialized = false
+        self._T.manualSimulation = false
     end
 
     @ExecSpace("ServerOnly")
@@ -257,13 +260,29 @@ script BattleSession extends Component
     end
 
     @ExecSpace("ServerOnly")
+    method boolean BeginManualSimulation()
+        -- Acquire the session clock for controlled tests without pausing native physics.
+        if self._T.initialized ~= true or self._T.manualSimulation == true then return false end
+        self._T.manualSimulation = true
+        log("[M1][BattleSession] manual simulation acquired")
+        return true
+    end
+
+    @ExecSpace("ServerOnly")
+    method void EndManualSimulation()
+        -- Restore the live server clock after a controlled test, including error cleanup.
+        self._T.manualSimulation = false
+        log("[M1][BattleSession] live simulation restored")
+    end
+
+    @ExecSpace("ServerOnly")
     method void AdvanceForTest(number elapsed)
         -- Provide a high-level elapsed-time seam for external behavior tests.
-        if elapsed == nil or elapsed <= 0 then return end
+        if self._T.manualSimulation ~= true or elapsed == nil or elapsed <= 0 then return end
         local remaining = elapsed
         while remaining > 0 do
             local step = math.min(1 / 60, remaining)
-            self:StepSimulation(step, true)
+            self:StepSimulation(step)
             remaining = remaining - step
         end
         self:RefreshSnapshot()
@@ -548,8 +567,8 @@ script BattleSession extends Component
         entity:AddComponent("script.BattleHitEffectPresentation")
         entity:AddComponent("script.BattleAttackComposition")
         local unit = entity:GetComponent("script.BattleUnit")
-        local attackFactory = entity:GetComponent("script.BattleAttackComposition")
-        if not isvalid(unit) or not isvalid(attackFactory) then
+        local attackExecution = entity:GetComponent("script.BattleAttackComposition")
+        if not isvalid(unit) or not isvalid(attackExecution) then
             log_error("[M1][BattleSession] required combat component missing on " .. name)
             entity:Destroy()
             return nil
@@ -557,10 +576,10 @@ script BattleSession extends Component
 
         local openingDelay = 0
         if faction == "ENEMY" then openingDelay = self.EnemyOpeningDelay end
-        unit:BindAttackFactory(attackFactory)
+        unit:BindAttackExecution(attackExecution)
         unit:SetMonsterIdentity(profile.MonsterId, profile.MonsterName, profile.HitEffectRUID)
-        unit:Configure(faction, profile.MonsterName, profile.MonsterType, profile.MaxHp, profile.MoveSpeed, profile.AttackDamage, profile.AttackIntervalSeconds, profile.AttackRange, profile.RetargetIntervalSeconds, profile.ImpactDelaySeconds, profile.DieAnimationRUID, openingDelay, profile.ContactCooldownSeconds, Vector2(profile.ContactSizeX, profile.ContactSizeY), profile.KnockbackDistance, profile.HitStopDurationSeconds)
-        if not unit:HasAttackAdapter() then
+        unit:Configure(faction, profile.MonsterName, profile, openingDelay)
+        if not unit:HasAttackExecution() then
             log_error("[M1][BattleSession] attack adapter missing on " .. name)
             entity:Destroy()
             return nil
@@ -602,11 +621,21 @@ script BattleSession extends Component
     end
 
     method void QueueDamage(Entity target, integer amount, Entity attacker)
-        -- Queue HitEvent damage for deterministic batch resolution at the session boundary.
+        -- Freeze accepted hit policy before later reconfiguration can change the attacker.
         if not self:IsBattleActive() or amount == nil or amount <= 0 or not isvalid(target) then return end
         local targetUnit = target:GetComponent("script.BattleUnit")
         if not isvalid(targetUnit) or not targetUnit:IsAlive() then return end
-        table.insert(self._T.pendingDamage, { target = target, amount = amount, attacker = attacker })
+        local attackerKind = ""
+        local hitEffectRUID = ""
+        if isvalid(attacker) then
+            local attackerUnit = attacker:GetComponent("script.BattleUnit")
+            if isvalid(attackerUnit) then
+                attackerKind = attackerUnit.UnitKind
+                if attackerKind ~= "TANK" then hitEffectRUID = attackerUnit:GetHitEffectRUID() or "" end
+            end
+        end
+        table.insert(self._T.pendingDamage, { target = target, amount = amount, attacker = attacker,
+            attackerKind = attackerKind, hitEffectRUID = hitEffectRUID })
     end
 
     method void QueueKnockback(Entity attacker, Entity defender, number distance)
@@ -679,7 +708,7 @@ script BattleSession extends Component
     end
 
     method void ApplyPendingKnockbacks()
-        -- Apply queued displacement to the enemy Kinematicbody without changing the tank position.
+        -- Apply accepted tank displacement even if its attack profile changed after enqueueing.
         if self._T.pendingKnockbacks == nil or #self._T.pendingKnockbacks == 0 then return end
         local pending = self._T.pendingKnockbacks
         self._T.pendingKnockbacks = {}
@@ -691,7 +720,7 @@ script BattleSession extends Component
                 local attackerTransform = item.attacker:GetComponent("TransformComponent")
                 local defenderTransform = item.defender:GetComponent("TransformComponent")
                 local kinematic = item.defender:GetComponent("KinematicbodyComponent")
-                if isvalid(attackerUnit) and isvalid(defenderUnit) and isvalid(attackerTransform) and isvalid(defenderTransform) and isvalid(kinematic) and attackerUnit.UnitKind == "TANK" and defenderUnit:IsAlive() and attackerUnit.Faction ~= defenderUnit.Faction then
+                if isvalid(attackerUnit) and isvalid(defenderUnit) and isvalid(attackerTransform) and isvalid(defenderTransform) and isvalid(kinematic) and defenderUnit:IsAlive() and attackerUnit.Faction ~= defenderUnit.Faction then
                     local attackerPosition = attackerTransform.WorldPosition
                     local defenderPosition = defenderTransform.WorldPosition
                     local dx = defenderPosition.x - attackerPosition.x
@@ -718,8 +747,10 @@ script BattleSession extends Component
         end
     end
 
-    method void StepSimulation(number delta, boolean advanceAttacks)
-        -- Tick units, advance test timers, apply contact displacement, then resolve queued hits.
+    @ExecSpace("ServerOnly")
+    method void StepSimulation(number delta)
+        -- Tick all units and attacks before resolving the complete native-hit damage batch.
+        if delta < 0 then return end
         self:DisableDefaultPlayer()
         if self.Phase == "BATTLE" then
             for _, record in ipairs(self._T.units) do
@@ -728,10 +759,8 @@ script BattleSession extends Component
                     record.unit:AdvanceKnockback(delta)
                 end
             end
-            if advanceAttacks == true then
-                for _, record in ipairs(self._T.units) do
-                    if isvalid(record.unit) then record.unit:AdvanceAttack(delta) end
-                end
+            for _, record in ipairs(self._T.units) do
+                if isvalid(record.unit) then record.unit:AdvanceAttack(delta) end
             end
             self:ApplyPendingKnockbacks()
             self:ResolveDamageBatch()
@@ -750,12 +779,9 @@ script BattleSession extends Component
         local pending = self._T.pendingDamage
         self._T.pendingDamage = {}
         for _, hit in ipairs(pending) do
-            local attackerUnit = nil
-            if isvalid(hit.attacker) then attackerUnit = hit.attacker:GetComponent("script.BattleUnit") end
-            local isTankContact = isvalid(attackerUnit) and attackerUnit.UnitKind == "TANK"
             if isvalid(hit.target) then
                 local unit = hit.target:GetComponent("script.BattleUnit")
-                if isvalid(unit) then unit:ApplyResolvedDamage(hit.amount, hit.attacker, not isTankContact) end
+                if isvalid(unit) then unit:ApplyResolvedDamage(hit.amount, hit.attacker, hit.attackerKind ~= "TANK", hit.hitEffectRUID) end
             end
         end
     end
