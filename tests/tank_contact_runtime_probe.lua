@@ -103,8 +103,6 @@ for index = 1, 2 do
     enemyUnit:Configure("ENEMY", enemy.Name, profile, 0)
     table.insert(probes, enemy)
 end
-session.EnemyAlive = session.EnemyAlive + 2
-
 _TimerService:SetTimerOnce(function()
     -- Trigger the first native contact, then wait a frame for HitEvent and session batch resolution.
     placeProbesAtTank()

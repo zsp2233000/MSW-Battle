@@ -77,8 +77,6 @@ script BattleSession extends Component
         self._T.resultEntered = false
         self.Result = ""
         self._T.configurationErrorDetail = ""
-        self.PlayerAlive = 0
-        self.EnemyAlive = 0
         self.InitialPlayerAlive = 0
         self.InitialEnemyAlive = 0
         self.UnitSnapshots = ""
@@ -106,10 +104,8 @@ script BattleSession extends Component
             return
         end
 
-        self.PlayerAlive = 0
-        self.EnemyAlive = 6
-        self.InitialPlayerAlive = 0
-        self.InitialEnemyAlive = 6
+        self.InitialPlayerAlive = self.PlayerAlive
+        self.InitialEnemyAlive = self.EnemyAlive
         self.ConfigurationError = ""
         self.SessionGeneration = self.SessionGeneration + 1
         self.Phase = "DEPLOYMENT"
@@ -248,15 +244,15 @@ script BattleSession extends Component
 
     @ExecSpace("ServerOnly")
     method void ClearUnits()
-        -- Destroy any partially-created or completed roster so configuration failures leave no live units behind.
-        if self._T.units == nil then
-            self._T.units = {}
-            return
-        end
-        for _, record in ipairs(self._T.units) do
+        -- Destroy the roster and reset its counters and queued combat work.
+        for _, record in ipairs(self._T.units or {}) do
             if isvalid(record.entity) then record.entity:Destroy() end
         end
         self._T.units = {}
+        self.PlayerAlive = 0
+        self.EnemyAlive = 0
+        self._T.pendingDamage = {}
+        self._T.pendingKnockbacks = {}
     end
 
     @ExecSpace("ServerOnly")
@@ -349,10 +345,14 @@ script BattleSession extends Component
     end
 
     method any GetMonsterProfile(string monsterId)
-        -- Resolve a validated profile through the map's catalog.
+        -- Return a shallow profile copy so callers cannot mutate the validated catalog.
         local catalog = self._T.monsterCatalog
         if not isvalid(catalog) then return nil end
-        return catalog:GetProfile(monsterId)
+        local profile = catalog:GetProfile(monsterId)
+        if profile == nil then return nil end
+        local copy = {}
+        for key, value in pairs(profile) do copy[key] = value end
+        return copy
     end
 
     method string FindMonsterIdByType(string monsterType)
@@ -417,14 +417,21 @@ script BattleSession extends Component
 
     @ExecSpace("Server")
     method void RequestRemoveDeployedUnit(Vector3 position)
-        -- A right-click removes the nearest deployed player unit and never deploys.
-        if not self:IsSenderInMap(senderUserId) or self.Phase ~= "DEPLOYMENT" then return end
-        if position == nil or position.x ~= position.x or position.y ~= position.y then return end
+        -- Validate the requesting player before delegating position-based removal.
+        if not self:IsSenderInMap(senderUserId) then return end
+        self:TryRemoveDeployedUnitAt(position)
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean TryRemoveDeployedUnitAt(Vector3 position)
+        -- Remove the nearest registered player unit within the deployment radius.
+        if self.Phase ~= "DEPLOYMENT" or self._T.initialized ~= true or self._T.dataReady ~= true then return false end
+        if position == nil or position.x ~= position.x or position.y ~= position.y or position.z ~= position.z then return false end
         local removeRadiusSquared = self.DeploymentRemoveRadius * self.DeploymentRemoveRadius
         local nearestIndex = nil
         local nearestDistanceSquared = removeRadiusSquared
-        for index, record in ipairs(self._T.units) do
-            if record.faction == "PLAYER" and isvalid(record.entity) then
+        for index, record in ipairs(self._T.units or {}) do
+            if record.faction == "PLAYER" and record.dead ~= true and isvalid(record.entity) then
                 local transform = record.entity:GetComponent("TransformComponent")
                 if isvalid(transform) then
                     local current = transform.WorldPosition
@@ -438,9 +445,9 @@ script BattleSession extends Component
                 end
             end
         end
-        if nearestIndex ~= nil then
-            self:RemoveDeployedUnit(nearestIndex)
-        end
+        if nearestIndex == nil then return false end
+        self:RemoveDeployedUnit(nearestIndex)
+        return true
     end
 
     @ExecSpace("ServerOnly")
@@ -471,7 +478,6 @@ script BattleSession extends Component
             self:RefreshSnapshot()
             return false
         end
-        self.PlayerAlive = self.PlayerAlive + 1
         self:EmitPresentation("DEPLOY", entity, nil, 0)
         self:RefreshSnapshot()
         log("[M1][BattleSession] DEPLOY monsterId=" .. monsterId .. " playerUnits=" .. tostring(self.PlayerAlive))
@@ -486,7 +492,7 @@ script BattleSession extends Component
         if record == nil or record.faction ~= "PLAYER" then return end
         table.remove(self._T.units, index)
         if isvalid(record.entity) then record.entity:Destroy() end
-        self.PlayerAlive = math.max(0, self.PlayerAlive - 1)
+        if record.dead ~= true then self.PlayerAlive = math.max(0, self.PlayerAlive - 1) end
         self:EmitPresentation("REMOVE", nil, nil, 0)
         self:RefreshSnapshot()
         log("[M1][BattleSession] REMOVE monsterId=" .. record.monsterId .. " playerUnits=" .. tostring(self.PlayerAlive))
@@ -554,6 +560,10 @@ script BattleSession extends Component
 
     method Entity SpawnConfiguredUnit(string modelId, string name, string faction, table profile, Vector3 position)
         -- Create, validate, configure, and register one unit atomically before it enters the roster.
+        if faction ~= "PLAYER" and faction ~= "ENEMY" then
+            log_error("[M1][BattleSession] unsupported faction for " .. tostring(name))
+            return nil
+        end
         local map = self:GetMapEntity()
         if not isvalid(map) then return nil end
         local entity = _SpawnService:SpawnByModelId(modelId, name, position, map)
@@ -587,6 +597,13 @@ script BattleSession extends Component
         unit:ConfigurePresentation(profile)
         local record = { entity = entity, unit = unit, faction = faction, monsterId = profile.MonsterId, monsterName = profile.MonsterName, unitKind = profile.MonsterType, dead = false }
         table.insert(self._T.units, record)
+        if faction == "PLAYER" then
+            self.PlayerAlive = self.PlayerAlive + 1
+        else
+            self.EnemyAlive = self.EnemyAlive + 1
+        end
+        log("[M1][BattleSession] REGISTER faction=" .. faction .. " unit=" .. name
+            .. " playerAlive=" .. tostring(self.PlayerAlive) .. " enemyAlive=" .. tostring(self.EnemyAlive))
         return entity
     end
 
@@ -787,9 +804,10 @@ script BattleSession extends Component
     end
 
     method void NotifyDeath(Entity entity)
-        -- Update faction alive count once while leaving result evaluation to the batch boundary.
+        -- Count only the first death notification for a registered unit that is actually dead.
+        if not isvalid(entity) then return end
         for _, record in ipairs(self._T.units) do
-            if record.entity == entity and record.dead ~= true then
+            if record.entity == entity and record.dead ~= true and isvalid(record.unit) and record.unit.IsDead == true then
                 record.dead = true
                 if record.faction == "PLAYER" then
                     self.PlayerAlive = math.max(0, self.PlayerAlive - 1)
@@ -797,6 +815,8 @@ script BattleSession extends Component
                     self.EnemyAlive = math.max(0, self.EnemyAlive - 1)
                 end
                 self:EmitPresentation("DEAD", entity, nil, 0)
+                log("[M1][BattleSession] DEATH faction=" .. record.faction
+                    .. " playerAlive=" .. tostring(self.PlayerAlive) .. " enemyAlive=" .. tostring(self.EnemyAlive))
                 return
             end
         end

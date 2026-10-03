@@ -27,6 +27,32 @@ local ok, detail = pcall(function()
     local enemy = _EntityService:GetEntityByPath("/maps/map01/M1_EnemyTank")
     check(isvalid(player) and isvalid(enemy), "production factions spawn for the batch fixture")
     if not isvalid(player) or not isvalid(enemy) then return end
+    check(session.PlayerAlive == 1 and session.EnemyAlive == 6,
+        "registered spawns own the synchronized faction counts")
+
+    player:SetEnable(false)
+    session:NotifyDeath(player)
+    check(session.PlayerAlive == 1 and session.EnemyAlive == 6,
+        "disabling a living unit does not count as death")
+    player:SetEnable(true)
+
+    local enemyUnit = enemy:GetComponent("script.BattleUnit")
+    session:QueueDamage(enemy, 10000, player)
+    session:AdvanceForTest(0.001)
+    local firstDeathSnapshot = session:GetDebugSnapshot()
+    local firstDeathUnits = session:GetUnitSnapshots()
+    check(isvalid(enemyUnit) and enemyUnit.IsDead and session.PlayerAlive == 1 and session.EnemyAlive == 5,
+        "a fully resolved lethal damage batch decrements the enemy count once")
+    check(string.find(firstDeathSnapshot, "playerAlive=1|enemyAlive=5", 1, true) ~= nil
+        and string.find(firstDeathUnits, "ENEMY:M1_EnemyTank,", 1, true) ~= nil
+        and string.find(firstDeathUnits, "alive=false", 1, true) ~= nil,
+        "synchronized counts and the existing snapshot expose the resolved death")
+
+    session:NotifyDeath(enemy)
+    session:QueueDamage(enemy, 10000, player)
+    session:AdvanceForTest(0.001)
+    check(session.PlayerAlive == 1 and session.EnemyAlive == 5,
+        "duplicate death notification and damage to a dead unit do not decrement again")
 
     for _, entity in ipairs(map.Children:ToTable()) do
         local unit = entity:GetComponent("script.BattleUnit")

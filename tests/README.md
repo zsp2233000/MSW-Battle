@@ -16,7 +16,7 @@ node --test tests/*.test.cjs
 | attack_clock_runtime_probe.lua | 取得／釋放手動時鐘、自動／手動互斥、恢復正式攻擊 |
 | shooter_runtime_probe.lua | 射手正式移動、射程、資料中的命中影格、無 projectile、RESULT |
 | tank_contact_runtime_probe.lua | 正式接觸、各目標 cooldown、擊退、邊界、RESULT |
-| six_vs_six_batch_outcome_probe.lua | 同批已接受命中不因攻擊者死亡而撤回；DRAW 只發布一次 |
+| six_vs_six_batch_outcome_probe.lua | 登記存活數、停用不算死亡、致死傷害只扣一次、同批已接受命中不因攻擊者死亡而撤回；DRAW 只發布一次 |
 | six_vs_six_runtime_probe.lua | 固定編隊、索敵、擁擠移動、WIN／LOSE／DRAW、RESULT |
 | six_vs_six_full_battle_probe.lua | 十二個單位自然對戰、結果及終止後狀態 |
 

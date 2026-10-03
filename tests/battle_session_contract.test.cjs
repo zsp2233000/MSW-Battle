@@ -189,7 +189,9 @@ test("Issue #7 preserves the data-driven battle core behind deployment", () => {
   assert.match(session, /method Entity SpawnMonster\(string monsterId/);
   assert.match(session, /fixedEnemyRoster/);
   assert.match(session, /self\.PlayerAlive = 0/);
-  assert.match(session, /self\.EnemyAlive = 6/);
+  assert.match(session, /self\.InitialPlayerAlive = self\.PlayerAlive/);
+  assert.match(session, /self\.InitialEnemyAlive = self\.EnemyAlive/);
+  assert.doesNotMatch(session, /self\.EnemyAlive\s*=\s*6/);
   assert.match(session, /self:EmitPresentation\("RESULT"/);
   assert.match(session, /self\._T\.resultEntered == true/);
   assert.match(session, /script\.BattleDeploymentInput/);
@@ -211,4 +213,39 @@ test("Issue #7 preserves the data-driven battle core behind deployment", () => {
     assert.match(probe, new RegExp(scenario.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
   assert.match(probe, /\[M1\]\[SixVsSixProbe\] PASS/);
+});
+
+test("Issue #14 centralizes BattleSession registration, death, and removal accounting", () => {
+  const session = read("RootDesk/MyDesk/Combat/BattleSession.mlua");
+  const deploymentProbe = read("tests/deployment_runtime_probe.lua");
+  const tankProbe = read("tests/tank_contact_runtime_probe.lua");
+  const batchProbe = read("tests/six_vs_six_batch_outcome_probe.lua");
+
+  assert.match(session, /@ExecSpace\("ServerOnly"\)\s+method boolean TryRemoveDeployedUnitAt\(Vector3 position\)/);
+  assert.doesNotMatch(deploymentProbe, /session\._T|:RemoveDeployedUnit\(/);
+  for (const scenario of [
+    "deployment starts empty against six fixed enemies",
+    "zero player units cannot start",
+    "first unit",
+    "sixth unit",
+    "seventh unit is rejected",
+    "profile lookups return distinct outer tables",
+    "editing a profile copy does not mutate catalog",
+    "removal with a NaN z coordinate is rejected",
+    "position-based removal selects the deployed unit",
+    "redeployment registers exactly one replacement unit",
+    "removal after start is rejected",
+  ]) {
+    assert.ok(deploymentProbe.includes(scenario), `${scenario} runtime assertion missing`);
+  }
+  assert.doesNotMatch(tankProbe, /EnemyAlive\s*=\s*session\.EnemyAlive\s*\+/);
+  for (const scenario of [
+    "registered spawns own the synchronized faction counts",
+    "disabling a living unit does not count as death",
+    "a fully resolved lethal damage batch decrements the enemy count once",
+    "synchronized counts and the existing snapshot expose the resolved death",
+    "duplicate death notification and damage to a dead unit do not decrement again",
+  ]) {
+    assert.ok(batchProbe.includes(scenario), `${scenario} runtime assertion missing`);
+  }
 });
