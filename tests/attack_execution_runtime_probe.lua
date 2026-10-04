@@ -69,7 +69,7 @@ local function samePosition(left, right)
     return math.abs(left.x - right.x) < 0.0001 and math.abs(left.y - right.y) < 0.0001
 end
 
-local function controlledCase(label, playerRoster, enemyRoster, callback, automaticNames)
+local function controlledCase(label, playerRoster, enemyRoster, callback)
     local acquireOk, acquired = pcall(function() return session:BeginManualSimulation() end)
     if not acquireOk then
         check(false, label .. " clock acquisition raised: " .. tostring(acquired))
@@ -95,10 +95,8 @@ local function controlledCase(label, playerRoster, enemyRoster, callback, automa
                 local entity, unit = getUnit(entry.name)
                 check(isvalid(entity) and isvalid(unit), label .. " resolves prepared unit " .. entry.name)
                 if not isvalid(entity) or not isvalid(unit) then return false end
-                if automaticNames == nil or automaticNames[entry.name] ~= true then
-                    -- Disable only autonomous acquisition; explicit test intent still uses the installed adapter.
-                    unit.AttackRange = 0
-                end
+                -- Keep autonomous acquisition inert; explicit intent still uses the installed adapter.
+                unit.AttackRange = 0
                 local movement = entity:GetComponent("MovementComponent")
                 if isvalid(movement) then movement:Stop() end
             end
@@ -125,6 +123,7 @@ local function controlledCase(label, playerRoster, enemyRoster, callback, automa
     return completed == true
 end
 
+local runOk, runDetail = pcall(function()
 if session.BeginManualSimulation == nil or session.PrepareBattleForTest == nil then
     check(false, "controlled battle and manual clock interfaces are available")
     return
@@ -135,7 +134,7 @@ for _, kind in ipairs({ "monster_warrior", "monster_shooter" }) do
     local actorName = "Issue16_AreaActor_" .. suffix
     local targetName = "Issue16_AreaTarget_" .. suffix
     local decoyName = "Issue16_AreaDecoy_" .. suffix
-    if not controlledCase("" .. suffix .. " native hit", {
+    if not controlledCase(suffix .. " native hit", {
         row(kind, actorName, -1, 0, activeProfile(0.18, 0.8)),
     }, {
         row("monster_warrior", targetName, -0.5, 0, quietProfile()),
@@ -202,7 +201,7 @@ do
         row("monster_shooter", actorName, -1, 0, activeProfile(0.18, 0.8)),
     }, {
         row("monster_warrior", targetName, -0.5, 0, quietProfile()),
-        row("monster_warrior", reserveName, 4.5, 2, quietProfile()),
+        row("monster_warrior", reserveName, 3.4, 1.4, quietProfile()),
     }, function()
         local actor, unit = getUnit(actorName)
         local targetEntity, target = getUnit(targetName)
@@ -303,7 +302,7 @@ do
         row("monster_shooter", actorName, -1, 0, activeProfile(0.18, 0.8)),
     }, {
         row("monster_warrior", firstTargetName, -0.5, 0, quietProfile()),
-        row("monster_warrior", replacementName, 5, 2, quietProfile()),
+        row("monster_warrior", replacementName, 3.4, 1.4, quietProfile()),
     }, function()
         local actor, unit = getUnit(actorName)
         local firstTargetEntity, firstTarget = getUnit(firstTargetName)
@@ -369,7 +368,7 @@ do
         row("monster_shooter", actorName, -1, 0, activeProfile(0.18, 0.8)),
     }, {
         row("monster_warrior", targetName, 1.5, 0, quietProfile()),
-        row("monster_warrior", reserveName, 5, 2, quietProfile()),
+        row("monster_warrior", reserveName, 3.4, 1.4, quietProfile()),
     }, function()
         local actor, unit = getUnit(actorName)
         local targetEntity, target = getUnit(targetName)
@@ -403,7 +402,7 @@ do
         row("monster_tank", actorName, -1, 0, activeProfile(0.18, 2)),
     }, {
         row("monster_warrior", targetName, -0.5, 0, quietProfile()),
-        row("monster_warrior", reserveName, 4.5, 2, quietProfile()),
+        row("monster_warrior", reserveName, 3.4, 1.4, quietProfile()),
     }, function()
         local actor, unit = getUnit(actorName)
         local _, target = getUnit(targetName)
@@ -455,13 +454,58 @@ do
 end
 
 do
+    local actorName = "Issue16_BatchActor"
+    local playerReserveName = "Issue16_BatchPlayerReserve"
+    local targetName = "Issue16_BatchTarget"
+    local killerName = "Issue16_BatchKiller"
+    local enemyReserveName = "Issue16_BatchEnemyReserve"
+    if not controlledCase("accepted hit survives same-batch attacker death", {
+        row("monster_shooter", actorName, -1, 0, activeProfile(0.01, 2, 30, 30)),
+        row("monster_tank", playerReserveName, -4, 1.4, quietProfile()),
+    }, {
+        row("monster_warrior", targetName, -0.4, 0, quietProfile(30)),
+        row("monster_shooter", killerName, -1, 0.2, activeProfile(0.01, 2, 30, 30)),
+        row("monster_tank", enemyReserveName, 3.4, 1.4, quietProfile()),
+    }, function()
+        local actorEntity, actor = getUnit(actorName)
+        local _, playerReserve = getUnit(playerReserveName)
+        local targetEntity, target = getUnit(targetName)
+        local killerEntity, killer = getUnit(killerName)
+        local _, enemyReserve = getUnit(enemyReserveName)
+        local acceptedEffect = actor:GetHitEffectRUID()
+
+        actor:DriveAttack(targetEntity, true)
+        killer:DriveAttack(actorEntity, true)
+        session:AdvanceForTest(0.05)
+
+        check(actor.AttackSerial == 1 and killer.AttackSerial == 1,
+            "both lethal native attacks are accepted in the same full battle step")
+        check(actor.IsDead and actor.Hp == 0 and actor.DamageTakenSerial == 1,
+            "the opposing accepted hit kills the shooter in that damage batch")
+        check(target.IsDead and target.Hp == 0 and target.DamageTakenSerial == 1,
+            "the shooter's already accepted hit still resolves after its death")
+        check(acceptedEffect ~= "" and target.HitEffectSerial == 1
+            and target.LastHitEffectRUID == acceptedEffect,
+            "same-batch shooter death preserves the accepted hit's captured effect policy")
+        check(playerReserve:IsAlive() and enemyReserve:IsAlive()
+            and session.Phase == "BATTLE" and session.Result == "",
+            "live reserves keep the legitimate post-death battle observable")
+        check(contains(session.EventHistory, "DAMAGE:" .. killerEntity.Name .. ":" .. actorEntity.Name)
+            and contains(session.EventHistory, "DAMAGE:" .. actorEntity.Name .. ":" .. targetName)
+            and contains(session.EventHistory, "DEAD:" .. actorEntity.Name)
+            and contains(session.EventHistory, "DEAD:" .. targetName),
+            "both accepted damage events and both deaths are published")
+    end) then return end
+end
+
+do
     local actorName = "Issue16_DyingActor"
     local reserveName = "Issue16_DyingActorReserve"
     local targetName = "Issue16_DyingActorTarget"
     local killerName = "Issue16_DyingActorKiller"
     if not controlledCase("attacker death cancels unresolved shot", {
         row("monster_shooter", actorName, -1, 0, activeProfile(0.18, 0.8, 30, 30)),
-        row("monster_tank", reserveName, -4, 3, quietProfile()),
+        row("monster_tank", reserveName, -4, 1.4, quietProfile()),
     }, {
         row("monster_warrior", targetName, 1.5, 0, quietProfile()),
         row("monster_shooter", killerName, -0.5, 0.2, activeProfile(0.01, 2, 30)),
@@ -496,7 +540,7 @@ do
         row("monster_warrior", killerName, 0, 0, activeProfile(0.01, 2, 35)),
     }, {
         row("monster_warrior", targetName, 0.3, 0, quietProfile(35)),
-        row("monster_tank", reserveName, 4.5, 3, quietProfile()),
+        row("monster_tank", reserveName, 3.4, 1.4, quietProfile()),
     }, function()
         local shooterEntity, shooter = getUnit(actorName)
         local killerEntity, killer = getUnit(killerName)
@@ -529,7 +573,7 @@ do
     }, {
         row("monster_warrior", firstName, -0.5, 0, quietProfile()),
         row("monster_warrior", secondName, -1, 0.3, quietProfile()),
-        row("monster_warrior", thirdName, 4.5, 2, quietProfile()),
+        row("monster_warrior", thirdName, 3.4, 1.4, quietProfile()),
     }, function()
         local actor, unit = getUnit(actorName)
         local _, first = getUnit(firstName)
@@ -629,6 +673,9 @@ do
             "terminal WIN leaves actor and defeated target positions stable")
     end) then return end
 end
+
+end)
+if not runOk then check(false, "attack execution probe raised: " .. tostring(runDetail)) end
 
 if failures == 0 then
     log("[M1][AttackExecutionProbe] PASS")

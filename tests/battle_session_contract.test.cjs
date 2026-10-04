@@ -303,5 +303,13 @@ test("Issue #16 attack probes use prepared battle scenes and public session step
     assert.doesNotMatch(probe, mutableSessionOutcomes, `${probePath} must not write session outcome state`);
     assert.doesNotMatch(probe, /:\s*SetEnable\s*\(\s*false\s*\)/,
       `${probePath} must keep every prepared battle unit enabled`);
+    assert.match(probe, /\[M1\]\[(?:AttackExecution|AttackClock)Probe\] PASS/,
+      `${probePath} must report its successful terminal marker`);
+    assert.match(probe, /\[M1\]\[(?:AttackExecution|AttackClock)Probe\] FAILURES=/,
+      `${probePath} must report a terminal failure count`);
   }
+
+  assert.match(read("tests/attack_execution_runtime_probe.lua"),
+    /accepted hit survives same-batch attacker death/,
+    "the execution probe must preserve accepted-hit behavior when its attacker dies in the batch");
 });

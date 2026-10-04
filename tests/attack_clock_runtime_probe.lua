@@ -40,8 +40,6 @@ else
                 row("monster_shooter", actorName, -1, 0, {
                     MoveSpeed = 0,
                     RetargetIntervalSeconds = 0,
-                    ImpactDelaySeconds = 0.18,
-                    AttackIntervalSeconds = 0.8,
                 }),
             }
             local enemyRoster = {
@@ -79,9 +77,9 @@ else
             check(actor.AttackSerial == 1 and target.Hp == initialHp,
                 "manual session time starts one attack before its impact")
 
-            wait(0.35)
+            wait(actor.ImpactDelay + 0.1)
             check(actor.AttackSerial == 1 and target.Hp == initialHp,
-                "live Maker frames do not advance attacks while this probe owns the clock")
+                "real time longer than the data-derived impact delay cannot advance the owned clock")
 
             session:AdvanceForTest(actor.ImpactDelay + 0.02)
             check(target.Hp == initialHp - 30 and target.DamageTakenSerial == 1,
@@ -99,7 +97,7 @@ else
             check(actor.AttackSerial == serialAfterRelease and target.Hp == hpAfterRelease,
                 "manual elapsed time is rejected after the probe releases ownership")
 
-            wait(1.1)
+            wait(actor.AttackInterval + actor.ImpactDelay + 0.1)
             check(actor.AttackSerial > serialAfterRelease and target.Hp < hpAfterRelease,
                 "live clock resumes automatic attacks after release")
             return true
