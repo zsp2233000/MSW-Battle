@@ -2,11 +2,6 @@
 -- Every case prepares and starts a complete controlled battle before observing the production step.
 local map = _EntityService:GetEntityByPath("/maps/map01")
 local session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
-if not isvalid(session) then
-    log_error("[M1][AttackExecutionProbe][FAIL] BattleSession unavailable")
-    return
-end
-
 local failures = 0
 local function check(condition, message)
     if condition then log("[M1][AttackExecutionProbe][PASS] " .. message)
@@ -124,6 +119,11 @@ local function controlledCase(label, playerRoster, enemyRoster, callback)
 end
 
 local runOk, runDetail = pcall(function()
+if not isvalid(session) then
+    check(false, "BattleSession unavailable")
+    return
+end
+
 if session.BeginManualSimulation == nil or session.PrepareBattleForTest == nil then
     check(false, "controlled battle and manual clock interfaces are available")
     return

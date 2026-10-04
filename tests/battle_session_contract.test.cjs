@@ -309,7 +309,13 @@ test("Issue #16 attack probes use prepared battle scenes and public session step
       `${probePath} must report a terminal failure count`);
   }
 
-  assert.match(read("tests/attack_execution_runtime_probe.lua"),
+  const executionProbe = read("tests/attack_execution_runtime_probe.lua");
+  assert.match(executionProbe,
     /accepted hit survives same-batch attacker death/,
     "the execution probe must preserve accepted-hit behavior when its attacker dies in the batch");
+  assert.ok(
+    executionProbe.indexOf("local runOk, runDetail = pcall(function()") <
+      executionProbe.indexOf("if not isvalid(session) then"),
+    "the execution probe must protect the missing-session path so it reaches its terminal marker",
+  );
 });
