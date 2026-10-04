@@ -285,3 +285,23 @@ test("Issue #15 exposes an atomic server-only controlled battle-scene seam", () 
   assert.doesNotMatch(probe, /session\._T/);
   assert.match(probe, /\[M1\]\[ControlledScenarioProbe\] PASS/);
 });
+
+test("Issue #16 attack probes use prepared battle scenes and public session stepping", () => {
+  const probePaths = [
+    "tests/attack_execution_runtime_probe.lua",
+    "tests/attack_clock_runtime_probe.lua",
+  ];
+  const forbiddenCalls = /session\._T|:(?:SpawnUnit|SpawnConfiguredUnit|TryDeployMonster|QueueDamage|QueueKnockback|ApplyPendingKnockbacks|ResolveDamageBatch|EvaluateResult|EnterResult)\s*\(/;
+  const mutableSessionOutcomes = /session\.(?:Phase|Result|PlayerAlive|EnemyAlive|InitialPlayerAlive|InitialEnemyAlive)\s*=(?!=)/;
+
+  for (const probePath of probePaths) {
+    const probe = read(probePath);
+    assert.match(probe, /session:PrepareBattleForTest\(/, `${probePath} must prepare a complete controlled scene`);
+    assert.match(probe, /session:TryStartBattle\(\)/, `${probePath} must start the prepared battle`);
+    assert.match(probe, /session:AdvanceForTest\(/, `${probePath} must verify through full session steps`);
+    assert.doesNotMatch(probe, forbiddenCalls, `${probePath} must not bypass roster or settlement APIs`);
+    assert.doesNotMatch(probe, mutableSessionOutcomes, `${probePath} must not write session outcome state`);
+    assert.doesNotMatch(probe, /:\s*SetEnable\s*\(\s*false\s*\)/,
+      `${probePath} must keep every prepared battle unit enabled`);
+  }
+});

@@ -1,271 +1,637 @@
 -- Run in a fresh Maker Play test with context=server_main.
--- Exercise real attack composition and full BattleSession steps; no private timer assertions.
+-- Every case prepares and starts a complete controlled battle before observing the production step.
 local map = _EntityService:GetEntityByPath("/maps/map01")
-local session = map:GetComponent("script.BattleSession")
-local failures, sequence = 0, 0
-local fixtures = {}
-local function check(condition, message)
-    if condition then log("[AttackExecutionProbe][PASS] " .. message)
-    else failures = failures + 1; log_error("[AttackExecutionProbe][FAIL] " .. message) end
-end
-local function profile(monsterId)
-    local copy = {}
-    for key, value in pairs(session:GetMonsterProfile(monsterId)) do copy[key] = value end
-    copy.MoveSpeed = 0
-    copy.ImpactDelaySeconds = 0.18
-    copy.AttackIntervalSeconds = 0.8
-    return copy
-end
-local function spawn(monsterId, faction, x, y)
-    sequence = sequence + 1
-    local data = profile(monsterId)
-    local entity = session:SpawnConfiguredUnit(data.ModelId, "AttackProbe_" .. sequence, faction, data, Vector3(x, y, 0))
-    table.insert(fixtures, entity)
-    local unit = entity:GetComponent("script.BattleUnit")
-    unit.AttackRange = 0 -- Stop automatic engagement; the test submits intent through the public module.
-    return entity, unit, entity:GetComponent("script.BattleAttackComposition"), data
-end
-local function cleanup()
-    for _, entity in ipairs(fixtures) do
-        entity:GetComponent("script.BattleUnit"):CancelAttack()
-        entity:Destroy()
-    end
-    fixtures = {}
-end
-local function flush()
-    session:AdvanceForTest(0.001) -- Full production step resolves accepted native HitEvents.
-end
-local function pair(monsterId)
-    local actor, actorUnit, attack, data = spawn(monsterId, "PLAYER", -1, 0)
-    local target, targetUnit = spawn("monster_warrior", "ENEMY", -0.5, 0)
-    return actor, actorUnit, attack, data, target, targetUnit
-end
-if session.BeginManualSimulation == nil then
-    log_error("[AttackExecutionProbe][FAIL] manual clock interface is missing")
+local session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
+if not isvalid(session) then
+    log_error("[M1][AttackExecutionProbe][FAIL] BattleSession unavailable")
     return
 end
-session:BeginManualSimulation()
-local ok, detail = pcall(function()
-    session:TryDeployMonster("monster_tank", Vector3(-4, 0, 0))
-    session:TryDeployMonster("monster_tank", Vector3(-4, -1, 0))
-    session:TryStartBattle()
-    for _, entity in ipairs(map.Children:ToTable()) do
-        if isvalid(entity:GetComponent("script.BattleUnit")) then entity:SetEnable(false) end
+
+local failures = 0
+local function check(condition, message)
+    if condition then log("[M1][AttackExecutionProbe][PASS] " .. message)
+    else failures = failures + 1; log_error("[M1][AttackExecutionProbe][FAIL] " .. message) end
+end
+
+local function row(monsterId, name, x, y, overrides)
+    return { monsterId = monsterId, name = name, position = Vector3(x, y, 0), overrides = overrides }
+end
+
+local function activeProfile(impactDelay, attackInterval, attackDamage, maxHp)
+    local result = {
+        MoveSpeed = 0,
+        RetargetIntervalSeconds = 0,
+        ImpactDelaySeconds = impactDelay,
+        AttackIntervalSeconds = attackInterval,
+    }
+    if attackDamage ~= nil then result.AttackDamage = attackDamage end
+    if maxHp ~= nil then result.MaxHp = maxHp end
+    return result
+end
+
+local function quietProfile(maxHp)
+    local result = {
+        MoveSpeed = 0,
+        AttackDamage = 0,
+        AttackRange = 0,
+        RetargetIntervalSeconds = 0,
+        ImpactDelaySeconds = 0.05,
+        AttackIntervalSeconds = 100,
+    }
+    if maxHp ~= nil then result.MaxHp = maxHp end
+    return result
+end
+
+local function catalogProfile(monsterId)
+    local source = session:GetMonsterProfile(monsterId)
+    if source == nil then return nil end
+    local copy = {}
+    for key, value in pairs(source) do copy[key] = value end
+    return copy
+end
+
+local function getUnit(name)
+    local entity = _EntityService:GetEntityByPath("/maps/map01/" .. name)
+    if not isvalid(entity) then return nil, nil end
+    return entity, entity:GetComponent("script.BattleUnit")
+end
+
+local function getAttack(entity)
+    if not isvalid(entity) then return nil end
+    return entity:GetComponent("script.BattleAttackComposition")
+end
+
+local function contains(value, fragment)
+    return string.find(value or "", fragment, 1, true) ~= nil
+end
+
+local function samePosition(left, right)
+    return math.abs(left.x - right.x) < 0.0001 and math.abs(left.y - right.y) < 0.0001
+end
+
+local function controlledCase(label, playerRoster, enemyRoster, callback, automaticNames)
+    local acquireOk, acquired = pcall(function() return session:BeginManualSimulation() end)
+    if not acquireOk then
+        check(false, label .. " clock acquisition raised: " .. tostring(acquired))
+        return false
     end
-    for _, kind in ipairs({"monster_warrior", "monster_shooter"}) do
-        local actor, unit, attack, data, target, defender = pair(kind)
-        local decoy, decoyUnit = spawn("monster_warrior", "ENEMY", -0.5, 0.15)
-        attack:TryEngage(target, true)
-        attack:TryEngage(target, true)
-        attack:Advance(0.05)
-        flush()
-        check(unit.AttackSerial == 1 and defender.Hp == 220, kind .. " starts once and preserves pre-impact HP")
-        check(string.find(session.EventHistory, "ATTACK_START:" .. actor.Name, 1, true) ~= nil, kind .. " emits attack start")
-        attack:Advance(0.14)
-        flush()
+    if acquired ~= true then
+        check(false, label .. " acquires its own manual clock")
+        return false
+    end
+
+    local callOk, completed = pcall(function()
+        local prepared = session:PrepareBattleForTest(playerRoster, enemyRoster)
+        check(prepared == true, label .. " prepares a complete controlled roster")
+        if prepared ~= true then return false end
+
+        local expectedPlayers = #playerRoster
+        local expectedEnemies = #enemyRoster
+        check(session.PlayerAlive == expectedPlayers and session.EnemyAlive == expectedEnemies,
+            label .. " registers every actor, target, decoy, and reserve")
+
+        for _, roster in ipairs({ playerRoster, enemyRoster }) do
+            for _, entry in ipairs(roster) do
+                local entity, unit = getUnit(entry.name)
+                check(isvalid(entity) and isvalid(unit), label .. " resolves prepared unit " .. entry.name)
+                if not isvalid(entity) or not isvalid(unit) then return false end
+                if automaticNames == nil or automaticNames[entry.name] ~= true then
+                    -- Disable only autonomous acquisition; explicit test intent still uses the installed adapter.
+                    unit.AttackRange = 0
+                end
+                local movement = entity:GetComponent("MovementComponent")
+                if isvalid(movement) then movement:Stop() end
+            end
+        end
+
+        local started = session:TryStartBattle()
+        check(started == true and session.Phase == "BATTLE"
+            and session.InitialPlayerAlive == expectedPlayers and session.InitialEnemyAlive == expectedEnemies,
+            label .. " starts with the prepared battle counts")
+        if started ~= true then return false end
+
+        callback()
+        return true
+    end)
+
+    local releaseOk, releaseDetail = pcall(function() session:EndManualSimulation() end)
+    if not releaseOk then
+        check(false, label .. " clock release raised: " .. tostring(releaseDetail))
+    end
+    if not callOk then
+        check(false, label .. " raised: " .. tostring(completed))
+        return false
+    end
+    return completed == true
+end
+
+if session.BeginManualSimulation == nil or session.PrepareBattleForTest == nil then
+    check(false, "controlled battle and manual clock interfaces are available")
+    return
+end
+
+for _, kind in ipairs({ "monster_warrior", "monster_shooter" }) do
+    local suffix = kind == "monster_warrior" and "Assault" or "Shooter"
+    local actorName = "Issue16_AreaActor_" .. suffix
+    local targetName = "Issue16_AreaTarget_" .. suffix
+    local decoyName = "Issue16_AreaDecoy_" .. suffix
+    if not controlledCase("" .. suffix .. " native hit", {
+        row(kind, actorName, -1, 0, activeProfile(0.18, 0.8)),
+    }, {
+        row("monster_warrior", targetName, -0.5, 0, quietProfile()),
+        row("monster_warrior", decoyName, -0.5, 0.15, quietProfile()),
+    }, function()
+        local actorEntity, unit = getUnit(actorName)
+        local targetEntity, target = getUnit(targetName)
+        local _, decoy = getUnit(decoyName)
+        local attack = getAttack(actorEntity)
+        unit:DriveAttack(targetEntity, true)
+        unit:DriveAttack(targetEntity, true)
+        check(unit.AttackSerial == 1, suffix .. " accepts one attack intent")
+        session:AdvanceForTest(0.05)
+        check(target.Hp == 220 and target.DamageTakenSerial == 0,
+            suffix .. " keeps target HP unchanged before impact")
+        check(contains(session.EventHistory, "ATTACK_START:" .. actorEntity.Name), suffix .. " publishes attack start")
+        session:AdvanceForTest(0.14)
         local expectedHp = kind == "monster_warrior" and 185 or 190
-        check(defender.Hp == expectedHp, kind .. " applies configured damage through HitEvent")
-        check(decoyUnit.Hp == (kind == "monster_warrior" and 185 or 220), kind .. " preserves area versus locked-target policy")
-        check(string.find(session.EventHistory, "HIT:" .. actor.Name, 1, true) ~= nil and
-            string.find(session.EventHistory, "TARGET_HIT:" .. actor.Name, 1, true) ~= nil and
-            string.find(session.EventHistory, "DAMAGE:" .. actor.Name .. ":" .. target.Name, 1, true) ~= nil,
-            kind .. " preserves native hit presentation semantics")
-        cleanup()
-    end
-    for _, kind in ipairs({"monster_warrior", "monster_shooter"}) do
-        local actor, unit, attack, data, target, defender = pair(kind)
-        attack:TryEngage(target, true)
-        attack:Advance(0.05)
-        attack:Cancel("NORMAL")
-        attack:Cancel("NORMAL")
-        attack:Advance(0.2)
-        flush()
-        check(defender.Hp == 220, kind .. " cancellation removes pending damage")
-        attack:TryEngage(target, true)
-        check(unit.AttackSerial == (kind == "monster_warrior" and 1 or 2), kind .. " preserves ordinary cancellation cooldown")
-        cleanup()
-    end
-    do
-        local actor, unit, attack, data, target, defender = pair("monster_shooter")
-        attack:TryEngage(target, true)
-        attack:Advance(0.05)
-        target.KinematicbodyComponent:SetWorldPosition(Vector2(3.5, 0))
-        attack:Advance(0.2)
-        flush()
-        check(defender.Hp == 220, "shooter leaving range cancels a pending hit")
-        target.KinematicbodyComponent:SetWorldPosition(Vector2(-0.5, 0))
-        attack:TryEngage(target, true)
-        check(unit.AttackSerial == 2, "shooter can retry immediately after range cancellation")
-        target:SetEnable(false)
-        attack:Advance(0.2)
-        flush()
-        check(defender.Hp == 220, "disabled defender cannot receive a pending hit")
-        cleanup()
-    end
-    do
-        local actor, unit, attack, data, target, defender = pair("monster_warrior")
-        attack:TryEngage(target, true)
-        target.KinematicbodyComponent:SetWorldPosition(Vector2(-0.36, 0))
-        attack:Advance(0.2)
-        flush()
-        check(defender.Hp == 185, "warrior preserves the 0.05 impact range tolerance")
-        cleanup()
-    end
-    for _, kind in ipairs({"monster_warrior", "monster_shooter"}) do
-        local actor, unit, attack, data, target, defender = pair(kind)
-        attack:TryEngage(target, true)
-        attack:Advance(0.05)
-        check(attack:Configure(data, 0), kind .. " supports reconfiguration on the same actor")
-        attack:Advance(0.2)
-        flush()
-        check(defender.Hp == 220 and unit.AttackSerial == 1, kind .. " clears old pending work without rewinding observations")
-        attack:TryEngage(target, true)
-        check(unit.AttackSerial == 2, kind .. " reconfiguration clears old cooldown")
-        cleanup()
-    end
-    do
-        local actor, unit, attack, data, target, defender = pair("monster_shooter")
-        attack:TryEngage(target, true)
-        local warrior = profile("monster_warrior")
-        check(attack:Configure(warrior, 0), "same actor can switch native attack adapter")
-        attack:Advance(0.2)
-        flush()
-        check(defender.Hp == 220 and unit.AttackSerial == 1, "adapter switch discards the previous shot")
-        attack:TryEngage(target, true)
-        attack:Advance(0.2)
-        flush()
-        check(defender.Hp == 185 and unit.AttackSerial == 2, "replacement adapter alone delivers the next hit")
-        cleanup()
-    end
-    do
-        local actor, unit, attack, data, target, defender = pair("monster_shooter")
-        attack:TryEngage(target, true)
-        local tank = profile("monster_tank")
-        check(attack:Configure(tank, 0) and unit.UnitKind == "TANK", "switch to tank updates installed attack classification")
-        attack:TryEngage(nil, false)
-        flush()
-        check(defender.Hp == 180 and defender.KnockbackActive, "reconfigured tank contact retains damage and native knockback")
-        check(attack:Configure(data, 0) and unit.UnitKind == "SHOOTER", "switch from tank restores shooter classification")
-        target:SetEnable(false)
-        local replacement, replacementUnit = spawn("monster_warrior", "ENEMY", -0.5, 0)
-        attack:TryEngage(replacement, true)
-        attack:Advance(0.2)
-        flush()
-        check(replacementUnit.Hp == 190 and not replacementUnit.KnockbackActive, "reconfigured shooter delivers hitscan damage without tank knockback")
-        cleanup()
-    end
-    do
-        local actor, unit, attack, data, target, defender = pair("monster_shooter")
-        attack:TryEngage(target, true)
-        check(not attack:Configure({ MonsterType = "INVALID" }, 0), "invalid configuration is rejected explicitly")
-        attack:Advance(1)
-        attack:TryEngage(target, true)
-        flush()
-        check(defender.Hp == 220 and unit.AttackSerial == 1, "failed configuration leaves no active attack work")
-        local warrior = profile("monster_warrior")
-        check(attack:Configure(warrior, 0), "configuration can recover with a different native adapter")
-        local decoy, decoyUnit = spawn("monster_warrior", "ENEMY", -0.5, 0.15)
-        attack:TryEngage(target, true)
-        attack:Advance(0.2)
-        flush()
-        check(defender.Hp == 185, "recovered configuration delivers the new native damage")
-        check(decoyUnit.Hp == 185, "recovered warrior preserves area hits after a rejected shooter configuration")
-        cleanup()
-    end
-    for _, kind in ipairs({"monster_tank", "monster_shooter"}) do
-        local actor, unit, attack, data, target, defender = pair(kind)
-        if kind == "monster_tank" then
-            unit:SetMonsterIdentity(unit.MonsterId, unit.MonsterName, session:GetMonsterProfile("monster_shooter").HitEffectRUID)
-            check(unit:GetHitEffectRUID() ~= "", "tank fixture has an assigned hit effect that contact must exclude")
-        end
-        attack:TryEngage(target, true)
-        if kind == "monster_shooter" then attack:Advance(0.2) end
-        check(defender.Hp == 220, kind .. " accepted native hit waits for the session batch")
-        local replacement = profile(kind == "monster_tank" and "monster_shooter" or "monster_tank")
-        attack:Configure(replacement, 0)
-        if kind == "monster_shooter" then unit:SetMonsterIdentity(unit.MonsterId, unit.MonsterName, "") end
-        actor:SetEnable(false) -- Isolate already accepted work from replacement attack intent.
-        flush()
-        if kind == "monster_tank" then
-            check(defender.Hp == 180 and defender.KnockbackActive and defender.CombatState ~= "ON_HIT" and defender.HitEffectSerial == 0,
-                "accepted tank hit retains knockback and excludes hit stop after switching to shooter")
-        else
-            check(defender.Hp == 190 and not defender.KnockbackActive and defender.CombatState == "ON_HIT" and defender.HitEffectSerial == 1,
-                "accepted shooter hit retains hit stop and hit effect after switching to tank")
-        end
-        cleanup()
-    end
-    for _, kind in ipairs({"monster_warrior", "monster_shooter"}) do
-        local actor, unit, attack, data, target, defender = pair(kind)
-        attack:Configure(data, 0.12)
-        attack:TryEngage(target, true)
-        check(unit.AttackSerial == 0, kind .. " opening lead does not announce attack start")
-        attack:Advance(0.12)
-        attack:TryEngage(target, true)
-        check(unit.AttackSerial == 1, kind .. " opening lead is consumed once")
-        cleanup()
-    end
-    do
-        local actor, unit, attack, data, target, defender = pair("monster_shooter")
-        data.AttackIntervalSeconds = 0.01
-        attack:Configure(data, 0)
-        unit.AttackRange = 4 -- A new intent would be eligible without the hit-stop gate.
-        attack:TryEngage(target, true)
-        session:QueueDamage(actor, 1, target)
-        flush()
-        local serial = unit.AttackSerial
-        session:AdvanceForTest(0.19)
-        check(defender.Hp == 190 and unit.AttackSerial == serial, "hit stop blocks new intent while existing pending time continues")
-        cleanup()
-    end
-    do
-        local actor, unit, attack, data, target, defender = pair("monster_shooter")
-        attack:TryEngage(target, true)
-        session:QueueDamage(actor, 10000, target)
-        flush()
-        attack:Advance(0.2)
-        flush()
-        check(unit.IsDead and defender.Hp == 220, "attacker death discards an unresolved shot")
-        cleanup()
-    end
-    do
-        local actor, unit, attack, data, target, defender = pair("monster_shooter")
-        attack:TryEngage(target, true)
-        session:QueueDamage(target, 10000, actor)
-        flush()
-        attack:Advance(0.2)
-        flush()
-        check(defender.IsDead and defender.DamageTakenSerial == 1, "target death before impact prevents another native hit")
-        cleanup()
-    end
-    do
-        local actor, unit, attack, data, target, defender = pair("monster_tank")
-        local second, secondUnit = spawn("monster_warrior", "ENEMY", -1.3, 0)
-        attack:TryEngage(nil, false)
-        flush()
-        check(defender.Hp == 180 and secondUnit.Hp == 180 and unit.AttackSerial == 2,
-            "tank ignores selected-target range and announces each contact defender")
-        attack:TryEngage(target, true)
-        flush()
-        check(defender.Hp == 180 and secondUnit.Hp == 180, "tank cooldown blocks repeated contact independently")
-        local third, thirdUnit = spawn("monster_warrior", "ENEMY", -1, 0.3)
-        attack:TryEngage(nil, false)
-        flush()
-        check(thirdUnit.Hp == 180 and unit.AttackSerial == 3, "another defender is not blocked by earlier tank cooldowns")
-        cleanup()
-    end
-    do
-        local actor, unit, attack, data, target, defender = pair("monster_shooter")
-        attack:TryEngage(target, true)
-        session:EnterResult("WIN")
-        attack:Advance(1)
-        attack:TryEngage(target, true)
+        local expectedDecoyHp = kind == "monster_warrior" and 185 or 220
+        check(target.Hp == expectedHp and target.DamageTakenSerial == 1,
+            suffix .. " applies the configured native HitEvent damage")
+        check(decoy.Hp == expectedDecoyHp,
+            suffix .. " preserves warrior area hits and shooter target lock")
+        local hitAt = string.find(session.EventHistory, "HIT:" .. actorEntity.Name .. ":" .. targetName, 1, true)
+        local targetHitAt = string.find(session.EventHistory, "TARGET_HIT:" .. actorEntity.Name .. ":" .. targetName, 1, true)
+        local damageAt = string.find(session.EventHistory, "DAMAGE:" .. actorEntity.Name .. ":" .. targetName, 1, true)
+        check(hitAt ~= nil and targetHitAt ~= nil and damageAt ~= nil
+            and hitAt < targetHitAt and targetHitAt < damageAt,
+            suffix .. " preserves ordered native hit and damage events")
+        check(isvalid(actorEntity) and isvalid(attack), suffix .. " keeps its actor and installed attack composition")
+    end) then return end
+end
+
+for _, kind in ipairs({ "monster_warrior", "monster_shooter" }) do
+    local suffix = kind == "monster_warrior" and "Assault" or "Shooter"
+    local actorName = "Issue16_CancelActor_" .. suffix
+    local targetName = "Issue16_CancelTarget_" .. suffix
+    if not controlledCase(suffix .. " cancellation", {
+        row(kind, actorName, -1, 0, activeProfile(0.18, 0.8)),
+    }, {
+        row("monster_warrior", targetName, -0.5, 0, quietProfile()),
+    }, function()
+        local actor, unit = getUnit(actorName)
+        local _, target = getUnit(targetName)
+        unit:DriveAttack(_EntityService:GetEntityByPath("/maps/map01/" .. targetName), true)
+        session:AdvanceForTest(0.05)
+        unit:CancelAttack()
+        session:AdvanceForTest(0.2)
+        check(target.Hp == 220 and target.DamageTakenSerial == 0,
+            suffix .. " cancellation removes an unaccepted hit")
+        unit:DriveAttack(_EntityService:GetEntityByPath("/maps/map01/" .. targetName), true)
+        local expectedSerial = kind == "monster_warrior" and 1 or 2
+        check(unit.AttackSerial == expectedSerial,
+            suffix .. " retains its existing ordinary cancellation cooldown")
+        check(isvalid(actor), suffix .. " remains available after cancelling pending work")
+    end) then return end
+end
+
+do
+    local actorName = "Issue16_RangeActor"
+    local targetName = "Issue16_RangeTarget"
+    local reserveName = "Issue16_RangeReserve"
+    if not controlledCase("shooter range cancellation", {
+        row("monster_shooter", actorName, -1, 0, activeProfile(0.18, 0.8)),
+    }, {
+        row("monster_warrior", targetName, -0.5, 0, quietProfile()),
+        row("monster_warrior", reserveName, 4.5, 2, quietProfile()),
+    }, function()
+        local actor, unit = getUnit(actorName)
+        local targetEntity, target = getUnit(targetName)
+        unit:DriveAttack(targetEntity, true)
+        session:AdvanceForTest(0.05)
+        targetEntity.KinematicbodyComponent:SetWorldPosition(Vector2(3.5, 0))
+        session:AdvanceForTest(0.2)
+        check(target.Hp == 220 and target.DamageTakenSerial == 0,
+            "shooter leaving range cancels its unaccepted hit")
+        targetEntity.KinematicbodyComponent:SetWorldPosition(Vector2(-0.5, 0))
+        unit:DriveAttack(targetEntity, true)
+        check(unit.AttackSerial == 2, "shooter can retry after leaving range")
+        targetEntity.KinematicbodyComponent:SetWorldPosition(Vector2(3.5, 0))
+        session:AdvanceForTest(0.2)
+        check(target.Hp == 220 and target.DamageTakenSerial == 0,
+            "second out-of-range attempt is cancelled without damaging the living target")
+        check(isvalid(actor) and isvalid(getUnit(reserveName)), "the prepared reserve remains registered")
+    end) then return end
+end
+
+do
+    local actorName = "Issue16_ToleranceActor"
+    local targetName = "Issue16_ToleranceTarget"
+    if not controlledCase("warrior impact tolerance", {
+        row("monster_warrior", actorName, -1, 0, activeProfile(0.18, 0.8)),
+    }, {
+        row("monster_warrior", targetName, -0.5, 0, quietProfile()),
+    }, function()
+        local actor, unit = getUnit(actorName)
+        local targetEntity, target = getUnit(targetName)
+        unit:DriveAttack(targetEntity, true)
+        targetEntity.KinematicbodyComponent:SetWorldPosition(Vector2(-0.36, 0))
+        session:AdvanceForTest(0.2)
+        check(target.Hp == 185 and target.DamageTakenSerial == 1,
+            "warrior keeps the 0.05 impact range tolerance")
+        check(isvalid(actor), "warrior actor remains registered after impact")
+    end) then return end
+end
+
+for _, kind in ipairs({ "monster_warrior", "monster_shooter" }) do
+    local suffix = kind == "monster_warrior" and "Assault" or "Shooter"
+    local actorName = "Issue16_ReconfigureActor_" .. suffix
+    local targetName = "Issue16_ReconfigureTarget_" .. suffix
+    if not controlledCase(suffix .. " same-adapter reconfiguration", {
+        row(kind, actorName, -1, 0, activeProfile(0.18, 0.8)),
+    }, {
+        row("monster_warrior", targetName, -0.5, 0, quietProfile()),
+    }, function()
+        local actor, unit = getUnit(actorName)
+        local targetEntity, target = getUnit(targetName)
+        local attack = getAttack(actor)
+        local data = catalogProfile(kind)
+        unit:DriveAttack(targetEntity, true)
+        session:AdvanceForTest(0.05)
+        check(attack:Configure(data, 0), suffix .. " can reconfigure on its existing actor")
+        session:AdvanceForTest(0.2)
+        check(target.Hp == 220 and unit.AttackSerial == 1,
+            suffix .. " discards pending work without rewinding observations")
+        unit:DriveAttack(targetEntity, true)
+        check(unit.AttackSerial == 2, suffix .. " accepts the replacement attack intent")
+        session:AdvanceForTest(0.2)
+        local expectedHp = kind == "monster_warrior" and 185 or 190
+        check(target.Hp == expectedHp and target.DamageTakenSerial == 1,
+            suffix .. " delivers the replacement attack through the full session step")
+    end) then return end
+end
+
+do
+    local actorName = "Issue16_AdapterActor"
+    local targetName = "Issue16_AdapterTarget"
+    if not controlledCase("attack adapter replacement", {
+        row("monster_shooter", actorName, -1, 0, activeProfile(0.18, 0.8)),
+    }, {
+        row("monster_warrior", targetName, -0.5, 0, quietProfile()),
+    }, function()
+        local actor, unit = getUnit(actorName)
+        local targetEntity, target = getUnit(targetName)
+        local attack = getAttack(actor)
+        local warrior = catalogProfile("monster_warrior")
+        unit:DriveAttack(targetEntity, true)
+        check(attack:Configure(warrior, 0) and unit.UnitKind == "ASSAULT",
+            "same actor can replace its shooter adapter with the warrior adapter")
+        session:AdvanceForTest(0.2)
+        check(target.Hp == 220 and unit.AttackSerial == 1,
+            "adapter replacement cancels the unaccepted shot")
+        unit:DriveAttack(targetEntity, true)
+        session:AdvanceForTest(0.2)
+        check(target.Hp == 185 and target.DamageTakenSerial == 1 and unit.AttackSerial == 2,
+            "replacement adapter alone delivers its native area hit")
+    end) then return end
+end
+
+do
+    local actorName = "Issue16_TankSwitchActor"
+    local firstTargetName = "Issue16_TankSwitchTarget"
+    local replacementName = "Issue16_TankSwitchReplacement"
+    if not controlledCase("tank and shooter adapter switch", {
+        row("monster_shooter", actorName, -1, 0, activeProfile(0.18, 0.8)),
+    }, {
+        row("monster_warrior", firstTargetName, -0.5, 0, quietProfile()),
+        row("monster_warrior", replacementName, 5, 2, quietProfile()),
+    }, function()
+        local actor, unit = getUnit(actorName)
+        local firstTargetEntity, firstTarget = getUnit(firstTargetName)
+        local replacementEntity, replacement = getUnit(replacementName)
+        local attack = getAttack(actor)
+        local tank = catalogProfile("monster_tank")
+        local shooter = catalogProfile("monster_shooter")
+        check(attack:Configure(tank, 0) and unit.UnitKind == "TANK",
+            "switch to tank updates installed attack classification")
+        unit:DriveAttack(nil, false)
+        session:AdvanceForTest(0.02)
+        check(firstTarget.Hp == 180 and firstTarget.DamageTakenSerial == 1 and firstTarget.KnockbackActive,
+            "reconfigured tank preserves contact damage and native knockback")
+        check(attack:Configure(shooter, 0) and unit.UnitKind == "SHOOTER",
+            "switch from tank restores shooter classification")
+        replacementEntity.KinematicbodyComponent:SetWorldPosition(Vector2(-0.5, 0))
+        unit:DriveAttack(replacementEntity, true)
+        session:AdvanceForTest(0.2)
+        check(replacement.Hp == 190 and replacement.DamageTakenSerial == 1
+            and not replacement.KnockbackActive,
+            "reconfigured shooter delivers hitscan damage without tank knockback")
+    end) then return end
+end
+
+do
+    local actorName = "Issue16_RecoveryActor"
+    local targetName = "Issue16_RecoveryTarget"
+    local decoyName = "Issue16_RecoveryDecoy"
+    if not controlledCase("invalid configuration recovery", {
+        row("monster_shooter", actorName, -1, 0, activeProfile(0.18, 0.8)),
+    }, {
+        row("monster_warrior", targetName, -0.5, 0, quietProfile()),
+        row("monster_warrior", decoyName, -0.5, 0.15, quietProfile()),
+    }, function()
+        local actor, unit = getUnit(actorName)
+        local targetEntity, target = getUnit(targetName)
+        local _, decoy = getUnit(decoyName)
+        local attack = getAttack(actor)
+        local shooter = catalogProfile("monster_shooter")
+        local warrior = catalogProfile("monster_warrior")
+        unit:DriveAttack(targetEntity, true)
+        check(attack:Configure({ MonsterType = "INVALID" }, 0) == false,
+            "invalid attack configuration is rejected explicitly")
         session:AdvanceForTest(1)
-        check(defender.Hp == 220 and unit.AttackSerial == 1, "RESULT discards pending hits and blocks new attacks")
-        cleanup()
-    end
-end)
-cleanup()
-session:EndManualSimulation()
-if not ok then check(false, tostring(detail)) end
-log("[AttackExecutionProbe] failures=" .. tostring(failures))
+        unit:DriveAttack(targetEntity, true)
+        check(target.Hp == 220 and unit.AttackSerial == 1,
+            "rejected configuration leaves no active attack work")
+        check(attack:Configure(warrior, 0), "configuration recovers with another native adapter")
+        unit:DriveAttack(targetEntity, true)
+        session:AdvanceForTest(0.2)
+        check(target.Hp == 185 and decoy.Hp == 185
+            and target.DamageTakenSerial == 1 and decoy.DamageTakenSerial == 1,
+            "recovered warrior preserves area hits after rejected shooter configuration")
+        check(shooter.MonsterType == "SHOOTER", "recovery fixture came from the shooter catalog profile")
+    end) then return end
+end
+
+do
+    local actorName = "Issue16_FrozenShooter"
+    local targetName = "Issue16_FrozenShooterTarget"
+    local reserveName = "Issue16_FrozenShooterReserve"
+    if not controlledCase("accepted shooter hit survives reconfiguration", {
+        row("monster_shooter", actorName, -1, 0, activeProfile(0.18, 0.8)),
+    }, {
+        row("monster_warrior", targetName, 1.5, 0, quietProfile()),
+        row("monster_warrior", reserveName, 5, 2, quietProfile()),
+    }, function()
+        local actor, unit = getUnit(actorName)
+        local targetEntity, target = getUnit(targetName)
+        local attack = getAttack(actor)
+        local shooter = catalogProfile("monster_shooter")
+        local tank = catalogProfile("monster_tank")
+        local acceptedEffect = unit:GetHitEffectRUID()
+        unit:DriveAttack(targetEntity, true)
+        -- Emit one real adapter HitEvent; the following AdvanceForTest applies the complete damage batch.
+        unit:AdvanceAttack(0.2)
+        check(unit.AttackSerial == 1 and target.Hp == 220,
+            "native shooter hit is accepted before the session batch is advanced")
+        check(attack:Configure(tank, 0) and unit.UnitKind == "TANK",
+            "accepted shooter hit can be followed by an adapter replacement")
+        unit:SetMonsterIdentity(unit.MonsterId, unit.MonsterName, "")
+        session:AdvanceForTest(0.02)
+        check(target.Hp == 190 and target.DamageTakenSerial == 1,
+            "accepted shooter damage survives replacement before full-step resolution")
+        check(acceptedEffect ~= "" and target.HitEffectSerial == 1
+            and target.LastHitEffectRUID == acceptedEffect and target.CombatState == "ON_HIT",
+            "accepted shooter hit retains its captured hit effect and hit-stop policy")
+        check(shooter.MonsterType == "SHOOTER", "accepted policy starts from the shooter catalog profile")
+    end) then return end
+end
+
+do
+    local actorName = "Issue16_FrozenTank"
+    local targetName = "Issue16_FrozenTankTarget"
+    local reserveName = "Issue16_FrozenTankReserve"
+    if not controlledCase("accepted tank hit survives reconfiguration", {
+        row("monster_tank", actorName, -1, 0, activeProfile(0.18, 2)),
+    }, {
+        row("monster_warrior", targetName, -0.5, 0, quietProfile()),
+        row("monster_warrior", reserveName, 4.5, 2, quietProfile()),
+    }, function()
+        local actor, unit = getUnit(actorName)
+        local _, target = getUnit(targetName)
+        local attack = getAttack(actor)
+        local shooter = catalogProfile("monster_shooter")
+        local shooterEffect = shooter.HitEffectRUID
+        unit:SetMonsterIdentity(unit.MonsterId, unit.MonsterName, shooterEffect)
+        unit:DriveAttack(nil, false)
+        check(unit.AttackSerial == 1 and target.Hp == 220,
+            "native tank contact is accepted before the session batch is advanced")
+        check(attack:Configure(shooter, 0) and unit.UnitKind == "SHOOTER",
+            "accepted tank contact can be followed by an adapter replacement")
+        session:AdvanceForTest(0.02)
+        check(target.Hp == 180 and target.DamageTakenSerial == 1 and target.KnockbackActive,
+            "accepted tank contact retains damage and queued knockback")
+        check(target.HitEffectSerial == 0 and target.CombatState ~= "ON_HIT",
+            "accepted tank contact retains its no-hit-effect and no-hit-stop policy")
+    end) then return end
+end
+
+do
+    local actorName = "Issue16_HitStopActor"
+    local targetName = "Issue16_HitStopTarget"
+    local hitterName = "Issue16_HitStopHitter"
+    if not controlledCase("hit stop blocks new intent but advances accepted work", {
+        row("monster_shooter", actorName, -1, 0, activeProfile(0.18, 0.01)),
+    }, {
+        row("monster_warrior", targetName, -0.5, 0, quietProfile()),
+        row("monster_shooter", hitterName, -1, 0.15, activeProfile(0.01, 2, 1)),
+    }, function()
+        local actorEntity, actor = getUnit(actorName)
+        local targetEntity, target = getUnit(targetName)
+        local hitterEntity, hitter = getUnit(hitterName)
+        actor:DriveAttack(targetEntity, true)
+        hitter:DriveAttack(actorEntity, true)
+        session:AdvanceForTest(0.02)
+        check(actor.DamageTakenSerial == 1 and actor.CombatState == "ON_HIT",
+            "opposing native hit starts actor hit stop")
+        actor.AttackRange = 4
+        session:AdvanceForTest(0.16)
+        check(target.Hp == 190 and target.DamageTakenSerial == 1,
+            "already pending attack advances through hit stop and applies its HitEvent")
+        check(actor.AttackSerial == 1,
+            "hit stop blocks a new automatic attack intent during the accepted strike")
+        check(contains(session.EventHistory, "DAMAGE:" .. hitterEntity.Name .. ":" .. actorEntity.Name)
+            and contains(session.EventHistory, "DAMAGE:" .. actorEntity.Name .. ":" .. targetEntity.Name),
+            "both opposing and outgoing damage events remain observable")
+    end) then return end
+end
+
+do
+    local actorName = "Issue16_DyingActor"
+    local reserveName = "Issue16_DyingActorReserve"
+    local targetName = "Issue16_DyingActorTarget"
+    local killerName = "Issue16_DyingActorKiller"
+    if not controlledCase("attacker death cancels unresolved shot", {
+        row("monster_shooter", actorName, -1, 0, activeProfile(0.18, 0.8, 30, 30)),
+        row("monster_tank", reserveName, -4, 3, quietProfile()),
+    }, {
+        row("monster_warrior", targetName, 1.5, 0, quietProfile()),
+        row("monster_shooter", killerName, -0.5, 0.2, activeProfile(0.01, 2, 30)),
+    }, function()
+        local actorEntity, actor = getUnit(actorName)
+        local _, reserve = getUnit(reserveName)
+        local targetEntity, target = getUnit(targetName)
+        local killerEntity, killer = getUnit(killerName)
+        actor:DriveAttack(targetEntity, true)
+        killer:DriveAttack(actorEntity, true)
+        session:AdvanceForTest(0.05)
+        check(actor.IsDead and actor.Hp == 0 and actor.DamageTakenSerial == 1,
+            "enemy attack kills the pending shooter through the battle step")
+        check(reserve:IsAlive() and session.Phase == "BATTLE" and session.Result == "",
+            "prepared player reserve keeps observation in BATTLE after actor death")
+        session:AdvanceForTest(0.25)
+        check(target.Hp == 220 and target.DamageTakenSerial == 0 and actor.AttackSerial == 1,
+            "dead attacker cannot resolve its unaccepted shot")
+        check(contains(session.EventHistory, "DAMAGE:" .. killerEntity.Name .. ":" .. actorEntity.Name)
+            and not contains(session.EventHistory, "RESULT"),
+            "death is recorded without forcing a terminal result")
+    end) then return end
+end
+
+do
+    local actorName = "Issue16_TargetDeathShooter"
+    local killerName = "Issue16_TargetDeathKiller"
+    local targetName = "Issue16_DyingTarget"
+    local reserveName = "Issue16_DyingTargetReserve"
+    if not controlledCase("target death cancels pending shooter hit", {
+        row("monster_shooter", actorName, -1, 0, activeProfile(0.18, 0.8)),
+        row("monster_warrior", killerName, 0, 0, activeProfile(0.01, 2, 35)),
+    }, {
+        row("monster_warrior", targetName, 0.3, 0, quietProfile(35)),
+        row("monster_tank", reserveName, 4.5, 3, quietProfile()),
+    }, function()
+        local shooterEntity, shooter = getUnit(actorName)
+        local killerEntity, killer = getUnit(killerName)
+        local _, target = getUnit(targetName)
+        local _, reserve = getUnit(reserveName)
+        local targetEntity = _EntityService:GetEntityByPath("/maps/map01/" .. targetName)
+        shooter:DriveAttack(targetEntity, true)
+        killer:DriveAttack(targetEntity, true)
+        session:AdvanceForTest(0.05)
+        check(target.IsDead and target.Hp == 0 and target.DamageTakenSerial == 1,
+            "warrior attack kills the selected target before shooter impact")
+        check(reserve:IsAlive() and session.Phase == "BATTLE" and session.Result == "",
+            "prepared enemy reserve keeps observation in BATTLE after target death")
+        session:AdvanceForTest(0.2)
+        check(target.DamageTakenSerial == 1 and shooter.AttackSerial == 1,
+            "shooter does not deliver another native hit to the dead target")
+        check(isvalid(shooterEntity) and isvalid(killerEntity)
+            and contains(session.EventHistory, "DAMAGE:" .. killerEntity.Name .. ":" .. targetName),
+            "target death retains its legitimate attack and semantic damage event")
+    end) then return end
+end
+
+do
+    local actorName = "Issue16_TankMultiActor"
+    local firstName = "Issue16_TankMultiFirst"
+    local secondName = "Issue16_TankMultiSecond"
+    local thirdName = "Issue16_TankMultiThird"
+    if not controlledCase("tank multi-target contact cooldowns", {
+        row("monster_tank", actorName, -1, 0, activeProfile(0.18, 2)),
+    }, {
+        row("monster_warrior", firstName, -0.5, 0, quietProfile()),
+        row("monster_warrior", secondName, -1, 0.3, quietProfile()),
+        row("monster_warrior", thirdName, 4.5, 2, quietProfile()),
+    }, function()
+        local actor, unit = getUnit(actorName)
+        local _, first = getUnit(firstName)
+        local _, second = getUnit(secondName)
+        local thirdEntity, third = getUnit(thirdName)
+        unit:DriveAttack(nil, false)
+        session:AdvanceForTest(0.02)
+        check(first.Hp == 180 and second.Hp == 180 and third.Hp == 220
+            and unit.AttackSerial == 2,
+            "one tank contact announces and damages each in-range defender")
+        unit:DriveAttack(nil, false)
+        session:AdvanceForTest(0.02)
+        check(first.Hp == 180 and second.Hp == 180 and unit.AttackSerial == 2,
+            "each defender keeps its own contact cooldown")
+        thirdEntity.KinematicbodyComponent:SetWorldPosition(Vector2(-0.8, 0.2))
+        unit:DriveAttack(nil, false)
+        session:AdvanceForTest(0.02)
+        check(third.Hp == 180 and third.DamageTakenSerial == 1 and unit.AttackSerial == 3,
+            "a new defender is not blocked by other targets' cooldowns")
+        check(isvalid(actor), "tank actor remains registered after multiple contacts")
+    end) then return end
+end
+
+for _, kind in ipairs({ "monster_warrior", "monster_shooter" }) do
+    local suffix = kind == "monster_warrior" and "Assault" or "Shooter"
+    local actorName = "Issue16_OpeningActor_" .. suffix
+    local targetName = "Issue16_OpeningTarget_" .. suffix
+    if not controlledCase(suffix .. " opening delay", {
+        row(kind, actorName, -1, 0, activeProfile(0.18, 0.8)),
+    }, {
+        row("monster_warrior", targetName, -0.5, 0, quietProfile()),
+    }, function()
+        local actor, unit = getUnit(actorName)
+        local targetEntity, target = getUnit(targetName)
+        local attack = getAttack(actor)
+        local data = catalogProfile(kind)
+        check(attack:Configure(data, 0.12), suffix .. " accepts the configured opening delay")
+        unit:DriveAttack(targetEntity, true)
+        check(unit.AttackSerial == 0, suffix .. " does not announce before opening delay elapses")
+        session:AdvanceForTest(0.05)
+        unit:DriveAttack(targetEntity, true)
+        check(unit.AttackSerial == 0, suffix .. " keeps the opening delay during early steps")
+        session:AdvanceForTest(0.08)
+        unit:DriveAttack(targetEntity, true)
+        check(unit.AttackSerial == 1, suffix .. " consumes the opening delay once")
+        session:AdvanceForTest(0.2)
+        local expectedHp = kind == "monster_warrior" and 185 or 190
+        check(target.Hp == expectedHp and target.DamageTakenSerial == 1,
+            suffix .. " performs the first attack after its opening delay")
+    end) then return end
+end
+
+do
+    local actorName = "Issue16_TerminalActor"
+    local targetName = "Issue16_TerminalTarget"
+    if not controlledCase("natural WIN terminal boundary", {
+        row("monster_shooter", actorName, -1, 0, activeProfile(0.18, 0.8)),
+    }, {
+        row("monster_warrior", targetName, -0.5, 0, quietProfile(30)),
+    }, function()
+        local actorEntity, actor = getUnit(actorName)
+        local targetEntity, target = getUnit(targetName)
+        local actorBefore = actorEntity.TransformComponent.WorldPosition
+        local targetBeforeHp = target.Hp
+        actor:DriveAttack(targetEntity, true)
+        session:AdvanceForTest(0.05)
+        check(target.Hp == targetBeforeHp and actor.AttackSerial == 1,
+            "terminal target remains alive before the lethal attack impact")
+        session:AdvanceForTest(0.14)
+        check(session.Phase == "RESULT" and session.Result == "WIN",
+            "legal native lethal damage produces the actual WIN result")
+        check(target.Hp == 0 and target.IsDead and target.DamageTakenSerial == 1,
+            "terminal target records the applied lethal HitEvent")
+        check(contains(session.EventHistory, "DAMAGE:" .. actorEntity.Name .. ":" .. targetName)
+            and contains(session.EventHistory, "DEAD:" .. targetName)
+            and session.LastEvent == "RESULT",
+            "terminal damage, death, and result semantic events are published")
+
+        local attackSerial = actor.AttackSerial
+        local targetHp = target.Hp
+        local damageSerial = target.DamageTakenSerial
+        local eventSerial = session.EventSerial
+        local eventHistory = session.EventHistory
+        local actorPosition = actorEntity.TransformComponent.WorldPosition
+        local targetPosition = targetEntity.TransformComponent.WorldPosition
+        actor:DriveAttack(targetEntity, true)
+        session:AdvanceForTest(0.5)
+        local actorAfter = actorEntity.TransformComponent.WorldPosition
+        local targetAfter = targetEntity.TransformComponent.WorldPosition
+        check(actor.AttackSerial == attackSerial and target.Hp == targetHp
+            and target.DamageTakenSerial == damageSerial,
+            "terminal WIN blocks later attack and damage changes")
+        check(session.EventSerial == eventSerial and session.EventHistory == eventHistory,
+            "terminal WIN blocks later semantic combat events")
+        check(samePosition(actorPosition, actorAfter) and samePosition(targetPosition, targetAfter)
+            and samePosition(actorBefore, actorAfter),
+            "terminal WIN leaves actor and defeated target positions stable")
+    end) then return end
+end
+
+if failures == 0 then
+    log("[M1][AttackExecutionProbe] PASS")
+else
+    log_error("[M1][AttackExecutionProbe] FAILURES=" .. tostring(failures))
+end
