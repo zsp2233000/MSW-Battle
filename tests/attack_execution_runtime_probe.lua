@@ -37,6 +37,12 @@ local function quietProfile(maxHp)
     return result
 end
 
+local function consumeEnemyOpeningDelay(unit, target, label)
+    unit:DriveAttack(target, true)
+    session:AdvanceForTest(session.EnemyOpeningDelay + 0.02)
+    check(unit.AttackSerial == 0, label .. " consumes the configured enemy opening delay before attacking")
+end
+
 local function catalogProfile(monsterId)
     local source = session:GetMonsterProfile(monsterId)
     if source == nil then return nil end
@@ -262,7 +268,7 @@ for _, kind in ipairs({ "monster_warrior", "monster_shooter" }) do
             suffix .. " discards pending work without rewinding observations")
         unit:DriveAttack(targetEntity, true)
         check(unit.AttackSerial == 2, suffix .. " accepts the replacement attack intent")
-        session:AdvanceForTest(0.2)
+        session:AdvanceForTest(data.ImpactDelaySeconds + 0.02)
         local expectedHp = kind == "monster_warrior" and 185 or 190
         check(target.Hp == expectedHp and target.DamageTakenSerial == 1,
             suffix .. " delivers the replacement attack through the full session step")
@@ -288,7 +294,7 @@ do
         check(target.Hp == 220 and unit.AttackSerial == 1,
             "adapter replacement cancels the unaccepted shot")
         unit:DriveAttack(targetEntity, true)
-        session:AdvanceForTest(0.2)
+        session:AdvanceForTest(warrior.ImpactDelaySeconds + 0.02)
         check(target.Hp == 185 and target.DamageTakenSerial == 1 and unit.AttackSerial == 2,
             "replacement adapter alone delivers its native area hit")
     end) then return end
@@ -320,7 +326,7 @@ do
             "switch from tank restores shooter classification")
         replacementEntity.KinematicbodyComponent:SetWorldPosition(Vector2(-0.5, 0))
         unit:DriveAttack(replacementEntity, true)
-        session:AdvanceForTest(0.2)
+        session:AdvanceForTest(shooter.ImpactDelaySeconds + 0.02)
         check(replacement.Hp == 190 and replacement.DamageTakenSerial == 1
             and not replacement.KnockbackActive,
             "reconfigured shooter delivers hitscan damage without tank knockback")
@@ -352,7 +358,7 @@ do
             "rejected configuration leaves no active attack work")
         check(attack:Configure(warrior, 0), "configuration recovers with another native adapter")
         unit:DriveAttack(targetEntity, true)
-        session:AdvanceForTest(0.2)
+        session:AdvanceForTest(warrior.ImpactDelaySeconds + 0.02)
         check(target.Hp == 185 and decoy.Hp == 185
             and target.DamageTakenSerial == 1 and decoy.DamageTakenSerial == 1,
             "recovered warrior preserves area hits after rejected shooter configuration")
@@ -436,6 +442,7 @@ do
         local actorEntity, actor = getUnit(actorName)
         local targetEntity, target = getUnit(targetName)
         local hitterEntity, hitter = getUnit(hitterName)
+        consumeEnemyOpeningDelay(hitter, actorEntity, "hit-stop enemy shooter")
         actor:DriveAttack(targetEntity, true)
         hitter:DriveAttack(actorEntity, true)
         session:AdvanceForTest(0.02)
@@ -474,6 +481,7 @@ do
         local _, enemyReserve = getUnit(enemyReserveName)
         local acceptedEffect = actor:GetHitEffectRUID()
 
+        consumeEnemyOpeningDelay(actor, targetEntity, "same-batch dying shooter")
         killer:DriveAttack(actorEntity, true)
         actor:DriveAttack(targetEntity, true)
         session:AdvanceForTest(0.05)
@@ -520,6 +528,7 @@ do
         local _, reserve = getUnit(reserveName)
         local targetEntity, target = getUnit(targetName)
         local killerEntity, killer = getUnit(killerName)
+        consumeEnemyOpeningDelay(killer, actorEntity, "pending-shot killer")
         actor:DriveAttack(targetEntity, true)
         killer:DriveAttack(actorEntity, true)
         session:AdvanceForTest(0.05)
@@ -625,7 +634,7 @@ for _, kind in ipairs({ "monster_warrior", "monster_shooter" }) do
         session:AdvanceForTest(0.08)
         unit:DriveAttack(targetEntity, true)
         check(unit.AttackSerial == 1, suffix .. " consumes the opening delay once")
-        session:AdvanceForTest(0.2)
+        session:AdvanceForTest(data.ImpactDelaySeconds + 0.02)
         local expectedHp = kind == "monster_warrior" and 185 or 190
         check(target.Hp == expectedHp and target.DamageTakenSerial == 1,
             suffix .. " performs the first attack after its opening delay")
