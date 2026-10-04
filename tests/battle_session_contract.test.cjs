@@ -249,3 +249,39 @@ test("Issue #14 centralizes BattleSession registration, death, and removal accou
     assert.ok(batchProbe.includes(scenario), `${scenario} runtime assertion missing`);
   }
 });
+
+test("Issue #15 exposes an atomic server-only controlled battle-scene seam", () => {
+  const session = read("RootDesk/MyDesk/Combat/BattleSession.mlua");
+  const probe = read("tests/controlled_scenario_runtime_probe.lua");
+
+  assert.match(
+    session,
+    /@ExecSpace\("ServerOnly"\)\s+method boolean PrepareBattleForTest\(table playerRoster, table enemyRoster\)/,
+  );
+  assert.match(session, /Environment:IsMakerPlay\(\)/);
+  assert.match(session, /method boolean TryStartBattle\(\)/);
+
+  for (const scenario of [
+    "valid 1v1 scene",
+    "zero-player scene cannot start",
+    "overlapping deployment positions",
+    "arena boundary position",
+    "preparation without a manual clock",
+    "unknown MonsterId",
+    "zero-enemy roster",
+    "duplicate team name",
+    "seventh unit",
+    "invalid arena coordinates",
+    "foreign userdata is rejected as a position",
+    "unknown profile override",
+    "invalid numeric overrides",
+    "scene switch discards queued old-scene work",
+    "throwing case releases its owned clock",
+    "partial spawn failure clears every new unit",
+  ]) {
+    assert.ok(probe.includes(scenario), `${scenario} runtime assertion missing`);
+  }
+
+  assert.doesNotMatch(probe, /session\._T/);
+  assert.match(probe, /\[M1\]\[ControlledScenarioProbe\] PASS/);
+});

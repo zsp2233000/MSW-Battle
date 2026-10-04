@@ -19,6 +19,9 @@ node --test tests/*.test.cjs
 | six_vs_six_batch_outcome_probe.lua | 登記存活數、停用不算死亡、致死傷害只扣一次、同批已接受命中不因攻擊者死亡而撤回；DRAW 只發布一次 |
 | six_vs_six_runtime_probe.lua | 固定編隊、索敵、擁擠移動、WIN／LOSE／DRAW、RESULT |
 | six_vs_six_full_battle_probe.lua | 十二個單位自然對戰、結果及終止後狀態 |
+| controlled_scenario_runtime_probe.lua | Maker-only 受控編隊、輸入原子驗證、profile 覆寫、時鐘所有權、場景切換隔離及中途生成失敗清理 |
+
+`controlled_scenario_runtime_probe.lua` 會故意嘗試一次不存在的模型，驗證部分生成失敗後清理已建立單位；該案例預期出現 `LEA-3028`、`SpawnByModelId returned nil` 與 `[M1][BattleSession] CONFIG_ERROR` 診斷。除此之外，probe 的 Error／Warning 都須處理。
 
 手動 probe 以 BeginManualSimulation 取得自有邏輯的時間控制權，結束或發生 Lua 錯誤時以 EndManualSimulation 釋放。InitializeBattle 與 OnEndPlay 也會恢復正式時鐘。手動時間不推進原生 Body；移動與擊退必須使用正式 Maker frames 驗收。
 
