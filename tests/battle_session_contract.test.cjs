@@ -313,6 +313,8 @@ test("Issue #16 attack probes use prepared battle scenes and public session step
   assert.match(executionProbe,
     /accepted hit survives same-batch attacker death/,
     "the execution probe must preserve accepted-hit behavior when its attacker dies in the batch");
+  assert.match(executionProbe, /attackerDeathAt\s*<\s*outgoingHitAt/,
+    "the death scenario must observe the accepted hit resolve after its attacker dies");
   assert.ok(
     executionProbe.indexOf("local runOk, runDetail = pcall(function()") <
       executionProbe.indexOf("if not isvalid(session) then"),

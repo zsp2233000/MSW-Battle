@@ -460,11 +460,11 @@ do
     local killerName = "Issue16_BatchKiller"
     local enemyReserveName = "Issue16_BatchEnemyReserve"
     if not controlledCase("accepted hit survives same-batch attacker death", {
-        row("monster_shooter", actorName, -1, 0, activeProfile(0.01, 2, 30, 30)),
+        row("monster_shooter", killerName, -1, 0, activeProfile(0.01, 2, 30)),
+        row("monster_warrior", targetName, -0.4, 0.3, quietProfile(30)),
         row("monster_tank", playerReserveName, -4, 1.4, quietProfile()),
     }, {
-        row("monster_warrior", targetName, -0.4, 0, quietProfile(30)),
-        row("monster_shooter", killerName, -1, 0.2, activeProfile(0.01, 2, 30, 30)),
+        row("monster_shooter", actorName, -0.5, 0, activeProfile(0.01, 2, 30, 30)),
         row("monster_tank", enemyReserveName, 3.4, 1.4, quietProfile()),
     }, function()
         local actorEntity, actor = getUnit(actorName)
@@ -474,14 +474,14 @@ do
         local _, enemyReserve = getUnit(enemyReserveName)
         local acceptedEffect = actor:GetHitEffectRUID()
 
-        actor:DriveAttack(targetEntity, true)
         killer:DriveAttack(actorEntity, true)
+        actor:DriveAttack(targetEntity, true)
         session:AdvanceForTest(0.05)
 
         check(actor.AttackSerial == 1 and killer.AttackSerial == 1,
             "both lethal native attacks are accepted in the same full battle step")
         check(actor.IsDead and actor.Hp == 0 and actor.DamageTakenSerial == 1,
-            "the opposing accepted hit kills the shooter in that damage batch")
+            "the first resolved HitEvent kills the accepted shooter before its outgoing hit settles")
         check(target.IsDead and target.Hp == 0 and target.DamageTakenSerial == 1,
             "the shooter's already accepted hit still resolves after its death")
         check(acceptedEffect ~= "" and target.HitEffectSerial == 1
@@ -490,11 +490,17 @@ do
         check(playerReserve:IsAlive() and enemyReserve:IsAlive()
             and session.Phase == "BATTLE" and session.Result == "",
             "live reserves keep the legitimate post-death battle observable")
-        check(contains(session.EventHistory, "DAMAGE:" .. killerEntity.Name .. ":" .. actorEntity.Name)
+        local killerDamageAt = string.find(session.EventHistory,
+            "DAMAGE:" .. killerEntity.Name .. ":" .. actorEntity.Name, 1, true)
+        local attackerDeathAt = string.find(session.EventHistory, "DEAD:" .. actorEntity.Name, 1, true)
+        local outgoingHitAt = string.find(session.EventHistory,
+            "DAMAGE:" .. actorEntity.Name .. ":" .. targetName, 1, true)
+        check(killerDamageAt ~= nil and attackerDeathAt ~= nil and outgoingHitAt ~= nil
+            and killerDamageAt < attackerDeathAt and attackerDeathAt < outgoingHitAt
             and contains(session.EventHistory, "DAMAGE:" .. actorEntity.Name .. ":" .. targetName)
             and contains(session.EventHistory, "DEAD:" .. actorEntity.Name)
             and contains(session.EventHistory, "DEAD:" .. targetName),
-            "both accepted damage events and both deaths are published")
+            "the accepted outgoing damage event follows its attacker's same-batch death event")
     end) then return end
 end
 
