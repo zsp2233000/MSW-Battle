@@ -430,6 +430,26 @@ test("Issue #19 probes renamed and same-type catalog identities through producti
     "the identity probe must only query the loaded catalog and use production deployment");
 });
 
+test("Issue #19 requires Maker lifecycle verification before modifying the catalog", async () => {
+  const fixture = require(path.join(root, "tests/monster_catalog_csv_fixture.cjs"));
+  const sourceBytes = fs.readFileSync(path.join(root, "RootDesk/MyDesk/Data/MonsterData.csv"));
+  const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "m1-monster-csv-lifecycle-test-"));
+  const csvPath = path.join(sandbox, "MonsterData.csv");
+
+  try {
+    fs.writeFileSync(csvPath, sourceBytes);
+    await assert.rejects(fixture.withTemporaryMonsterCsv(async () => {
+      throw new Error("probe must not run without lifecycle verification");
+    }, { csvPath, logger: () => {} }),
+    /required lifecycle callbacks are missing: lifecycle\.stop, lifecycle\.refresh, lifecycle\.verifyRestored/);
+    assert.deepEqual(fs.readFileSync(csvPath), sourceBytes);
+    assert.deepEqual(fs.readdirSync(sandbox), ["MonsterData.csv"],
+      "validation happens before creating backup or fixture files");
+  } finally {
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  }
+});
+
 test("Issue #19 temporary CSV guard restores exact original bytes after success or probe failure", async () => {
   const fixture = require(path.join(root, "tests/monster_catalog_csv_fixture.cjs"));
   const sourceBytes = fs.readFileSync(path.join(root, "RootDesk/MyDesk/Data/MonsterData.csv"));
@@ -477,24 +497,78 @@ test("Issue #19 temporary CSV guard restores exact original bytes after success 
 
     const abortController = new AbortController();
     let interruptedManifest = "";
+    let continueAfterCancellation = false;
+    let startProbe;
+    const probeStarted = new Promise((resolve) => { startProbe = resolve; });
     const interruptionStages = [];
-    await assert.rejects(fixture.withTemporaryMonsterCsv(async (manifest) => {
-      interruptedManifest = manifest.manifestPath;
-      abortController.abort();
-      return new Promise(() => {});
+    const interruptedRun = fixture.withTemporaryMonsterCsv(async ({ manifestPath, signal }) => {
+      interruptedManifest = manifestPath;
+      startProbe();
+      await new Promise((resolve, reject) => {
+        signal.addEventListener("abort", () => {
+          setTimeout(() => {
+            continueAfterCancellation = true;
+            reject(signal.reason);
+          }, 20);
+        }, { once: true });
+      });
     }, {
       csvPath,
       signal: abortController.signal,
       lifecycle: {
-        stop: async ({ stage }) => interruptionStages.push(`stop:${stage}`),
+        stop: async ({ stage }) => {
+          interruptionStages.push(`stop:${stage}`);
+          if (stage === "before-restore") {
+            assert.equal(continueAfterCancellation, true, "Maker stops only after the probe acknowledges cancellation");
+          }
+        },
         refresh: async ({ stage }) => interruptionStages.push(`refresh:${stage}`),
         verifyRestored: async () => interruptionStages.push("verify:formal-catalog"),
       },
       logger: () => {},
-    }), /interrupted by AbortSignal/);
+    });
+    await probeStarted;
+    abortController.abort();
+    await assert.rejects(interruptedRun, /interrupted by AbortSignal/);
     assert.deepEqual(fs.readFileSync(csvPath), sourceBytes);
     assert.equal(fs.existsSync(interruptedManifest), false, "interruption cleanup removes its OS-temp backup after verification");
     assert.deepEqual(interruptionStages, [
+      "stop:before-restore",
+      "refresh:after-restore",
+      "verify:formal-catalog",
+      "stop:after-restore-verification",
+    ]);
+
+    const cleanupAbortController = new AbortController();
+    const beforeSigintListeners = process.listeners("SIGINT");
+    const beforeSigtermListeners = process.listeners("SIGTERM");
+    let cleanupManifest = "";
+    const cleanupSignalStages = [];
+    await assert.rejects(fixture.withTemporaryMonsterCsv(async (manifest) => {
+      cleanupManifest = manifest.manifestPath;
+      return "probe complete";
+    }, {
+      csvPath,
+      signal: cleanupAbortController.signal,
+      lifecycle: {
+        stop: async ({ stage }) => {
+          cleanupSignalStages.push(`stop:${stage}`);
+          assert.ok(process.listeners("SIGINT").some((listener) => !beforeSigintListeners.includes(listener)),
+            "SIGINT handler remains installed during Maker cleanup");
+          assert.ok(process.listeners("SIGTERM").some((listener) => !beforeSigtermListeners.includes(listener)),
+            "SIGTERM handler remains installed during Maker cleanup");
+          if (stage === "before-restore") cleanupAbortController.abort();
+        },
+        refresh: async ({ stage }) => cleanupSignalStages.push(`refresh:${stage}`),
+        verifyRestored: async () => cleanupSignalStages.push("verify:formal-catalog"),
+      },
+      logger: () => {},
+    }), /interrupted by AbortSignal/);
+    assert.deepEqual(fs.readFileSync(csvPath), sourceBytes);
+    assert.equal(fs.existsSync(cleanupManifest), false, "a signal during cleanup still completes rollback");
+    assert.deepEqual(process.listeners("SIGINT"), beforeSigintListeners, "SIGINT handler is removed after cleanup");
+    assert.deepEqual(process.listeners("SIGTERM"), beforeSigtermListeners, "SIGTERM handler is removed after cleanup");
+    assert.deepEqual(cleanupSignalStages, [
       "stop:before-restore",
       "refresh:after-restore",
       "verify:formal-catalog",

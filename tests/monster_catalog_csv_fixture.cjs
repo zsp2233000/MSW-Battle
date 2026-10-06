@@ -77,6 +77,13 @@ function insideTempDirectory(candidate, tempRoot = os.tmpdir()) {
 
 async function withTemporaryMonsterCsv(runProbe, options = {}) {
   if (typeof runProbe !== "function") throw new TypeError("runProbe must be a function");
+  const lifecycle = options.lifecycle || {};
+  const lifecycleOperations = ["stop", "refresh", "verifyRestored"];
+  const missingLifecycleOperations = lifecycleOperations.filter((operation) => typeof lifecycle[operation] !== "function");
+  if (missingLifecycleOperations.length > 0) {
+    const missingNames = missingLifecycleOperations.map((operation) => `lifecycle.${operation}`).join(", ");
+    throw new TypeError(`required lifecycle callbacks are missing: ${missingNames}`);
+  }
   const csvPath = path.resolve(options.csvPath || path.join(__dirname, "../RootDesk/MyDesk/Data/MonsterData.csv"));
   const tempRoot = path.resolve(options.tempRoot || os.tmpdir());
   const originalBytes = fs.readFileSync(csvPath);
@@ -94,7 +101,6 @@ async function withTemporaryMonsterCsv(runProbe, options = {}) {
     fixtureSha256: sha256(fixtureBytes),
     fixtureByteLength: fixtureBytes.length,
   };
-  const lifecycle = options.lifecycle || {};
   const logger = options.logger || (() => {});
   const abortController = new AbortController();
   let signalError = null;
@@ -110,14 +116,15 @@ async function withTemporaryMonsterCsv(runProbe, options = {}) {
   const onSigterm = () => onSignal("SIGTERM");
   const externalSignal = options.signal;
   const onExternalAbort = () => onSignal("AbortSignal");
-  process.once("SIGINT", onSigint);
-  process.once("SIGTERM", onSigterm);
+  process.on("SIGINT", onSigint);
+  process.on("SIGTERM", onSigterm);
   if (externalSignal) {
     if (externalSignal.aborted) onExternalAbort();
     else externalSignal.addEventListener("abort", onExternalAbort, { once: true });
   }
 
   let outcome;
+  let probePromise = null;
   let fixtureInstalled = false;
   let backupDirectoryRemoved = false;
   const cleanupErrors = [];
@@ -128,24 +135,31 @@ async function withTemporaryMonsterCsv(runProbe, options = {}) {
       throw new Error("OS-temp MonsterData backup failed byte-for-byte verification");
     }
     logger(`[M1][CatalogFixture] original bytes=${originalBytes.length} sha256=${originalSha256} backup=${backupPath}`);
+    if (signalError) throw signalError;
     fs.writeFileSync(csvPath, fixtureBytes);
     fixtureInstalled = true;
     if (!fs.readFileSync(csvPath).equals(fixtureBytes)) throw new Error("temporary MonsterData fixture failed byte-for-byte verification");
 
-    const probePromise = Promise.resolve()
+    probePromise = Promise.resolve()
       .then(() => runProbe({ ...manifest, signal: abortController.signal }))
       .then((value) => ({ kind: "success", value }), (error) => ({ kind: "failure", error }));
     outcome = await Promise.race([probePromise, interruption]);
   } catch (error) {
     outcome = { kind: "failure", error };
   } finally {
-    process.removeListener("SIGINT", onSigint);
-    process.removeListener("SIGTERM", onSigterm);
-    externalSignal?.removeEventListener("abort", onExternalAbort);
-
+    if (fixtureInstalled && outcome?.kind === "interrupted" && probePromise) {
+      // Do not restore while the callback can still resume and dispatch Maker work.
+      // Its promise settling after AbortSignal is the cancellation acknowledgement.
+      try {
+        const cancelledOutcome = await probePromise;
+        logger(`[M1][CatalogFixture] interrupted probe settled before rollback outcome=${cancelledOutcome.kind}`);
+      } catch (error) {
+        cleanupErrors.push(error);
+      }
+    }
     if (fixtureInstalled) {
       try {
-        await lifecycle.stop?.({ stage: "before-restore", manifest });
+        await lifecycle.stop({ stage: "before-restore", manifest });
       } catch (error) {
         cleanupErrors.push(error);
       }
@@ -162,17 +176,17 @@ async function withTemporaryMonsterCsv(runProbe, options = {}) {
       cleanupErrors.push(error);
     }
     try {
-      await lifecycle.refresh?.({ stage: "after-restore", manifest });
+      await lifecycle.refresh({ stage: "after-restore", manifest });
     } catch (error) {
       cleanupErrors.push(error);
     }
     try {
-      await lifecycle.verifyRestored?.({ ...manifest, originalBytes });
+      await lifecycle.verifyRestored({ ...manifest, originalBytes });
     } catch (error) {
       cleanupErrors.push(error);
     }
     try {
-      await lifecycle.stop?.({ stage: "after-restore-verification", manifest });
+      await lifecycle.stop({ stage: "after-restore-verification", manifest });
     } catch (error) {
       cleanupErrors.push(error);
     }
@@ -184,9 +198,12 @@ async function withTemporaryMonsterCsv(runProbe, options = {}) {
         cleanupErrors.push(error);
       }
     }
+    process.removeListener("SIGINT", onSigint);
+    process.removeListener("SIGTERM", onSigterm);
+    externalSignal?.removeEventListener("abort", onExternalAbort);
   }
 
-  const primaryError = outcome?.kind === "success" ? null : outcome?.error || signalError;
+  const primaryError = outcome?.kind === "success" && !signalError ? null : outcome?.error || signalError;
   if (cleanupErrors.length > 0) {
     const errors = primaryError ? [primaryError, ...cleanupErrors] : cleanupErrors;
     throw new AggregateError(errors, `temporary MonsterData cleanup failed${backupDirectoryRemoved ? "" : `; backup retained at ${tempDirectory}`}`);
