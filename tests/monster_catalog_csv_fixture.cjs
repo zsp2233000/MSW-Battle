@@ -5,6 +5,33 @@ const path = require("node:path");
 
 const TANK_ID = "monster_tank";
 const VARIANT_ID = "probe_tank_variant";
+const DEFAULT_PROBE_CANCELLATION_TIMEOUT_MS = 30_000;
+const DEFAULT_LIFECYCLE_TIMEOUT_MS = 120_000;
+
+async function settlesWithin(promise, timeoutMs) {
+  let timeoutId;
+  const settled = await Promise.race([
+    Promise.resolve(promise).then(() => true),
+    new Promise((resolve) => { timeoutId = setTimeout(() => resolve(false), timeoutMs); }),
+  ]);
+  clearTimeout(timeoutId);
+  return settled;
+}
+
+async function callWithTimeout(callback, args, operation, timeoutMs) {
+  let timeoutId;
+  const callbackPromise = Promise.resolve().then(() => callback(args));
+  const timeoutPromise = new Promise((resolve, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(
+      `lifecycle.${operation} did not complete within ${timeoutMs}ms`,
+    )), timeoutMs);
+  });
+  try {
+    return await Promise.race([callbackPromise, timeoutPromise]);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 
 function parseMonsterCsv(source) {
   const text = Buffer.isBuffer(source) ? source.toString("utf8") : String(source);
@@ -84,6 +111,11 @@ async function withTemporaryMonsterCsv(runProbe, options = {}) {
     const missingNames = missingLifecycleOperations.map((operation) => `lifecycle.${operation}`).join(", ");
     throw new TypeError(`required lifecycle callbacks are missing: ${missingNames}`);
   }
+  const probeCancellationTimeoutMs = options.probeCancellationTimeoutMs ?? DEFAULT_PROBE_CANCELLATION_TIMEOUT_MS;
+  const lifecycleTimeoutMs = options.lifecycleTimeoutMs ?? DEFAULT_LIFECYCLE_TIMEOUT_MS;
+  for (const [name, value] of Object.entries({ probeCancellationTimeoutMs, lifecycleTimeoutMs })) {
+    if (!Number.isSafeInteger(value) || value < 1) throw new TypeError(`${name} must be a positive integer`);
+  }
   const csvPath = path.resolve(options.csvPath || path.join(__dirname, "../RootDesk/MyDesk/Data/MonsterData.csv"));
   const tempRoot = path.resolve(options.tempRoot || os.tmpdir());
   const originalBytes = fs.readFileSync(csvPath);
@@ -128,13 +160,20 @@ async function withTemporaryMonsterCsv(runProbe, options = {}) {
   let fixtureInstalled = false;
   let backupDirectoryRemoved = false;
   const cleanupErrors = [];
+  const safeLog = (message) => {
+    try {
+      logger(message);
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+  };
   try {
     fs.writeFileSync(backupPath, originalBytes, { flag: "wx" });
     fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, { flag: "wx" });
     if (!insideTempDirectory(backupPath, tempRoot) || !fs.readFileSync(backupPath).equals(originalBytes)) {
       throw new Error("OS-temp MonsterData backup failed byte-for-byte verification");
     }
-    logger(`[M1][CatalogFixture] original bytes=${originalBytes.length} sha256=${originalSha256} backup=${backupPath}`);
+    safeLog(`[M1][CatalogFixture] original bytes=${originalBytes.length} sha256=${originalSha256} backup=${backupPath}`);
     if (signalError) throw signalError;
     fs.writeFileSync(csvPath, fixtureBytes);
     fixtureInstalled = true;
@@ -147,22 +186,25 @@ async function withTemporaryMonsterCsv(runProbe, options = {}) {
   } catch (error) {
     outcome = { kind: "failure", error };
   } finally {
+    let probeQuiesced = outcome?.kind !== "interrupted" || !probePromise;
     if (fixtureInstalled && outcome?.kind === "interrupted" && probePromise) {
-      // Do not restore while the callback can still resume and dispatch Maker work.
-      // Its promise settling after AbortSignal is the cancellation acknowledgement.
+      probeQuiesced = await settlesWithin(probePromise, probeCancellationTimeoutMs);
+      if (probeQuiesced) safeLog("[M1][CatalogFixture] interrupted probe acknowledged cancellation before rollback");
+    }
+    if (fixtureInstalled) {
       try {
-        const cancelledOutcome = await probePromise;
-        logger(`[M1][CatalogFixture] interrupted probe settled before rollback outcome=${cancelledOutcome.kind}`);
+        await callWithTimeout(lifecycle.stop, { stage: "before-restore", manifest }, "stop", lifecycleTimeoutMs);
       } catch (error) {
         cleanupErrors.push(error);
       }
     }
-    if (fixtureInstalled) {
-      try {
-        await lifecycle.stop({ stage: "before-restore", manifest });
-      } catch (error) {
-        cleanupErrors.push(error);
-      }
+    if (fixtureInstalled && outcome?.kind === "interrupted" && probePromise && !probeQuiesced) {
+      // Maker Stop can release a request that did not settle on AbortSignal alone.
+      probeQuiesced = await settlesWithin(probePromise, probeCancellationTimeoutMs);
+      if (probeQuiesced) safeLog("[M1][CatalogFixture] interrupted probe settled after Maker Stop");
+      else cleanupErrors.push(new Error(
+        `probe callback did not acknowledge AbortSignal within ${probeCancellationTimeoutMs}ms before or after Maker Stop`,
+      ));
     }
     try {
       const backupBytes = fs.existsSync(backupPath) ? fs.readFileSync(backupPath) : originalBytes;
@@ -171,22 +213,22 @@ async function withTemporaryMonsterCsv(runProbe, options = {}) {
       if (!restoredBytes.equals(originalBytes) || sha256(restoredBytes) !== originalSha256) {
         throw new Error("MonsterData.csv restore failed byte-for-byte SHA-256 verification");
       }
-      logger(`[M1][CatalogFixture] restored bytes=${restoredBytes.length} sha256=${originalSha256}`);
+      safeLog(`[M1][CatalogFixture] restored bytes=${restoredBytes.length} sha256=${originalSha256}`);
     } catch (error) {
       cleanupErrors.push(error);
     }
     try {
-      await lifecycle.refresh({ stage: "after-restore", manifest });
+      await callWithTimeout(lifecycle.refresh, { stage: "after-restore", manifest }, "refresh", lifecycleTimeoutMs);
     } catch (error) {
       cleanupErrors.push(error);
     }
     try {
-      await lifecycle.verifyRestored({ ...manifest, originalBytes });
+      await callWithTimeout(lifecycle.verifyRestored, { ...manifest, originalBytes }, "verifyRestored", lifecycleTimeoutMs);
     } catch (error) {
       cleanupErrors.push(error);
     }
     try {
-      await lifecycle.stop({ stage: "after-restore-verification", manifest });
+      await callWithTimeout(lifecycle.stop, { stage: "after-restore-verification", manifest }, "stop", lifecycleTimeoutMs);
     } catch (error) {
       cleanupErrors.push(error);
     }

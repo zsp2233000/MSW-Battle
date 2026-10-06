@@ -574,6 +574,111 @@ test("Issue #19 temporary CSV guard restores exact original bytes after success 
       "verify:formal-catalog",
       "stop:after-restore-verification",
     ]);
+
+    const loggerAbortController = new AbortController();
+    let loggerFailureManifest = "";
+    let startLoggerFailureProbe;
+    const loggerFailureProbeStarted = new Promise((resolve) => { startLoggerFailureProbe = resolve; });
+    const loggerFailureStages = [];
+    const loggerFailureSigintListeners = process.listeners("SIGINT");
+    const loggerFailureSigtermListeners = process.listeners("SIGTERM");
+    const loggerFailureRun = fixture.withTemporaryMonsterCsv(async ({ manifestPath, signal }) => {
+      loggerFailureManifest = manifestPath;
+      startLoggerFailureProbe();
+      await new Promise((resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    }, {
+      csvPath,
+      signal: loggerAbortController.signal,
+      lifecycle: {
+        stop: async ({ stage }) => loggerFailureStages.push(`stop:${stage}`),
+        refresh: async ({ stage }) => loggerFailureStages.push(`refresh:${stage}`),
+        verifyRestored: async ({ originalBytes }) => {
+          assert.deepEqual(fs.readFileSync(csvPath), originalBytes);
+          loggerFailureStages.push("verify:formal-catalog");
+        },
+      },
+      logger: (message) => {
+        if (message.includes("acknowledged cancellation")) throw new Error("logger failed during cancellation acknowledgement");
+      },
+    });
+    await loggerFailureProbeStarted;
+    loggerAbortController.abort();
+    let loggerFailure;
+    await assert.rejects(loggerFailureRun, (error) => {
+      loggerFailure = error;
+      return error instanceof AggregateError && /cleanup failed; backup retained at/.test(error.message);
+    });
+    const loggerFailureDirectory = path.dirname(loggerFailureManifest);
+    try {
+      assert.deepEqual(fs.readFileSync(csvPath), sourceBytes, "logger failure does not interrupt CSV restoration");
+      assert.deepEqual(fs.readFileSync(path.join(loggerFailureDirectory, "MonsterData.csv.original")), sourceBytes,
+        "a logger failure retains the recovery backup");
+      assert.ok(loggerFailure.errors.some((error) => /logger failed during cancellation acknowledgement/.test(error.message)),
+        "the logger failure is reported as incomplete cleanup");
+      assert.deepEqual(loggerFailureStages, [
+        "stop:before-restore",
+        "refresh:after-restore",
+        "verify:formal-catalog",
+        "stop:after-restore-verification",
+      ], "all Maker cleanup callbacks run despite a logger exception");
+      assert.deepEqual(process.listeners("SIGINT"), loggerFailureSigintListeners,
+        "SIGINT handler is removed after logger failure cleanup");
+      assert.deepEqual(process.listeners("SIGTERM"), loggerFailureSigtermListeners,
+        "SIGTERM handler is removed after logger failure cleanup");
+    } finally {
+      if (fixture.insideTempDirectory(loggerFailureDirectory)) fs.rmSync(loggerFailureDirectory, { recursive: true, force: true });
+    }
+
+    const pendingAbortController = new AbortController();
+    let pendingManifest = "";
+    let startPendingProbe;
+    const pendingProbeStarted = new Promise((resolve) => { startPendingProbe = resolve; });
+    const pendingCleanupStages = [];
+    const pendingRun = fixture.withTemporaryMonsterCsv(async ({ manifestPath }) => {
+      pendingManifest = manifestPath;
+      startPendingProbe();
+      return new Promise(() => {});
+    }, {
+      csvPath,
+      signal: pendingAbortController.signal,
+      probeCancellationTimeoutMs: 10,
+      lifecycleTimeoutMs: 100,
+      lifecycle: {
+        stop: async ({ stage }) => pendingCleanupStages.push(`stop:${stage}`),
+        refresh: async ({ stage }) => pendingCleanupStages.push(`refresh:${stage}`),
+        verifyRestored: async ({ originalBytes }) => {
+          assert.deepEqual(fs.readFileSync(csvPath), originalBytes);
+          pendingCleanupStages.push("verify:formal-catalog");
+        },
+      },
+      logger: () => {},
+    });
+    await pendingProbeStarted;
+    pendingAbortController.abort();
+    let pendingCleanupError;
+    await assert.rejects(pendingRun, (error) => {
+      pendingCleanupError = error;
+      return error instanceof AggregateError && /cleanup failed; backup retained at/.test(error.message);
+    });
+    const retainedDirectory = path.dirname(pendingManifest);
+    try {
+      assert.equal(fixture.insideTempDirectory(retainedDirectory), true, "incomplete rollback retains an OS-temp backup");
+      assert.deepEqual(fs.readFileSync(csvPath), sourceBytes, "bounded recovery restores formal CSV bytes");
+      assert.deepEqual(fs.readFileSync(path.join(retainedDirectory, "MonsterData.csv.original")), sourceBytes,
+        "incomplete cancellation preserves the original backup for recovery");
+      assert.ok(pendingCleanupError.errors.some((error) => /did not acknowledge AbortSignal/.test(error.message)),
+        "a timed-out callback is reported as incomplete cleanup");
+      assert.deepEqual(pendingCleanupStages, [
+        "stop:before-restore",
+        "refresh:after-restore",
+        "verify:formal-catalog",
+        "stop:after-restore-verification",
+      ]);
+    } finally {
+      if (fixture.insideTempDirectory(retainedDirectory)) fs.rmSync(retainedDirectory, { recursive: true, force: true });
+    }
   } finally {
     fs.rmSync(sandbox, { recursive: true, force: true });
   }
