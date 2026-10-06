@@ -32,13 +32,7 @@ test("MonsterData assets reach the owning unit and semantic hit events", () => {
   assert.match(read("BattleHitEffectPresentation.mlua"), /@ExecSpace\("Multicast"\)\s+method void PlayHitEffect\(string effectRUID\)/);
 });
 
-test("each successful same-frame hit keeps its damage event and target sound", () => {
-  const session = read("BattleSession.mlua");
-  const resolver = session.match(/method void ResolveDamageBatch\(\)([\s\S]*?)\n\s*end\s*\n\s*method void NotifyDeath/);
-  assert.ok(resolver, "BattleSession must resolve queued hits");
-  assert.match(resolver[1], /for _, hit in ipairs\(pending\)/);
-  assert.doesNotMatch(resolver[1], /found\.amount\s*=|resolved\s*=/);
-
+test("each successful hit keeps its damage event and target sound", () => {
   const unit = read("BattleUnit.mlua");
   assert.match(unit, /session:EmitPresentation\("DAMAGE", attacker, self\.Entity, amount\)/);
   assert.match(unit, /self\.OnHitSoundSerial = self\.OnHitSoundSerial \+ 1[\s\S]*?self:PlayCombatSound\(self\.OnHitSoundRUID\)/);

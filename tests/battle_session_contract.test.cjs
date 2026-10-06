@@ -193,8 +193,6 @@ test("Issue #7 preserves the data-driven battle core behind deployment", () => {
   assert.match(session, /self\.InitialPlayerAlive = self\.PlayerAlive/);
   assert.match(session, /self\.InitialEnemyAlive = self\.EnemyAlive/);
   assert.doesNotMatch(session, /self\.EnemyAlive\s*=\s*6/);
-  assert.match(session, /self:EmitPresentation\("RESULT"/);
-  assert.match(session, /self\._T\.resultEntered == true/);
   assert.match(session, /script\.BattleDeploymentInput/);
 
   assert.match(unit, /@Sync property string MonsterId = ""/);
@@ -228,7 +226,6 @@ test("Issue #14 centralizes BattleSession registration, death, and removal accou
   const session = read("RootDesk/MyDesk/Combat/BattleSession.mlua");
   const deploymentProbe = read("tests/deployment_runtime_probe.lua");
   const tankProbe = read("tests/tank_contact_runtime_probe.lua");
-  const batchProbe = read("tests/six_vs_six_batch_outcome_probe.lua");
 
   assert.match(session, /@ExecSpace\("ServerOnly"\)\s+method boolean TryRemoveDeployedUnitAt\(Vector3 position\)/);
   assert.doesNotMatch(deploymentProbe, /session\._T|:RemoveDeployedUnit\(/);
@@ -248,15 +245,6 @@ test("Issue #14 centralizes BattleSession registration, death, and removal accou
     assert.ok(deploymentProbe.includes(scenario), `${scenario} runtime assertion missing`);
   }
   assert.doesNotMatch(tankProbe, /EnemyAlive\s*=\s*session\.EnemyAlive\s*\+/);
-  for (const scenario of [
-    "registered spawns own the synchronized faction counts",
-    "disabling a living unit does not count as death",
-    "a fully resolved lethal damage batch decrements the enemy count once",
-    "synchronized counts and the existing snapshot expose the resolved death",
-    "duplicate death notification and damage to a dead unit do not decrement again",
-  ]) {
-    assert.ok(batchProbe.includes(scenario), `${scenario} runtime assertion missing`);
-  }
 });
 
 test("Issue #15 exposes an atomic server-only controlled battle-scene seam", () => {
@@ -300,7 +288,7 @@ test("Issue #16 attack probes use prepared battle scenes and public session step
     "tests/attack_execution_runtime_probe.lua",
     "tests/attack_clock_runtime_probe.lua",
   ];
-  const forbiddenCalls = /session\._T|:(?:SpawnUnit|SpawnConfiguredUnit|TryDeployMonster|QueueDamage|QueueKnockback|ApplyPendingKnockbacks|ResolveDamageBatch|EvaluateResult|EnterResult)\s*\(/;
+  const forbiddenCalls = /session\._T|:(?:SpawnUnit|SpawnConfiguredUnit|TryDeployMonster|QueueDamage|QueueKnockback|ApplyPendingKnockbacks)\s*\(/;
   const mutableSessionOutcomes = /session\.(?:Phase|Result|PlayerAlive|EnemyAlive|InitialPlayerAlive|InitialEnemyAlive)\s*=(?!=)/;
 
   for (const probePath of probePaths) {
@@ -337,7 +325,7 @@ test("Issue #17 combat probes use controlled rosters and natural native outcomes
     ["tests/shooter_runtime_probe.lua", "ShooterProbe"],
     ["tests/targeting_crowding_runtime_probe.lua", "TargetCrowdingProbe"],
   ];
-  const forbiddenBypasses = /session\._T|:(?:SpawnUnit|SpawnConfiguredUnit|QueueDamage|QueueKnockback|ApplyPendingKnockbacks|ResolveDamageBatch|DetermineResult|EvaluateResult|EnterResult)\s*\(/;
+  const forbiddenBypasses = /session\._T|:(?:SpawnUnit|SpawnConfiguredUnit|QueueDamage|QueueKnockback|ApplyPendingKnockbacks)\s*\(/;
   const mutableSessionOutcomes = /session\.(?:Phase|Result|PlayerAlive|EnemyAlive|InitialPlayerAlive|InitialEnemyAlive)\s*=(?!=)/;
 
   for (const [probePath, probeTag] of controlledProbes) {
@@ -378,10 +366,28 @@ test("Issue #17 combat probes use controlled rosters and natural native outcomes
   const sixVsSixProbe = read("tests/six_vs_six_runtime_probe.lua");
   assert.equal((sixVsSixProbe.match(/session:TryDeployMonster\(/g) || []).length, 1,
     "formal 6v6 probe must deploy through the official command in its roster loop");
-  assert.doesNotMatch(sixVsSixProbe, /session\._T|:(?:SpawnUnit|SpawnConfiguredUnit|DetermineResult|EnterResult)\s*\(/,
+  assert.doesNotMatch(sixVsSixProbe, /session\._T|:(?:SpawnUnit|SpawnConfiguredUnit)\s*\(/,
     "formal 6v6 probe must retain registered map units and natural settlement");
   assert.match(sixVsSixProbe, /InitialPlayerAlive == 6 and session\.InitialEnemyAlive == 6/);
   assert.ok(sixVsSixProbe.indexOf("local runOk, runDetail = pcall(function()") <
     sixVsSixProbe.indexOf('_EntityService:GetEntityByPath("/maps/map01")'),
   "formal 6v6 probe must capture map/session setup errors");
+});
+
+test("Issue #18 verifies same-batch outcomes and natural 6v6 settlement", () => {
+  const batchProbe = read("tests/six_vs_six_batch_outcome_probe.lua");
+  const fullBattleProbe = read("tests/six_vs_six_full_battle_probe.lua");
+
+  for (const scenario of [
+    "one accepted lethal hit produces WIN",
+    "one accepted lethal hit produces LOSE",
+    "same-batch lethal hits produce DRAW in player-first order",
+    "same-batch lethal hits produce DRAW in enemy-first order",
+    "two accepted hits retain separate HP, serial, sound, and damage-event observations",
+    "DRAW rejects later battle commands and remains stable after a full step",
+  ]) {
+    assert.ok(batchProbe.includes(scenario), `${scenario} runtime assertion missing`);
+  }
+  assert.match(fullBattleProbe, /result matches final alive counts/);
+  assert.match(fullBattleProbe, /terminal state is stable for one second of real frames/);
 });

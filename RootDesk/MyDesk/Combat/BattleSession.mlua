@@ -502,14 +502,6 @@ script BattleSession extends Component
         return true
     end
 
-    method string FindMonsterIdByType(string monsterType)
-        -- Delegate combat-type lookup to the validated catalog.
-        local catalog = self._T.monsterCatalog
-        if not isvalid(catalog) then return "" end
-        return catalog:FindIdByType(monsterType)
-    end
-
-
     method table BuildFixedEnemyRoster()
         -- Build six enemy entries from session IDs and positions.
         local monsterIds = { self.EnemyMonsterId1, self.EnemyMonsterId2, self.EnemyMonsterId3, self.EnemyMonsterId4, self.EnemyMonsterId5, self.EnemyMonsterId6 }
@@ -686,20 +678,6 @@ script BattleSession extends Component
         local profile = self:GetMonsterProfile(monsterId)
         if profile == nil then
             log_error("[M1][BattleSession] configured MonsterId missing: " .. tostring(monsterId))
-            return nil
-        end
-        return self:SpawnConfiguredUnit(profile.ModelId, name, faction, profile, position)
-    end
-
-    method Entity SpawnUnit(string modelId, string name, string faction, string monsterKey, Vector3 position)
-        -- Preserve the existing high-level test seam while resolving its key through MonsterData.
-        local profile = self:GetMonsterProfile(monsterKey)
-        if profile == nil then
-            local legacyMonsterId = self:FindMonsterIdByType(monsterKey)
-            profile = self:GetMonsterProfile(legacyMonsterId)
-        end
-        if profile == nil then
-            log_error("[M1][BattleSession] MonsterData profile missing for " .. tostring(monsterKey))
             return nil
         end
         return self:SpawnConfiguredUnit(profile.ModelId, name, faction, profile, position)
@@ -913,8 +891,9 @@ script BattleSession extends Component
 
     @ExecSpace("ServerOnly")
     method void StepSimulation(number delta)
-        -- Tick all units and attacks before resolving the complete native-hit damage batch.
+        -- Run one complete combat step and settle its outcome only after all accepted damage resolves.
         if delta < 0 then return end
+        if self.Phase == "RESULT" then return end
         self:DisableDefaultPlayer()
         if self.Phase == "BATTLE" then
             for _, record in ipairs(self._T.units) do
@@ -928,17 +907,35 @@ script BattleSession extends Component
             end
             self:ApplyPendingKnockbacks()
             self:ResolveDamageBatch()
-            self:EvaluateResult()
-        elseif self.Phase == "RESULT" then
-            for _, record in ipairs(self._T.units) do
-                if isvalid(record.unit) then record.unit:Tick(delta) end
+
+            local result = ""
+            if self.PlayerAlive <= 0 and self.EnemyAlive <= 0 then
+                result = "DRAW"
+            elseif self.EnemyAlive <= 0 then
+                result = "WIN"
+            elseif self.PlayerAlive <= 0 then
+                result = "LOSE"
+            end
+
+            if result ~= "" and self.Phase == "BATTLE" and self._T.resultEntered ~= true then
+                self._T.resultEntered = true
+                self.Result = result
+                self.Phase = "RESULT"
+                self._T.pendingDamage = {}
+                self._T.pendingKnockbacks = {}
+                for _, record in ipairs(self._T.units) do
+                    if isvalid(record.unit) then record.unit:StopForResult() end
+                end
+                self:EmitPresentation("RESULT", nil, nil, 0)
+                log("[M1][BattleSession] RESULT=" .. result)
             end
         end
         self:RefreshSnapshot()
     end
 
+    @ExecSpace("ServerOnly")
     method void ResolveDamageBatch()
-        -- Resolve each HitEvent separately; EvaluateResult runs after the full batch.
+        -- Resolve each accepted HitEvent separately so damage, death, and presentation stay per hit.
         if self._T.pendingDamage == nil or #self._T.pendingDamage == 0 then return end
         local pending = self._T.pendingDamage
         self._T.pendingDamage = {}
@@ -967,36 +964,6 @@ script BattleSession extends Component
                 return
             end
         end
-    end
-
-    method string DetermineResult(integer playerAlive, integer enemyAlive)
-        -- Classify the completed damage batch independently so high-level tests can observe all three outcomes.
-        if playerAlive <= 0 and enemyAlive <= 0 then return "DRAW" end
-        if enemyAlive <= 0 then return "WIN" end
-        if playerAlive <= 0 then return "LOSE" end
-        return ""
-    end
-
-    method void EvaluateResult()
-        -- Enter RESULT once after all same-frame damage has been applied.
-        if self.Phase ~= "BATTLE" or self._T.resultEntered == true then return end
-        local result = self:DetermineResult(self.PlayerAlive, self.EnemyAlive)
-        if result ~= "" then self:EnterResult(result) end
-    end
-
-    method void EnterResult(string result)
-        -- Stop all movement, targeting, attack, contact, and damage paths at the terminal boundary.
-        if self._T.resultEntered == true then return end
-        self._T.resultEntered = true
-        self.Phase = "RESULT"
-        self.Result = result
-        self._T.pendingKnockbacks = {}
-        for _, record in ipairs(self._T.units) do
-            if isvalid(record.unit) then record.unit:StopForResult() end
-        end
-        self:EmitPresentation("RESULT", nil, nil, 0)
-        self:RefreshSnapshot()
-        log("[M1][BattleSession] RESULT=" .. result)
     end
 
     method void EmitPresentation(string eventName, Entity source, Entity target, integer amount)
