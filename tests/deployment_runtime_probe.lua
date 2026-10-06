@@ -1,12 +1,7 @@
 -- Run in Maker Play with context=server_main before pressing Start in the UI.
 -- Exercises the production server deployment gates without replacing combat logic.
-local map = _EntityService:GetEntityByPath("/maps/map01")
-local session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
-if not isvalid(session) then
-    log_error("[M1][DeploymentProbe][FAIL] BattleSession unavailable")
-    return
-end
-
+local map = nil
+local session = nil
 local failures = 0
 local function check(condition, message)
     if condition then
@@ -16,6 +11,12 @@ local function check(condition, message)
         log_error("[M1][DeploymentProbe][FAIL] " .. message)
     end
 end
+
+local runOk, runDetail = pcall(function()
+map = _EntityService:GetEntityByPath("/maps/map01")
+session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
+check(isvalid(map) and isvalid(session), "map and BattleSession are available")
+if not isvalid(session) then return end
 
 check(session.Phase == "DEPLOYMENT" and session.PlayerAlive == 0 and session.EnemyAlive == 6,
     "deployment starts empty against six fixed enemies")
@@ -77,6 +78,9 @@ local beforeRemove = session.PlayerAlive
 check(not session:TryRemoveDeployedUnitAt(Vector3(-2, -3, 0)), "removal after start is rejected")
 check(session.PlayerAlive == beforeRemove, "rejected removal preserves the roster count")
 check(not session:TryStartBattle(), "second start is rejected")
+end)
+
+if not runOk then check(false, "probe raised: " .. tostring(runDetail)) end
 
 if failures == 0 then
     log("[M1][DeploymentProbe] PASS")

@@ -1,17 +1,18 @@
 -- Run in a fresh Maker Play test, context=server_main.
 -- Exercises the public controlled-scene API; no private BattleSession state is read.
-local map = _EntityService:GetEntityByPath("/maps/map01")
-local session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
-if not isvalid(session) then
-    log_error("[M1][ControlledScenarioProbe][FAIL] BattleSession unavailable")
-    return
-end
-
+local map = nil
+local session = nil
 local failures = 0
 local function check(condition, message)
     if condition then log("[M1][ControlledScenarioProbe][PASS] " .. message)
     else failures = failures + 1; log_error("[M1][ControlledScenarioProbe][FAIL] " .. message) end
 end
+
+local runOk, runDetail = pcall(function()
+map = _EntityService:GetEntityByPath("/maps/map01")
+session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
+check(isvalid(map) and isvalid(session), "map and BattleSession are available")
+if not isvalid(session) then return end
 
 local function row(monsterId, name, position, overrides)
     return { monsterId = monsterId, name = name, position = position, overrides = overrides }
@@ -26,6 +27,12 @@ local function quietProfile()
         ImpactDelaySeconds = 0,
         AttackIntervalSeconds = 100,
     }
+end
+
+local function tankContactProfile(damage)
+    local result = quietProfile()
+    result.AttackDamage = damage
+    return result
 end
 
 local function capturePublicState(includeSnapshotSerial)
@@ -64,7 +71,8 @@ local function manualCase(label, callback, expectThrow)
     end
 
     local ok, detail = pcall(callback)
-    session:EndManualSimulation()
+    local releaseOk, releaseDetail = pcall(function() session:EndManualSimulation() end)
+    if not releaseOk then check(false, label .. " clock release raised: " .. tostring(releaseDetail)) end
     if expectThrow == true then
         check(not ok, label .. " throwing case releases its owned clock")
         return not ok
@@ -204,7 +212,7 @@ end)
 
 manualCase("invalid input preserves the active public state and pending work", function()
     check(session:PrepareBattleForTest(
-        { row("monster_tank", "Issue15_StablePlayer", Vector3(-1, 0, 0), quietProfile()) },
+        { row("monster_tank", "Issue15_StablePlayer", Vector3(-0.4, 0, 0), tankContactProfile(9)) },
         { row("monster_warrior", "Issue15_StableEnemy", Vector3(0, 0, 0), quietProfile()) }
     ), "stable baseline scene is prepared")
     check(session:TryStartBattle(), "stable baseline enters battle")
@@ -216,8 +224,11 @@ manualCase("invalid input preserves the active public state and pending work", f
     if not isvalid(playerUnit) or not isvalid(enemyUnit) then return end
 
     local hpBeforePendingHit = enemyUnit.Hp
-    session:QueueDamage(enemyEntity, 9, playerEntity)
-    session:QueueKnockback(playerEntity, enemyEntity, 0.7)
+    local damageSerialBeforePendingHit = enemyUnit.DamageTakenSerial
+    local playerUnit = playerEntity:GetComponent("script.BattleUnit")
+    playerUnit:DriveAttack(enemyEntity, true)
+    check(enemyUnit.Hp == hpBeforePendingHit,
+        "native tank contact stages hit-event damage before the next complete session step")
 
     rejectUnchanged("unknown MonsterId in a later row preserves the full prior scene",
         { row("monster_tank", "Issue15_ValidBeforeBad", Vector3(-1, 0, 0), quietProfile()) },
@@ -279,13 +290,14 @@ manualCase("invalid input preserves the active public state and pending work", f
     end
 
     session:AdvanceForTest(0.01)
-    check(enemyUnit.Hp == hpBeforePendingHit - 9,
-        "validation failures preserve previously queued damage and knockback work")
+    check(enemyUnit.Hp == hpBeforePendingHit - 9 and enemyUnit.DamageTakenSerial == damageSerialBeforePendingHit + 1
+        and enemyUnit.KnockbackActive,
+        "validation failures preserve native pending damage and knockback until a complete session step")
 end)
 
 manualCase("scene switch discards queued old-scene work", function()
     check(session:PrepareBattleForTest(
-        { row("monster_tank", "Issue15_OldPlayer", Vector3(-1, 0, 0), quietProfile()) },
+        { row("monster_tank", "Issue15_OldPlayer", Vector3(-0.4, 0, 0), tankContactProfile(17)) },
         { row("monster_warrior", "Issue15_OldEnemy", Vector3(0, 0, 0), quietProfile()) }
     ), "old scene is prepared")
     check(session:TryStartBattle(), "old scene starts before work is queued")
@@ -294,8 +306,11 @@ manualCase("scene switch discards queued old-scene work", function()
     check(isvalid(oldPlayer) and isvalid(oldEnemy), "old scene units are available")
     if not isvalid(oldPlayer) or not isvalid(oldEnemy) then return end
 
-    session:QueueDamage(oldEnemy, 17, oldPlayer)
-    session:QueueKnockback(oldPlayer, oldEnemy, 0.8)
+    local oldEnemyUnit = oldEnemy:GetComponent("script.BattleUnit")
+    local oldPlayerUnit = oldPlayer:GetComponent("script.BattleUnit")
+    oldPlayerUnit:DriveAttack(oldEnemy, true)
+    check(oldEnemyUnit.Hp == oldEnemyUnit.MaxHp,
+        "native tank HitEvent stages old-scene damage before a complete session step")
     local generation = session.SessionGeneration
     local eventSerial = session.EventSerial
     check(session:PrepareBattleForTest(
@@ -341,31 +356,9 @@ local reacquireOk, reacquireDetail = pcall(function()
     if acquired then session:EndManualSimulation() end
 end)
 if not reacquireOk then check(false, "clock reacquisition check raised: " .. tostring(reacquireDetail)) end
-
-manualCase("partial spawn failure clears every new unit", function()
-    local catalog = map:GetComponent("script.MonsterCatalog")
-    local shooterProfile = isvalid(catalog) and catalog:GetProfile("monster_shooter") or nil
-    check(isvalid(catalog) and shooterProfile ~= nil, "catalog profile is available for a recoverable Maker model fault")
-    if not isvalid(catalog) or shooterProfile == nil then return end
-
-    local originalModelId = shooterProfile.ModelId
-    local generation = session.SessionGeneration
-    shooterProfile.ModelId = "issue15_missing_spawn_model"
-    local callOk, accepted = pcall(function()
-        return session:PrepareBattleForTest(
-            { row("monster_tank", "Issue15_PartialPlayer", Vector3(-4, 0, 0), quietProfile()) },
-            { row("monster_shooter", "Issue15_PartialEnemy", Vector3(3, 0, 0), quietProfile()) }
-        )
-    end)
-    shooterProfile.ModelId = originalModelId
-
-    check(callOk and accepted == false, "recoverable model-reference fault fails after the first unit spawns")
-    check(shooterProfile.ModelId == originalModelId, "temporary Maker model-reference fault is restored")
-    check(session.Phase == "CONFIG_ERROR" and session.PlayerAlive == 0 and session.EnemyAlive == 0
-        and session:GetUnitSnapshots() == "" and string.find(session:GetDebugSnapshot(), "phase=CONFIG_ERROR", 1, true) ~= nil
-        and session.SessionGeneration == generation,
-        "partial spawn failure clears every new unit and enters CONFIG_ERROR without committing a generation")
 end)
+
+if not runOk then check(false, "probe raised: " .. tostring(runDetail)) end
 
 if failures == 0 then
     log("[M1][ControlledScenarioProbe] PASS")

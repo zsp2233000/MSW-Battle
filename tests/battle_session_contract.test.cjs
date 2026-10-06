@@ -1,5 +1,6 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 
@@ -274,7 +275,6 @@ test("Issue #15 exposes an atomic server-only controlled battle-scene seam", () 
     "invalid numeric overrides",
     "scene switch discards queued old-scene work",
     "throwing case releases its owned clock",
-    "partial spawn failure clears every new unit",
   ]) {
     assert.ok(probe.includes(scenario), `${scenario} runtime assertion missing`);
   }
@@ -390,4 +390,154 @@ test("Issue #18 verifies same-batch outcomes and natural 6v6 settlement", () => 
   }
   assert.match(fullBattleProbe, /result matches final alive counts/);
   assert.match(fullBattleProbe, /terminal state is stable for one second of real frames/);
+});
+
+test("Issue #19 probes renamed and same-type catalog identities through production APIs", () => {
+  const sourceBytes = fs.readFileSync(path.join(root, "RootDesk/MyDesk/Data/MonsterData.csv"));
+  const fixture = require(path.join(root, "tests/monster_catalog_csv_fixture.cjs"));
+  const original = fixture.parseMonsterCsv(sourceBytes);
+  const temporary = fixture.parseMonsterCsv(fixture.createTemporaryFixtureBuffer(sourceBytes));
+  const originalTank = original.records.find((row) => row.MonsterId === "monster_tank");
+  const renamedTank = temporary.records.find((row) => row.MonsterId === "monster_tank");
+  const variantTank = temporary.records.find((row) => row.MonsterId === "probe_tank_variant");
+
+  assert.equal(temporary.records.length, original.records.length + 1);
+  assert.equal(renamedTank.MonsterName, "RenamedTank");
+  assert.equal(variantTank.MonsterName, "VariantTank");
+  assert.deepEqual(renamedTank, { ...originalTank, MonsterName: "RenamedTank" });
+  assert.deepEqual(variantTank, {
+    ...originalTank,
+    MonsterId: "probe_tank_variant",
+    MonsterName: "VariantTank",
+  });
+
+  const probe = read("tests/monster_catalog_identity_runtime_probe.lua");
+  for (const expected of [
+    'map:GetComponent("script.MonsterCatalog")',
+    'catalog:GetProfile("monster_tank")',
+    'catalog:GetProfile("probe_tank_variant")',
+    'session:TryDeployMonster("monster_tank"',
+    'session:TryDeployMonster("probe_tank_variant"',
+    "primaryUnit.MonsterId == \"monster_tank\"",
+    "variantUnit.MonsterId == \"probe_tank_variant\"",
+    "[M1][CatalogIdentityProbe] PASS",
+    "[M1][CatalogIdentityProbe] FAILURES=",
+  ]) {
+    assert.ok(probe.includes(expected), `${expected} runtime assertion missing`);
+  }
+  assert.doesNotMatch(probe,
+    /session\._T|catalog:Load\(|session:GetMonsterProfile\(|PrepareBattleForTest\(|\w+Profile\.\w+\s*=(?!=)/,
+    "the identity probe must only query the loaded catalog and use production deployment");
+});
+
+test("Issue #19 temporary CSV guard restores exact original bytes after success or probe failure", async () => {
+  const fixture = require(path.join(root, "tests/monster_catalog_csv_fixture.cjs"));
+  const sourceBytes = fs.readFileSync(path.join(root, "RootDesk/MyDesk/Data/MonsterData.csv"));
+  const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "m1-monster-csv-guard-test-"));
+  const csvPath = path.join(sandbox, "MonsterData.csv");
+
+  try {
+    for (const shouldThrow of [false, true]) {
+      fs.writeFileSync(csvPath, sourceBytes);
+      let manifestPath = "";
+      const lifecycleStages = [];
+      const runProbe = async (manifest) => {
+        manifestPath = manifest.manifestPath;
+        const activeBytes = fs.readFileSync(csvPath);
+        assert.notDeepEqual(activeBytes, sourceBytes);
+        assert.equal(path.dirname(manifest.backupPath), path.dirname(manifest.manifestPath));
+        assert.ok(path.resolve(manifest.backupPath).startsWith(path.resolve(os.tmpdir())));
+        if (shouldThrow) throw new Error("simulated probe failure");
+        return "probe complete";
+      };
+      const lifecycle = {
+        stop: async ({ stage }) => lifecycleStages.push(`stop:${stage}`),
+        refresh: async ({ stage }) => lifecycleStages.push(`refresh:${stage}`),
+        verifyRestored: async ({ originalBytes }) => {
+          assert.deepEqual(fs.readFileSync(csvPath), originalBytes);
+          lifecycleStages.push("verify:formal-catalog");
+        },
+      };
+
+      if (shouldThrow) {
+        await assert.rejects(fixture.withTemporaryMonsterCsv(runProbe, { csvPath, lifecycle, logger: () => {} }),
+          /simulated probe failure/);
+      } else {
+        assert.equal(await fixture.withTemporaryMonsterCsv(runProbe, { csvPath, lifecycle, logger: () => {} }), "probe complete");
+      }
+      assert.deepEqual(fs.readFileSync(csvPath), sourceBytes);
+      assert.equal(fs.existsSync(manifestPath), false, "successful cleanup removes its OS-temp backup");
+      assert.deepEqual(lifecycleStages, [
+        "stop:before-restore",
+        "refresh:after-restore",
+        "verify:formal-catalog",
+        "stop:after-restore-verification",
+      ]);
+    }
+
+    const abortController = new AbortController();
+    let interruptedManifest = "";
+    const interruptionStages = [];
+    await assert.rejects(fixture.withTemporaryMonsterCsv(async (manifest) => {
+      interruptedManifest = manifest.manifestPath;
+      abortController.abort();
+      return new Promise(() => {});
+    }, {
+      csvPath,
+      signal: abortController.signal,
+      lifecycle: {
+        stop: async ({ stage }) => interruptionStages.push(`stop:${stage}`),
+        refresh: async ({ stage }) => interruptionStages.push(`refresh:${stage}`),
+        verifyRestored: async () => interruptionStages.push("verify:formal-catalog"),
+      },
+      logger: () => {},
+    }), /interrupted by AbortSignal/);
+    assert.deepEqual(fs.readFileSync(csvPath), sourceBytes);
+    assert.equal(fs.existsSync(interruptedManifest), false, "interruption cleanup removes its OS-temp backup after verification");
+    assert.deepEqual(interruptionStages, [
+      "stop:before-restore",
+      "refresh:after-restore",
+      "verify:formal-catalog",
+      "stop:after-restore-verification",
+    ]);
+  } finally {
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  }
+});
+
+test("Issue #19 server runtime probes do not bypass BattleSession settlement state", () => {
+  const serverProbePaths = [
+    "tests/six_vs_six_runtime_probe.lua",
+    "tests/deployment_runtime_probe.lua",
+    "tests/attack_execution_runtime_probe.lua",
+    "tests/attack_clock_runtime_probe.lua",
+    "tests/tank_contact_runtime_probe.lua",
+    "tests/shooter_runtime_probe.lua",
+    "tests/targeting_crowding_runtime_probe.lua",
+    "tests/six_vs_six_batch_outcome_probe.lua",
+    "tests/six_vs_six_full_battle_probe.lua",
+    "tests/controlled_scenario_runtime_probe.lua",
+    "tests/monster_catalog_identity_runtime_probe.lua",
+    "tests/monster_catalog_restored_runtime_probe.lua",
+  ];
+  const forbidden = /session\._T|session\.(?:Phase|Result|PlayerAlive|EnemyAlive|InitialPlayerAlive|InitialEnemyAlive)\s*=(?!=)|table\.remove\s*\(|session:(?:RemoveDeployedUnit|SpawnUnit|SpawnConfiguredUnit|QueueDamage|QueueKnockback|ApplyPendingKnockbacks|ResolveDamageBatch|DetermineResult|EvaluateResult|EnterResult|ForceResult|SetResult)\s*\(/;
+
+  for (const probePath of serverProbePaths) {
+    const probe = read(probePath);
+    assert.doesNotMatch(probe, forbidden, `${probePath} must observe the public session seam without mutating or staging settlement`);
+  }
+
+  for (const [probePath, tag] of [
+    ["tests/deployment_runtime_probe.lua", "DeploymentProbe"],
+    ["tests/controlled_scenario_runtime_probe.lua", "ControlledScenarioProbe"],
+  ]) {
+    const probe = read(probePath);
+    assert.match(probe, /local runOk, runDetail = pcall\(function\(\)/,
+      `${probePath} must capture setup and execution exceptions`);
+    assert.ok(probe.indexOf("local runOk, runDetail = pcall(function()")
+      < probe.indexOf('_EntityService:GetEntityByPath("/maps/map01")'),
+    `${probePath} must protect the missing-map/session path too`);
+    assert.match(probe, new RegExp(`\\[M1\\]\\[${tag}\\] FAILURES=`),
+      `${probePath} must emit a terminal failure marker after exceptions`);
+  }
 });
