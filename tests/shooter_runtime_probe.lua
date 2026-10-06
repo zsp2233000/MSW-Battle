@@ -98,19 +98,38 @@ local runOk, runDetail = pcall(function()
     check(approachPosition.x > -2 and defender.Hp == 30,
         "shooter moves under native physics while the target remains beyond firing range and unharmed")
 
-    local attackStarted = waitFor(function() return actor.AttackSerial > 0 end, 3.0, 0.05)
+    local attackStarted = waitFor(function() return actor.AttackSerial > 0 end, 3.0, 0.01)
     check(attackStarted, "shooter begins an attack after approaching the target")
     if not attackStarted then return end
+    local attackObservedAtMs = DateTime.UtcNow.Elapsed
     local attackStartDistance = distance(position(shooter), position(target))
     check(attackStartDistance <= actor.AttackRange + 0.001,
         "attack starts only after the shooter enters its catalog range")
     check(defender.Hp == 30 and defender.DamageTakenSerial == 0,
         "AttackSerial advances before the catalog impact frame reaches the target")
 
-    local impactObserved = waitFor(function() return defender.DamageTakenSerial > 0 end,
-        actor.ImpactDelay + 1.0, 0.05)
-    check(impactObserved, "native HitEvent arrives after the profile impact delay")
+    local expectedImpactMs = actor.ImpactDelay * 1000
+    local frameToleranceMs = 50
+    check(expectedImpactMs > 0, "shooter profile has a measurable positive impact delay")
+    local observedImpactMs = nil
+    while true do
+        local elapsedMs = DateTime.UtcNow.Elapsed - attackObservedAtMs
+        if defender.DamageTakenSerial > 0 then
+            observedImpactMs = elapsedMs
+            break
+        end
+        if elapsedMs >= expectedImpactMs + frameToleranceMs then break end
+        wait(0.01)
+    end
+    local impactObserved = observedImpactMs ~= nil
+    check(impactObserved, "native HitEvent arrives by the profile impact deadline")
     if not impactObserved then return end
+    log("[M1][ShooterProbe] expectedImpactMs=" .. tostring(expectedImpactMs)
+        .. " observedImpactMs=" .. tostring(observedImpactMs)
+        .. " toleranceMs=" .. tostring(frameToleranceMs))
+    check(observedImpactMs >= expectedImpactMs - frameToleranceMs
+        and observedImpactMs <= expectedImpactMs + frameToleranceMs,
+        "native HitEvent lands within one-frame tolerance of the profile impact frame")
     check(defender.Hp == 0 and defender.DamageTakenSerial == 1,
         "hitscan applies exactly the catalog 30 damage at its impact frame")
     check(session.Phase == "RESULT" and session.Result == "WIN"
@@ -119,8 +138,12 @@ local runOk, runDetail = pcall(function()
     check(not hasProjectileEntity(), "hitscan does not spawn a projectile entity")
 
     local shooterSerial = actor.AttackSerial
+    local defenderSerial = defender.AttackSerial
     local resultEventSerial = session.EventSerial
     local shooterHp = actor.Hp
+    local defenderHp = defender.Hp
+    local shooterDamageSerial = actor.DamageTakenSerial
+    local defenderDamageSerial = defender.DamageTakenSerial
     local shooterPosition = position(shooter)
     local targetPosition = position(target)
     check(actor.CurrentTargetName == "" and defender.CurrentTargetName == "",
@@ -132,11 +155,17 @@ local runOk, runDetail = pcall(function()
     local targetAfter = position(target)
     check(session.Phase == "RESULT" and session.Result == "WIN" and session.EventSerial == resultEventSerial,
         "result and event history remain unchanged on real frames")
-    check(actor.AttackSerial == shooterSerial and actor.Hp == shooterHp and defender.Hp == 0,
-        "RESULT prevents new shots and health changes")
+    check(actor.AttackSerial == shooterSerial and defender.AttackSerial == defenderSerial
+        and actor.Hp == shooterHp and defender.Hp == defenderHp
+        and actor.DamageTakenSerial == shooterDamageSerial and defender.DamageTakenSerial == defenderDamageSerial,
+        "RESULT prevents new attacks, hit events, and health changes for every unit")
     check(math.abs(shooterAfter.x - shooterPosition.x) < 0.001
-        and math.abs(targetAfter.x - targetPosition.x) < 0.001,
+        and math.abs(shooterAfter.y - shooterPosition.y) < 0.001
+        and math.abs(targetAfter.x - targetPosition.x) < 0.001
+        and math.abs(targetAfter.y - targetPosition.y) < 0.001,
         "RESULT stops further native body movement")
+    check(actor.CurrentTargetName == "" and defender.CurrentTargetName == "",
+        "RESULT keeps all unit target references cleared on real frames")
     check(not actor.KnockbackActive and not defender.KnockbackActive and not hasProjectileEntity(),
         "no knockback or projectile appears after RESULT")
 

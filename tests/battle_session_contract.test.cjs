@@ -332,15 +332,15 @@ test("Issue #16 attack probes use prepared battle scenes and public session step
 });
 
 test("Issue #17 combat probes use controlled rosters and natural native outcomes", () => {
-  const controlledProbePaths = [
-    "tests/tank_contact_runtime_probe.lua",
-    "tests/shooter_runtime_probe.lua",
-    "tests/targeting_crowding_runtime_probe.lua",
+  const controlledProbes = [
+    ["tests/tank_contact_runtime_probe.lua", "TankProbe"],
+    ["tests/shooter_runtime_probe.lua", "ShooterProbe"],
+    ["tests/targeting_crowding_runtime_probe.lua", "TargetCrowdingProbe"],
   ];
   const forbiddenBypasses = /session\._T|:(?:SpawnUnit|SpawnConfiguredUnit|QueueDamage|QueueKnockback|ApplyPendingKnockbacks|ResolveDamageBatch|DetermineResult|EvaluateResult|EnterResult)\s*\(/;
   const mutableSessionOutcomes = /session\.(?:Phase|Result|PlayerAlive|EnemyAlive|InitialPlayerAlive|InitialEnemyAlive)\s*=(?!=)/;
 
-  for (const probePath of controlledProbePaths) {
+  for (const [probePath, probeTag] of controlledProbes) {
     const probe = read(probePath);
     assert.match(probe, /session:BeginManualSimulation\(\)/, `${probePath} must check clock acquisition`);
     assert.match(probe, /session:PrepareBattleForTest\(/, `${probePath} must prepare controlled rosters`);
@@ -348,8 +348,10 @@ test("Issue #17 combat probes use controlled rosters and natural native outcomes
     assert.match(probe, /session:EndManualSimulation\(\)/, `${probePath} must release the owned clock`);
     assert.doesNotMatch(probe, forbiddenBypasses, `${probePath} must use native attacks and session settlement`);
     assert.doesNotMatch(probe, mutableSessionOutcomes, `${probePath} must not write outcome state`);
-    assert.match(probe, /\[M1\]\[[A-Za-z]+Probe\] (?:PASS|FAILURES=)/,
-      `${probePath} must emit a final verdict`);
+    assert.ok(probe.includes(`[M1][${probeTag}] PASS`),
+      `${probePath} must emit its matching PASS verdict`);
+    assert.ok(probe.includes(`[M1][${probeTag}] FAILURES=`),
+      `${probePath} must emit its matching failure verdict`);
     assert.match(probe, /local runOk, runDetail = pcall\(function\(\)/,
       `${probePath} must capture whole-script errors`);
     assert.ok(probe.indexOf("local runOk, runDetail = pcall(function()") <

@@ -109,6 +109,8 @@ local runOk, runDetail = pcall(function()
     check(firstContact, "native contact reaches the first target")
     if not firstContact then return end
     check(firstUnit.Hp == 120 and secondUnit.Hp == 160, "contact area reaches only the overlapping target")
+    check(firstUnit.CombatState ~= "STUN" and secondUnit.CombatState ~= "STUN",
+        "native contact does not stun either target")
     local afterFirst = getPosition(tank)
     check(math.abs(afterFirst.x - tankStart.x) < 0.001 and math.abs(afterFirst.y - tankStart.y) < 0.001,
         "tank does not recoil from its native contact")
@@ -172,7 +174,12 @@ local runOk, runDetail = pcall(function()
         and session.InitialPlayerAlive == 1 and session.InitialEnemyAlive == 2,
         "result counters reflect the prepared roster and actual deaths")
 
-    local resultSerial = tankUnit.AttackSerial
+    local resultTankHp = tankUnit.Hp
+    local resultFirstHp = firstUnit.Hp
+    local resultSecondHp = secondUnit.Hp
+    local resultTankSerial = tankUnit.AttackSerial
+    local resultFirstSerial = firstUnit.AttackSerial
+    local resultSecondSerial = secondUnit.AttackSerial
     local resultEventSerial = session.EventSerial
     local tankResultPosition = getPosition(tank)
     local firstResultPosition = getPosition(first)
@@ -187,12 +194,20 @@ local runOk, runDetail = pcall(function()
     local secondAfterResult = getPosition(second)
     check(session.Phase == "RESULT" and session.Result == "WIN" and session.EventSerial == resultEventSerial,
         "result state and event history remain unchanged on real frames")
-    check(tankUnit.AttackSerial == resultSerial and firstUnit.Hp == 0 and secondUnit.Hp == 0,
-        "RESULT prevents new attacks and health changes")
+    check(tankUnit.Hp == resultTankHp and firstUnit.Hp == resultFirstHp and secondUnit.Hp == resultSecondHp
+        and tankUnit.AttackSerial == resultTankSerial and firstUnit.AttackSerial == resultFirstSerial
+        and secondUnit.AttackSerial == resultSecondSerial,
+        "RESULT prevents health changes and new attacks for every unit")
     check(math.abs(tankAfterResult.x - tankResultPosition.x) < 0.001
+        and math.abs(tankAfterResult.y - tankResultPosition.y) < 0.001
         and math.abs(firstAfterResult.x - firstResultPosition.x) < 0.001
-        and math.abs(secondAfterResult.x - secondResultPosition.x) < 0.001,
+        and math.abs(firstAfterResult.y - firstResultPosition.y) < 0.001
+        and math.abs(secondAfterResult.x - secondResultPosition.x) < 0.001
+        and math.abs(secondAfterResult.y - secondResultPosition.y) < 0.001,
         "RESULT prevents further body movement")
+    check(tankUnit.CurrentTargetName == "" and firstUnit.CurrentTargetName == ""
+        and secondUnit.CurrentTargetName == "",
+        "RESULT keeps every unit target cleared on real frames")
     check(not tankUnit.KnockbackActive and not firstUnit.KnockbackActive and not secondUnit.KnockbackActive,
         "no knockback resumes after RESULT")
 
