@@ -1,7 +1,7 @@
 -- Execute this probe in Maker Play mode with context=server_main during deployment.
 -- It observes the production six-versus-six BattleSession seams without adding UI or alternate combat logic.
 local map = _EntityService:GetEntityByPath("/maps/map01")
-local session = map:GetComponent("script.BattleSession")
+local session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
 local failures = 0
 
 local function check(condition, message)
@@ -12,11 +12,6 @@ local function check(condition, message)
         failures = failures + 1
         log_error("[M1][SixVsSixProbe][FAIL] " .. message)
     end
-end
-
-local function getEntity(name)
-    -- Resolve one fixed roster member by the session's stable map path.
-    return _EntityService:GetEntityByPath("/maps/map01/" .. name)
 end
 
 local function getPosition(entity)
@@ -60,20 +55,23 @@ local snapshots = session:GetUnitSnapshots()
 check(string.find(snapshots, "monsterId=monster_tank") ~= nil and string.find(snapshots, "monsterId=monster_warrior") ~= nil and string.find(snapshots, "monsterId=monster_shooter") ~= nil, "snapshot exposes MonsterId, editable name, and kind for all initial rows")
 
 -- Freeze the production roster so the high-level fixtures are not consumed by the live battle while this probe runs.
-for _, name in ipairs({"M1_Player_1", "M1_Player_2", "M1_Player_3", "M1_Player_4", "M1_Player_5", "M1_Player_6", "M1_EnemyTank", "M1_EnemyTank2", "M1_EnemyAssault", "M1_EnemyAssault2", "M1_EnemyShooter", "M1_EnemyShooter2"}) do
-    local entity = getEntity(name)
+local disabledCount = 0
+for _, record in ipairs(session._T.units) do
+    local entity = record.entity
     if isvalid(entity) then
         freezeUnit(entity)
         entity:SetEnable(false)
+        if not entity.Enable then disabledCount = disabledCount + 1 end
     end
 end
+check(disabledCount == session.InitialPlayerAlive + session.InitialEnemyAlive, "all initial roster units are disabled before fixtures spawn")
 
 -- Spawn isolated production BattleUnit fixtures so the assertions remain deterministic even if Maker dispatches the probe a few frames after Play starts.
-local source = session:SpawnUnit(session.PlayerModelId, "M1_ProbeSource", "PLAYER", "TANK", Vector3(-4, 0, 0))
-local preferred = session:SpawnUnit(session.EnemyModelId, "M1_ProbePreferred", "ENEMY", "ASSAULT", Vector3(0, 0, 0))
-local replacement = session:SpawnUnit(session.EnemyModelId, "M1_ProbeReplacement", "ENEMY", "ASSAULT", Vector3(0, 0, 0))
-local crowdA = session:SpawnUnit(session.PlayerModelId, "M1_ProbeCrowdA", "PLAYER", "TANK", Vector3(-4, -2, 0))
-local crowdB = session:SpawnUnit(session.PlayerModelId, "M1_ProbeCrowdB", "PLAYER", "TANK", Vector3(-4, -2, 0))
+local source = session:SpawnMonster("monster_tank", "M1_ProbeSource", "PLAYER", Vector3(-4, 0, 0))
+local preferred = session:SpawnMonster("monster_warrior", "M1_ProbePreferred", "ENEMY", Vector3(0, 0, 0))
+local replacement = session:SpawnMonster("monster_warrior", "M1_ProbeReplacement", "ENEMY", Vector3(0, 0, 0))
+local crowdA = session:SpawnMonster("monster_tank", "M1_ProbeCrowdA", "PLAYER", Vector3(-4, -2, 0))
+local crowdB = session:SpawnMonster("monster_tank", "M1_ProbeCrowdB", "PLAYER", Vector3(-4, -2, 0))
 if not isvalid(source) or not isvalid(preferred) or not isvalid(replacement) or not isvalid(crowdA) or not isvalid(crowdB) then
     log_error("[M1][SixVsSixProbe][FAIL] isolated production fixtures are unavailable")
     return

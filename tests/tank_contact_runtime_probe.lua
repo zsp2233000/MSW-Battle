@@ -1,15 +1,24 @@
 -- Execute this probe in Maker Play mode with context=server_main during deployment.
 -- It drives the production BattleSession, BattleUnit, TankContactAttack, Hit, and knockback paths.
 local map = _EntityService:GetEntityByPath("/maps/map01")
-local session = map:GetComponent("script.BattleSession")
+local session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
+if not isvalid(session) then
+    log_error("[M1][TankProbe][FAIL] map or session is unavailable")
+    return
+end
 if isvalid(session) and session.Phase == "DEPLOYMENT" then
     session:TryDeployMonster("monster_tank", Vector3(-4.4, 0, 0))
     session:TryStartBattle()
 end
-local tank = _EntityService:GetEntityByPath("/maps/map01/M1_Player_1")
-local fixedShooter = nil
-local tankUnit = tank:GetComponent("script.BattleUnit")
-local tankBody = tank:GetComponent("KinematicbodyComponent")
+local tank = nil
+for _, record in ipairs(session._T.units) do
+    if record.faction == "PLAYER" and record.unitKind == "TANK" and isvalid(record.entity) then
+        tank = record.entity
+        break
+    end
+end
+local tankUnit = isvalid(tank) and tank:GetComponent("script.BattleUnit") or nil
+local tankBody = isvalid(tank) and tank:GetComponent("KinematicbodyComponent") or nil
 local failures = 0
 local probes = {}
 
@@ -55,10 +64,11 @@ if not isvalid(map) or not isvalid(session) or not isvalid(tank) or not isvalid(
     return
 end
 
--- Disable every fixed unit except the Tank under test so the six-versus-six session cannot consume the contact fixtures.
-for _, name in ipairs({"M1_PlayerTank2", "M1_PlayerWarrior", "M1_PlayerWarrior2", "M1_PlayerShooter", "M1_PlayerShooter2", "M1_EnemyTank", "M1_EnemyTank2", "M1_EnemyAssault", "M1_EnemyAssault2", "M1_EnemyShooter", "M1_EnemyShooter2"}) do
-    local entity = _EntityService:GetEntityByPath("/maps/map01/" .. name)
-    if isvalid(entity) then
+-- Disable the actual session roster except the Tank under test.
+local disabledCount = 0
+for _, record in ipairs(session._T.units) do
+    local entity = record.entity
+    if isvalid(entity) and entity ~= tank then
         local unit = entity:GetComponent("script.BattleUnit")
         local movement = entity:GetComponent("MovementComponent")
         if isvalid(unit) then
@@ -66,36 +76,30 @@ for _, name in ipairs({"M1_PlayerTank2", "M1_PlayerWarrior", "M1_PlayerWarrior2"
             unit.MoveSpeed = 0
             unit.RetargetInterval = 99
         end
-        if isvalid(movement) then movement:Stop() end
+        if isvalid(movement) then
+            movement.InputSpeed = 0
+            movement:Stop()
+        end
         entity:SetEnable(false)
+        if not entity.Enable then disabledCount = disabledCount + 1 end
     end
 end
-
--- Freeze the fixed shooter so its ranged adapter cannot affect the tank contact fixtures.
-if isvalid(fixedShooter) then
-    local shooterUnit = fixedShooter:GetComponent("script.BattleUnit")
-    local shooterMovement = fixedShooter:GetComponent("MovementComponent")
-    if isvalid(shooterUnit) then
-        shooterUnit:CancelAttack()
-        shooterUnit.MoveSpeed = 0
-        shooterUnit.RetargetInterval = 99
-    end
-    if isvalid(shooterMovement) then
-        shooterMovement.InputSpeed = 0
-        shooterMovement:Stop()
-    end
-end
+check(disabledCount == session.InitialPlayerAlive + session.InitialEnemyAlive - 1 and tank.Enable, "only the Tank under test remains enabled from the initial roster")
 
 -- Freeze the Tank only for this probe so its position can be compared across contact hits.
 tankUnit.MoveSpeed = 0
 tankBody:SetWorldPosition(Vector2(0, 0))
 local initialPosition = getProbePosition(tank)
 for index = 1, 2 do
-    local enemy = session:SpawnUnit(session.EnemyModelId, "M1_TankProbeEnemy" .. tostring(index), "ENEMY", "ASSAULT", Vector3(10, 10, 0))
+    local enemy = session:SpawnMonster("monster_warrior", "M1_TankProbeEnemy" .. tostring(index), "ENEMY", Vector3(10, 10, 0))
+    if not isvalid(enemy) then
+        log_error("[M1][TankProbe][FAIL] contact fixture spawn failed")
+        return
+    end
     local enemyUnit = enemy:GetComponent("script.BattleUnit")
     enemyUnit.MoveSpeed = 0
     enemyUnit.RetargetInterval = 99
-    enemyUnit:Configure("ENEMY", enemy.Name, "ASSAULT", 220, 0, 0, 99, 0.6, 99, 0.18, 0.6, 0, 2.0, Vector2(1.2, 1.2), 0.8, 0.2)
+    enemyUnit:Configure("ENEMY", enemy.Name, "ASSAULT", 220, 0, 0, 99, 0.6, 99, 0.18, enemyUnit.DeathAnimationRUID, 0, 2.0, Vector2(1.2, 1.2), 0.8, 0.2)
     table.insert(probes, enemy)
 end
 session.EnemyAlive = session.EnemyAlive + 2

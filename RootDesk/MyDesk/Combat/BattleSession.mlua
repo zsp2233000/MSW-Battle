@@ -429,11 +429,8 @@ script BattleSession extends Component
                 self:FailConfiguration("battle placement on blocked tile: " .. sourceName)
                 return roster
             end
-            local minimumSquared = self.DeploymentMinDistance * self.DeploymentMinDistance
             for _, prior in ipairs(roster) do
-                local dx = position.x - prior.position.x
-                local dy = position.y - prior.position.y
-                if dx * dx + dy * dy + 0.000001 < minimumSquared then
+                if self:IsDeploymentTooClose(position, prior.position) then
                     self:FailConfiguration("battle placements too close: " .. prior.name .. " and " .. sourceName)
                     return roster
                 end
@@ -451,6 +448,15 @@ script BattleSession extends Component
         end
         log("[M1][BattleSession] battle placements validated: player=" .. tostring(playerCount) .. " enemy=" .. tostring(enemyCount))
         return roster
+    end
+
+    method boolean IsDeploymentTooClose(Vector3 position, Vector3 otherPosition)
+        -- Apply the same minimum center distance to map placements and manual deployment.
+        local dx = position.x - otherPosition.x
+        local dy = position.y - otherPosition.y
+        local minimumSquared = self.DeploymentMinDistance * self.DeploymentMinDistance
+        -- Vector3 stores positions as float32; 0.6 can round slightly below the boundary.
+        return dx * dx + dy * dy + 0.000001 < minimumSquared
     end
 
     @ExecSpace("Server")
@@ -530,16 +536,12 @@ script BattleSession extends Component
         local profile = self:GetMonsterProfile(monsterId)
         if profile == nil or self.PlayerAlive >= self.DeploymentMaxUnits then return false end
         if position.x < self.DeploymentMinX or position.x > self.DeploymentMaxX or position.y < self.DeploymentMinY or position.y > self.DeploymentMaxY then return false end
-        local minimumSquared = self.DeploymentMinDistance * self.DeploymentMinDistance
         for _, record in ipairs(self._T.units) do
             if isvalid(record.entity) then
                 local transform = record.entity:GetComponent("TransformComponent")
                 if isvalid(transform) then
                     local current = transform.WorldPosition
-                    local dx = position.x - current.x
-                    local dy = position.y - current.y
-                    -- Vector3 stores positions as float32; 0.6 can round slightly below the boundary.
-                    if dx * dx + dy * dy + 0.000001 < minimumSquared then return false end
+                    if self:IsDeploymentTooClose(position, current) then return false end
                 end
             end
         end

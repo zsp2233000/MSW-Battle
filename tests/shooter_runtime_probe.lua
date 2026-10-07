@@ -1,7 +1,7 @@
 -- Execute this probe in Maker Play mode with context=server_main during deployment.
 -- It drives the production BattleSession, BattleUnit, ShooterAttack, Hit, and result-stop paths.
 local map = _EntityService:GetEntityByPath("/maps/map01")
-local session = map:GetComponent("script.BattleSession")
+local session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
 if isvalid(session) and session.Phase == "DEPLOYMENT" then
     session:TryDeployMonster("monster_tank", Vector3(-4.4, 0, 0))
     session:TryStartBattle()
@@ -41,7 +41,7 @@ end
 local function silenceAssaultTarget(entity)
     -- Keep a real BattleUnit target alive without letting its own adapter affect the probe.
     local unit = entity:GetComponent("script.BattleUnit")
-    unit:Configure("ENEMY", entity.Name, "ASSAULT", 220, 0, 0, 99, 0.6, 99, 0.18, 0.6, 0, 2.0, Vector2(1.2, 1.2), 0.8, 0.2)
+    unit:Configure("ENEMY", entity.Name, "ASSAULT", 220, 0, 0, 99, 0.6, 99, 0.18, unit.DeathAnimationRUID, 0, 2.0, Vector2(1.2, 1.2), 0.8, 0.2)
     freezeUnit(entity)
 end
 
@@ -61,35 +61,21 @@ if not isvalid(map) or not isvalid(session) or not session:IsBattleActive() then
     return
 end
 
--- Disable every fixed unit so the spawned shooter fixtures are the only active combat participants.
-for _, name in ipairs({"M1_Player_1", "M1_EnemyTank", "M1_EnemyTank2", "M1_EnemyAssault", "M1_EnemyAssault2", "M1_EnemyShooter", "M1_EnemyShooter2"}) do
-    local entity = _EntityService:GetEntityByPath("/maps/map01/" .. name)
+-- Disable the actual session roster before adding isolated shooter fixtures.
+local disabledCount = 0
+for _, record in ipairs(session._T.units) do
+    local entity = record.entity
     if isvalid(entity) then
-        local unit = entity:GetComponent("script.BattleUnit")
-        local movement = entity:GetComponent("MovementComponent")
-        if isvalid(unit) then
-            unit:CancelAttack()
-            unit.MoveSpeed = 0
-            unit.RetargetInterval = 99
-        end
-        if isvalid(movement) then movement:Stop() end
+        freezeUnit(entity)
         entity:SetEnable(false)
+        if not entity.Enable then disabledCount = disabledCount + 1 end
     end
 end
+check(disabledCount == session.InitialPlayerAlive + session.InitialEnemyAlive, "all initial roster units are disabled before fixtures spawn")
 
-local fixedTank = _EntityService:GetEntityByPath("/maps/map01/M1_Player_1")
-local fixedShooter = nil
-local fixedAssault = _EntityService:GetEntityByPath("/maps/map01/M1_EnemyAssault")
-if isvalid(fixedTank) then freezeUnit(fixedTank) end
-if isvalid(fixedShooter) then freezeUnit(fixedShooter) end
-if isvalid(fixedAssault) then
-    freezeUnit(fixedAssault)
-    fixedAssault:GetComponent("KinematicbodyComponent"):SetWorldPosition(Vector2(-5, 1.5))
-end
-
-local shooter = session:SpawnUnit(session.PlayerModelId, "M1_ShooterProbe", "PLAYER", "SHOOTER", Vector3(0, 0, 0))
-local target = session:SpawnUnit(session.EnemyModelId, "M1_ShooterProbeTarget", "ENEMY", "ASSAULT", Vector3(5, 0, 0))
-local decoy = session:SpawnUnit(session.EnemyModelId, "M1_ShooterProbeDecoy", "ENEMY", "ASSAULT", Vector3(5, 0.15, 0))
+local shooter = session:SpawnMonster("monster_shooter", "M1_ShooterProbe", "PLAYER", Vector3(0, 0, 0))
+local target = session:SpawnMonster("monster_warrior", "M1_ShooterProbeTarget", "ENEMY", Vector3(5, 0, 0))
+local decoy = session:SpawnMonster("monster_warrior", "M1_ShooterProbeDecoy", "ENEMY", Vector3(5, 0.15, 0))
 if not isvalid(shooter) or not isvalid(target) or not isvalid(decoy) then
     log_error("[M1][ShooterProbe][FAIL] shooter fixture spawn failed")
     return
@@ -124,8 +110,8 @@ check(shooterUnit.AttackSerial == firstAttackSerial + 1, "shooter starts the nex
 session:AdvanceForTest(0.2)
 check(targetUnit.Hp == 160, "shooter applies the next hit after its impact delay")
 
-local cancelShooter = session:SpawnUnit(session.PlayerModelId, "M1_ShooterProbeCancel", "PLAYER", "SHOOTER", Vector3(0, -1, 0))
-local cancelTarget = session:SpawnUnit(session.EnemyModelId, "M1_ShooterProbeCancelTarget", "ENEMY", "ASSAULT", Vector3(3, -1, 0))
+local cancelShooter = session:SpawnMonster("monster_shooter", "M1_ShooterProbeCancel", "PLAYER", Vector3(0, -1, 0))
+local cancelTarget = session:SpawnMonster("monster_warrior", "M1_ShooterProbeCancelTarget", "ENEMY", Vector3(3, -1, 0))
 if not isvalid(cancelShooter) or not isvalid(cancelTarget) then
     log_error("[M1][ShooterProbe][FAIL] cancellation fixture spawn failed")
     return
@@ -139,8 +125,8 @@ cancelTarget:GetComponent("KinematicbodyComponent"):SetWorldPosition(Vector2(5, 
 session:AdvanceForTest(0.2)
 check(cancelTarget:GetComponent("script.BattleUnit").Hp == 220, "target leaves range before impact cancels the pending shot")
 
-local timingShooter = session:SpawnUnit(session.PlayerModelId, "M1_ShooterProbeTiming", "PLAYER", "SHOOTER", Vector3(0, -2, 0))
-local timingTarget = session:SpawnUnit(session.EnemyModelId, "M1_ShooterProbeTimingTarget", "ENEMY", "ASSAULT", Vector3(3, -2, 0))
+local timingShooter = session:SpawnMonster("monster_shooter", "M1_ShooterProbeTiming", "PLAYER", Vector3(0, -2, 0))
+local timingTarget = session:SpawnMonster("monster_warrior", "M1_ShooterProbeTimingTarget", "ENEMY", Vector3(3, -2, 0))
 if not isvalid(timingShooter) or not isvalid(timingTarget) then
     log_error("[M1][ShooterProbe][FAIL] impact timing fixture spawn failed")
     return
@@ -156,8 +142,8 @@ check(session.LastEvent == "ATTACK_START", "shooter publishes the semantic attac
 session:AdvanceForTest(0.2)
 check(timingTargetUnit.Hp == 190, "shooter applies damage after the configured impact time")
 
-local deathShooter = session:SpawnUnit(session.PlayerModelId, "M1_ShooterProbeDeath", "PLAYER", "SHOOTER", Vector3(0, -3, 0))
-local deathTarget = session:SpawnUnit(session.EnemyModelId, "M1_ShooterProbeDeathTarget", "ENEMY", "ASSAULT", Vector3(3, -3, 0))
+local deathShooter = session:SpawnMonster("monster_shooter", "M1_ShooterProbeDeath", "PLAYER", Vector3(0, -3, 0))
+local deathTarget = session:SpawnMonster("monster_warrior", "M1_ShooterProbeDeathTarget", "ENEMY", Vector3(3, -3, 0))
 if not isvalid(deathShooter) or not isvalid(deathTarget) then
     log_error("[M1][ShooterProbe][FAIL] death cancellation fixture spawn failed")
     return
@@ -173,9 +159,9 @@ session:AdvanceForTest(0.05)
 session:AdvanceForTest(0.2)
 check(deathTargetUnit.IsDead == true and deathTargetUnit.Hp == 0 and deathTargetUnit.DamageTakenSerial == 1, "target dies before impact and cancels the pending shot")
 
-local invalidationShooter = session:SpawnUnit(session.PlayerModelId, "M1_ShooterProbeInvalidation", "PLAYER", "SHOOTER", Vector3(-3, -3, 0))
-local invalidTarget = session:SpawnUnit(session.EnemyModelId, "M1_ShooterProbeInvalidTarget", "ENEMY", "ASSAULT", Vector3(0, -3, 0))
-local replacementTarget = session:SpawnUnit(session.EnemyModelId, "M1_ShooterProbeReplacement", "ENEMY", "ASSAULT", Vector3(0.2, -3, 0))
+local invalidationShooter = session:SpawnMonster("monster_shooter", "M1_ShooterProbeInvalidation", "PLAYER", Vector3(-3, -3, 0))
+local invalidTarget = session:SpawnMonster("monster_warrior", "M1_ShooterProbeInvalidTarget", "ENEMY", Vector3(0, -3, 0))
+local replacementTarget = session:SpawnMonster("monster_warrior", "M1_ShooterProbeReplacement", "ENEMY", Vector3(0.2, -3, 0))
 if not isvalid(invalidationShooter) or not isvalid(invalidTarget) or not isvalid(replacementTarget) then
     log_error("[M1][ShooterProbe][FAIL] invalidation fixture spawn failed")
     return

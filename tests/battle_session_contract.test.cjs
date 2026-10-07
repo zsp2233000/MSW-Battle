@@ -171,7 +171,7 @@ test("battle phase keeps the Tank profile and adds Shooter to the player formati
 
   assert.match(assault, /extends AttackComponent/);
   assert.match(assault, /return self\.AttackDamage/);
-  assert.match(runtimeProbe, /session:SpawnUnit/);
+  assert.match(runtimeProbe, /session:SpawnMonster/);
   assert.match(runtimeProbe, /_TimerService:SetTimerOnce/);
   assert.match(runtimeProbe, /session:EnterResult\("WIN"\)/);
   assert.match(runtimeProbe, /\[M1\]\[TankProbe\] PASS/);
@@ -217,7 +217,7 @@ test("Issue #4 adds a configurable hitscan shooter adapter", () => {
   assert.match(session, /while #self\._T\.eventHistory > 24/);
   assert.doesNotMatch(shooter, /SpawnService|Projectile|projectile/);
 
-  assert.match(runtimeProbe, /SpawnUnit\(session\.EnemyModelId, "M1_ShooterProbeTarget"/);
+  assert.match(runtimeProbe, /SpawnMonster\("monster_warrior", "M1_ShooterProbeTarget"/);
   assert.match(runtimeProbe, /AdvanceForTest/);
   assert.match(runtimeProbe, /pre-impact/);
   assert.match(runtimeProbe, /target dies before impact/);
