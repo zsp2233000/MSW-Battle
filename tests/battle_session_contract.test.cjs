@@ -1,5 +1,6 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 
@@ -74,191 +75,6 @@ test("M1 unit model has the RectTile movement and native hit contract", () => {
   assert.ok(values.get("MOD.Core.SpriteRendererComponent.SpriteRUID"));
 });
 
-test("battle phase keeps the Tank profile and adds Shooter to the player formation", () => {
-  const session = read("RootDesk/MyDesk/Combat/BattleSession.mlua");
-  const unit = read("RootDesk/MyDesk/Combat/BattleUnit.mlua");
-  const contact = read("RootDesk/MyDesk/Combat/TankContactAttack.mlua");
-  const presentation = read("RootDesk/MyDesk/Combat/TankPresentation.mlua");
-  const shooterPresentation = read("RootDesk/MyDesk/Combat/ShooterPresentation.mlua");
-  const hitEffectPresentation = read("RootDesk/MyDesk/Combat/BattleHitEffectPresentation.mlua");
-  const assault = read("RootDesk/MyDesk/Combat/AssaultAttack.mlua");
-  const shooterAttack = read("RootDesk/MyDesk/Combat/ShooterAttack.mlua");
-  const runtimeProbe = read("tests/tank_contact_runtime_probe.lua");
-  const monsterData = readCsvRows("RootDesk/MyDesk/Data/MonsterData.csv")
-    .map((row) => row.join(","))
-    .join("\n");
-
-  assert.match(session, /EnemyMonsterId3 = "monster_warrior"/);
-  assert.match(session, /self\.PlayerAlive = 0/);
-  assert.match(session, /self\.EnemyAlive = 6/);
-  assert.match(session, /EventHistory/);
-  assert.match(monsterData, /monster_tank,Tank,TANK,battleunit,500,1\.1,40,2\.0,0\.65/);
-  assert.match(monsterData, /monster_warrior,Warrior,ASSAULT,battleunit,220,2\.0,35,0\.7,0\.6/);
-  assert.match(monsterData, /monster_shooter,Shooter,SHOOTER,battleunit,120,0\.8,30,2,4\.0/);
-  assert.match(session, /QueueKnockback/);
-  assert.match(session, /ApplyPendingKnockbacks/);
-  assert.match(session, /ArenaMinX/);
-  assert.doesNotMatch(session, /CameraComponent|CameraZoomPercent|CameraOffset/);
-  assert.match(session, /self:EmitPresentation\("RESULT"/);
-  assert.match(session, /self\._T\.resultEntered == true/);
-
-  assert.match(unit, /@Sync property string UnitKind = "ASSAULT"/);
-  assert.match(unit, /if self\.UnitKind == "TANK" then/);
-  assert.match(unit, /self:DriveAttack\(target, false\)/);
-  assert.match(unit, /self:DriveAttack\(target, true\)/);
-  assert.match(unit, /HitStopDuration = 0\.2/);
-  assert.match(unit, /hitStopRemaining/);
-  assert.match(unit, /hitStopMovement:Stop\(\)/);
-  assert.match(unit, /self\.CombatState = "IDLE"/);
-  assert.match(unit, /@Sync property integer HitEffectSerial = 0/);
-  assert.match(unit, /@Sync property string LastHitEffectRUID = "TBD"/);
-  assert.match(unit, /method string GetHitEffectRUID\(\)/);
-  assert.match(unit, /self\.LastHitEffectRUID = hitEffectRUID/);
-  assert.match(unit, /self\.HitEffectSerial = self\.HitEffectSerial \+ 1/);
-  assert.match(unit, /session:QueueDamage\(self\.Entity, event\.TotalDamage, event\.AttackerEntity\)/);
-  assert.match(unit, /kinematic:SetWorldPosition\(position\)/);
-  assert.doesNotMatch(unit, /transform:SetWorldPosition|transform:SetPosition\(/);
-
-  assert.match(contact, /extends AttackComponent/);
-  assert.match(contact, /AttackDamage = 40/);
-  assert.doesNotMatch(contact, /ContactDamage/);
-  assert.match(contact, /ContactCooldown = 2\.0/);
-  assert.match(contact, /self:AttackFrom\(self\.ContactSize/);
-  assert.doesNotMatch(contact, /TryContact\(Entity target\)/);
-  assert.match(contact, /targetCooldowns/);
-  assert.match(contact, /return self\.AttackDamage/);
-  assert.match(contact, /session:QueueKnockback/);
-  assert.doesNotMatch(contact, /_SoundService|VFX|PlayEffect/);
-
-  assert.match(presentation, /a95cfed2c8fe4d2cb64cbb62db051f92/);
-  assert.match(presentation, /8257566e41aa4234929e81c6c2dab2e4/);
-  assert.match(presentation, /OnHitAnimationRUID/);
-  assert.match(presentation, /5ebbdaf503964f3e87de155d16650805/);
-  assert.match(presentation, /dddbe2f162184ec89add7440da56eb75/);
-  assert.match(presentation, /AttackSoundRUID/);
-  assert.match(presentation, /OnHitSoundRUID/);
-  assert.match(presentation, /6eb2ef8a783c4393bd7ee6a2c199bda7/);
-  assert.match(presentation, /c49646f7299e4c6e81e953c96e20b294/);
-  assert.match(presentation, /lastAttackSerial/);
-  assert.match(presentation, /PlaySoundAtPos/);
-  assert.match(presentation, /@ExecSpace\("ClientOnly"\)\s+method void OnBeginPlay\(/);
-  assert.match(presentation, /@ExecSpace\("ClientOnly"\)\s+method void OnUpdate\(/);
-  assert.match(presentation, /unit\.DamageTakenSerial[\s\S]*self:PlayAtEntity\(self\.OnHitSoundRUID\)/);
-  assert.match(presentation, /unit\.IsDead == true and self\._T\.deathSoundPlayed ~= true/);
-  assert.match(presentation, /soundRUID == nil[\s\S]*soundRUID == "TBD"[\s\S]*soundRUID == "N\/A"/);
-
-  assert.match(session, /entity:AddComponent\("script\.BattleHitEffectPresentation"\)/);
-  assert.match(hitEffectPresentation, /@ExecSpace\("ClientOnly"\)\s+method void OnUpdate\(/);
-  assert.match(hitEffectPresentation, /unit\.HitEffectSerial/);
-  assert.match(hitEffectPresentation, /unit\.LastHitEffectRUID/);
-  assert.match(hitEffectPresentation, /PlayEffectAttached\(effectRUID, self\.Entity/);
-  assert.match(hitEffectPresentation, /effectRUID == nil[\s\S]*effectRUID == "TBD"[\s\S]*effectRUID == "N\/A"/);
-
-  assert.match(session, /entity:AddComponent\("script\.ShooterPresentation"\)/);
-  assert.match(shooterPresentation, /AttackSoundRUID/);
-  assert.match(shooterPresentation, /OnHitSoundRUID/);
-  assert.match(shooterPresentation, /DeathSoundRUID/);
-  assert.match(shooterPresentation, /lastAttackSerial/);
-  assert.match(shooterPresentation, /lastDamageSerial/);
-  assert.match(shooterPresentation, /PlaySoundAtPos/);
-  assert.match(shooterPresentation, /@ExecSpace\("ClientOnly"\)\s+method void OnBeginPlay\(/);
-  assert.match(shooterPresentation, /@ExecSpace\("ClientOnly"\)\s+method void OnUpdate\(/);
-  assert.match(shooterPresentation, /unit\.DamageTakenSerial[\s\S]*self:PlayAtEntity\(self\.OnHitSoundRUID\)/);
-  assert.match(shooterPresentation, /unit\.IsDead == true and self\._T\.deathSoundPlayed ~= true/);
-  assert.match(shooterPresentation, /soundRUID == nil[\s\S]*soundRUID == "TBD"[\s\S]*soundRUID == "N\/A"/);
-  assert.match(shooterAttack, /property string HitEffectRUID = "1f2bdb3b15a145ea8f3db3fbfb61296b"/);
-
-
-  assert.match(assault, /extends AttackComponent/);
-  assert.match(assault, /return self\.AttackDamage/);
-  assert.match(runtimeProbe, /session:SpawnUnit/);
-  assert.match(runtimeProbe, /_TimerService:SetTimerOnce/);
-  assert.match(runtimeProbe, /session:EnterResult\("WIN"\)/);
-  assert.match(runtimeProbe, /\[M1\]\[TankProbe\] PASS/);
-});
-
-test("Issue #4 adds a configurable hitscan shooter adapter", () => {
-  const session = read("RootDesk/MyDesk/Combat/BattleSession.mlua");
-  const composition = read("RootDesk/MyDesk/Combat/BattleAttackComposition.mlua");
-  const unit = read("RootDesk/MyDesk/Combat/BattleUnit.mlua");
-  const shooter = read("RootDesk/MyDesk/Combat/ShooterAttack.mlua");
-  const runtimeProbe = read("tests/shooter_runtime_probe.lua");
-  const monsterData = readCsvRows("RootDesk/MyDesk/Data/MonsterData.csv")
-    .map((row) => row.join(","))
-    .join("\n");
-
-  assert.match(monsterData, /monster_shooter,Shooter,SHOOTER,battleunit,120,0\.8,30,2,4\.0,9,/);
-  assert.match(session, /profile\.MonsterType == "SHOOTER"/);
-  assert.match(session, /profile\.MaxHp/);
-  assert.match(session, /profile\.AttackRange/);
-
-  assert.match(composition, /unitKind == "SHOOTER"/);
-  assert.match(composition, /script\.ShooterAttack/);
-  assert.match(unit, /unitKind == "TANK"/);
-  assert.match(unit, /self\.Entity\.Enable ~= false/);
-  assert.doesNotMatch(unit, /Projectile|projectile/);
-
-  assert.match(shooter, /extends AttackComponent/);
-  assert.match(shooter, /AttackDamage = 30/);
-  assert.match(shooter, /AttackRange = 4\.0/);
-  assert.match(shooter, /AttackInterval = 0\.8/);
-  assert.match(shooter, /method void TryEngage\(Entity target, boolean targetInRange\)/);
-  assert.match(shooter, /method void Advance\(number delta\)/);
-  assert.match(shooter, /@ExecSpace\("ServerOnly"\)\s+method void OnUpdate\(number delta\)/);
-  assert.match(shooter, /method void Cancel\(\)/);
-  assert.match(shooter, /method void CancelImpact\(\)[\s\S]*self\.CooldownRemaining = 0/);
-  assert.match(shooter, /AttackFrom\(Vector2\(0\.2, 0\.2\), Vector2\(targetPosition\.x, targetPosition\.y\), "shooter", nil\)/);
-  assert.match(shooter, /impactTarget/);
-  assert.match(shooter, /return dx \* dx \+ dy \* dy <= self\.AttackRange \* self\.AttackRange/);
-  assert.doesNotMatch(shooter, /AttackRange \+ 0\.05/);
-  assert.match(shooter, /return self\.AttackDamage/);
-  assert.match(shooter, /session:EmitPresentation\("HIT"/);
-  assert.match(unit, /session:EmitPresentation\("TARGET_HIT"/);
-  assert.match(session, /while #self\._T\.eventHistory > 24/);
-  assert.doesNotMatch(shooter, /SpawnService|Projectile|projectile/);
-
-  assert.match(runtimeProbe, /SpawnUnit\(session\.EnemyModelId, "M1_ShooterProbeTarget"/);
-  assert.match(runtimeProbe, /AdvanceForTest/);
-  assert.match(runtimeProbe, /pre-impact/);
-  assert.match(runtimeProbe, /target dies before impact/);
-  assert.match(runtimeProbe, /target leaves range before impact/);
-  assert.match(runtimeProbe, /SetEnable\(false\)/);
-  assert.match(runtimeProbe, /replacementTarget/);
-  assert.match(runtimeProbe, /ATTACK_START/);
-  assert.match(runtimeProbe, /AttackSerial/);
-  assert.match(runtimeProbe, /Children:ToTable/);
-  assert.match(runtimeProbe, /\[M1\]\[ShooterProbe\] PASS/);
-});
-
-test("BattleUnit owns attack dispatch while BattleSession stays adapter-agnostic", () => {
-  const session = read("RootDesk/MyDesk/Combat/BattleSession.mlua");
-  const unit = read("RootDesk/MyDesk/Combat/BattleUnit.mlua");
-  const composition = read("RootDesk/MyDesk/Combat/BattleAttackComposition.mlua");
-  const contact = read("RootDesk/MyDesk/Combat/TankContactAttack.mlua");
-  const assault = read("RootDesk/MyDesk/Combat/AssaultAttack.mlua");
-  const runtimeProbe = read("tests/tank_contact_runtime_probe.lua");
-
-  assert.match(composition, /method Component CreateAdapter\(Entity owner, string unitKind\)/);
-  assert.match(composition, /owner:AddComponent\(adapterType\)/);
-  assert.match(unit, /method void BindAttackFactory\(Component factory\)/);
-  assert.match(unit, /method void DriveAttack\(Entity target, boolean targetInRange\)/);
-  assert.match(unit, /method void AdvanceAttack\(number delta\)/);
-  assert.match(unit, /method void CancelAttack\(\)/);
-  assert.match(unit, /attackAdapter/);
-  assert.match(session, /entity:AddComponent\("script\.BattleAttackComposition"\)/);
-  assert.doesNotMatch(unit, /self\.Entity:AddComponent\(adapterType\)/);
-  assert.match(assault, /method void TryEngage\(Entity target, boolean targetInRange\)/);
-  assert.match(assault, /method void Cancel\(\)/);
-  assert.match(contact, /method void TryEngage\(Entity target, boolean targetInRange\)/);
-  assert.match(contact, /method void Cancel\(\)/);
-  assert.match(contact, /session:QueueKnockback\(/);
-  assert.match(runtimeProbe, /tankUnit:DriveAttack\(tank, true\)/);
-  assert.doesNotMatch(runtimeProbe, /GetComponent\("script\.(TankContactAttack|AssaultAttack)"\)/);
-  assert.match(session, /record\.unit:AdvanceAttack\(delta\)/);
-  assert.doesNotMatch(session, /script\.AssaultAttack|script\.TankContactAttack/);
-  assert.doesNotMatch(session, /QueueTankContactKnockback/);
-});
-
 test("Issue #7 uses the delivered option template, start button, and result entities", () => {
   const { UIBuilder } = require(path.join(root, ".agents/skills/msw-ui-system/scripts/msw_ui_builder.cjs"));
   const ui = UIBuilder.read(path.join(root, "ui/BattleGroup.ui"));
@@ -277,7 +93,6 @@ test("Issue #7 keeps deployment authority on the map session and uses IDs for ca
   const uiProbe = read("tests/deployment_ui_runtime_probe.lua");
   assert.match(session, /@Sync property string Phase = "DEPLOYMENT"/);
   assert.match(session, /method void RequestMonsterOptions\(\)/);
-  assert.match(session, /table\.insert\(options, \{ profile\.MonsterId, profile\.MonsterName, profile\.StandAnimationRUID \}\)/);
   assert.match(session, /@ExecSpace\("Server"\)\s+method void RequestBattlefieldClick\(string monsterId, Vector3 position\)/);
   assert.match(session, /method boolean TryDeployMonster\(string monsterId, Vector3 position\)/);
   assert.match(session, /self:GetMonsterProfile\(monsterId\)/);
@@ -368,22 +183,17 @@ test("Issue #7 preserves the data-driven battle core behind deployment", () => {
   const session = read("RootDesk/MyDesk/Combat/BattleSession.mlua");
   const unit = read("RootDesk/MyDesk/Combat/BattleUnit.mlua");
   const probe = read("tests/six_vs_six_runtime_probe.lua");
+  const targetingProbe = read("tests/targeting_crowding_runtime_probe.lua");
 
   assert.match(session, /MonsterDataSetName = "MonsterData"/);
   assert.match(session, /method boolean LoadMonsterData\(\)/);
-  assert.match(session, /_DataService:GetTable\(self\.MonsterDataSetName\)/);
   assert.match(session, /MonsterType/);
-  assert.match(session, /AttackFramesPerSecond = 60/);
-  assert.match(session, /profile\.ImpactDelaySeconds = profile\.AttackImpactFrame/);
-  assert.match(session, /duplicate MonsterId/);
-  assert.match(session, /invalid MonsterType/);
-  assert.match(session, /invalid numeric value/);
   assert.match(session, /method Entity SpawnMonster\(string monsterId/);
   assert.match(session, /fixedEnemyRoster/);
   assert.match(session, /self\.PlayerAlive = 0/);
-  assert.match(session, /self\.EnemyAlive = 6/);
-  assert.match(session, /self:EmitPresentation\("RESULT"/);
-  assert.match(session, /self\._T\.resultEntered == true/);
+  assert.match(session, /self\.InitialPlayerAlive = self\.PlayerAlive/);
+  assert.match(session, /self\.InitialEnemyAlive = self\.EnemyAlive/);
+  assert.doesNotMatch(session, /self\.EnemyAlive\s*=\s*6/);
   assert.match(session, /script\.BattleDeploymentInput/);
 
   assert.match(unit, /@Sync property string MonsterId = ""/);
@@ -391,16 +201,522 @@ test("Issue #7 preserves the data-driven battle core behind deployment", () => {
   assert.match(unit, /monsterId/);
   assert.match(unit, /MonsterName/);
 
+  for (const fixedRosterMember of [
+    "M1_EnemyTank", "M1_EnemyTank2", "M1_EnemyAssault",
+    "M1_EnemyAssault2", "M1_EnemyShooter", "M1_EnemyShooter2",
+  ]) assert.ok(probe.includes(fixedRosterMember), `${fixedRosterMember} must stay in the formal 6v6 probe`);
+  assert.match(probe, /InitialPlayerAlive == 6 and session\.InitialEnemyAlive == 6/);
   for (const scenario of [
-    "same-distance target is retained",
-    "dead target is reacquired",
-    "crowded units do not block or push each other",
-    "WIN",
-    "LOSE",
-    "same-batch DRAW",
-    "RESULT stops the battle",
+    "unit selects the nearest live enemy through Tick",
+    "exactly equidistant",
+    "explicitly disabled",
+    "native lethal HitEvent",
+    "both displace toward their target on real physics frames",
+    "natural WIN",
+    "natural LOSE",
+    "natural same-batch DRAW",
+    "prevents post-result attacks",
   ]) {
-    assert.match(probe, new RegExp(scenario.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.ok(targetingProbe.includes(scenario), `${scenario} runtime assertion missing`);
   }
   assert.match(probe, /\[M1\]\[SixVsSixProbe\] PASS/);
+  assert.match(targetingProbe, /\[M1\]\[TargetCrowdingProbe\] PASS/);
+});
+
+test("Issue #14 centralizes BattleSession registration, death, and removal accounting", () => {
+  const session = read("RootDesk/MyDesk/Combat/BattleSession.mlua");
+  const deploymentProbe = read("tests/deployment_runtime_probe.lua");
+  const tankProbe = read("tests/tank_contact_runtime_probe.lua");
+
+  assert.match(session, /@ExecSpace\("ServerOnly"\)\s+method boolean TryRemoveDeployedUnitAt\(Vector3 position\)/);
+  assert.doesNotMatch(deploymentProbe, /session\._T|:RemoveDeployedUnit\(/);
+  for (const scenario of [
+    "deployment starts empty against six fixed enemies",
+    "zero player units cannot start",
+    "first unit",
+    "sixth unit",
+    "seventh unit is rejected",
+    "profile lookups return distinct outer tables",
+    "editing a profile copy does not mutate catalog",
+    "removal with a NaN z coordinate is rejected",
+    "position-based removal selects the deployed unit",
+    "redeployment registers exactly one replacement unit",
+    "removal after start is rejected",
+  ]) {
+    assert.ok(deploymentProbe.includes(scenario), `${scenario} runtime assertion missing`);
+  }
+  assert.doesNotMatch(tankProbe, /EnemyAlive\s*=\s*session\.EnemyAlive\s*\+/);
+});
+
+test("Issue #15 exposes an atomic server-only controlled battle-scene seam", () => {
+  const session = read("RootDesk/MyDesk/Combat/BattleSession.mlua");
+  const probe = read("tests/controlled_scenario_runtime_probe.lua");
+
+  assert.match(
+    session,
+    /@ExecSpace\("ServerOnly"\)\s+method boolean PrepareBattleForTest\(table playerRoster, table enemyRoster\)/,
+  );
+  assert.match(session, /Environment:IsMakerPlay\(\)/);
+  assert.match(session, /method boolean TryStartBattle\(\)/);
+
+  for (const scenario of [
+    "valid 1v1 scene",
+    "zero-player scene cannot start",
+    "overlapping deployment positions",
+    "arena boundary position",
+    "preparation without a manual clock",
+    "unknown MonsterId",
+    "zero-enemy roster",
+    "duplicate team name",
+    "seventh unit",
+    "invalid arena coordinates",
+    "foreign userdata is rejected as a position",
+    "unknown profile override",
+    "invalid numeric overrides",
+    "scene switch discards queued old-scene work",
+    "throwing case releases its owned clock",
+  ]) {
+    assert.ok(probe.includes(scenario), `${scenario} runtime assertion missing`);
+  }
+
+  assert.doesNotMatch(probe, /session\._T/);
+  assert.match(probe, /\[M1\]\[ControlledScenarioProbe\] PASS/);
+});
+
+test("Issue #16 attack probes use prepared battle scenes and public session stepping", () => {
+  const probePaths = [
+    "tests/attack_execution_runtime_probe.lua",
+    "tests/attack_clock_runtime_probe.lua",
+  ];
+  const forbiddenCalls = /session\._T|:(?:SpawnUnit|SpawnConfiguredUnit|TryDeployMonster|QueueDamage|QueueKnockback|ApplyPendingKnockbacks)\s*\(/;
+  const mutableSessionOutcomes = /session\.(?:Phase|Result|PlayerAlive|EnemyAlive|InitialPlayerAlive|InitialEnemyAlive)\s*=(?!=)/;
+
+  for (const probePath of probePaths) {
+    const probe = read(probePath);
+    assert.match(probe, /session:PrepareBattleForTest\(/, `${probePath} must prepare a complete controlled scene`);
+    assert.match(probe, /session:TryStartBattle\(\)/, `${probePath} must start the prepared battle`);
+    assert.match(probe, /session:AdvanceForTest\(/, `${probePath} must verify through full session steps`);
+    assert.doesNotMatch(probe, forbiddenCalls, `${probePath} must not bypass roster or settlement APIs`);
+    assert.doesNotMatch(probe, mutableSessionOutcomes, `${probePath} must not write session outcome state`);
+    assert.doesNotMatch(probe, /:\s*SetEnable\s*\(\s*false\s*\)/,
+      `${probePath} must keep every prepared battle unit enabled`);
+    assert.match(probe, /\[M1\]\[(?:AttackExecution|AttackClock)Probe\] PASS/,
+      `${probePath} must report its successful terminal marker`);
+    assert.match(probe, /\[M1\]\[(?:AttackExecution|AttackClock)Probe\] FAILURES=/,
+      `${probePath} must report a terminal failure count`);
+  }
+
+  const executionProbe = read("tests/attack_execution_runtime_probe.lua");
+  assert.match(executionProbe,
+    /accepted hit survives same-batch attacker death/,
+    "the execution probe must preserve accepted-hit behavior when its attacker dies in the batch");
+  assert.match(executionProbe, /attackerDeathAt\s*<\s*outgoingHitAt/,
+    "the death scenario must observe the accepted hit resolve after its attacker dies");
+  assert.ok(
+    executionProbe.indexOf("local runOk, runDetail = pcall(function()") <
+      executionProbe.indexOf("if not isvalid(session) then"),
+    "the execution probe must protect the missing-session path so it reaches its terminal marker",
+  );
+});
+
+test("Issue #17 combat probes use controlled rosters and natural native outcomes", () => {
+  const controlledProbes = [
+    ["tests/tank_contact_runtime_probe.lua", "TankProbe"],
+    ["tests/shooter_runtime_probe.lua", "ShooterProbe"],
+    ["tests/targeting_crowding_runtime_probe.lua", "TargetCrowdingProbe"],
+  ];
+  const forbiddenBypasses = /session\._T|:(?:SpawnUnit|SpawnConfiguredUnit|QueueDamage|QueueKnockback|ApplyPendingKnockbacks)\s*\(/;
+  const mutableSessionOutcomes = /session\.(?:Phase|Result|PlayerAlive|EnemyAlive|InitialPlayerAlive|InitialEnemyAlive)\s*=(?!=)/;
+
+  for (const [probePath, probeTag] of controlledProbes) {
+    const probe = read(probePath);
+    assert.match(probe, /session:BeginManualSimulation\(\)/, `${probePath} must check clock acquisition`);
+    assert.match(probe, /session:PrepareBattleForTest\(/, `${probePath} must prepare controlled rosters`);
+    assert.match(probe, /session:TryStartBattle\(\)/, `${probePath} must start via the session API`);
+    assert.match(probe, /session:EndManualSimulation\(\)/, `${probePath} must release the owned clock`);
+    assert.doesNotMatch(probe, forbiddenBypasses, `${probePath} must use native attacks and session settlement`);
+    assert.doesNotMatch(probe, mutableSessionOutcomes, `${probePath} must not write outcome state`);
+    assert.ok(probe.includes(`[M1][${probeTag}] PASS`),
+      `${probePath} must emit its matching PASS verdict`);
+    assert.ok(probe.includes(`[M1][${probeTag}] FAILURES=`),
+      `${probePath} must emit its matching failure verdict`);
+    assert.match(probe, /local runOk, runDetail = pcall\(function\(\)/,
+      `${probePath} must capture whole-script errors`);
+    assert.ok(probe.indexOf("local runOk, runDetail = pcall(function()") <
+      probe.indexOf('_EntityService:GetEntityByPath("/maps/map01")'),
+    `${probePath} must capture map/session setup errors too`);
+  }
+
+  const tankProbe = read("tests/tank_contact_runtime_probe.lua");
+  const shooterProbe = read("tests/shooter_runtime_probe.lua");
+  const targetingProbe = read("tests/targeting_crowding_runtime_probe.lua");
+  assert.match(tankProbe, /DamageTakenSerial == firstSerial \+ 4/,
+    "tank contact must reach lethal damage through repeated native contacts");
+  assert.match(tankProbe, /independently/,
+    "tank contact must distinguish each target's cooldown");
+  assert.match(shooterProbe, /actor\.ImpactDelay/,
+    "shooter must use its profile impact timing");
+  assert.match(shooterProbe, /defender\.DamageTakenSerial > 0/,
+    "shooter must verify the native hit event");
+  assert.match(targetingProbe, /nearestB:SetEnable\(false\)/,
+    "only the explicit invalid-target case may disable a target");
+  assert.match(targetingProbe, /AttackSerial > 0 and enemyUnit\.AttackSerial > 0/,
+    "DRAW must resolve both already accepted attacks");
+
+  const sixVsSixProbe = read("tests/six_vs_six_runtime_probe.lua");
+  assert.equal((sixVsSixProbe.match(/session:TryDeployMonster\(/g) || []).length, 1,
+    "formal 6v6 probe must deploy through the official command in its roster loop");
+  assert.doesNotMatch(sixVsSixProbe, /session\._T|:(?:SpawnUnit|SpawnConfiguredUnit)\s*\(/,
+    "formal 6v6 probe must retain registered map units and natural settlement");
+  assert.match(sixVsSixProbe, /InitialPlayerAlive == 6 and session\.InitialEnemyAlive == 6/);
+  assert.ok(sixVsSixProbe.indexOf("local runOk, runDetail = pcall(function()") <
+    sixVsSixProbe.indexOf('_EntityService:GetEntityByPath("/maps/map01")'),
+  "formal 6v6 probe must capture map/session setup errors");
+});
+
+test("Issue #18 verifies same-batch outcomes and natural 6v6 settlement", () => {
+  const batchProbe = read("tests/six_vs_six_batch_outcome_probe.lua");
+  const fullBattleProbe = read("tests/six_vs_six_full_battle_probe.lua");
+
+  for (const scenario of [
+    "one accepted lethal hit produces WIN",
+    "one accepted lethal hit produces LOSE",
+    "same-batch lethal hits produce DRAW in player-first order",
+    "same-batch lethal hits produce DRAW in enemy-first order",
+    "two accepted hits retain separate HP, serial, sound, and damage-event observations",
+    "DRAW rejects later battle commands and remains stable after a full step",
+  ]) {
+    assert.ok(batchProbe.includes(scenario), `${scenario} runtime assertion missing`);
+  }
+  assert.match(fullBattleProbe, /result matches final alive counts/);
+  assert.match(fullBattleProbe, /terminal state is stable for one second of real frames/);
+});
+
+test("Issue #19 probes renamed and same-type catalog identities through production APIs", () => {
+  const sourceBytes = fs.readFileSync(path.join(root, "RootDesk/MyDesk/Data/MonsterData.csv"));
+  const fixture = require(path.join(root, "tests/monster_catalog_csv_fixture.cjs"));
+  const original = fixture.parseMonsterCsv(sourceBytes);
+  const temporary = fixture.parseMonsterCsv(fixture.createTemporaryFixtureBuffer(sourceBytes));
+  const originalTank = original.records.find((row) => row.MonsterId === "monster_tank");
+  const renamedTank = temporary.records.find((row) => row.MonsterId === "monster_tank");
+  const variantTank = temporary.records.find((row) => row.MonsterId === "probe_tank_variant");
+
+  assert.equal(temporary.records.length, original.records.length + 1);
+  assert.equal(renamedTank.MonsterName, "RenamedTank");
+  assert.equal(variantTank.MonsterName, "VariantTank");
+  assert.deepEqual(renamedTank, { ...originalTank, MonsterName: "RenamedTank" });
+  assert.deepEqual(variantTank, {
+    ...originalTank,
+    MonsterId: "probe_tank_variant",
+    MonsterName: "VariantTank",
+  });
+
+  const probe = read("tests/monster_catalog_identity_runtime_probe.lua");
+  for (const expected of [
+    'map:GetComponent("script.MonsterCatalog")',
+    'catalog:GetProfile("monster_tank")',
+    'catalog:GetProfile("probe_tank_variant")',
+    'session:TryDeployMonster("monster_tank"',
+    'session:TryDeployMonster("probe_tank_variant"',
+    "primaryUnit.MonsterId == \"monster_tank\"",
+    "variantUnit.MonsterId == \"probe_tank_variant\"",
+    "[M1][CatalogIdentityProbe] PASS",
+    "[M1][CatalogIdentityProbe] FAILURES=",
+  ]) {
+    assert.ok(probe.includes(expected), `${expected} runtime assertion missing`);
+  }
+  assert.doesNotMatch(probe,
+    /session\._T|catalog:Load\(|session:GetMonsterProfile\(|PrepareBattleForTest\(|\w+Profile\.\w+\s*=(?!=)/,
+    "the identity probe must only query the loaded catalog and use production deployment");
+});
+
+test("Issue #19 requires Maker lifecycle verification before modifying the catalog", async () => {
+  const fixture = require(path.join(root, "tests/monster_catalog_csv_fixture.cjs"));
+  const sourceBytes = fs.readFileSync(path.join(root, "RootDesk/MyDesk/Data/MonsterData.csv"));
+  const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "m1-monster-csv-lifecycle-test-"));
+  const csvPath = path.join(sandbox, "MonsterData.csv");
+
+  try {
+    fs.writeFileSync(csvPath, sourceBytes);
+    await assert.rejects(fixture.withTemporaryMonsterCsv(async () => {
+      throw new Error("probe must not run without lifecycle verification");
+    }, { csvPath, logger: () => {} }),
+    /required lifecycle callbacks are missing: lifecycle\.stop, lifecycle\.refresh, lifecycle\.verifyRestored/);
+    assert.deepEqual(fs.readFileSync(csvPath), sourceBytes);
+    assert.deepEqual(fs.readdirSync(sandbox), ["MonsterData.csv"],
+      "validation happens before creating backup or fixture files");
+  } finally {
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  }
+});
+
+test("Issue #19 temporary CSV guard restores exact original bytes after success or probe failure", async () => {
+  const fixture = require(path.join(root, "tests/monster_catalog_csv_fixture.cjs"));
+  const sourceBytes = fs.readFileSync(path.join(root, "RootDesk/MyDesk/Data/MonsterData.csv"));
+  const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "m1-monster-csv-guard-test-"));
+  const csvPath = path.join(sandbox, "MonsterData.csv");
+
+  try {
+    for (const shouldThrow of [false, true]) {
+      fs.writeFileSync(csvPath, sourceBytes);
+      let manifestPath = "";
+      const lifecycleStages = [];
+      const runProbe = async (manifest) => {
+        manifestPath = manifest.manifestPath;
+        const activeBytes = fs.readFileSync(csvPath);
+        assert.notDeepEqual(activeBytes, sourceBytes);
+        assert.equal(path.dirname(manifest.backupPath), path.dirname(manifest.manifestPath));
+        assert.ok(path.resolve(manifest.backupPath).startsWith(path.resolve(os.tmpdir())));
+        if (shouldThrow) throw new Error("simulated probe failure");
+        return "probe complete";
+      };
+      const lifecycle = {
+        stop: async ({ stage }) => lifecycleStages.push(`stop:${stage}`),
+        refresh: async ({ stage }) => lifecycleStages.push(`refresh:${stage}`),
+        verifyRestored: async ({ originalBytes }) => {
+          assert.deepEqual(fs.readFileSync(csvPath), originalBytes);
+          lifecycleStages.push("verify:formal-catalog");
+        },
+      };
+
+      if (shouldThrow) {
+        await assert.rejects(fixture.withTemporaryMonsterCsv(runProbe, { csvPath, lifecycle, logger: () => {} }),
+          /simulated probe failure/);
+      } else {
+        assert.equal(await fixture.withTemporaryMonsterCsv(runProbe, { csvPath, lifecycle, logger: () => {} }), "probe complete");
+      }
+      assert.deepEqual(fs.readFileSync(csvPath), sourceBytes);
+      assert.equal(fs.existsSync(manifestPath), false, "successful cleanup removes its OS-temp backup");
+      assert.deepEqual(lifecycleStages, [
+        "stop:before-restore",
+        "refresh:after-restore",
+        "verify:formal-catalog",
+        "stop:after-restore-verification",
+      ]);
+    }
+
+    const abortController = new AbortController();
+    let interruptedManifest = "";
+    let continueAfterCancellation = false;
+    let startProbe;
+    const probeStarted = new Promise((resolve) => { startProbe = resolve; });
+    const interruptionStages = [];
+    const interruptedRun = fixture.withTemporaryMonsterCsv(async ({ manifestPath, signal }) => {
+      interruptedManifest = manifestPath;
+      startProbe();
+      await new Promise((resolve, reject) => {
+        signal.addEventListener("abort", () => {
+          setTimeout(() => {
+            continueAfterCancellation = true;
+            reject(signal.reason);
+          }, 20);
+        }, { once: true });
+      });
+    }, {
+      csvPath,
+      signal: abortController.signal,
+      lifecycle: {
+        stop: async ({ stage }) => {
+          interruptionStages.push(`stop:${stage}`);
+          if (stage === "before-restore") {
+            assert.equal(continueAfterCancellation, true, "Maker stops only after the probe acknowledges cancellation");
+          }
+        },
+        refresh: async ({ stage }) => interruptionStages.push(`refresh:${stage}`),
+        verifyRestored: async () => interruptionStages.push("verify:formal-catalog"),
+      },
+      logger: () => {},
+    });
+    await probeStarted;
+    abortController.abort();
+    await assert.rejects(interruptedRun, /interrupted by AbortSignal/);
+    assert.deepEqual(fs.readFileSync(csvPath), sourceBytes);
+    assert.equal(fs.existsSync(interruptedManifest), false, "interruption cleanup removes its OS-temp backup after verification");
+    assert.deepEqual(interruptionStages, [
+      "stop:before-restore",
+      "refresh:after-restore",
+      "verify:formal-catalog",
+      "stop:after-restore-verification",
+    ]);
+
+    const cleanupAbortController = new AbortController();
+    const beforeSigintListeners = process.listeners("SIGINT");
+    const beforeSigtermListeners = process.listeners("SIGTERM");
+    let cleanupManifest = "";
+    const cleanupSignalStages = [];
+    await assert.rejects(fixture.withTemporaryMonsterCsv(async (manifest) => {
+      cleanupManifest = manifest.manifestPath;
+      return "probe complete";
+    }, {
+      csvPath,
+      signal: cleanupAbortController.signal,
+      lifecycle: {
+        stop: async ({ stage }) => {
+          cleanupSignalStages.push(`stop:${stage}`);
+          assert.ok(process.listeners("SIGINT").some((listener) => !beforeSigintListeners.includes(listener)),
+            "SIGINT handler remains installed during Maker cleanup");
+          assert.ok(process.listeners("SIGTERM").some((listener) => !beforeSigtermListeners.includes(listener)),
+            "SIGTERM handler remains installed during Maker cleanup");
+          if (stage === "before-restore") cleanupAbortController.abort();
+        },
+        refresh: async ({ stage }) => cleanupSignalStages.push(`refresh:${stage}`),
+        verifyRestored: async () => cleanupSignalStages.push("verify:formal-catalog"),
+      },
+      logger: () => {},
+    }), /interrupted by AbortSignal/);
+    assert.deepEqual(fs.readFileSync(csvPath), sourceBytes);
+    assert.equal(fs.existsSync(cleanupManifest), false, "a signal during cleanup still completes rollback");
+    assert.deepEqual(process.listeners("SIGINT"), beforeSigintListeners, "SIGINT handler is removed after cleanup");
+    assert.deepEqual(process.listeners("SIGTERM"), beforeSigtermListeners, "SIGTERM handler is removed after cleanup");
+    assert.deepEqual(cleanupSignalStages, [
+      "stop:before-restore",
+      "refresh:after-restore",
+      "verify:formal-catalog",
+      "stop:after-restore-verification",
+    ]);
+
+    const loggerAbortController = new AbortController();
+    let loggerFailureManifest = "";
+    let startLoggerFailureProbe;
+    const loggerFailureProbeStarted = new Promise((resolve) => { startLoggerFailureProbe = resolve; });
+    const loggerFailureStages = [];
+    const loggerFailureSigintListeners = process.listeners("SIGINT");
+    const loggerFailureSigtermListeners = process.listeners("SIGTERM");
+    const loggerFailureRun = fixture.withTemporaryMonsterCsv(async ({ manifestPath, signal }) => {
+      loggerFailureManifest = manifestPath;
+      startLoggerFailureProbe();
+      await new Promise((resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    }, {
+      csvPath,
+      signal: loggerAbortController.signal,
+      lifecycle: {
+        stop: async ({ stage }) => loggerFailureStages.push(`stop:${stage}`),
+        refresh: async ({ stage }) => loggerFailureStages.push(`refresh:${stage}`),
+        verifyRestored: async ({ originalBytes }) => {
+          assert.deepEqual(fs.readFileSync(csvPath), originalBytes);
+          loggerFailureStages.push("verify:formal-catalog");
+        },
+      },
+      logger: (message) => {
+        if (message.includes("acknowledged cancellation")) throw new Error("logger failed during cancellation acknowledgement");
+      },
+    });
+    await loggerFailureProbeStarted;
+    loggerAbortController.abort();
+    let loggerFailure;
+    await assert.rejects(loggerFailureRun, (error) => {
+      loggerFailure = error;
+      return error instanceof AggregateError && /cleanup failed; backup retained at/.test(error.message);
+    });
+    const loggerFailureDirectory = path.dirname(loggerFailureManifest);
+    try {
+      assert.deepEqual(fs.readFileSync(csvPath), sourceBytes, "logger failure does not interrupt CSV restoration");
+      assert.deepEqual(fs.readFileSync(path.join(loggerFailureDirectory, "MonsterData.csv.original")), sourceBytes,
+        "a logger failure retains the recovery backup");
+      assert.ok(loggerFailure.errors.some((error) => /logger failed during cancellation acknowledgement/.test(error.message)),
+        "the logger failure is reported as incomplete cleanup");
+      assert.deepEqual(loggerFailureStages, [
+        "stop:before-restore",
+        "refresh:after-restore",
+        "verify:formal-catalog",
+        "stop:after-restore-verification",
+      ], "all Maker cleanup callbacks run despite a logger exception");
+      assert.deepEqual(process.listeners("SIGINT"), loggerFailureSigintListeners,
+        "SIGINT handler is removed after logger failure cleanup");
+      assert.deepEqual(process.listeners("SIGTERM"), loggerFailureSigtermListeners,
+        "SIGTERM handler is removed after logger failure cleanup");
+    } finally {
+      if (fixture.insideTempDirectory(loggerFailureDirectory)) fs.rmSync(loggerFailureDirectory, { recursive: true, force: true });
+    }
+
+    const pendingAbortController = new AbortController();
+    let pendingManifest = "";
+    let startPendingProbe;
+    const pendingProbeStarted = new Promise((resolve) => { startPendingProbe = resolve; });
+    const pendingCleanupStages = [];
+    const pendingRun = fixture.withTemporaryMonsterCsv(async ({ manifestPath }) => {
+      pendingManifest = manifestPath;
+      startPendingProbe();
+      return new Promise(() => {});
+    }, {
+      csvPath,
+      signal: pendingAbortController.signal,
+      probeCancellationTimeoutMs: 10,
+      lifecycleTimeoutMs: 100,
+      lifecycle: {
+        stop: async ({ stage }) => pendingCleanupStages.push(`stop:${stage}`),
+        refresh: async ({ stage }) => pendingCleanupStages.push(`refresh:${stage}`),
+        verifyRestored: async ({ originalBytes }) => {
+          assert.deepEqual(fs.readFileSync(csvPath), originalBytes);
+          pendingCleanupStages.push("verify:formal-catalog");
+        },
+      },
+      logger: () => {},
+    });
+    await pendingProbeStarted;
+    pendingAbortController.abort();
+    let pendingCleanupError;
+    await assert.rejects(pendingRun, (error) => {
+      pendingCleanupError = error;
+      return error instanceof AggregateError && /cleanup failed; backup retained at/.test(error.message);
+    });
+    const retainedDirectory = path.dirname(pendingManifest);
+    try {
+      assert.equal(fixture.insideTempDirectory(retainedDirectory), true, "incomplete rollback retains an OS-temp backup");
+      assert.deepEqual(fs.readFileSync(csvPath), sourceBytes, "bounded recovery restores formal CSV bytes");
+      assert.deepEqual(fs.readFileSync(path.join(retainedDirectory, "MonsterData.csv.original")), sourceBytes,
+        "incomplete cancellation preserves the original backup for recovery");
+      assert.ok(pendingCleanupError.errors.some((error) => /did not acknowledge AbortSignal/.test(error.message)),
+        "a timed-out callback is reported as incomplete cleanup");
+      assert.deepEqual(pendingCleanupStages, [
+        "stop:before-restore",
+        "refresh:after-restore",
+        "verify:formal-catalog",
+        "stop:after-restore-verification",
+      ]);
+    } finally {
+      if (fixture.insideTempDirectory(retainedDirectory)) fs.rmSync(retainedDirectory, { recursive: true, force: true });
+    }
+  } finally {
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  }
+});
+
+test("Issue #19 server runtime probes do not bypass BattleSession settlement state", () => {
+  const serverProbePaths = [
+    "tests/six_vs_six_runtime_probe.lua",
+    "tests/deployment_runtime_probe.lua",
+    "tests/attack_execution_runtime_probe.lua",
+    "tests/attack_clock_runtime_probe.lua",
+    "tests/tank_contact_runtime_probe.lua",
+    "tests/shooter_runtime_probe.lua",
+    "tests/targeting_crowding_runtime_probe.lua",
+    "tests/six_vs_six_batch_outcome_probe.lua",
+    "tests/six_vs_six_full_battle_probe.lua",
+    "tests/controlled_scenario_runtime_probe.lua",
+    "tests/monster_catalog_identity_runtime_probe.lua",
+    "tests/monster_catalog_restored_runtime_probe.lua",
+  ];
+  const forbidden = /session\._T|session\.(?:Phase|Result|PlayerAlive|EnemyAlive|InitialPlayerAlive|InitialEnemyAlive)\s*=(?!=)|table\.remove\s*\(|session:(?:RemoveDeployedUnit|SpawnUnit|SpawnConfiguredUnit|QueueDamage|QueueKnockback|ApplyPendingKnockbacks|ResolveDamageBatch|DetermineResult|EvaluateResult|EnterResult|ForceResult|SetResult)\s*\(/;
+
+  for (const probePath of serverProbePaths) {
+    const probe = read(probePath);
+    assert.doesNotMatch(probe, forbidden, `${probePath} must observe the public session seam without mutating or staging settlement`);
+  }
+
+  for (const [probePath, tag] of [
+    ["tests/deployment_runtime_probe.lua", "DeploymentProbe"],
+    ["tests/controlled_scenario_runtime_probe.lua", "ControlledScenarioProbe"],
+  ]) {
+    const probe = read(probePath);
+    assert.match(probe, /local runOk, runDetail = pcall\(function\(\)/,
+      `${probePath} must capture setup and execution exceptions`);
+    assert.ok(probe.indexOf("local runOk, runDetail = pcall(function()")
+      < probe.indexOf('_EntityService:GetEntityByPath("/maps/map01")'),
+    `${probePath} must protect the missing-map/session path too`);
+    assert.match(probe, new RegExp(`\\[M1\\]\\[${tag}\\] FAILURES=`),
+      `${probePath} must emit a terminal failure marker after exceptions`);
+  }
 });

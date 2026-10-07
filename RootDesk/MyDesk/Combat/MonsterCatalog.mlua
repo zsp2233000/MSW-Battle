@@ -1,0 +1,290 @@
+@Component
+script MonsterCatalog extends Component
+
+    property string ErrorMessage = ""
+
+    @ExecSpace("ServerOnly")
+    method void OnInitialize()
+        -- Initialize the map-scoped catalog without exposing server diagnostics to clients.
+        self._T.profilesById = {}
+        self.ErrorMessage = ""
+    end
+
+    method boolean IsBlank(any value)
+        -- Treat missing cells and empty CSV cells as absent values.
+        return value == nil or value == ""
+    end
+
+    method boolean SetError(string message)
+        -- Preserve the first validation failure for the session's server log.
+        if self.ErrorMessage == "" then self.ErrorMessage = message end
+        return false
+    end
+
+    method number ReadNumber(any raw, string fieldName, string monsterId, number minimum)
+        -- Parse a finite numeric cell and enforce the field's minimum value.
+        if self:IsBlank(raw) then
+            self:SetError("invalid numeric value " .. fieldName .. " for " .. monsterId)
+            return 0
+        end
+        local parsed = tonumber(raw)
+        if parsed == nil or parsed ~= parsed or parsed == math.huge or parsed == -math.huge or parsed < minimum then
+            self:SetError("invalid numeric value " .. fieldName .. " for " .. monsterId)
+            return 0
+        end
+        return parsed
+    end
+
+    method integer ReadInteger(any raw, string fieldName, string monsterId, integer minimum)
+        -- Reject fractional values for fields requiring an integer.
+        local parsed = self:ReadNumber(raw, fieldName, monsterId, minimum)
+        if self.ErrorMessage ~= "" then return 0 end
+        if parsed % 1 ~= 0 then
+            self:SetError("invalid numeric value " .. fieldName .. " for " .. monsterId)
+            return 0
+        end
+        return math.floor(parsed)
+    end
+
+    method any ReadPresentationClip(string ruid, string monsterId, string fieldName)
+        -- Load and validate clip frames before deriving presentation timing.
+        local clip = _ResourceService:LoadAnimationClipAndWait(ruid)
+        if not isvalid(clip) or clip.IsLoadComplete ~= true then
+            self:SetError(fieldName .. " failed to load for " .. monsterId)
+            return nil
+        end
+        local frames = clip.Frames:ToTable()
+        if frames == nil or #frames == 0 then
+            self:SetError(fieldName .. " has no frames for " .. monsterId)
+            return nil
+        end
+        if clip.PlayRate == nil or not (clip.PlayRate > 0) or not (clip.PlayRate < math.huge) then
+            self:SetError(fieldName .. " has invalid PlayRate for " .. monsterId)
+            return nil
+        end
+        local total = 0
+        for _, frame in ipairs(frames) do
+            local delay = frame and frame.Delay or nil
+            if delay == nil or not (delay >= 0) or not (delay < math.huge) then
+                self:SetError(fieldName .. " has invalid frame timing for " .. monsterId)
+                return nil
+            end
+            total = total + delay
+        end
+        if not (total > 0) or not (total < math.huge) then
+            self:SetError(fieldName .. " has no positive duration for " .. monsterId)
+            return nil
+        end
+        return { frames = frames, playRate = clip.PlayRate, duration = total / clip.PlayRate }
+    end
+
+    method boolean ValidateResource(string ruid, string monsterId, string fieldName, any expectedType)
+        -- Check the resource type of each nonblank animation or audio reference.
+        if self:IsBlank(ruid) then return true end
+        local actualType = _ResourceService:GetTypeAndWait(ruid)
+        if actualType ~= expectedType then
+            return self:SetError(
+                fieldName .. " has invalid resource type for " .. monsterId
+                .. " (expected=" .. tostring(expectedType) .. ", actual=" .. tostring(actualType) .. ")"
+            )
+        end
+        return true
+    end
+
+    method any ParseRow(any row, integer rowIndex)
+        -- Validate one complete monster row and build its authoritative profile.
+        if row == nil then
+            self:SetError("MonsterData row missing at index " .. tostring(rowIndex))
+            return nil
+        end
+        local monsterId = row:GetItem("MonsterId")
+        if self:IsBlank(monsterId) then
+            self:SetError("MonsterData row " .. tostring(rowIndex) .. " missing MonsterId")
+            return nil
+        end
+        if self._T.profilesById[monsterId] ~= nil then
+            self:SetError("duplicate MonsterId " .. monsterId)
+            return nil
+        end
+
+        local monsterName = row:GetItem("MonsterName")
+        local monsterType = row:GetItem("MonsterType")
+        local modelId = row:GetItem("ModelId")
+        if self:IsBlank(monsterName) or self:IsBlank(modelId) then
+            self:SetError("MonsterData row " .. monsterId .. " missing name or ModelId")
+            return nil
+        end
+        if self._T.allowedModelIds == nil or self._T.allowedModelIds[modelId] ~= true then
+            self:SetError("unexpected ModelId " .. tostring(modelId) .. " for " .. monsterId)
+            return nil
+        end
+        if monsterType ~= "TANK" and monsterType ~= "ASSAULT" and monsterType ~= "SHOOTER" then
+            self:SetError("invalid MonsterType " .. tostring(monsterType) .. " for " .. monsterId)
+            return nil
+        end
+
+        local profile = {
+            MonsterId = monsterId,
+            MonsterName = monsterName,
+            MonsterType = monsterType,
+            ModelId = modelId,
+        }
+        profile.MaxHp = self:ReadInteger(row:GetItem("MaxHp"), "MaxHp", monsterId, 1)
+        profile.MoveSpeed = self:ReadNumber(row:GetItem("MoveSpeed"), "MoveSpeed", monsterId, 0.0001)
+        profile.AttackDamage = self:ReadInteger(row:GetItem("AttackDamage"), "AttackDamage", monsterId, 1)
+        profile.AttackIntervalSeconds = self:ReadNumber(row:GetItem("AttackIntervalSeconds"), "AttackIntervalSeconds", monsterId, 0.0001)
+        profile.AttackRange = self:ReadNumber(row:GetItem("AttackRange"), "AttackRange", monsterId, 0.0001)
+        local attackImpactFrame = row:GetItem("AttackImpactFrame")
+        if monsterType == "TANK" and self:IsBlank(attackImpactFrame) then
+            profile.AttackImpactFrame = 0
+        elseif monsterType ~= "TANK" and self:IsBlank(attackImpactFrame) then
+            profile.AttackImpactFrame = 1
+        else
+            profile.AttackImpactFrame = self:ReadInteger(attackImpactFrame, "AttackImpactFrame", monsterId, 0)
+        end
+        profile.RetargetIntervalSeconds = self:ReadNumber(row:GetItem("RetargetIntervalSeconds"), "RetargetIntervalSeconds", monsterId, 0.0001)
+        profile.HitStopDurationSeconds = self:ReadNumber(row:GetItem("HitStopDurationSeconds"), "HitStopDurationSeconds", monsterId, 0)
+        if self.ErrorMessage ~= "" then return nil end
+        local contactMinimum = 0
+        if monsterType == "TANK" then contactMinimum = 0.0001 end
+        profile.ContactCooldownSeconds = self:ReadNumber(row:GetItem("ContactCooldownSeconds"), "ContactCooldownSeconds", monsterId, contactMinimum)
+        profile.ContactSizeX = self:ReadNumber(row:GetItem("ContactSizeX"), "ContactSizeX", monsterId, contactMinimum)
+        profile.ContactSizeY = self:ReadNumber(row:GetItem("ContactSizeY"), "ContactSizeY", monsterId, contactMinimum)
+        profile.KnockbackDistance = self:ReadNumber(row:GetItem("KnockbackDistance"), "KnockbackDistance", monsterId, contactMinimum)
+        if monsterType ~= "TANK" and profile.AttackImpactFrame <= 0 then
+            self:SetError("invalid numeric value AttackImpactFrame for " .. monsterId)
+            return nil
+        end
+        if self.ErrorMessage ~= "" then return nil end
+
+        local assetFields = {
+            "StandAnimationRUID", "MoveAnimationRUID", "AttackAnimationRUID", "HitAnimationRUID",
+            "DieAnimationRUID", "HitEffectRUID", "AttackSoundRUID", "OnHitSoundRUID", "DieSoundRUID",
+        }
+        local optionalAssetFields = {
+            AttackAnimationRUID = monsterType == "TANK",
+            HitEffectRUID = true,
+            AttackSoundRUID = true,
+            OnHitSoundRUID = true,
+            DieSoundRUID = true,
+        }
+        for _, fieldName in ipairs(assetFields) do
+            local assetRUID = row:GetItem(fieldName)
+            if optionalAssetFields[fieldName] ~= true and self:IsBlank(assetRUID) then
+                self:SetError("MonsterData row " .. monsterId .. " missing " .. fieldName)
+                return nil
+            end
+            profile[fieldName] = assetRUID or ""
+        end
+
+
+        local resourceTypes = {
+            StandAnimationRUID = ResourceType.AnimationClip,
+            MoveAnimationRUID = ResourceType.AnimationClip,
+            AttackAnimationRUID = ResourceType.AnimationClip,
+            HitAnimationRUID = ResourceType.AnimationClip,
+            DieAnimationRUID = ResourceType.AnimationClip,
+            HitEffectRUID = ResourceType.AnimationClip,
+            AttackSoundRUID = ResourceType.AudioClip,
+            OnHitSoundRUID = ResourceType.AudioClip,
+            DieSoundRUID = ResourceType.AudioClip,
+        }
+        for _, fieldName in ipairs(assetFields) do
+            if self:ValidateResource(profile[fieldName], monsterId, fieldName, resourceTypes[fieldName]) == false then
+                return nil
+            end
+        end
+
+        local hitClip = self:ReadPresentationClip(profile.HitAnimationRUID, monsterId, "HitAnimationRUID")
+        if hitClip == nil then return nil end
+        profile.HitAnimationDurationSeconds = hitClip.duration
+        profile.ImpactDelaySeconds = 0
+        profile.AttackAnimationDurationSeconds = 0
+        if monsterType ~= "TANK" then
+            local attackClip = self:ReadPresentationClip(profile.AttackAnimationRUID, monsterId, "AttackAnimationRUID")
+            if attackClip == nil then return nil end
+            if profile.AttackImpactFrame > #attackClip.frames then
+                self:SetError("AttackImpactFrame exceeds attack clip for " .. monsterId)
+                return nil
+            end
+            profile.AttackAnimationDurationSeconds = attackClip.duration
+            for frameIndex = 1, profile.AttackImpactFrame - 1 do
+                profile.ImpactDelaySeconds = profile.ImpactDelaySeconds + attackClip.frames[frameIndex].Delay
+            end
+            profile.ImpactDelaySeconds = profile.ImpactDelaySeconds / attackClip.playRate
+        end
+        return profile
+    end
+
+    method boolean ValidateRoster(table roster)
+        -- Require every configured enemy ID to exist with its expected combat type.
+        for _, entry in ipairs(roster or {}) do
+            local profile = self._T.profilesById[entry.monsterId]
+            if profile == nil then
+                return self:SetError("missing configured MonsterId " .. tostring(entry.monsterId))
+            end
+            if profile.MonsterType ~= entry.expectedType then
+                return self:SetError("MonsterId " .. tostring(entry.monsterId) .. " has unexpected MonsterType")
+            end
+        end
+        return true
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean Load(string datasetName, table fixedRoster, table allowedModelIds)
+        -- Rebuild the catalog only when every row and fixed enemy entry passes validation.
+        self.ErrorMessage = ""
+        self._T.profilesById = {}
+        self._T.allowedModelIds = allowedModelIds or {}
+        local dataset = _DataService:GetTable(datasetName)
+        if dataset == nil then return self:SetError("MonsterData table unavailable") end
+        local requiredColumns = {
+            "MonsterId", "MonsterName", "MonsterType", "ModelId", "MaxHp", "MoveSpeed", "AttackDamage",
+            "AttackIntervalSeconds", "AttackRange", "AttackImpactFrame", "RetargetIntervalSeconds",
+            "HitStopDurationSeconds", "ContactCooldownSeconds", "ContactSizeX", "ContactSizeY",
+            "KnockbackDistance", "StandAnimationRUID", "MoveAnimationRUID", "AttackAnimationRUID",
+            "HitAnimationRUID", "DieAnimationRUID", "HitEffectRUID", "AttackSoundRUID",
+            "OnHitSoundRUID", "DieSoundRUID",
+        }
+        for _, columnName in ipairs(requiredColumns) do
+            if dataset:GetColumn(columnName) == nil then
+                return self:SetError("MonsterData missing column " .. columnName)
+            end
+        end
+        local rowCount = dataset:GetRowCount()
+        if rowCount == nil or rowCount <= 0 then return self:SetError("MonsterData has no rows") end
+        for rowIndex = 1, rowCount do
+            local profile = self:ParseRow(dataset:GetRow(rowIndex), rowIndex)
+            if profile == nil then return false end
+            self._T.profilesById[profile.MonsterId] = profile
+        end
+        if self:ValidateRoster(fixedRoster) == false then return false end
+        log("[M1][MonsterCatalog] loaded and validated rows=" .. tostring(rowCount))
+        return true
+    end
+
+    method any GetProfile(string monsterId)
+        -- Resolve a validated profile by its stable MonsterId.
+        if self._T.profilesById == nil then return nil end
+        return self._T.profilesById[monsterId]
+    end
+
+    method string FindIdByType(string monsterType)
+        -- Find an available validated monster of the requested combat type.
+        for monsterId, profile in pairs(self._T.profilesById or {}) do
+            if profile.MonsterType == monsterType then return monsterId end
+        end
+        return ""
+    end
+
+    method table GetDeploymentOptions()
+        -- Return the sorted, limited fields needed to display deployment cards.
+        local options = {}
+        for _, profile in pairs(self._T.profilesById or {}) do
+            table.insert(options, { profile.MonsterId, profile.MonsterName, profile.StandAnimationRUID })
+        end
+        table.sort(options, function(left, right) return left[1] < right[1] end)
+        return options
+    end
+
+end
