@@ -57,7 +57,7 @@ function parseMonsterCsv(source) {
   return { bom, header, records, trailingNewline };
 }
 
-function createTemporaryFixtureBuffer(originalBytes) {
+function createTemporaryFixtureBuffer(originalBytes, variantStats = {}) {
   const source = Buffer.isBuffer(originalBytes) ? originalBytes : Buffer.from(originalBytes);
   const decoded = source.toString("utf8");
   if (!Buffer.from(decoded, "utf8").equals(source)) throw new Error("MonsterData CSV is not valid UTF-8");
@@ -88,6 +88,18 @@ function createTemporaryFixtureBuffer(originalBytes) {
   const variantCells = [...tankCells];
   variantCells[idIndex] = VARIANT_ID;
   variantCells[nameIndex] = "VariantTank";
+  const numericFields = new Set([
+    "MaxHp", "MoveSpeed", "AttackDamage", "AttackIntervalSeconds", "AttackRange",
+    "AttackImpactFrame", "RetargetIntervalSeconds", "HitStopDurationSeconds",
+    "ContactCooldownSeconds", "ContactSizeX", "ContactSizeY", "KnockbackDistance",
+  ]);
+  for (const [field, value] of Object.entries(variantStats)) {
+    const columnIndex = header.indexOf(field);
+    if (!numericFields.has(field) || columnIndex < 0 || typeof value !== "number" || !Number.isFinite(value)) {
+      throw new TypeError(`variantStats.${field} must be a finite numeric combat cell`);
+    }
+    variantCells[columnIndex] = String(value);
+  }
   lines.push(variantCells.join(","));
   const result = `${parsed.bom}${lines.join(newline)}${parsed.trailingNewline ? newline : ""}`;
   return Buffer.from(result, "utf8");
@@ -120,7 +132,7 @@ async function withTemporaryMonsterCsv(runProbe, options = {}) {
   const tempRoot = path.resolve(options.tempRoot || os.tmpdir());
   const originalBytes = fs.readFileSync(csvPath);
   const originalSha256 = sha256(originalBytes);
-  const fixtureBytes = createTemporaryFixtureBuffer(originalBytes);
+  const fixtureBytes = createTemporaryFixtureBuffer(originalBytes, options.variantStats);
   const tempDirectory = fs.mkdtempSync(path.join(tempRoot, "m1-monster-csv-"));
   const backupPath = path.join(tempDirectory, "MonsterData.csv.original");
   const manifestPath = path.join(tempDirectory, "manifest.json");

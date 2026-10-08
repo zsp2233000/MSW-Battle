@@ -569,12 +569,35 @@ do
             "warrior attack kills the selected target before shooter impact")
         check(reserve:IsAlive() and session.Phase == "BATTLE" and session.Result == "",
             "prepared enemy reserve keeps observation in BATTLE after target death")
+        check(session.EnemyAlive == 1 and target.CurrentTargetName == "" and target.CombatState == "DEAD",
+            "death immediately removes alive eligibility and clears the defender target")
         session:AdvanceForTest(0.2)
         check(target.DamageTakenSerial == 1 and shooter.AttackSerial == 1,
             "shooter does not deliver another native hit to the dead target")
         check(isvalid(shooterEntity) and isvalid(killerEntity)
             and contains(session.EventHistory, "DAMAGE:" .. killerEntity.Name .. ":" .. targetName),
             "target death retains its legitimate attack and semantic damage event")
+        local history = session.EventHistory
+        local soundSerial = target.OnHitSoundSerial
+        local effectSerial = target.HitEffectSerial
+        local attackSerial = target.AttackSerial
+        -- Isolate the damage guard from the native StateComponent's automatic HIT transition.
+        -- DEAD -> HIT is an invalid native transition; this fresh Play is discarded after the probe.
+        local state = targetEntity:GetComponent("StateComponent")
+        state:DisconnectHitEvent()
+        local delivered = 0
+        local observer = targetEntity:ConnectEvent(HitEvent, function(event) delivered = delivered + 1 end)
+        targetEntity:SendEvent(HitEvent(Vector2(0.3, 0), killerEntity, { 999 }, nil,
+            HitFeedbackAction.Default, false, 999))
+        session:AdvanceForTest(0.01)
+        targetEntity:DisconnectEvent(HitEvent, observer)
+        check(delivered == 1, "late native HitEvent reaches the dead defender event bus")
+        check(session.Phase == "BATTLE" and session.Result == "" and session.PlayerAlive == 2 and session.EnemyAlive == 1,
+            "post-death native event is tested with both factions still alive")
+        check(target.IsDead and target.Hp == 0 and target.DamageTakenSerial == 1
+            and target.OnHitSoundSerial == soundSerial and target.HitEffectSerial == effectSerial
+            and target.AttackSerial == attackSerial and session.EventHistory == history,
+            "dead defender rejects a later native HitEvent without damage, sound, effect, or semantic events")
     end) then return end
 end
 
