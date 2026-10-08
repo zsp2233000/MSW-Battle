@@ -22,18 +22,6 @@ script BattleSession extends Component
     property string PlayerModelId = "battleunit"
     property string EnemyModelId = "battleunit"
     property string MonsterDataSetName = "MonsterData"
-    property string EnemyMonsterId1 = "monster_tank"
-    property string EnemyMonsterId2 = "monster_tank"
-    property string EnemyMonsterId3 = "monster_warrior"
-    property string EnemyMonsterId4 = "monster_warrior"
-    property string EnemyMonsterId5 = "monster_shooter"
-    property string EnemyMonsterId6 = "monster_shooter"
-    property Vector3 EnemyPosition1 = Vector3(2.6, 1.0, 0)
-    property Vector3 EnemyPosition2 = Vector3(2.6, 0.0, 0)
-    property Vector3 EnemyPosition3 = Vector3(2.6, -1.0, 0)
-    property Vector3 EnemyPosition4 = Vector3(2.6, -2.0, 0)
-    property Vector3 EnemyPosition5 = Vector3(2.6, -3.0, 0)
-    property Vector3 EnemyPosition6 = Vector3(1.6, -1.0, 0)
     property number EnemyOpeningDelay = 0.12 -- Deterministic M1 lead; DRAW remains for same-batch edge cases.
     property number ArenaMinX = -5.5
     property number ArenaMaxX = 3.5
@@ -49,8 +37,9 @@ script BattleSession extends Component
 
     @ExecSpace("ServerOnly")
     method void OnBeginPlay()
-        -- Initialize the map session and build its first validated enemy roster.
+        -- Initialize the map session and build its first validated map roster.
         self._T.configurationUsers = {}
+        self._T.placedRoster = {}
         self._T.rebuilding = false
         self.SnapshotSerial = 0
         self.EventSerial = 0
@@ -70,7 +59,6 @@ script BattleSession extends Component
         self._T.pendingDamage = {}
         self._T.pendingKnockbacks = {}
         self._T.monsterCatalog = nil
-        self._T.fixedEnemyRoster = {}
         self._T.nextPlayerUnitNumber = 0
         self._T.eventHistory = {}
         self._T.dataReady = false
@@ -87,7 +75,6 @@ script BattleSession extends Component
         self.LastEventAmount = 0
         self:DisableDefaultPlayer()
 
-        self._T.fixedEnemyRoster = self:BuildFixedEnemyRoster()
         if self:LoadMonsterData() == false then
             self:RefreshSnapshot()
             self._T.initialized = true
@@ -95,15 +82,26 @@ script BattleSession extends Component
             return
         end
 
-        if self:SpawnRoster(self._T.fixedEnemyRoster, "ENEMY") == false then
+        local placedRoster = self:BuildPlacedRoster()
+        if placedRoster == nil then
+            self:RefreshSnapshot()
+            self._T.initialized = true
+            self._T.rebuilding = false
+            return
+        end
+        self._T.placedRoster = placedRoster
+        if self:SpawnPlacedRoster(placedRoster) == false then
             self:ClearUnits()
-            self:FailConfiguration("fixed enemy roster spawn failed")
+            self:FailConfiguration("map placement roster spawn failed")
             self:RefreshSnapshot()
             self._T.initialized = true
             self._T.rebuilding = false
             return
         end
 
+        for _, entry in ipairs(placedRoster) do
+            if isvalid(entry.source) then entry.source:Destroy() end
+        end
         self.InitialPlayerAlive = self.PlayerAlive
         self.InitialEnemyAlive = self.EnemyAlive
         self.ConfigurationError = ""
@@ -113,7 +111,7 @@ script BattleSession extends Component
         self._T.rebuilding = false
         self:EmitPresentation("DEPLOYMENT_START", nil, nil, 0)
         self:RefreshSnapshot()
-        log("[M1][BattleSession] DEPLOYMENT ready: fixed six-unit enemy roster")
+        log("[M1][BattleSession] DEPLOYMENT ready: map playerUnits=" .. tostring(self.PlayerAlive) .. " enemyUnits=" .. tostring(self.EnemyAlive))
     end
 
     @ExecSpace("ServerOnly")
@@ -133,7 +131,7 @@ script BattleSession extends Component
         self._T.pendingDamage = {}
         self._T.pendingKnockbacks = {}
         self._T.monsterCatalog = nil
-        self._T.fixedEnemyRoster = {}
+        self._T.placedRoster = {}
         self._T.dataReady = false
         self._T.initialized = false
         self._T.manualSimulation = false
@@ -337,7 +335,7 @@ script BattleSession extends Component
         if not isvalid(catalog) then return self:FailConfiguration("MonsterCatalog component unavailable") end
         self._T.monsterCatalog = catalog
         local allowedModelIds = { [self.PlayerModelId] = true, [self.EnemyModelId] = true }
-        if catalog:Load(self.MonsterDataSetName, self._T.fixedEnemyRoster, allowedModelIds) == false then
+        if catalog:Load(self.MonsterDataSetName, {}, allowedModelIds) == false then
             return self:FailConfiguration(catalog.ErrorMessage)
         end
         self._T.dataReady = true
@@ -502,17 +500,85 @@ script BattleSession extends Component
         return true
     end
 
-    method table BuildFixedEnemyRoster()
-        -- Build six enemy entries from session IDs and positions.
-        local monsterIds = { self.EnemyMonsterId1, self.EnemyMonsterId2, self.EnemyMonsterId3, self.EnemyMonsterId4, self.EnemyMonsterId5, self.EnemyMonsterId6 }
-        local positions = { self.EnemyPosition1, self.EnemyPosition2, self.EnemyPosition3, self.EnemyPosition4, self.EnemyPosition5, self.EnemyPosition6 }
-        local names = { "M1_EnemyTank", "M1_EnemyTank2", "M1_EnemyAssault", "M1_EnemyAssault2", "M1_EnemyShooter", "M1_EnemyShooter2" }
+    method table BuildPlacedRoster()
+        -- Read every Maker-placed unit before spawning, so a bad placement cannot create a partial roster.
         local roster = {}
-        local expectedTypes = { "TANK", "TANK", "ASSAULT", "ASSAULT", "SHOOTER", "SHOOTER" }
-        for index = 1, 6 do
-            table.insert(roster, { monsterId = monsterIds[index], expectedType = expectedTypes[index], position = positions[index], name = names[index] })
+        local map = self:GetMapEntity()
+        if not isvalid(map) then
+            self:FailConfiguration("map unavailable for battle placements")
+            return nil
         end
+        local tileMap = self:GetRectTileMapComponent()
+        if not isvalid(tileMap) then
+            self:FailConfiguration("RectTileMap unavailable for battle placements")
+            return nil
+        end
+        local placements = map:GetChildComponentsByTypeName("script.BattlePlacement", true)
+        local candidates = {}
+        for _, placement in ipairs(placements or {}) do
+            local source = placement.Entity
+            local transform = isvalid(source) and source:GetComponent("TransformComponent") or nil
+            if not isvalid(transform) then
+                self:FailConfiguration("battle placement missing TransformComponent: " .. tostring(source))
+                return nil
+            end
+            table.insert(candidates, { source = source, monsterId = placement.MonsterId,
+                faction = placement.Faction, position = transform.WorldPosition, name = source.Name })
+        end
+        -- Successful spawning consumes markers; retain their descriptors for configuration recovery.
+        if #candidates == 0 then candidates = self._T.placedRoster or {} end
+        local playerCount = 0
+        local enemyCount = 0
+        for _, entry in ipairs(candidates) do
+            local source = entry.source
+            local monsterId = entry.monsterId
+            local faction = entry.faction
+            local sourceName = entry.name
+            if (monsterId == nil or monsterId == "") or self:GetMonsterProfile(monsterId) == nil then
+                self:FailConfiguration("battle placement has unknown MonsterId: " .. sourceName .. " (" .. tostring(monsterId) .. ")")
+                return nil
+            end
+            if faction ~= "PLAYER" and faction ~= "ENEMY" then
+                self:FailConfiguration("battle placement has invalid Faction: " .. sourceName .. " (" .. tostring(faction) .. ")")
+                return nil
+            end
+            local position = entry.position
+            if position == nil or position.x ~= position.x or position.y ~= position.y or position.x < self.ArenaMinX or position.x > self.ArenaMaxX or position.y < self.ArenaMinY or position.y > self.ArenaMaxY then
+                self:FailConfiguration("battle placement outside arena: " .. sourceName)
+                return nil
+            end
+            if self:IsRectTilePositionBlocked(tileMap, position) then
+                self:FailConfiguration("battle placement on blocked tile: " .. sourceName)
+                return nil
+            end
+            for _, prior in ipairs(roster) do
+                if self:IsDeploymentTooClose(position, prior.position) then
+                    self:FailConfiguration("battle placements too close: " .. prior.name .. " and " .. sourceName)
+                    return nil
+                end
+            end
+            if faction == "PLAYER" then playerCount = playerCount + 1 else enemyCount = enemyCount + 1 end
+            table.insert(roster, { source = source, monsterId = monsterId, faction = faction, position = Vector3(position.x, position.y, position.z), name = sourceName })
+        end
+        if enemyCount == 0 then
+            self:FailConfiguration("map has no ENEMY battle placements")
+            return nil
+        end
+        if playerCount > self.DeploymentMaxUnits then
+            self:FailConfiguration("map PLAYER placements exceed deployment limit")
+            return nil
+        end
+        log("[M1][BattleSession] battle placements validated: player=" .. tostring(playerCount) .. " enemy=" .. tostring(enemyCount))
         return roster
+    end
+
+    method boolean IsDeploymentTooClose(Vector3 position, Vector3 otherPosition)
+        -- Apply the same minimum center distance to map placements and manual deployment.
+        local dx = position.x - otherPosition.x
+        local dy = position.y - otherPosition.y
+        local minimumSquared = self.DeploymentMinDistance * self.DeploymentMinDistance
+        -- Vector3 stores positions as float32; 0.6 can round slightly below the boundary.
+        return dx * dx + dy * dy + 0.000001 < minimumSquared
     end
 
     @ExecSpace("Server")
@@ -570,7 +636,7 @@ script BattleSession extends Component
         local nearestIndex = nil
         local nearestDistanceSquared = removeRadiusSquared
         for index, record in ipairs(self._T.units or {}) do
-            if record.faction == "PLAYER" and record.dead ~= true and isvalid(record.entity) then
+            if record.faction == "PLAYER" and record.removable == true and record.dead ~= true and isvalid(record.entity) then
                 local transform = record.entity:GetComponent("TransformComponent")
                 if isvalid(transform) then
                     local current = transform.WorldPosition
@@ -597,16 +663,12 @@ script BattleSession extends Component
         local profile = self:GetMonsterProfile(monsterId)
         if profile == nil or self.PlayerAlive >= self.DeploymentMaxUnits then return false end
         if position.x < self.DeploymentMinX or position.x > self.DeploymentMaxX or position.y < self.DeploymentMinY or position.y > self.DeploymentMaxY then return false end
-        local minimumSquared = self.DeploymentMinDistance * self.DeploymentMinDistance
         for _, record in ipairs(self._T.units) do
-            if record.faction == "PLAYER" and isvalid(record.entity) then
+            if isvalid(record.entity) then
                 local transform = record.entity:GetComponent("TransformComponent")
                 if isvalid(transform) then
                     local current = transform.WorldPosition
-                    local dx = position.x - current.x
-                    local dy = position.y - current.y
-                    -- Vector3 stores positions as float32; 0.6 can round slightly below the boundary.
-                    if dx * dx + dy * dy + 0.000001 < minimumSquared then return false end
+                    if self:IsDeploymentTooClose(position, current) then return false end
                 end
             end
         end
@@ -617,6 +679,7 @@ script BattleSession extends Component
             self:RefreshSnapshot()
             return false
         end
+        self._T.units[#self._T.units].removable = true
         self:EmitPresentation("DEPLOY", entity, nil, 0)
         self:RefreshSnapshot()
         log("[M1][BattleSession] DEPLOY monsterId=" .. monsterId .. " playerUnits=" .. tostring(self.PlayerAlive))
@@ -628,7 +691,7 @@ script BattleSession extends Component
         -- Remove only an existing player roster record during deployment.
         if self.Phase ~= "DEPLOYMENT" then return end
         local record = self._T.units[index]
-        if record == nil or record.faction ~= "PLAYER" then return end
+        if record == nil or record.faction ~= "PLAYER" or record.removable ~= true then return end
         table.remove(self._T.units, index)
         if isvalid(record.entity) then record.entity:Destroy() end
         if record.dead ~= true then self.PlayerAlive = math.max(0, self.PlayerAlive - 1) end
@@ -663,11 +726,12 @@ script BattleSession extends Component
         return true
     end
 
-    method boolean SpawnRoster(table roster, string faction)
-        -- Spawn every fixed entry only after its MonsterId profile has passed validation.
-        for _, entry in ipairs(roster) do
-            local entity = self:SpawnMonster(entry.monsterId, entry.name, faction, entry.position)
+    method boolean SpawnPlacedRoster(table roster)
+        -- Create every validated map unit, preserving each placement's faction and world position.
+        for index, entry in ipairs(roster) do
+            local entity = self:SpawnMonster(entry.monsterId, entry.name .. "_Unit_" .. tostring(index), entry.faction, entry.position)
             if not isvalid(entity) then return false end
+            log("[M1][BattleSession] MAP_UNIT name=" .. entry.name .. " monsterId=" .. entry.monsterId .. " faction=" .. entry.faction)
         end
         return true
     end
@@ -720,7 +784,7 @@ script BattleSession extends Component
             return nil
         end
         unit:ConfigurePresentation(profile)
-        local record = { entity = entity, unit = unit, faction = faction, monsterId = profile.MonsterId, monsterName = profile.MonsterName, unitKind = profile.MonsterType, dead = false }
+        local record = { entity = entity, unit = unit, faction = faction, monsterId = profile.MonsterId, monsterName = profile.MonsterName, unitKind = profile.MonsterType, dead = false, removable = false }
         table.insert(self._T.units, record)
         if faction == "PLAYER" then
             self.PlayerAlive = self.PlayerAlive + 1

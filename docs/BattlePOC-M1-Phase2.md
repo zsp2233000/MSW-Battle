@@ -1,10 +1,10 @@
-# Battle POC — Phase 2 玩家部署與六對六編隊
+# Battle POC — Phase 2 玩家部署與關卡預配置編隊
 
 > 🔖 **AI 接續提醒**：若在新工作階段接續本階段，先載入 `msw-planning`，依恢復流程讀取 `Archive/As-built.md`、`BattlePOC-M1-GDD.md` 與本文件；開始實作或修改 checklist 狀態前，必須完整閱讀 `references/build-management.md`。
-> Parent doc: `BattlePOC-M1-GDD.md` · This Phase's goal: 在固定戰場完成玩家一至六隻單位的部署，按開始後鎖定編隊，與右側固定六隻敵軍進入自動戰鬥。
+> Parent doc: `BattlePOC-M1-GDD.md` · This Phase's goal: 在固定戰場完成玩家一至六隻單位的部署，按開始後鎖定編隊，與關卡預配置的敵軍進入自動戰鬥。
 > **Skills to reference (this Phase)**: `msw-general`、`msw-scripting`、`msw-combat-system`、`msw-ui-system`（人類交付怪物選項樣板與 UI 外觀，程式只填名稱、建立選項並綁定功能）。
 
-> 2026-09-23 設計更新：下列既有三種按鈕與 `ASSAULT` 等封閉選擇值記錄的是舊實作。新的交付契約是由 `MonsterData` 依名稱列出怪物並以 `MonsterId` 部署；目前固定敵軍位置仍在 `BattleSession`，沒有編隊 dataset。
+> 2026-09-26 設計更新：下列既有三種按鈕與 `ASSAULT` 等封閉選擇值記錄的是舊實作。新的交付契約是由 `MonsterData` 依名稱列出怪物並以 `MonsterId` 部署；關卡編隊由 Maker 放置實體管理，沒有編隊 dataset。
 
 ## Status checklist
 
@@ -14,7 +14,7 @@
 
 - 🟡 舊種類按鈕與開始按鈕的 client adapter 已掛到 `map01`；`/ui/BattleGroup` 提供 `BtnTank`、`BtnAssault`、`BtnShooter`、`BtnStart`，Maker Play 已記錄 `bound deployment buttons=4`。具名怪物選單尚未交付，需重新串接並人工驗證。
 - 🟡 完成左側自由放置、點擊移除、0.6 最小間距、一至六隻限制與伺服器驗證。 ⚠️ server gate／roster API 與舊種類 UI 已具備；需接上 `MonsterId` 並透過 Maker Play 完成輸入驗證。
-- 🟡 建立右側固定六隻敵軍與可調位置設定，預設二坦克、二戰士、二射手。 ⚠️ Maker Play 已確認六隻生成與 snapshot 編成／座標；正式人工驗收待 Phase 2 UI 流程可進入。
+- ✅ Maker Play 驗證地圖配置生成：原六隻敵軍的 ID、陣營、位置與數值正確；暫改一個配置為 `PLAYER` 得到一我方／五敵方，預配置玩家單位不可移除且可直接開始；無效 ID 產生配置錯誤且零單位生成。測試後已還原原六隻敵軍。
 - 🟡 開戰後鎖定所有部署操作。 ⚠️ phase gate 與轉場 guard 已實作；需至少一隻玩家部署後透過 UI 驗證拒絕新增／移除／換位。
 - 🟡 驗證一至六隻任意重複怪物皆能開始並完成單局。 ⚠️ roster／phase transition 與舊種類 UI 已具備；具名怪物選單及完整 1–6 編隊驗證待完成。
 
@@ -32,7 +32,7 @@
 
 ### 2. 玩家部署區與伺服器驗證
 
-- **Goal**: 在 `X=-5..-2`、`Y=-3..1` 接受點擊部署，拒絕區外、重疊小於 `0.6`、超過六隻及戰鬥後的新增；部署階段再次點擊玩家單位會移除它。
+- **Goal**: 在 `X=-5..-2`、`Y=-3..1` 接受點擊部署，拒絕區外、與任何在場單位中心距離小於 `0.6`、玩家編隊總數超過六隻及戰鬥後的新增；部署階段只能移除手動部署的玩家單位。
 - **Required systems·components**: `BattleSession` 部署狀態、玩家意圖事件／RPC 邊界、`MonsterData` 查找、可部署單位的 `BattleUnit` 記錄與 `SpawnByModelId`；所有規則在伺服器重驗證。
 - **Data**: `DeploymentMinDistance=0.6`、`DeploymentMaxUnits=6`、`DeploymentBounds=(-5,-2,-3,1)`；集中於 `BattleSession` 可調屬性。
 - **UI**: 使用名稱選單目前選取的 `MonsterId` 與滑鼠世界座標；選項外觀與容器由人類提供。
@@ -40,13 +40,13 @@
 - **Dependencies**: Task 1 的意圖入口；既有 `BattleUnit.model` 與 `RectTile` map。
 - **Skills to reference (predicted)**: `msw-general` 的 spawn／RectTile 參考、`msw-scripting` 的事件與 client/server exec-space 規則、`msw-combat-system` 的 battle-session 邊界。
 
-### 3. 固定六隻敵軍與編成設定
+### 3. Maker 預配置單位與編成設定
 
-- **Goal**: 部署階段建立右側固定敵軍，位置由設定提供，預設為二坦克、二戰士、二射手；玩家不能選取、移動或移除敵軍。
-- **Required systems·components**: `BattleSession` 的固定 roster、`MonsterData` 中的初始坦克／戰士／射手 ID、`BattleUnit` 的 `UnitKind`／兵種行為、既有可生成 model。
-- **Data**: 六個敵軍位置與所引用的六個 `MonsterId` 集中於 session 設定；每隻怪物的數值與 RUID 從同一份 `MonsterData` 讀取，不建立編隊 dataset。
+- **Goal**: Maker 放置可設定 `MonsterId` 與 `Faction`（預設 `ENEMY`）的 model 實體；進入 `map01` 時從 `MonsterData` 生成對應單位並取代放置實體。原六隻敵軍遷移為六個地圖實體，之後放幾個就生成幾個。
+- **Required systems·components**: `BattleSession` 掃描地圖放置實體、`MonsterData`、`BattleUnit.Faction`、既有可生成 model、ModelBuilder 與 MapBuilder。
+- **Data**: 每個放置實體只設定 ID、陣營與戰場內的位置；數值與戰鬥外觀由 `MonsterData` 覆蓋。至少一隻敵軍；預配置玩家單位計入六隻上限且不可由玩家移除。非法 ID／陣營、阻擋磚、越界、中心距離不足 `0.6` 或超額玩家單位均停止本局並報配置錯誤。
 - **UI**: 無新增 UI；敵軍不可由玩家輸入修改。
-- **Done (verification) criteria**: server snapshot 能列出六隻固定敵軍的 ID、名稱、種類與位置；Maker Play 由使用者確認敵軍只出現在右側且每次 Play 的位置一致。
+- **Done (verification) criteria**: server snapshot 的 ID、陣營、名稱、種類、位置與地圖配置一致；改變放置數量後存活數正確；預配置玩家單位計入上限且右鍵無法移除；配置錯誤不留下半生成單位。Maker Play 確認原六隻位置與編成仍一致。
 - **Dependencies**: Task 2 的 session roster；`BattleUnit.model` 可由 `SpawnByModelId` 複用。
 - **Skills to reference (predicted)**: `msw-general` spawn／model 規則、`msw-scripting` component state、`msw-combat-system` faction／target gating。
 
@@ -62,7 +62,7 @@
 
 ### 5. 一至六隻任意重複兵種的完整單局
 
-- **Goal**: 玩家可用一至六隻任意怪物（同一怪物可重複）開始戰鬥，固定敵軍加入後正常進入 `BATTLE`，並在一方全滅後只產生一次結果。
+- **Goal**: 玩家可用預配置與手動部署合計一至六隻任意怪物（同一怪物可重複）開始戰鬥，關卡敵軍加入後正常進入 `BATTLE`，並在一方全滅後只產生一次結果。
 - **Required systems·components**: Phase 1 的 `BattleSession`／`BattleUnit`／`AssaultAttack` 回歸路徑，加上 Phase 2 roster 與 phase transition；不在本階段加入坦克／射手的完整兵種差異。
 - **Data**: 測試矩陣涵蓋 1、2、3、4、5、6 隻，以及全坦克、全戰士、全射手與混合編隊。
 - **UI**: 使用具名怪物選單部署、`BtnStart` 開始；結果顯示仍沿用目前 M1 的 runtime boundary，完整結果 UI 串接留在 Phase 4。

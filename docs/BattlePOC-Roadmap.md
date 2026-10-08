@@ -2,7 +2,7 @@
 
 > 🔖 跨里程碑方向：先證明單局部署與自動戰鬥，再依 POC 測試決定是否擴張。
 > 本文件不是 GDD；當前契約以 `BattlePOC-M1-GDD.md` 為準。
-> 最後更新：2026-09-21
+> 最後更新：2026-09-26
 
 ## 願景與發布條件
 
@@ -13,7 +13,7 @@
 
 | M | 主題 | 狀態 |
 |---|---|---|
-| M1 | 單人對固定六隻敵軍的完整 POC → `BattlePOC-M1-GDD.md` | 🔨 active (Phase 1/5 done) |
+| M1 | 單人對關卡預配置敵軍的完整 POC → `BattlePOC-M1-GDD.md` | 🔨 active (Phase 1/5 done) |
 | M2 | 雙方玩家一次布陣與對戰同步 | planned |
 | M3 | 依 POC 測試結果擴充關卡、怪物種類與既有怪物資料表 | candidate |
 

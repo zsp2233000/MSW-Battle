@@ -189,7 +189,8 @@ test("Issue #7 preserves the data-driven battle core behind deployment", () => {
   assert.match(session, /method boolean LoadMonsterData\(\)/);
   assert.match(session, /MonsterType/);
   assert.match(session, /method Entity SpawnMonster\(string monsterId/);
-  assert.match(session, /fixedEnemyRoster/);
+  assert.match(session, /placedRoster/);
+  assert.doesNotMatch(session, /BuildFixedEnemyRoster|EnemyMonsterId[1-6]/);
   assert.match(session, /self\.PlayerAlive = 0/);
   assert.match(session, /self\.InitialPlayerAlive = self\.PlayerAlive/);
   assert.match(session, /self\.InitialEnemyAlive = self\.EnemyAlive/);
