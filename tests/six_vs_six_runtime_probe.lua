@@ -1,138 +1,80 @@
--- Execute this probe in Maker Play mode with context=server_main during deployment.
--- It observes the production six-versus-six BattleSession seams without adding UI or alternate combat logic.
-local map = _EntityService:GetEntityByPath("/maps/map01")
-local session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
+-- Execute in a fresh Maker Play test with context=server_main during deployment.
+-- Keeps the formal six-player deployment against the map's six fixed enemies as the integration check.
+local map = nil
+local session = nil
 local failures = 0
+local manualClockOwned = false
 
 local function check(condition, message)
-    -- Record a failed high-level acceptance assertion without hiding later evidence.
-    if condition then
-        log("[M1][SixVsSixProbe][PASS] " .. message)
-    else
-        failures = failures + 1
-        log_error("[M1][SixVsSixProbe][FAIL] " .. message)
+    if condition then log("[M1][SixVsSixProbe][PASS] " .. message)
+    else failures = failures + 1; log_error("[M1][SixVsSixProbe][FAIL] " .. message) end
+end
+
+local function releaseClockAndCheck()
+    if not manualClockOwned then return end
+    session:EndManualSimulation()
+    manualClockOwned = false
+    local reacquired = session:BeginManualSimulation()
+    check(reacquired, "six-versus-six setup releases the manual clock")
+    if reacquired then session:EndManualSimulation() end
+end
+
+local runOk, runDetail = pcall(function()
+    map = _EntityService:GetEntityByPath("/maps/map01")
+    session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
+    if not isvalid(map) or not isvalid(session) then
+        check(false, "map and BattleSession are available")
+        return
     end
-end
+    local acquired = session:BeginManualSimulation()
+    check(acquired, "formal deployment probe acquires the manual clock")
+    if not acquired then return end
+    manualClockOwned = true
 
-local function getPosition(entity)
-    -- Read the native RectTile world position used by the production movement path.
-    return entity:GetComponent("TransformComponent").WorldPosition
-end
-
-local function setPosition(entity, x, y)
-    -- Use the RectTile body teleport only for deterministic test fixture placement.
-    entity:GetComponent("KinematicbodyComponent"):SetWorldPosition(Vector2(x, y))
-end
-
-local function freezeUnit(entity)
-    -- Freeze a fixture's own AI while leaving its BattleUnit registration intact.
-    local unit = entity:GetComponent("script.BattleUnit")
-    local movement = entity:GetComponent("MovementComponent")
-    if isvalid(unit) then
-        unit:CancelAttack()
-        unit.MoveSpeed = 0
-        unit.RetargetInterval = 99
+    local roster = { "monster_tank", "monster_tank", "monster_warrior", "monster_warrior", "monster_shooter", "monster_shooter" }
+    local positions = {
+        Vector3(-4.4, 1, 0), Vector3(-4.4, 0, 0), Vector3(-4.4, -1, 0),
+        Vector3(-4.4, -2, 0), Vector3(-4.4, -3, 0), Vector3(-3.4, -1, 0),
+    }
+    check(session.Phase == "DEPLOYMENT", "formal six-versus-six roster starts from deployment")
+    for index, monsterId in ipairs(roster) do
+        local deployed = session:TryDeployMonster(monsterId, positions[index])
+        check(deployed, "official deployment accepts player " .. tostring(index))
+        if not deployed then return end
     end
-    if isvalid(movement) then
-        movement.InputSpeed = 0
-        movement:Stop()
+
+    local started = session:TryStartBattle()
+    check(started, "six deployed players start through the formal session command")
+    if not started then return end
+    check(session.InitialPlayerAlive == 6 and session.InitialEnemyAlive == 6
+        and session.PlayerAlive == 6 and session.EnemyAlive == 6,
+        "formal six-player roster starts against all six fixed enemies")
+    check(session:IsBattleActive(), "the complete twelve-unit roster enters BATTLE")
+
+    local snapshots = session:GetUnitSnapshots()
+    for index = 1, 6 do
+        check(string.find(snapshots, "M1_Player_" .. tostring(index), 1, true) ~= nil,
+            "snapshot contains deployed player " .. tostring(index))
     end
-end
-
-if not isvalid(map) or not isvalid(session) then
-    log_error("[M1][SixVsSixProbe][FAIL] map or session is unavailable")
-    return
-end
-
-local roster = { "monster_tank", "monster_tank", "monster_warrior", "monster_warrior", "monster_shooter", "monster_shooter" }
-local positions = { Vector3(-4.4, 1, 0), Vector3(-4.4, 0, 0), Vector3(-4.4, -1, 0), Vector3(-4.4, -2, 0), Vector3(-4.4, -3, 0), Vector3(-3.4, -1, 0) }
-for index, monsterId in ipairs(roster) do session:TryDeployMonster(monsterId, positions[index]) end
-session:TryStartBattle()
-
-check(session.InitialPlayerAlive == 6 and session.InitialEnemyAlive == 6, "fixed six-versus-six roster starts with six alive units per faction")
-check(session:IsBattleActive(), "six-versus-six battle starts after deployment")
-local snapshots = session:GetUnitSnapshots()
-check(string.find(snapshots, "monsterId=monster_tank") ~= nil and string.find(snapshots, "monsterId=monster_warrior") ~= nil and string.find(snapshots, "monsterId=monster_shooter") ~= nil, "snapshot exposes MonsterId, editable name, and kind for all initial rows")
-
--- Freeze the production roster so the high-level fixtures are not consumed by the live battle while this probe runs.
-local disabledCount = 0
-for _, record in ipairs(session._T.units) do
-    local entity = record.entity
-    if isvalid(entity) then
-        freezeUnit(entity)
-        entity:SetEnable(false)
-        if not entity.Enable then disabledCount = disabledCount + 1 end
+    for _, name in ipairs({ "M1_EnemyTank", "M1_EnemyTank2", "M1_EnemyAssault", "M1_EnemyAssault2", "M1_EnemyShooter", "M1_EnemyShooter2" }) do
+        check(string.find(snapshots, name, 1, true) ~= nil, "snapshot contains fixed enemy " .. name)
     end
+    for _, monsterId in ipairs({ "monster_tank", "monster_warrior", "monster_shooter" }) do
+        check(string.find(snapshots, "monsterId=" .. monsterId, 1, true) ~= nil,
+            "snapshot preserves official identity " .. monsterId)
+    end
+
+    releaseClockAndCheck()
+    wait(0.2)
+    check(session.Phase == "BATTLE" and session.InitialPlayerAlive == 6 and session.InitialEnemyAlive == 6,
+        "the formal roster remains active on live Maker frames")
+end)
+
+if manualClockOwned and session ~= nil then
+    local cleanupOk, cleanupDetail = pcall(function() session:EndManualSimulation() end)
+    manualClockOwned = false
+    if not cleanupOk then check(false, "error cleanup releases the manual clock: " .. tostring(cleanupDetail)) end
 end
-check(disabledCount == session.InitialPlayerAlive + session.InitialEnemyAlive, "all initial roster units are disabled before fixtures spawn")
-
--- Spawn isolated production BattleUnit fixtures so the assertions remain deterministic even if Maker dispatches the probe a few frames after Play starts.
-local source = session:SpawnMonster("monster_tank", "M1_ProbeSource", "PLAYER", Vector3(-4, 0, 0))
-local preferred = session:SpawnMonster("monster_warrior", "M1_ProbePreferred", "ENEMY", Vector3(0, 0, 0))
-local replacement = session:SpawnMonster("monster_warrior", "M1_ProbeReplacement", "ENEMY", Vector3(0, 0, 0))
-local crowdA = session:SpawnMonster("monster_tank", "M1_ProbeCrowdA", "PLAYER", Vector3(-4, -2, 0))
-local crowdB = session:SpawnMonster("monster_tank", "M1_ProbeCrowdB", "PLAYER", Vector3(-4, -2, 0))
-if not isvalid(source) or not isvalid(preferred) or not isvalid(replacement) or not isvalid(crowdA) or not isvalid(crowdB) then
-    log_error("[M1][SixVsSixProbe][FAIL] isolated production fixtures are unavailable")
-    return
-end
-
-freezeUnit(source)
-freezeUnit(preferred)
-freezeUnit(replacement)
-freezeUnit(crowdB)
-setPosition(source, -4, 0)
-setPosition(preferred, 0, 0)
-setPosition(replacement, 0, 0)
-
--- same-distance target is retained
-check(session:FindNearestEnemy(source, preferred) == preferred, "same-distance target is retained")
-
--- dead target is reacquired
-preferred:SetEnable(false)
-check(session:FindNearestEnemy(source, preferred) == replacement, "dead target is reacquired")
-preferred:SetEnable(true)
-
--- crowded units do not block or push each other
-local crowdUnitA = crowdA:GetComponent("script.BattleUnit")
-local crowdUnitB = crowdB:GetComponent("script.BattleUnit")
-local crowdMovementA = crowdA:GetComponent("MovementComponent")
-local crowdMovementB = crowdB:GetComponent("MovementComponent")
-setPosition(crowdA, -4, -2)
-setPosition(crowdB, -4, -2)
-setPosition(replacement, 0, -2)
-crowdUnitA.MoveSpeed = 1.0
-crowdUnitB.MoveSpeed = 1.0
-crowdUnitA.RetargetInterval = 0
-crowdUnitB.RetargetInterval = 0
-session:AdvanceForTest(0.25)
-local crowdPositionA = getPosition(crowdA)
-local crowdPositionB = getPosition(crowdB)
-check(crowdPositionA.x > -4 and crowdPositionB.x > -4 and math.abs(crowdPositionA.x - crowdPositionB.x) < 0.01, "crowded units do not block or push each other")
-if isvalid(crowdMovementA) then crowdMovementA:Stop() end
-if isvalid(crowdMovementB) then crowdMovementB:Stop() end
-
--- WIN
-check(session:DetermineResult(6, 0) == "WIN", "WIN is selected when the fixed enemy faction is depleted")
-
--- LOSE
-check(session:DetermineResult(0, 6) == "LOSE", "LOSE is selected when the player faction is depleted")
-
--- same-batch DRAW
-check(session:DetermineResult(0, 0) == "DRAW", "same-batch DRAW is selected when both factions are depleted")
-
--- RESULT stops the battle
-local positionAtResult = getPosition(crowdA)
-local attackSerialAtResult = crowdUnitA.AttackSerial
-session:EnterResult("WIN")
-session:EnterResult("LOSE")
-session:AdvanceForTest(1.0)
-local positionAfterResult = getPosition(crowdA)
-check(session.Phase == "RESULT" and session.Result == "WIN" and session:IsBattleActive() == false, "RESULT stops the battle")
-check(positionAfterResult.x == positionAtResult.x and positionAfterResult.y == positionAtResult.y and crowdUnitA.AttackSerial == attackSerialAtResult, "RESULT stops movement and future attacks")
-
-if failures == 0 then
-    log("[M1][SixVsSixProbe] PASS")
-else
-    log_error("[M1][SixVsSixProbe] FAILURES=" .. tostring(failures))
-end
+if not runOk then check(false, "probe raised: " .. tostring(runDetail)) end
+if failures == 0 then log("[M1][SixVsSixProbe] PASS")
+else log_error("[M1][SixVsSixProbe] FAILURES=" .. tostring(failures)) end

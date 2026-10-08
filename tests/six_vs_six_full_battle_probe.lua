@@ -1,4 +1,4 @@
--- Run in Maker Play with context=server_main after the UI has started a six-versus-six battle.
+-- Run in a fresh Maker Play test with context=server_main.
 -- Observe the production roster; observe a complete natural battle and terminal state.
 local map = _EntityService:GetEntityByPath("/maps/map01")
 local session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
@@ -18,12 +18,21 @@ if not isvalid(session) then
     return
 end
 
+local roster = { "monster_tank", "monster_tank", "monster_warrior", "monster_warrior", "monster_shooter", "monster_shooter" }
+local positions = { Vector3(-4.4, 1, 0), Vector3(-4.4, 0, 0), Vector3(-4.4, -1, 0), Vector3(-4.4, -2, 0), Vector3(-4.4, -3, 0), Vector3(-3.4, -1, 0) }
+if session.Phase == "DEPLOYMENT" then
+    for index, monsterId in ipairs(roster) do session:TryDeployMonster(monsterId, positions[index]) end
+    session:TryStartBattle()
+end
 check(session.InitialPlayerAlive == 6 and session.InitialEnemyAlive == 6 and session:IsBattleActive(),
-    "UI-started mixed six-versus-six battle is active")
+    "mixed six-versus-six battle is active")
 
 local rosterRecords = {}
-for _, record in ipairs(session._T.units) do
-    if record.faction == "PLAYER" or record.faction == "ENEMY" then table.insert(rosterRecords, record) end
+for _, entity in ipairs(map.Children:ToTable()) do
+    local unit = entity:GetComponent("script.BattleUnit")
+    if isvalid(unit) then
+        table.insert(rosterRecords, { entity = entity, unit = unit, faction = unit.Faction, monsterId = unit.MonsterId })
+    end
 end
 check(#rosterRecords == 12, "observer captures all twelve production roster members")
 local elapsed = 0
@@ -43,21 +52,37 @@ local function observe()
         return
     end
 
-    check(session:DetermineResult(session.PlayerAlive, session.EnemyAlive) == session.Result,
-        "result matches final alive counts")
-    local _, resultEvents = string.gsub(session.EventHistory, "RESULT:::", "")
+    local resultMatchesAliveCounts = (session.Result == "DRAW" and session.PlayerAlive == 0 and session.EnemyAlive == 0)
+        or (session.Result == "WIN" and session.PlayerAlive > 0 and session.EnemyAlive == 0)
+        or (session.Result == "LOSE" and session.PlayerAlive == 0 and session.EnemyAlive > 0)
+    check(resultMatchesAliveCounts, "result matches final alive counts")
+    local resultEvents = 0
+    for event in string.gmatch(session.EventHistory or "", "[^;]+") do
+        if string.match(event, "^([^:]+)") == "RESULT" then resultEvents = resultEvents + 1 end
+    end
     check(resultEvents == 1, "exactly one RESULT event is published")
 
     local terminal = {}
+    local terminalEventSerial = session.EventSerial
+    local terminalEventHistory = session.EventHistory
     for index, record in ipairs(rosterRecords) do
         local entity = record.entity
         local unit = record.unit
         local label = record.faction .. " " .. record.monsterId .. " #" .. tostring(index)
         if isvalid(unit) then
             local position = entity:GetComponent("TransformComponent").WorldPosition
-            terminal[index] = { hp = unit.Hp, attacks = unit.AttackSerial, x = position.x, y = position.y }
-            check(unit.CurrentTargetName == "" and unit.CombatState == "RESULT_STOP",
-                label .. " has stopped targeting and movement")
+            terminal[index] = {
+                hp = unit.Hp,
+                attacks = unit.AttackSerial,
+                damage = unit.DamageTakenSerial,
+                sound = unit.OnHitSoundSerial,
+                hitEffect = unit.HitEffectSerial,
+                x = position.x,
+                y = position.y,
+            }
+            check(unit.CurrentTargetName == "" and unit.CombatState == "RESULT_STOP"
+                and unit.KnockbackActive == false,
+                label .. " has cleared targeting, movement, attack, and knockback")
         else
             check(false, label .. " remains inspectable after RESULT")
         end
@@ -71,13 +96,19 @@ local function observe()
             local label = record.faction .. " " .. record.monsterId .. " #" .. tostring(index)
             if isvalid(unit) and before ~= nil then
                 local position = entity:GetComponent("TransformComponent").WorldPosition
-                check(unit.Hp == before.hp and unit.AttackSerial == before.attacks and
-                    position.x == before.x and position.y == before.y,
-                    label .. " has no damage, attacks, or movement after RESULT")
+                check(unit.Hp == before.hp and unit.AttackSerial == before.attacks
+                    and unit.DamageTakenSerial == before.damage and unit.OnHitSoundSerial == before.sound
+                    and unit.HitEffectSerial == before.hitEffect and unit.CurrentTargetName == ""
+                    and unit.KnockbackActive == false and unit.CombatState == "RESULT_STOP"
+                    and math.abs(position.x - before.x) < 0.0001 and math.abs(position.y - before.y) < 0.0001,
+                    label .. " has no damage, attacks, movement, targeting, or knockback after RESULT")
             else
                 check(false, label .. " remains inspectable after RESULT")
             end
         end
+        check(session.Phase == "RESULT" and session.Result ~= ""
+            and session.EventSerial == terminalEventSerial and session.EventHistory == terminalEventHistory,
+            "terminal state is stable for one second of real frames")
         if failures == 0 then
             log("[M1][SixVsSixFullBattle] PASS")
         else

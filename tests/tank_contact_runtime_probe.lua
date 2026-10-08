@@ -1,183 +1,226 @@
--- Execute this probe in Maker Play mode with context=server_main during deployment.
--- It drives the production BattleSession, BattleUnit, TankContactAttack, Hit, and knockback paths.
-local map = _EntityService:GetEntityByPath("/maps/map01")
-local session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
-if not isvalid(session) then
-    log_error("[M1][TankProbe][FAIL] map or session is unavailable")
-    return
-end
-if isvalid(session) and session.Phase == "DEPLOYMENT" then
-    session:TryDeployMonster("monster_tank", Vector3(-4.4, 0, 0))
-    session:TryStartBattle()
-end
-local tank = nil
-for _, record in ipairs(session._T.units) do
-    if record.faction == "PLAYER" and record.unitKind == "TANK" and isvalid(record.entity) then
-        tank = record.entity
-        break
-    end
-end
-local tankUnit = isvalid(tank) and tank:GetComponent("script.BattleUnit") or nil
-local tankBody = isvalid(tank) and tank:GetComponent("KinematicbodyComponent") or nil
+-- Run in a fresh Maker Play test with context=server_main.
+-- Uses a controlled roster, native TankContactAttack/HitEvent, live frames, and natural result settlement.
+local map = nil
+local session = nil
 local failures = 0
-local probes = {}
+local manualClockOwned = false
 
 local function check(condition, message)
-    -- Record a failed acceptance assertion without stopping later probe checks.
-    if condition then
-        log("[M1][TankProbe][PASS] " .. message)
-    else
-        failures = failures + 1
-        log_error("[M1][TankProbe][FAIL] " .. message)
-    end
+    if condition then log("[M1][TankProbe][PASS] " .. message)
+    else failures = failures + 1; log_error("[M1][TankProbe][FAIL] " .. message) end
 end
 
-local function getProbePosition(entity)
-    -- Read the native Kinematicbody position used by the production knockback path.
+local function row(monsterId, name, position, overrides)
+    return { monsterId = monsterId, name = name, position = position, overrides = overrides }
+end
+
+local function getPosition(entity)
     return entity:GetComponent("TransformComponent").WorldPosition
 end
 
-local function placeProbesAtTank()
-    -- Re-overlap both real enemy entities so the production per-target timers can be observed.
-    local position = getProbePosition(tank)
-    for index, entity in ipairs(probes) do
-        local movement = entity:GetComponent("MovementComponent")
-        if isvalid(movement) then
-            movement.InputSpeed = 0
-            movement:Stop()
-        end
-        local offset = index == 1 and 0.2 or -0.2
-        entity:GetComponent("KinematicbodyComponent"):SetWorldPosition(Vector2(position.x + offset, position.y))
+local function setPosition(entity, x, y)
+    entity:GetComponent("KinematicbodyComponent"):SetWorldPosition(Vector2(x, y))
+end
+
+local function waitFor(predicate, timeout, interval)
+    local elapsed = 0
+    while elapsed < timeout do
+        if predicate() then return true end
+        wait(interval)
+        elapsed = elapsed + interval
     end
+    return predicate()
 end
 
-local function logProbeState(label)
-    -- Publish direct runtime state for the acceptance ledger.
-    local firstUnit = probes[1]:GetComponent("script.BattleUnit")
-    local secondUnit = probes[2]:GetComponent("script.BattleUnit")
-    local tankPosition = getProbePosition(tank)
-    log("[M1][TankProbe] " .. label .. " hp1=" .. tostring(firstUnit.Hp) .. " hp2=" .. tostring(secondUnit.Hp) .. " tank=" .. tostring(tankPosition.x) .. "," .. tostring(tankPosition.y) .. " event=" .. session.LastEvent .. " serial=" .. tostring(session.EventSerial))
+local function releaseClockAndCheck(label)
+    if not manualClockOwned then return end
+    session:EndManualSimulation()
+    manualClockOwned = false
+    local reacquired = session:BeginManualSimulation()
+    check(reacquired, label .. " releases the manual clock")
+    if reacquired then session:EndManualSimulation() end
 end
 
-if not isvalid(map) or not isvalid(session) or not isvalid(tank) or not isvalid(tankUnit) or not isvalid(tankBody) or not session:IsBattleActive() then
-    log_error("[M1][TankProbe][FAIL] battle session is not ready")
-    return
+local function prepareScene()
+    local acquired = session:BeginManualSimulation()
+    check(acquired, "controlled contact scene acquires the manual clock")
+    if not acquired then return false end
+    manualClockOwned = true
+
+    local prepared = session:PrepareBattleForTest(
+        { row("monster_tank", "Issue17_Tank", Vector3(0, 0, 0), {
+            MaxHp = 500,
+            MoveSpeed = 0,
+            AttackRange = 10,
+            RetargetIntervalSeconds = 0,
+        }) },
+        {
+            row("monster_warrior", "Issue17_TankTargetA", Vector3(0.2, 0, 0), {
+                MaxHp = 160,
+                MoveSpeed = 0,
+                AttackDamage = 0,
+                AttackRange = 0,
+                RetargetIntervalSeconds = 0,
+                AttackIntervalSeconds = 100,
+            }),
+            row("monster_warrior", "Issue17_TankTargetB", Vector3(2, 0, 0), {
+                MaxHp = 160,
+                MoveSpeed = 0,
+                AttackDamage = 0,
+                AttackRange = 0,
+                RetargetIntervalSeconds = 0,
+                AttackIntervalSeconds = 100,
+            }),
+        }
+    )
+    check(prepared, "tank and two official enemy profiles are prepared")
+    if not prepared then return false end
+    local started = session:TryStartBattle()
+    check(started and session:IsBattleActive(), "controlled contact scene starts through TryStartBattle")
+    if not started then return false end
+    return true
 end
 
--- Disable the actual session roster except the Tank under test.
-local disabledCount = 0
-for _, record in ipairs(session._T.units) do
-    local entity = record.entity
-    if isvalid(entity) and entity ~= tank then
-        local unit = entity:GetComponent("script.BattleUnit")
-        local movement = entity:GetComponent("MovementComponent")
-        if isvalid(unit) then
-            unit:CancelAttack()
-            unit.MoveSpeed = 0
-            unit.RetargetInterval = 99
-        end
-        if isvalid(movement) then
-            movement.InputSpeed = 0
-            movement:Stop()
-        end
-        entity:SetEnable(false)
-        if not entity.Enable then disabledCount = disabledCount + 1 end
-    end
-end
-check(disabledCount == session.InitialPlayerAlive + session.InitialEnemyAlive - 1 and tank.Enable, "only the Tank under test remains enabled from the initial roster")
-
--- Freeze the Tank only for this probe so its position can be compared across contact hits.
-tankUnit.MoveSpeed = 0
-tankBody:SetWorldPosition(Vector2(0, 0))
-local initialPosition = getProbePosition(tank)
-for index = 1, 2 do
-    local enemy = session:SpawnMonster("monster_warrior", "M1_TankProbeEnemy" .. tostring(index), "ENEMY", Vector3(10, 10, 0))
-    if not isvalid(enemy) then
-        log_error("[M1][TankProbe][FAIL] contact fixture spawn failed")
+local runOk, runDetail = pcall(function()
+    map = _EntityService:GetEntityByPath("/maps/map01")
+    session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
+    if not isvalid(map) or not isvalid(session) then
+        check(false, "map and BattleSession are available")
         return
     end
-    local enemyUnit = enemy:GetComponent("script.BattleUnit")
-    enemyUnit.MoveSpeed = 0
-    enemyUnit.RetargetInterval = 99
-    enemyUnit:Configure("ENEMY", enemy.Name, "ASSAULT", 220, 0, 0, 99, 0.6, 99, 0.18, enemyUnit.DeathAnimationRUID, 0, 2.0, Vector2(1.2, 1.2), 0.8, 0.2)
-    table.insert(probes, enemy)
+    if not prepareScene() then return end
+
+    local tank = _EntityService:GetEntityByPath("/maps/map01/Issue17_Tank")
+    local first = _EntityService:GetEntityByPath("/maps/map01/Issue17_TankTargetA")
+    local second = _EntityService:GetEntityByPath("/maps/map01/Issue17_TankTargetB")
+    local tankUnit = isvalid(tank) and tank:GetComponent("script.BattleUnit") or nil
+    local firstUnit = isvalid(first) and first:GetComponent("script.BattleUnit") or nil
+    local secondUnit = isvalid(second) and second:GetComponent("script.BattleUnit") or nil
+    local tankBody = isvalid(tank) and tank:GetComponent("KinematicbodyComponent") or nil
+    check(isvalid(tankUnit) and isvalid(firstUnit) and isvalid(secondUnit) and isvalid(tankBody),
+        "prepared native bodies and BattleUnits are available")
+    if not isvalid(tankUnit) or not isvalid(firstUnit) or not isvalid(secondUnit) or not isvalid(tankBody) then return end
+
+    local tankStart = getPosition(tank)
+    local firstSerial = firstUnit.DamageTakenSerial
+    local secondSerial = secondUnit.DamageTakenSerial
+    releaseClockAndCheck("contact scene setup")
+    local firstContact = waitFor(function() return firstUnit.DamageTakenSerial > firstSerial end, 1.2, 0.05)
+    check(firstContact, "native contact reaches the first target")
+    if not firstContact then return end
+    check(firstUnit.Hp == 120 and secondUnit.Hp == 160, "contact area reaches only the overlapping target")
+    check(firstUnit.CombatState ~= "STUN" and secondUnit.CombatState ~= "STUN",
+        "native contact does not stun either target")
+    local afterFirst = getPosition(tank)
+    check(math.abs(afterFirst.x - tankStart.x) < 0.001 and math.abs(afterFirst.y - tankStart.y) < 0.001,
+        "tank does not recoil from its native contact")
+
+    -- Contact the second defender later so its cooldown expires after the first defender's cooldown.
+    setPosition(first, 0.2, 0)
+    wait(0.8)
+    setPosition(second, 0.4, 0)
+    local secondContact = waitFor(function() return secondUnit.DamageTakenSerial > secondSerial end, 0.8, 0.05)
+    check(secondContact, "native contact later reaches the second target")
+    if not secondContact then return end
+    setPosition(second, 0.4, 0)
+    check(firstUnit.Hp == 120 and secondUnit.Hp == 120,
+        "per-target cooldown blocks the first target while accepting the newly contacted second target")
+
+    local firstSecondContact = waitFor(function() return firstUnit.DamageTakenSerial >= firstSerial + 2 end, 1.6, 0.05)
+    check(firstSecondContact, "the first target cooldown expires independently")
+    if not firstSecondContact then return end
+    check(firstUnit.Hp == 80 and secondUnit.Hp == 120 and secondUnit.DamageTakenSerial == secondSerial + 1,
+        "first target can be hit again while the second target remains on cooldown")
+
+    local secondSecondContact = waitFor(function() return secondUnit.DamageTakenSerial >= secondSerial + 2 end, 1.6, 0.05)
+    check(secondSecondContact, "the later second-target cooldown expires independently")
+    if not secondSecondContact then return end
+    check(firstUnit.Hp == 80 and secondUnit.Hp == 80,
+        "both targets take their second 40-damage contact without shared cooldown state")
+
+    local boundaryTankX = session.ArenaMaxX - 0.6
+    tankBody:SetWorldPosition(Vector2(boundaryTankX, 0))
+    setPosition(first, session.ArenaMaxX - 0.1, 0)
+    setPosition(second, session.ArenaMaxX - 0.2, 0)
+    local firstThirdContact = waitFor(function() return firstUnit.DamageTakenSerial >= firstSerial + 3 end, 1.6, 0.05)
+    check(firstThirdContact, "boundary contact reaches the first target after its own cooldown")
+    if not firstThirdContact then return end
+    check(firstUnit.Hp == 40 and secondUnit.Hp == 80 and secondUnit.DamageTakenSerial == secondSerial + 2,
+        "boundary contact preserves independent target cooldowns")
+
+    local secondThirdContact = waitFor(function() return secondUnit.DamageTakenSerial >= secondSerial + 3 end, 1.6, 0.05)
+    check(secondThirdContact, "boundary contact reaches the second target after its own cooldown")
+    if not secondThirdContact then return end
+    wait(0.15)
+    local firstAtBoundary = getPosition(first)
+    local secondAtBoundary = getPosition(second)
+    local tankAtBoundary = getPosition(tank)
+    check(firstUnit.Hp == 40 and secondUnit.Hp == 40, "third native contact leaves both targets alive for boundary inspection")
+    check(math.abs(firstAtBoundary.x - session.ArenaMaxX) < 0.05
+        and math.abs(secondAtBoundary.x - session.ArenaMaxX) < 0.05,
+        "native knockback clamps both enemy bodies at the arena boundary")
+    check(firstAtBoundary.x <= session.ArenaMaxX + 0.001 and secondAtBoundary.x <= session.ArenaMaxX + 0.001,
+        "neither enemy body crosses the arena boundary")
+    check(math.abs(tankAtBoundary.x - boundaryTankX) < 0.001,
+        "tank remains fixed while its targets are knocked back at the boundary")
+
+    local resultReached = waitFor(function() return session.Phase == "RESULT" end, 2.8, 0.05)
+    check(resultReached and session.Result == "WIN", "real lethal contacts naturally settle the full roster as WIN")
+    if not resultReached then return end
+    check(firstUnit.Hp == 0 and secondUnit.Hp == 0 and firstUnit.DamageTakenSerial == firstSerial + 4
+        and secondUnit.DamageTakenSerial == secondSerial + 4,
+        "four native HitEvent contacts eliminate both registered enemy units")
+    check(session.PlayerAlive == 1 and session.EnemyAlive == 0
+        and session.InitialPlayerAlive == 1 and session.InitialEnemyAlive == 2,
+        "result counters reflect the prepared roster and actual deaths")
+
+    local resultTankHp = tankUnit.Hp
+    local resultFirstHp = firstUnit.Hp
+    local resultSecondHp = secondUnit.Hp
+    local resultTankSerial = tankUnit.AttackSerial
+    local resultFirstSerial = firstUnit.AttackSerial
+    local resultSecondSerial = secondUnit.AttackSerial
+    local resultEventSerial = session.EventSerial
+    local tankResultPosition = getPosition(tank)
+    local firstResultPosition = getPosition(first)
+    local secondResultPosition = getPosition(second)
+    check(firstUnit.CurrentTargetName == "" and secondUnit.CurrentTargetName == ""
+        and tankUnit.CurrentTargetName == "", "RESULT clears all unit targets")
+    check(not tankUnit.KnockbackActive and not firstUnit.KnockbackActive and not secondUnit.KnockbackActive,
+        "RESULT clears accepted knockback work")
+    wait(2.2)
+    local tankAfterResult = getPosition(tank)
+    local firstAfterResult = getPosition(first)
+    local secondAfterResult = getPosition(second)
+    check(session.Phase == "RESULT" and session.Result == "WIN" and session.EventSerial == resultEventSerial,
+        "result state and event history remain unchanged on real frames")
+    check(tankUnit.Hp == resultTankHp and firstUnit.Hp == resultFirstHp and secondUnit.Hp == resultSecondHp
+        and tankUnit.AttackSerial == resultTankSerial and firstUnit.AttackSerial == resultFirstSerial
+        and secondUnit.AttackSerial == resultSecondSerial,
+        "RESULT prevents health changes and new attacks for every unit")
+    check(math.abs(tankAfterResult.x - tankResultPosition.x) < 0.001
+        and math.abs(tankAfterResult.y - tankResultPosition.y) < 0.001
+        and math.abs(firstAfterResult.x - firstResultPosition.x) < 0.001
+        and math.abs(firstAfterResult.y - firstResultPosition.y) < 0.001
+        and math.abs(secondAfterResult.x - secondResultPosition.x) < 0.001
+        and math.abs(secondAfterResult.y - secondResultPosition.y) < 0.001,
+        "RESULT prevents further body movement")
+    check(tankUnit.CurrentTargetName == "" and firstUnit.CurrentTargetName == ""
+        and secondUnit.CurrentTargetName == "",
+        "RESULT keeps every unit target cleared on real frames")
+    check(not tankUnit.KnockbackActive and not firstUnit.KnockbackActive and not secondUnit.KnockbackActive,
+        "no knockback resumes after RESULT")
+
+    local reacquired = session:BeginManualSimulation()
+    check(reacquired, "completed tank probe can reacquire the released manual clock")
+    if reacquired then session:EndManualSimulation() end
+end)
+
+if manualClockOwned and session ~= nil then
+    local cleanupOk, cleanupDetail = pcall(function() session:EndManualSimulation() end)
+    manualClockOwned = false
+    if not cleanupOk then check(false, "error cleanup releases the manual clock: " .. tostring(cleanupDetail)) end
 end
-session.EnemyAlive = session.EnemyAlive + 2
-
-_TimerService:SetTimerOnce(function()
-    -- Trigger the first native contact, then wait a frame for HitEvent and session batch resolution.
-    placeProbesAtTank()
-    tankUnit:DriveAttack(tank, true)
-    _TimerService:SetTimerOnce(function()
-        -- First contact proves fixed 40 damage, two overlapping targets, semantic event emission, and no Tank recoil.
-        local firstUnit = probes[1]:GetComponent("script.BattleUnit")
-        local secondUnit = probes[2]:GetComponent("script.BattleUnit")
-        check(firstUnit.Hp == 180 and secondUnit.Hp == 180, "first overlap damages both targets for 40")
-        check(session.LastEvent == "DAMAGE" or session.LastEvent == "DEAD", "contact reaches the semantic damage event")
-        local position = getProbePosition(tank)
-        check(math.abs(position.x - initialPosition.x) < 0.001 and math.abs(position.y - initialPosition.y) < 0.001, "Tank does not recoil from contact")
-        check(firstUnit.CombatState ~= "STUN" and secondUnit.CombatState ~= "STUN", "contact does not stun targets")
-        check(firstUnit.CombatState == "ON_HIT" and secondUnit.CombatState == "ON_HIT", "damaged units hold ON_HIT for the hit-stop window")
-        logProbeState("after-first-contact")
-
-        -- Re-overlap before the cooldown expires; neither target may take a second hit.
-        placeProbesAtTank()
-        tankUnit:DriveAttack(tank, true)
-        _TimerService:SetTimerOnce(function()
-            local firstBefore = probes[1]:GetComponent("script.BattleUnit").Hp
-            local secondBefore = probes[2]:GetComponent("script.BattleUnit").Hp
-            check(firstBefore == 180 and secondBefore == 180, "per-target cooldown blocks repeat contact before 2 seconds")
-
-            -- Retry after the full cooldown and wait for the next HitEvent batch.
-            _TimerService:SetTimerOnce(function()
-                placeProbesAtTank()
-                tankUnit:DriveAttack(tank, true)
-                _TimerService:SetTimerOnce(function()
-                    local firstAfter = probes[1]:GetComponent("script.BattleUnit").Hp
-                    local secondAfter = probes[2]:GetComponent("script.BattleUnit").Hp
-                    check(firstAfter == 140 and secondAfter == 140, "both target cooldowns expire independently at 2 seconds")
-
-                    -- Wait for the next cooldown before probing the arena boundary.
-                    _TimerService:SetTimerOnce(function()
-                        tankBody:SetWorldPosition(Vector2(session.ArenaMaxX - 0.5, 0))
-                        for index, entity in ipairs(probes) do
-                            local movement = entity:GetComponent("MovementComponent")
-                            if isvalid(movement) then
-                                movement.InputSpeed = 0
-                                movement:Stop()
-                            end
-                            local offset = index == 1 and 0.1 or -0.1
-                            entity:GetComponent("KinematicbodyComponent"):SetWorldPosition(Vector2(session.ArenaMaxX - 0.1 + offset, 0))
-                        end
-                        tankUnit:DriveAttack(tank, true)
-                        _TimerService:SetTimerOnce(function()
-                            -- The actual production knockback must move only enemies and clamp at ArenaMaxX.
-                            local tankPosition = getProbePosition(tank)
-                            check(math.abs(tankPosition.x - (session.ArenaMaxX - 0.5)) < 0.001, "Tank stays in place at the boundary probe")
-                            for _, entity in ipairs(probes) do
-                                local position = getProbePosition(entity)
-                                check(position.x <= session.ArenaMaxX + 0.001, "enemy knockback is clamped to the arena boundary")
-                            end
-                            logProbeState("after-boundary-contact")
-                            local firstAtResult = probes[1]:GetComponent("script.BattleUnit").Hp
-                            local secondAtResult = probes[2]:GetComponent("script.BattleUnit").Hp
-                            session:EnterResult("WIN")
-                            placeProbesAtTank()
-                            tankUnit:DriveAttack(tank, true)
-                            _TimerService:SetTimerOnce(function()
-                                -- The terminal phase must block future contact damage.
-                                check(probes[1]:GetComponent("script.BattleUnit").Hp == firstAtResult and probes[2]:GetComponent("script.BattleUnit").Hp == secondAtResult, "RESULT blocks future contact damage")
-                                logProbeState("after-result")
-                                if failures == 0 then
-                                    log("[M1][TankProbe] PASS")
-                                else
-                                    log_error("[M1][TankProbe] FAILURES=" .. tostring(failures))
-                                end
-                            end, 0.25)
-                        end, 0.25)
-                    end, 2.1)
-                end, 0.25)
-            end, 1.1)
-        end, 1.0)
-    end, 0.1)
-end, 0.25)
+if not runOk then check(false, "probe raised: " .. tostring(runDetail)) end
+if failures == 0 then log("[M1][TankProbe] PASS")
+else log_error("[M1][TankProbe] FAILURES=" .. tostring(failures)) end

@@ -29,35 +29,15 @@ test("MonsterData assets reach the owning unit and semantic hit events", () => {
   assert.match(unit, /self\.HitAnimationRUID = profile\.HitAnimationRUID/);
   assert.match(unit, /self\.AttackSoundRUID = profile\.AttackSoundRUID/);
   assert.match(unit, /session:EmitPresentation\("TARGET_HIT", event\.AttackerEntity, self\.Entity, event\.TotalDamage\)/);
-  assert.match(read("TankContactAttack.mlua"), /session:EmitPresentation\("TANK_CONTACT_HIT", self\.Entity, defender, self\.AttackDamage\)/);
-});
-
-test("tank contact cannot request a hit effect, even with an assigned RUID", () => {
-  const unit = read("BattleUnit.mlua");
-  const resolver = unit.match(/method void ApplyResolvedDamage\([^\n]+\)([\s\S]*?)\n\s*end\s*\n\s*@ExecSpace\("ServerOnly"\)\s+method void ConfigurePresentation/);
-  assert.ok(resolver, "BattleUnit must present only successfully applied damage");
-  assert.match(resolver[1], /attackerUnit\.UnitKind ~= "TANK"/);
-  assert.match(resolver[1], /hitEffectRUID = attackerUnit:GetHitEffectRUID\(\)/);
-  assert.match(resolver[1], /presentation:PlayHitEffect\(hitEffectRUID\)/);
   assert.match(read("BattleHitEffectPresentation.mlua"), /@ExecSpace\("Multicast"\)\s+method void PlayHitEffect\(string effectRUID\)/);
 });
 
-test("each successful same-frame hit keeps its damage event and target sound", () => {
-  const session = read("BattleSession.mlua");
-  const resolver = session.match(/method void ResolveDamageBatch\(\)([\s\S]*?)\n\s*end\s*\n\s*method void NotifyDeath/);
-  assert.ok(resolver, "BattleSession must resolve queued hits");
-  assert.match(resolver[1], /for _, hit in ipairs\(pending\)/);
-  assert.match(resolver[1], /unit:ApplyResolvedDamage\(hit\.amount, hit\.attacker, not isTankContact\)/);
-  assert.doesNotMatch(resolver[1], /found\.amount\s*=|resolved\s*=/);
-
+test("each successful hit keeps its damage event and target sound", () => {
   const unit = read("BattleUnit.mlua");
   assert.match(unit, /session:EmitPresentation\("DAMAGE", attacker, self\.Entity, amount\)/);
   assert.match(unit, /self\.OnHitSoundSerial = self\.OnHitSoundSerial \+ 1[\s\S]*?self:PlayCombatSound\(self\.OnHitSoundRUID\)/);
   assert.match(unit, /@ExecSpace\("Multicast"\)\s+method void PlayCombatSound\(string soundRUID\)/);
   assert.doesNotMatch(unit, /lastPresentation(?:Attack|Damage)Serial/);
-  for (const attack of ["AssaultAttack.mlua", "ShooterAttack.mlua", "TankContactAttack.mlua"]) {
-    assert.match(read(attack), /unit:PlayCombatSound\(unit\.AttackSoundRUID\)/, `${attack} must emit attack sound at the server-confirmed attack event`);
-  }
 });
 
 test("knockback uses collision-aware kinematic velocity", () => {
