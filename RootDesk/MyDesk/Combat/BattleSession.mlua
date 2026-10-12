@@ -27,10 +27,10 @@ script BattleSession extends Component
     property number ArenaMaxX = 3.5
     property number ArenaMinY = -3.5
     property number ArenaMaxY = 1.5
-    property number DeploymentMinX = -5
-    property number DeploymentMaxX = -2
-    property number DeploymentMinY = -3
-    property number DeploymentMaxY = 1
+    property number DeploymentMinX = -5.5
+    property number DeploymentMaxX = 3.5
+    property number DeploymentMinY = -3.5
+    property number DeploymentMaxY = 1.5
     property number DeploymentMinDistance = 0.6
     property number DeploymentRemoveRadius = 0.5
     property integer DeploymentMaxUnits = 6
@@ -38,6 +38,11 @@ script BattleSession extends Component
     @ExecSpace("ServerOnly")
     method void OnBeginPlay()
         -- Initialize the map session and build its first validated map roster.
+        self.DeploymentMinX = self.ArenaMinX
+        self.DeploymentMaxX = self.ArenaMaxX
+        self.DeploymentMinY = self.ArenaMinY
+        self.DeploymentMaxY = self.ArenaMaxY
+        log("[VRF] deployment bounds x=" .. tostring(self.DeploymentMinX) .. ".." .. tostring(self.DeploymentMaxX) .. " y=" .. tostring(self.DeploymentMinY) .. ".." .. tostring(self.DeploymentMaxY))
         self._T.configurationUsers = {}
         self._T.placedRoster = {}
         self._T.rebuilding = false
@@ -663,6 +668,11 @@ script BattleSession extends Component
         local profile = self:GetMonsterProfile(monsterId)
         if profile == nil or self.PlayerAlive >= self.DeploymentMaxUnits then return false end
         if position.x < self.DeploymentMinX or position.x > self.DeploymentMaxX or position.y < self.DeploymentMinY or position.y > self.DeploymentMaxY then return false end
+        local tileMap = self:GetRectTileMapComponent()
+        if not isvalid(tileMap) or self:IsRectTilePositionBlocked(tileMap, position) then
+            log("[VRF] deployment rejected at collidable or unavailable tile")
+            return false
+        end
         for _, record in ipairs(self._T.units) do
             if isvalid(record.entity) then
                 local transform = record.entity:GetComponent("TransformComponent")
