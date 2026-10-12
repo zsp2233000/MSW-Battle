@@ -115,6 +115,8 @@ script BattleAttackComposition extends Component
         if self._T.impactRemaining > 0 then return end
         self._T.pendingTarget = nil
         self._T.impactRemaining = -1
+        local unit = self.Entity:GetComponent("script.BattleUnit")
+        if isvalid(unit) then unit:FaceTarget(target) end
         self._T.adapter:ResolveImpact(target)
     end
 
@@ -156,6 +158,7 @@ script BattleAttackComposition extends Component
         local unit = self.Entity:GetComponent("script.BattleUnit")
         local session = self:GetActiveSession()
         if not isvalid(unit) or not isvalid(session) then return end
+        unit:FaceTarget(target)
         unit.AttackSerial = unit.AttackSerial + 1
         unit:PlayCombatSound(self._T.profile.AttackSoundRUID)
         session:EmitPresentation(eventName, self.Entity, target, self._T.profile.AttackDamage)

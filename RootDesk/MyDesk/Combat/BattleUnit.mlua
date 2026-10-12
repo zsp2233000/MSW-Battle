@@ -39,6 +39,7 @@ script BattleUnit extends Component
     @ExecSpace("ServerOnly")
     method void OnBeginPlay()
         -- Initialize a unit before the session supplies its faction and tuned combat values.
+        log("[VRF][BattleUnit] BEGIN_PLAY " .. self.Entity.Name)
         self._T.currentTarget = nil
         self._T.attackExecution = nil
         self._T.attackConfigured = false
@@ -87,6 +88,9 @@ script BattleUnit extends Component
         local deathAnimationRUID = profile.DieAnimationRUID
         local hitStopDuration = profile.HitStopDurationSeconds
         self.Faction = faction
+        if faction == "PLAYER" then self:FaceDirection(1) else self:FaceDirection(-1) end
+        log("[VRF][BattleUnit] DEFAULT_FACING " .. self.Entity.Name .. ", faction=" .. faction
+            .. ", scaleX=" .. tostring(self.Entity.TransformComponent.Scale.x))
         self.MonsterName = displayName
         self.UnitKind = unitKind
         self.MaxHp = maxHp
@@ -166,6 +170,31 @@ script BattleUnit extends Component
         return nil
     end
 
+    @ExecSpace("ServerOnly")
+    method void FaceDirection(number directionX)
+        -- Maple monster sprites face left; mirror the actor for rightward actions while preserving its size.
+        if math.abs(directionX) <= 0.0001 then return end
+        local transform = self.Entity.TransformComponent
+        if not isvalid(transform) then return end
+        local direction = 1
+        if directionX < 0 then direction = -1 end
+        local scale = transform.Scale
+        local scaleX = -direction * math.abs(scale.x)
+        if scale.x == scaleX then return end
+        transform.Scale = Vector3(scaleX, scale.y, scale.z)
+        log("[VRF][BattleUnit] FACING " .. self.Entity.Name .. ", direction=" .. tostring(direction))
+    end
+
+    @ExecSpace("ServerOnly")
+    method void FaceTarget(Entity target)
+        -- Face the actual attack target, retaining the previous horizontal direction for vertical targets.
+        if not isvalid(target) then return end
+        local transform = self.Entity.TransformComponent
+        local targetTransform = target.TransformComponent
+        if not isvalid(transform) or not isvalid(targetTransform) then return end
+        self:FaceDirection(targetTransform.WorldPosition.x - transform.WorldPosition.x)
+    end
+
     method any GetSession()
         -- Resolve the map-scoped session component from the unit's current map.
         local map = self.Entity.CurrentMap
@@ -235,6 +264,7 @@ script BattleUnit extends Component
             local movement = self.Entity:GetComponent("MovementComponent")
             if isvalid(movement) then
                 if directionLength > 0.0001 then
+                    self:FaceDirection(directionX)
                     movement.InputSpeed = self.MoveSpeed * 1.2
                     movement:MoveToDirection(Vector2(directionX / directionLength, directionY / directionLength), delta)
                 else
@@ -246,6 +276,7 @@ script BattleUnit extends Component
         else
             local movement = self.Entity:GetComponent("MovementComponent")
             if isvalid(movement) then movement:Stop() end
+            self:FaceTarget(target)
             if self.UnitKind == "TANK" then
                 self.CombatState = "IDLE"
             else
