@@ -7,7 +7,7 @@
   "Usage": 0,
   "UsePublish": 1,
   "UseService": 0,
-  "CoreVersion": "26.7.0.0",
+  "CoreVersion": "26.10.0.0",
   "StudioVersion": "0.1.0.0",
   "DynamicLoading": 0,
   "ContentProto": {
@@ -47,7 +47,7 @@
             {
               "@type": "script.BattleFixedCamera",
               "Enable": true,
-              "CameraZoomPercent": 90,
+              "CameraZoomPercent": 90.0,
               "CameraOffset": {
                 "x": -0.5,
                 "y": -0.5
@@ -83,7 +83,7 @@
                 "r": 0.549019635,
                 "g": 0.34117648,
                 "b": 0.164705887,
-                "a": 1
+                "a": 1.0
               },
               "TemplateRUID": "794ad8421e2543d8a6d2c70307637450",
               "Type": 2,
@@ -155,22 +155,22 @@
             {
               "@type": "MOD.Core.TransformComponent",
               "Rotation": {
-                "x": 0,
-                "y": 0,
-                "z": 0
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
               },
               "Position": {
-                "x": 0,
-                "y": 0,
-                "z": 1000
+                "x": 0.0,
+                "y": 0.0,
+                "z": 1000.0
               },
               "QuaternionRotation": {
-                "x": 0,
-                "y": 0,
-                "z": 0,
-                "w": 1
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0,
+                "w": 1.0
               },
-              "ZRotation": 0,
+              "ZRotation": 0.0,
               "Enable": true
             },
             {
@@ -826,17 +826,23 @@
           "@components": [
             {
               "@type": "MOD.Core.TransformComponent",
+              "Rotation": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              },
               "Position": {
-                "x": 0,
-                "y": 0,
+                "x": 0.0,
+                "y": 0.0,
                 "z": 999.999
               },
               "QuaternionRotation": {
-                "x": 0,
-                "y": 0,
-                "z": 0,
-                "w": 1
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0,
+                "w": 1.0
               },
+              "ZRotation": 0.0,
               "Enable": true
             },
             {
@@ -878,17 +884,23 @@
           "@components": [
             {
               "@type": "MOD.Core.TransformComponent",
+              "Rotation": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              },
               "Position": {
-                "x": 0,
-                "y": 0,
+                "x": 0.0,
+                "y": 0.0,
                 "z": 999.999
               },
               "QuaternionRotation": {
-                "x": 0,
-                "y": 0,
-                "z": 0,
-                "w": 1
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0,
+                "w": 1.0
               },
+              "ZRotation": 0.0,
               "Enable": true
             },
             {
@@ -919,46 +931,61 @@
           "displayOrder": 5,
           "pathConstraints": "///",
           "revision": 1,
+          "origin": {
+            "type": "Model",
+            "entry_id": "battleplacement",
+            "sub_entity_id": null,
+            "root_entity_id": "32b7570e-081f-4df2-9429-2e5e50078d00",
+            "replaced_model_id": null
+          },
           "modelId": "battleplacement",
           "@components": [
             {
               "@type": "MOD.Core.TransformComponent",
+              "Rotation": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              },
               "Position": {
                 "x": 2.6,
-                "y": 1,
-                "z": 0
+                "y": 1.0,
+                "z": 0.0
               },
               "QuaternionRotation": {
-                "x": 0,
-                "y": 0,
-                "z": 0,
-                "w": 1
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0,
+                "w": 1.0
               },
               "Scale": {
-                "x": 1,
-                "y": 1,
-                "z": 1
+                "x": 1.0,
+                "y": 1.0,
+                "z": 1.0
               },
+              "ZRotation": 0.0,
               "Enable": true
             },
             {
               "@type": "MOD.Core.SpriteRendererComponent",
-              "SpriteRUID": "a95cfed2c8fe4d2cb64cbb62db051f92",
-              "Color": {
-                "r": 1,
-                "g": 1,
-                "b": 1,
-                "a": 1
-              },
+              "ActionSheet": {},
               "DrawMode": 0,
+              "EndFrameIndex": 2147483647,
               "FlipX": false,
               "FlipY": false,
-              "PlayRate": 1,
               "OrderInLayer": 2,
+              "PlayRate": 1.0,
+              "RenderSetting": 0,
+              "SortingLayer": "MapLayer0",
+              "SpriteRUID": "a95cfed2c8fe4d2cb64cbb62db051f92",
               "StartFrameIndex": 0,
-              "EndFrameIndex": 2147483647,
-              "Enable": true,
-              "SortingLayer": "MapLayer0"
+              "Color": {
+                "r": 1.0,
+                "g": 1.0,
+                "b": 1.0,
+                "a": 1.0
+              },
+              "Enable": true
             },
             {
               "@type": "script.BattlePlacement",
@@ -967,14 +994,7 @@
               "Faction": "ENEMY"
             }
           ],
-          "@version": 1,
-          "origin": {
-            "type": "Model",
-            "entry_id": "battleplacement",
-            "sub_entity_id": null,
-            "root_entity_id": "32b7570e-081f-4df2-9429-2e5e50078d00",
-            "replaced_model_id": null
-          }
+          "@version": 1
         }
       },
       {
@@ -991,46 +1011,61 @@
           "displayOrder": 6,
           "pathConstraints": "///",
           "revision": 1,
+          "origin": {
+            "type": "Model",
+            "entry_id": "battleplacement",
+            "sub_entity_id": null,
+            "root_entity_id": "4bc721f1-76b5-4c9f-8d29-753ab0dc0248",
+            "replaced_model_id": null
+          },
           "modelId": "battleplacement",
           "@components": [
             {
               "@type": "MOD.Core.TransformComponent",
+              "Rotation": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              },
               "Position": {
                 "x": 2.6,
-                "y": 0,
-                "z": 0
+                "y": 0.0,
+                "z": 0.0
               },
               "QuaternionRotation": {
-                "x": 0,
-                "y": 0,
-                "z": 0,
-                "w": 1
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0,
+                "w": 1.0
               },
               "Scale": {
-                "x": 1,
-                "y": 1,
-                "z": 1
+                "x": 1.0,
+                "y": 1.0,
+                "z": 1.0
               },
+              "ZRotation": 0.0,
               "Enable": true
             },
             {
               "@type": "MOD.Core.SpriteRendererComponent",
-              "SpriteRUID": "a95cfed2c8fe4d2cb64cbb62db051f92",
-              "Color": {
-                "r": 1,
-                "g": 1,
-                "b": 1,
-                "a": 1
-              },
+              "ActionSheet": {},
               "DrawMode": 0,
+              "EndFrameIndex": 2147483647,
               "FlipX": false,
               "FlipY": false,
-              "PlayRate": 1,
               "OrderInLayer": 2,
+              "PlayRate": 1.0,
+              "RenderSetting": 0,
+              "SortingLayer": "MapLayer0",
+              "SpriteRUID": "a95cfed2c8fe4d2cb64cbb62db051f92",
               "StartFrameIndex": 0,
-              "EndFrameIndex": 2147483647,
-              "Enable": true,
-              "SortingLayer": "MapLayer0"
+              "Color": {
+                "r": 1.0,
+                "g": 1.0,
+                "b": 1.0,
+                "a": 1.0
+              },
+              "Enable": true
             },
             {
               "@type": "script.BattlePlacement",
@@ -1039,14 +1074,7 @@
               "Faction": "ENEMY"
             }
           ],
-          "@version": 1,
-          "origin": {
-            "type": "Model",
-            "entry_id": "battleplacement",
-            "sub_entity_id": null,
-            "root_entity_id": "4bc721f1-76b5-4c9f-8d29-753ab0dc0248",
-            "replaced_model_id": null
-          }
+          "@version": 1
         }
       },
       {
@@ -1063,46 +1091,61 @@
           "displayOrder": 7,
           "pathConstraints": "///",
           "revision": 1,
+          "origin": {
+            "type": "Model",
+            "entry_id": "battleplacement",
+            "sub_entity_id": null,
+            "root_entity_id": "da8749d2-6a56-456b-9d47-4d6dd26901b3",
+            "replaced_model_id": null
+          },
           "modelId": "battleplacement",
           "@components": [
             {
               "@type": "MOD.Core.TransformComponent",
+              "Rotation": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              },
               "Position": {
                 "x": 2.6,
-                "y": -1,
-                "z": 0
+                "y": -1.0,
+                "z": 0.0
               },
               "QuaternionRotation": {
-                "x": 0,
-                "y": 0,
-                "z": 0,
-                "w": 1
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0,
+                "w": 1.0
               },
               "Scale": {
-                "x": 1,
-                "y": 1,
-                "z": 1
+                "x": 1.0,
+                "y": 1.0,
+                "z": 1.0
               },
+              "ZRotation": 0.0,
               "Enable": true
             },
             {
               "@type": "MOD.Core.SpriteRendererComponent",
-              "SpriteRUID": "a95cfed2c8fe4d2cb64cbb62db051f92",
-              "Color": {
-                "r": 1,
-                "g": 1,
-                "b": 1,
-                "a": 1
-              },
+              "ActionSheet": {},
               "DrawMode": 0,
+              "EndFrameIndex": 2147483647,
               "FlipX": false,
               "FlipY": false,
-              "PlayRate": 1,
               "OrderInLayer": 2,
+              "PlayRate": 1.0,
+              "RenderSetting": 0,
+              "SortingLayer": "MapLayer0",
+              "SpriteRUID": "a95cfed2c8fe4d2cb64cbb62db051f92",
               "StartFrameIndex": 0,
-              "EndFrameIndex": 2147483647,
-              "Enable": true,
-              "SortingLayer": "MapLayer0"
+              "Color": {
+                "r": 1.0,
+                "g": 1.0,
+                "b": 1.0,
+                "a": 1.0
+              },
+              "Enable": true
             },
             {
               "@type": "script.BattlePlacement",
@@ -1111,14 +1154,7 @@
               "Faction": "ENEMY"
             }
           ],
-          "@version": 1,
-          "origin": {
-            "type": "Model",
-            "entry_id": "battleplacement",
-            "sub_entity_id": null,
-            "root_entity_id": "da8749d2-6a56-456b-9d47-4d6dd26901b3",
-            "replaced_model_id": null
-          }
+          "@version": 1
         }
       },
       {
@@ -1135,46 +1171,61 @@
           "displayOrder": 8,
           "pathConstraints": "///",
           "revision": 1,
+          "origin": {
+            "type": "Model",
+            "entry_id": "battleplacement",
+            "sub_entity_id": null,
+            "root_entity_id": "b77cb2f6-ca0e-44c3-84bf-eca86ed93cbe",
+            "replaced_model_id": null
+          },
           "modelId": "battleplacement",
           "@components": [
             {
               "@type": "MOD.Core.TransformComponent",
+              "Rotation": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              },
               "Position": {
                 "x": 2.6,
-                "y": -2,
-                "z": 0
+                "y": -2.0,
+                "z": 0.0
               },
               "QuaternionRotation": {
-                "x": 0,
-                "y": 0,
-                "z": 0,
-                "w": 1
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0,
+                "w": 1.0
               },
               "Scale": {
-                "x": 1,
-                "y": 1,
-                "z": 1
+                "x": 1.0,
+                "y": 1.0,
+                "z": 1.0
               },
+              "ZRotation": 0.0,
               "Enable": true
             },
             {
               "@type": "MOD.Core.SpriteRendererComponent",
-              "SpriteRUID": "a95cfed2c8fe4d2cb64cbb62db051f92",
-              "Color": {
-                "r": 1,
-                "g": 1,
-                "b": 1,
-                "a": 1
-              },
+              "ActionSheet": {},
               "DrawMode": 0,
+              "EndFrameIndex": 2147483647,
               "FlipX": false,
               "FlipY": false,
-              "PlayRate": 1,
               "OrderInLayer": 2,
+              "PlayRate": 1.0,
+              "RenderSetting": 0,
+              "SortingLayer": "MapLayer0",
+              "SpriteRUID": "a95cfed2c8fe4d2cb64cbb62db051f92",
               "StartFrameIndex": 0,
-              "EndFrameIndex": 2147483647,
-              "Enable": true,
-              "SortingLayer": "MapLayer0"
+              "Color": {
+                "r": 1.0,
+                "g": 1.0,
+                "b": 1.0,
+                "a": 1.0
+              },
+              "Enable": true
             },
             {
               "@type": "script.BattlePlacement",
@@ -1183,14 +1234,7 @@
               "Faction": "ENEMY"
             }
           ],
-          "@version": 1,
-          "origin": {
-            "type": "Model",
-            "entry_id": "battleplacement",
-            "sub_entity_id": null,
-            "root_entity_id": "b77cb2f6-ca0e-44c3-84bf-eca86ed93cbe",
-            "replaced_model_id": null
-          }
+          "@version": 1
         }
       },
       {
@@ -1207,46 +1251,61 @@
           "displayOrder": 9,
           "pathConstraints": "///",
           "revision": 1,
+          "origin": {
+            "type": "Model",
+            "entry_id": "battleplacement",
+            "sub_entity_id": null,
+            "root_entity_id": "62de71ae-eff6-476c-9666-9a11ce6f12f8",
+            "replaced_model_id": null
+          },
           "modelId": "battleplacement",
           "@components": [
             {
               "@type": "MOD.Core.TransformComponent",
+              "Rotation": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              },
               "Position": {
                 "x": 2.6,
-                "y": -3,
-                "z": 0
+                "y": -3.0,
+                "z": 0.0
               },
               "QuaternionRotation": {
-                "x": 0,
-                "y": 0,
-                "z": 0,
-                "w": 1
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0,
+                "w": 1.0
               },
               "Scale": {
-                "x": 1,
-                "y": 1,
-                "z": 1
+                "x": 1.0,
+                "y": 1.0,
+                "z": 1.0
               },
+              "ZRotation": 0.0,
               "Enable": true
             },
             {
               "@type": "MOD.Core.SpriteRendererComponent",
-              "SpriteRUID": "a95cfed2c8fe4d2cb64cbb62db051f92",
-              "Color": {
-                "r": 1,
-                "g": 1,
-                "b": 1,
-                "a": 1
-              },
+              "ActionSheet": {},
               "DrawMode": 0,
+              "EndFrameIndex": 2147483647,
               "FlipX": false,
               "FlipY": false,
-              "PlayRate": 1,
               "OrderInLayer": 2,
+              "PlayRate": 1.0,
+              "RenderSetting": 0,
+              "SortingLayer": "MapLayer0",
+              "SpriteRUID": "a95cfed2c8fe4d2cb64cbb62db051f92",
               "StartFrameIndex": 0,
-              "EndFrameIndex": 2147483647,
-              "Enable": true,
-              "SortingLayer": "MapLayer0"
+              "Color": {
+                "r": 1.0,
+                "g": 1.0,
+                "b": 1.0,
+                "a": 1.0
+              },
+              "Enable": true
             },
             {
               "@type": "script.BattlePlacement",
@@ -1255,14 +1314,7 @@
               "Faction": "ENEMY"
             }
           ],
-          "@version": 1,
-          "origin": {
-            "type": "Model",
-            "entry_id": "battleplacement",
-            "sub_entity_id": null,
-            "root_entity_id": "62de71ae-eff6-476c-9666-9a11ce6f12f8",
-            "replaced_model_id": null
-          }
+          "@version": 1
         }
       },
       {
@@ -1279,46 +1331,61 @@
           "displayOrder": 10,
           "pathConstraints": "///",
           "revision": 1,
+          "origin": {
+            "type": "Model",
+            "entry_id": "battleplacement",
+            "sub_entity_id": null,
+            "root_entity_id": "fd607c8e-4fa0-4adb-8233-df92183636b7",
+            "replaced_model_id": null
+          },
           "modelId": "battleplacement",
           "@components": [
             {
               "@type": "MOD.Core.TransformComponent",
+              "Rotation": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              },
               "Position": {
                 "x": 1.6,
-                "y": -1,
-                "z": 0
+                "y": -1.0,
+                "z": 0.0
               },
               "QuaternionRotation": {
-                "x": 0,
-                "y": 0,
-                "z": 0,
-                "w": 1
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0,
+                "w": 1.0
               },
               "Scale": {
-                "x": 1,
-                "y": 1,
-                "z": 1
+                "x": 1.0,
+                "y": 1.0,
+                "z": 1.0
               },
+              "ZRotation": 0.0,
               "Enable": true
             },
             {
               "@type": "MOD.Core.SpriteRendererComponent",
-              "SpriteRUID": "a95cfed2c8fe4d2cb64cbb62db051f92",
-              "Color": {
-                "r": 1,
-                "g": 1,
-                "b": 1,
-                "a": 1
-              },
+              "ActionSheet": {},
               "DrawMode": 0,
+              "EndFrameIndex": 2147483647,
               "FlipX": false,
               "FlipY": false,
-              "PlayRate": 1,
               "OrderInLayer": 2,
+              "PlayRate": 1.0,
+              "RenderSetting": 0,
+              "SortingLayer": "MapLayer0",
+              "SpriteRUID": "a95cfed2c8fe4d2cb64cbb62db051f92",
               "StartFrameIndex": 0,
-              "EndFrameIndex": 2147483647,
-              "Enable": true,
-              "SortingLayer": "MapLayer0"
+              "Color": {
+                "r": 1.0,
+                "g": 1.0,
+                "b": 1.0,
+                "a": 1.0
+              },
+              "Enable": true
             },
             {
               "@type": "script.BattlePlacement",
@@ -1327,14 +1394,7 @@
               "Faction": "ENEMY"
             }
           ],
-          "@version": 1,
-          "origin": {
-            "type": "Model",
-            "entry_id": "battleplacement",
-            "sub_entity_id": null,
-            "root_entity_id": "fd607c8e-4fa0-4adb-8233-df92183636b7",
-            "replaced_model_id": null
-          }
+          "@version": 1
         }
       }
     ]
