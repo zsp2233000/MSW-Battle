@@ -84,11 +84,6 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node .codex/hooks/core-version-check/core-version-check.cjs",
-            "timeout": 5
-          },
-          {
-            "type": "command",
             "command": "node .codex/hooks/skill-router-reminder/skill-router-reminder.cjs",
             "timeout": 5
           }
