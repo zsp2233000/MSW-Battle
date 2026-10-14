@@ -775,6 +775,7 @@ script BattleSession extends Component
         entity:AddComponent("script.BattleHPBar")
         entity:AddComponent("script.BattleHitEffectPresentation")
         entity:AddComponent("script.BattleAttackComposition")
+        entity:AddComponent("script.BattleUnitMotion")
         local unit = entity:GetComponent("script.BattleUnit")
         local attackExecution = entity:GetComponent("script.BattleAttackComposition")
         if not isvalid(unit) or not isvalid(attackExecution) then
@@ -787,9 +788,8 @@ script BattleSession extends Component
         if faction == "ENEMY" then openingDelay = self.EnemyOpeningDelay end
         unit:BindAttackExecution(attackExecution)
         unit:SetMonsterIdentity(profile.MonsterId, profile.MonsterName, profile.HitEffectRUID)
-        unit:Configure(faction, profile.MonsterName, profile, openingDelay)
-        if not unit:HasAttackExecution() then
-            log_error("[M1][BattleSession] attack adapter missing on " .. name)
+        if not unit:Configure(faction, profile.MonsterName, profile, openingDelay) then
+            log_error("[M1][BattleSession] combat execution configuration failed on " .. name)
             entity:Destroy()
             return nil
         end
@@ -806,34 +806,12 @@ script BattleSession extends Component
         return entity
     end
 
-    method Entity FindNearestEnemy(Entity source, Entity preferred)
-        -- Pick the nearest alive opposing unit, preserving a valid equal-distance target.
-        if not isvalid(source) then return nil end
-        local sourceUnit = source:GetComponent("script.BattleUnit")
-        local sourceTransform = source:GetComponent("TransformComponent")
-        if not isvalid(sourceUnit) or not isvalid(sourceTransform) then return nil end
-        if sourceUnit.IsDead then return nil end
-        local sourcePosition = sourceTransform.WorldPosition
-        local best = nil
-        local bestDistance = 0
-        for _, record in ipairs(self._T.units) do
-            local candidate = record.entity
-            local unit = record.unit
-            if isvalid(candidate) and isvalid(unit) and candidate ~= source and unit.Faction ~= sourceUnit.Faction and unit:IsAlive() then
-                local transform = candidate:GetComponent("TransformComponent")
-                if isvalid(transform) then
-                    local position = transform.WorldPosition
-                    local dx = position.x - sourcePosition.x
-                    local dy = position.y - sourcePosition.y
-                    local distance = dx * dx + dy * dy
-                    if best == nil or distance < bestDistance or (distance == bestDistance and candidate == preferred) then
-                        best = candidate
-                        bestDistance = distance
-                    end
-                end
-            end
-        end
-        return best
+    @ExecSpace("ServerOnly")
+    method table GetTargetCandidates()
+        -- Return transient entity references in roster order without exposing mutable records.
+        local candidates = {}
+        for _, record in ipairs(self._T.units or {}) do table.insert(candidates, record.entity) end
+        return candidates
     end
 
     method void QueueDamage(Entity target, integer amount, Entity attacker)
@@ -864,26 +842,6 @@ script BattleSession extends Component
         table.insert(self._T.pendingKnockbacks, { attacker = attacker, defender = defender, distance = distance })
     end
 
-    method number Clamp(number value, number minimum, number maximum)
-        -- Keep every knockback destination inside the playable RectTile boundary.
-        return math.max(minimum, math.min(maximum, value))
-    end
-
-    @ExecSpace("ServerOnly")
-    method void ConstrainUnitToArena(Entity entity)
-        -- Correct any physics movement that carried a battle unit beyond the arena limits.
-        if not isvalid(entity) then return end
-        local transform = entity:GetComponent("TransformComponent")
-        local kinematic = entity:GetComponent("KinematicbodyComponent")
-        if not isvalid(transform) or not isvalid(kinematic) then return end
-        local position = transform.WorldPosition
-        local nextX = self:Clamp(position.x, self.ArenaMinX, self.ArenaMaxX)
-        local nextY = self:Clamp(position.y, self.ArenaMinY, self.ArenaMaxY)
-        if nextX == position.x and nextY == position.y then return end
-        local movement = entity:GetComponent("MovementComponent")
-        if isvalid(movement) then movement:Stop() end
-        kinematic:SetWorldPosition(Vector2(nextX, nextY))
-    end
 
     method any GetRectTileMapComponent()
         -- Resolve the current map's RectTileMap so knockback can respect blocking tiles.
@@ -903,61 +861,16 @@ script BattleSession extends Component
         return tileInfo ~= nil and tileInfo.IsCollidable == true
     end
 
-    method Vector2 GetSafeKnockbackPosition(any tileMap, number fromX, number fromY, number toX, number toY)
-        -- Stop at the last free point before the knockback path enters a collidable tile.
-        if not isvalid(tileMap) then return Vector2(toX, toY) end
-        local deltaX = toX - fromX
-        local deltaY = toY - fromY
-        local distance = math.sqrt(deltaX * deltaX + deltaY * deltaY)
-        local stepCount = math.max(1, math.ceil(distance / 0.05))
-        local safeX = fromX
-        local safeY = fromY
-        for step = 1, stepCount do
-            local progress = step / stepCount
-            local candidateX = fromX + deltaX * progress
-            local candidateY = fromY + deltaY * progress
-            if self:IsRectTilePositionBlocked(tileMap, Vector3(candidateX, candidateY, 0)) then break end
-            safeX = candidateX
-            safeY = candidateY
-        end
-        return Vector2(safeX, safeY)
-    end
-
     method void ApplyPendingKnockbacks()
-        -- Apply accepted tank displacement even if its attack profile changed after enqueueing.
+        -- Deliver accepted intent after attacks; the defender owns every displacement detail.
         if self._T.pendingKnockbacks == nil or #self._T.pendingKnockbacks == 0 then return end
         local pending = self._T.pendingKnockbacks
         self._T.pendingKnockbacks = {}
-        local tileMap = self:GetRectTileMapComponent()
         for _, item in ipairs(pending) do
-            if isvalid(item.attacker) and isvalid(item.defender) then
-                local attackerUnit = item.attacker:GetComponent("script.BattleUnit")
-                local defenderUnit = item.defender:GetComponent("script.BattleUnit")
-                local attackerTransform = item.attacker:GetComponent("TransformComponent")
-                local defenderTransform = item.defender:GetComponent("TransformComponent")
-                local kinematic = item.defender:GetComponent("KinematicbodyComponent")
-                if isvalid(attackerUnit) and isvalid(defenderUnit) and isvalid(attackerTransform) and isvalid(defenderTransform) and isvalid(kinematic) and defenderUnit:IsAlive() and attackerUnit.Faction ~= defenderUnit.Faction then
-                    local attackerPosition = attackerTransform.WorldPosition
-                    local defenderPosition = defenderTransform.WorldPosition
-                    local dx = defenderPosition.x - attackerPosition.x
-                    local dy = defenderPosition.y - attackerPosition.y
-                    local length = math.sqrt(dx * dx + dy * dy)
-                    if length < 0.001 then
-                        if attackerUnit.Faction == "PLAYER" then dx = 1 else dx = -1 end
-                        dy = 0
-                        length = 1
-                    end
-                    local distance = item.distance
-                    if distance ~= nil and distance > 0 then
-                        local nextX = self:Clamp(defenderPosition.x + dx / length * distance, self.ArenaMinX, self.ArenaMaxX)
-                        local nextY = self:Clamp(defenderPosition.y + dy / length * distance, self.ArenaMinY, self.ArenaMaxY)
-                        local safePosition = self:GetSafeKnockbackPosition(tileMap, defenderPosition.x, defenderPosition.y, nextX, nextY)
-                        if math.abs(safePosition.x - nextX) > 0.0001 or math.abs(safePosition.y - nextY) > 0.0001 then
-                            log("[M1][BattleSession] KNOCKBACK blocked by RectTile collision")
-                        end
-                        defenderUnit:ApplyKnockback(safePosition)
-                        self:EmitPresentation("KNOCKBACK", item.attacker, item.defender, 0)
-                    end
+            if isvalid(item.defender) then
+                local motion = item.defender:GetComponent("script.BattleUnitMotion")
+                if isvalid(motion) and motion:Knockback(item.attacker, item.distance) then
+                    self:EmitPresentation("KNOCKBACK", item.attacker, item.defender, 0)
                 end
             end
         end
@@ -973,7 +886,6 @@ script BattleSession extends Component
             for _, record in ipairs(self._T.units) do
                 if isvalid(record.unit) then
                     record.unit:Tick(delta)
-                    record.unit:AdvanceKnockback(delta)
                 end
             end
             for _, record in ipairs(self._T.units) do
