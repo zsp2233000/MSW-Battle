@@ -9,6 +9,17 @@ script BattleDeploymentInput extends Component
     property any resultWin = nil
     property any resultLose = nil
     property any resultDraw = nil
+    property Entity deploymentPanel = "7d847e11-5404-42fb-8650-92f19590dbc1"
+    property Entity hudPanel = "5861735e-bf7d-4f58-b4b2-a2d85393af74"
+    property Entity resultPanel = "0ef318f3-194b-4a52-9b1d-62fa14756a5c"
+    property Entity phaseText = "0520e489-e0d2-46a9-9aa7-f2da9cb9943a"
+    property Entity phaseHintText = "899225eb-db2f-4d8c-8606-e76f503ae893"
+    property Entity playerCountText = "e0503105-2f34-4b5c-9277-4479fe444482"
+    property Entity enemyCountText = "74377a90-4118-4205-8354-1545a024002f"
+    property Entity deploymentCountText = "e750d0ba-eb3b-41b2-8dc0-fc59a43dd448"
+    property Entity selectionText = "a6da5bc2-713c-4834-ab97-227ac9d0e174"
+    property Entity resultPlayerText = "506bb73b-00a6-4313-ba14-ba1d3189f3a9"
+    property Entity resultEnemyText = "585aa74a-1ef0-4897-9885-4b996eb49840"
     property Entity configErrorGroup = "b54bf636-0511-441c-9947-d1a0f3c3fe34"
     property Entity configErrorMessage = "0fd05f4a-9c88-4f4b-83e7-99dbae361488"
     property any buttonBindings = nil
@@ -26,7 +37,7 @@ script BattleDeploymentInput extends Component
 
     @ExecSpace("ClientOnly")
     method void OnBeginPlay()
-        -- Bind the delivered UI and request the server's limited card catalog.
+        -- Bind the dark battle HUD and request the server's limited card catalog.
         self.session = self.Entity:GetComponent("script.BattleSession")
         self.buttonBindings = {}
         self.optionCards = {}
@@ -37,11 +48,10 @@ script BattleDeploymentInput extends Component
         self.resultWin = self:FindNamedUiEntity("ResultWin")
         self.resultLose = self:FindNamedUiEntity("ResultLose")
         self.resultDraw = self:FindNamedUiEntity("ResultDraw")
-        if isvalid(self.optionContainer) then
-            local transform = self.optionContainer.UITransformComponent
-            self._T.optionContainerSize = Vector2(transform.RectSize.x, transform.RectSize.y)
-            self._T.optionContainerPosition = Vector2(transform.anchoredPosition.x, transform.anchoredPosition.y)
-        end
+        self._T.hudKey = nil
+        self._T.selectedMonsterName = ""
+        self._T.optionBuildSerial = 0
+        self._T.portraitFrameSizes = {}
         self:SetResultEntities("")
         self.observedPhase = "__UNINITIALIZED__"
         self.observedGeneration = -1
@@ -58,6 +68,7 @@ script BattleDeploymentInput extends Component
         self.keyDownHandler = _InputService:ConnectEvent(KeyDownEvent, self.HandleRightClick)
         self.optionsRetryCountdown = 0
         log("[M1][DeploymentUI] initialized")
+        log("[VRF][BattleUI] initialized theme=dark dock=bottom layout=horizontal")
     end
 
     @ExecSpace("ClientOnly")
@@ -86,6 +97,7 @@ script BattleDeploymentInput extends Component
                 label.Text = self.session.ConfigurationError
             end
         end
+        self:SyncBattleHud()
     end
 
     @ExecSpace("ClientOnly")
@@ -107,50 +119,129 @@ script BattleDeploymentInput extends Component
         end
         self.buttonBindings = {}
         if isvalid(self.configErrorGroup) then self.configErrorGroup:SetEnable(false) end
+        if isvalid(self.deploymentPanel) then self.deploymentPanel:SetEnable(false) end
+        if isvalid(self.hudPanel) then self.hudPanel:SetEnable(false) end
+        self:SetResultEntities("")
+        self._T.hudKey = nil
+        self._T.portraitFrameSizes = nil
         self.startButtonAction = nil
         self.session = nil
     end
 
     @ExecSpace("ClientOnly")
     method Entity FindNamedUiEntity(string entityName)
-        -- Resolve a delivered UI entity without editing its layout or appearance.
+        -- Resolve the named controls inside the authored UI hierarchy.
         local root = _EntityService:GetEntityByPath("/ui")
         if not isvalid(root) then return nil end
         return root:GetChildByName(entityName, true)
     end
 
     @ExecSpace("ClientOnly")
+    method any GetPortraitFrameSizes(string ruid)
+        -- Cache each native frame size and the largest extent of the idle animation.
+        local cache = self._T.portraitFrameSizes
+        if cache == nil then
+            cache = {}
+            self._T.portraitFrameSizes = cache
+        end
+        if cache[ruid] ~= nil then return cache[ruid] end
+        local resourceType = _ResourceService:GetTypeAndWait(ruid)
+        local data = { sizes = {}, first = nil, maxWidth = 0, maxHeight = 0, animated = false }
+        local addFrame = function(frameIndex, sprite)
+            if isvalid(sprite) and sprite.IsLoadComplete ~= true then
+                sprite = _ResourceService:LoadSpriteAndWait(sprite.RUID)
+            end
+            if not isvalid(sprite) or sprite.IsLoadComplete ~= true or sprite.Width <= 0 or sprite.Height <= 0 then return false end
+            local size = Vector2(sprite.Width, sprite.Height)
+            data.sizes[frameIndex] = size
+            if data.first == nil then data.first = size end
+            data.maxWidth = math.max(data.maxWidth, size.x)
+            data.maxHeight = math.max(data.maxHeight, size.y)
+            return true
+        end
+        if resourceType == ResourceType.AnimationClip then
+            local clip = _ResourceService:LoadAnimationClipAndWait(ruid)
+            if not isvalid(clip) or clip.IsLoadComplete ~= true then return nil end
+            data.animated = true
+            for _, frame in ipairs(clip.Frames:ToTable()) do
+                if not addFrame(frame.FrameIndex, frame.FrameSprite) then return nil end
+            end
+        elseif resourceType == ResourceType.Sprite then
+            if not addFrame(0, _ResourceService:LoadSpriteAndWait(ruid)) then return nil end
+        end
+        if data.first == nil then return nil end
+        cache[ruid] = data
+        return data
+    end
+
+    @ExecSpace("ClientOnly")
+    method any ConfigureMonsterPortrait(Entity portraitEntity, string ruid)
+        -- Fit native frame dimensions with one uniform scale inside the card's portrait area.
+        if not isvalid(portraitEntity) then return nil end
+        portraitEntity:SetEnable(false)
+        local data = self:GetPortraitFrameSizes(ruid)
+        if not isvalid(portraitEntity) then return nil end
+        local portrait = portraitEntity.SpriteGUIRendererComponent
+        local transform = portraitEntity.UITransformComponent
+        local area = portraitEntity.Parent
+        if data == nil or not isvalid(portrait) or not isvalid(transform) or not isvalid(area) or not isvalid(area.UITransformComponent) then
+            log_warning("[BattleUI] portrait resource unavailable ruid=" .. ruid)
+            return nil
+        end
+        local bounds = area.UITransformComponent.RectSize
+        local availableWidth = math.max(1, bounds.x - 8)
+        local availableHeight = math.max(1, bounds.y - 8)
+        local scale = math.min(availableWidth / data.maxWidth, availableHeight / data.maxHeight)
+        -- None uses the centered UI rectangle instead of the monster's world-space pivot.
+        -- Keep that rectangle at the native frame size; scale X and Y together only.
+        portrait.PreserveSprite = PreserveSpriteType.None
+        portrait.Type = ImageType.Simple
+        portrait.LocalPosition = Vector2(0, 0)
+        portrait.LocalScale = Vector2(1, 1)
+        portrait.Color = Color.white
+        portrait.RaycastTarget = false
+        transform.RectSize = data.first
+        transform.UIScale = Vector3(scale, scale, 1)
+        local frameCallback = nil
+        if data.animated then
+            local onFrame = function(event)
+                if not isvalid(portraitEntity) then return end
+                local size = data.sizes[event.FrameIndex]
+                local current = portraitEntity.UITransformComponent
+                if size ~= nil and isvalid(current) and (current.RectSize.x ~= size.x or current.RectSize.y ~= size.y) then
+                    current.RectSize = size
+                end
+            end
+            frameCallback = portraitEntity:ConnectEvent(SpriteGUIAnimPlayerChangeFrameEvent, onFrame)
+        end
+        portrait.ImageRUID = DataRef(ruid)
+        portraitEntity:SetEnable(true)
+        log("[VRF][BattleUI] portrait ruid=" .. ruid .. " nativeMax=" .. tostring(data.maxWidth) .. "x" .. tostring(data.maxHeight) .. " scale=" .. tostring(scale) .. " area=" .. tostring(availableWidth) .. "x" .. tostring(availableHeight))
+        return frameCallback
+    end
+
+    @ExecSpace("ClientOnly")
     method void ShowMonsterOptions(table options, integer generation)
         -- Clone one card per validated MonsterData row and bind its stable ID.
         if self.optionsReady or not isvalid(self.session) or self.session.Phase ~= "DEPLOYMENT" or generation ~= self.session.SessionGeneration or generation ~= self.observedGeneration or not isvalid(self.optionTemplate) or not isvalid(self.optionContainer) then return end
+        -- Clone can yield while loading UI assets; reserve this catalog before cloning.
+        self.optionsReady = true
+        local buildSerial = self._T.optionBuildSerial
         self.optionData = options
-        local containerTransform = self.optionContainer:GetComponent("UITransformComponent")
-        local templateTransform = self.optionTemplate:GetComponent("UITransformComponent")
-        if not isvalid(containerTransform) or not isvalid(templateTransform) then return end
-        local cardWidth = templateTransform.RectSize.x
-        local cardHeight = templateTransform.RectSize.y
-        local columns = math.max(1, math.floor(containerTransform.RectSize.x / cardWidth))
-        local origin = templateTransform.anchoredPosition
-        local rows = math.ceil(#options / columns)
-        if rows > 1 then
-            local extraHeight = (rows - 1) * cardHeight
-            local containerPosition = containerTransform.anchoredPosition
-            local containerSize = containerTransform.RectSize
-            containerTransform.RectSize = Vector2(containerSize.x, containerSize.y + extraHeight)
-            containerTransform.anchoredPosition = Vector2(containerPosition.x, containerPosition.y + extraHeight / 2)
-            origin = Vector2(origin.x, origin.y + extraHeight / 2)
-        end
+        -- The horizontal ScrollLayoutGroup owns card placement and clipping.
+        -- Keep the authored dock position and size stable as the catalog grows.
         for index, option in ipairs(options) do
+            if buildSerial ~= self._T.optionBuildSerial or generation ~= self.session.SessionGeneration then return end
             local monsterId = option[1]
             local monsterName = option[2]
             local standRUID = option[3]
             local card = self.optionTemplate:Clone("MonsterOption_" .. tostring(index))
+            if buildSerial ~= self._T.optionBuildSerial or generation ~= self.session.SessionGeneration then
+                if isvalid(card) then card:Destroy() end
+                return
+            end
             if isvalid(card) then
-                card:SetEnable(true)
-                local cardTransform = card:GetComponent("UITransformComponent")
-                if isvalid(cardTransform) then
-                    cardTransform.anchoredPosition = Vector2(origin.x + ((index - 1) % columns) * cardWidth, origin.y - math.floor((index - 1) / columns) * cardHeight)
-                end
+                card:SetEnable(false)
                 local nameEntity = card:GetChildByName("MonsterName", true)
                 local portraitEntity = card:GetChildByName("Portrait", true)
                 local glowEntity = card:GetChildByName("SelectedGlow", true)
@@ -160,12 +251,13 @@ script BattleDeploymentInput extends Component
                     local nameImage = nameEntity:GetComponent("SpriteGUIRendererComponent")
                     if isvalid(nameImage) then nameImage.RaycastTarget = false end
                 end
-                if isvalid(portraitEntity) then
-                    local portrait = portraitEntity:GetComponent("SpriteGUIRendererComponent")
-                    if isvalid(portrait) then
-                        portrait.ImageRUID = DataRef(standRUID)
-                        portrait.RaycastTarget = false
+                local portraitCallback = self:ConfigureMonsterPortrait(portraitEntity, standRUID)
+                if not isvalid(card) or buildSerial ~= self._T.optionBuildSerial or not isvalid(self.session) or generation ~= self.session.SessionGeneration then
+                    if isvalid(portraitEntity) and portraitCallback ~= nil then
+                        portraitEntity:DisconnectEvent(SpriteGUIAnimPlayerChangeFrameEvent, portraitCallback)
                     end
+                    if isvalid(card) then card:Destroy() end
+                    return
                 end
                 if isvalid(glowEntity) then
                     glowEntity:SetEnable(false)
@@ -175,16 +267,19 @@ script BattleDeploymentInput extends Component
                 local clickAction = function() self:SelectMonsterCard(monsterId, glowEntity) end
                 local callback = card:ConnectEvent(ButtonClickEvent, clickAction)
                 table.insert(self.buttonBindings, { entity = card, eventCallback = callback })
-                table.insert(self.optionCards, { entity = card, monsterId = monsterId, glow = glowEntity, clickAction = clickAction })
+                table.insert(self.optionCards, { entity = card, monsterId = monsterId, glow = glowEntity, clickAction = clickAction, portrait = portraitEntity, portraitCallback = portraitCallback })
+                card:SetEnable(true)
             end
         end
         self.optionsReady = true
         log("[M1][DeploymentUI] cards=" .. tostring(#self.optionCards))
+        log("[VRF][BattleUI] cards=" .. tostring(#self.optionCards) .. " layout=horizontal")
     end
 
     @ExecSpace("ClientOnly")
     method void ClearMonsterOptions()
-        -- Release the previous catalog's cards, selection, and layout before a session rebuild.
+        -- Release the previous catalog and selection without moving the authored dock.
+        self._T.optionBuildSerial = (self._T.optionBuildSerial or 0) + 1
         local retainedBindings = {}
         for _, binding in ipairs(self.buttonBindings or {}) do
             if binding.entity == self.startButton then
@@ -195,16 +290,21 @@ script BattleDeploymentInput extends Component
         end
         self.buttonBindings = retainedBindings
         for _, card in ipairs(self.optionCards or {}) do
+            if isvalid(card.portrait) and card.portraitCallback ~= nil then
+                card.portrait:DisconnectEvent(SpriteGUIAnimPlayerChangeFrameEvent, card.portraitCallback)
+            end
             if isvalid(card.entity) then card.entity:Destroy() end
         end
         self.optionCards = {}
         self.optionData = {}
         self.optionsReady = false
         self.selectedMonsterId = ""
+        self._T.selectedMonsterName = ""
+        self._T.hudKey = nil
         self.optionsRetryCountdown = 0
-        if isvalid(self.optionContainer) and self._T.optionContainerSize ~= nil then
-            self.optionContainer.UITransformComponent.RectSize = self._T.optionContainerSize
-            self.optionContainer.UITransformComponent.anchoredPosition = self._T.optionContainerPosition
+        if isvalid(self.optionContainer) then
+            local layout = self.optionContainer.ScrollLayoutGroupComponent
+            if isvalid(layout) then layout:ResetScrollPosition(UITransformAxis.Horizontal) end
         end
     end
 
@@ -213,6 +313,9 @@ script BattleDeploymentInput extends Component
         -- Move the persistent selection glow to the card carrying this MonsterId.
         if not isvalid(self.session) or self.session.Phase ~= "DEPLOYMENT" then return end
         self.selectedMonsterId = monsterId
+        for _, option in ipairs(self.optionData or {}) do
+            if option[1] == monsterId then self._T.selectedMonsterName = option[2] break end
+        end
         for _, card in ipairs(self.optionCards) do
             if isvalid(card.glow) then card.glow:SetEnable(card.glow == glowEntity) end
         end
@@ -222,7 +325,7 @@ script BattleDeploymentInput extends Component
     @ExecSpace("ClientOnly")
     method void HandleStartButton()
         -- Ask the server to start only while deployment is open.
-        if isvalid(self.session) and self.session.Phase == "DEPLOYMENT" then self.session:RequestStartBattle() end
+        if isvalid(self.session) and self.session.Phase == "DEPLOYMENT" and self.session.PlayerAlive > 0 then self.session:RequestStartBattle() end
     end
 
     @ExecSpace("ClientOnly")
@@ -236,10 +339,65 @@ script BattleDeploymentInput extends Component
         self.observedPhase = phase
         self.observedInMap = inMap
         local enabled = inMap and phase == "DEPLOYMENT"
+        if isvalid(self.deploymentPanel) then self.deploymentPanel:SetEnable(enabled) end
+        if isvalid(self.hudPanel) then self.hudPanel:SetEnable(inMap and phase ~= "CONFIG_ERROR") end
         if isvalid(self.optionContainer) then self.optionContainer:SetEnable(enabled) end
         if isvalid(self.startButton) then self.startButton:SetEnable(enabled) end
+        if isvalid(self.resultPanel) then self.resultPanel:SetEnable(inMap and phase == "RESULT" and self.session.Result ~= "") end
         if isvalid(self.configErrorGroup) then self.configErrorGroup:SetEnable(inMap and phase == "CONFIG_ERROR") end
         log("[M1][DeploymentUI] deployment controls=" .. tostring(enabled) .. " phase=" .. tostring(phase))
+    end
+
+    @ExecSpace("ClientOnly")
+    method void SetUiText(Entity labelEntity, string value)
+        -- Update a bound text label only when its content changes.
+        if not isvalid(labelEntity) then return end
+        local label = labelEntity.TextGUIRendererComponent
+        if isvalid(label) and label.Text ~= value then label.Text = value end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void SyncBattleHud()
+        -- Follow live counts independently of the cached phase visibility changes.
+        if not isvalid(self.session) then return end
+        local phase = self.session.Phase
+        local playerAlive = self.session.PlayerAlive
+        local enemyAlive = self.session.EnemyAlive
+        local initialPlayer = self.session.InitialPlayerAlive
+        local initialEnemy = self.session.InitialEnemyAlive
+        local limit = self.session.DeploymentMaxUnits
+        local selectedName = self._T.selectedMonsterName or ""
+        local key = phase .. ":" .. tostring(playerAlive) .. ":" .. tostring(enemyAlive) .. ":" .. tostring(initialPlayer) .. ":" .. tostring(initialEnemy) .. ":" .. tostring(limit) .. ":" .. selectedName
+        if self._T.hudKey == key then return end
+        self._T.hudKey = key
+        local phaseName = "準備中"
+        local phaseHint = "等待戰場就緒"
+        if phase == "DEPLOYMENT" then
+            phaseName = "部署階段"
+            phaseHint = "選擇怪物，組成你的編隊"
+        elseif phase == "BATTLE" then
+            phaseName = "戰鬥進行中"
+            phaseHint = "雙方編隊自動交戰"
+        elseif phase == "RESULT" then
+            phaseName = "戰鬥結束"
+            phaseHint = "本次對戰已結算"
+        end
+        self:SetUiText(self.phaseText, phaseName)
+        self:SetUiText(self.phaseHintText, phaseHint)
+        self:SetUiText(self.playerCountText, tostring(playerAlive))
+        self:SetUiText(self.enemyCountText, tostring(enemyAlive))
+        self:SetUiText(self.deploymentCountText, "已部署  " .. tostring(playerAlive) .. " / " .. tostring(limit))
+        if selectedName == "" then selectedName = "請先選擇怪物" end
+        self:SetUiText(self.selectionText, selectedName)
+        self:SetUiText(self.resultPlayerText, tostring(playerAlive) .. " / " .. tostring(initialPlayer))
+        self:SetUiText(self.resultEnemyText, tostring(enemyAlive) .. " / " .. tostring(initialEnemy))
+        if isvalid(self.startButton) then
+            local ready = phase == "DEPLOYMENT" and playerAlive > 0
+            local button = self.startButton.ButtonComponent
+            if isvalid(button) then button.Enable = ready end
+            self:SetUiText(self.startButton, ready and "開始戰鬥" or "請先部署怪物")
+        end
+        log("[VRF][BattleUI] phase=" .. phase .. " player=" .. tostring(playerAlive) .. " enemy=" .. tostring(enemyAlive))
     end
 
     @ExecSpace("ClientOnly")
@@ -281,8 +439,12 @@ script BattleDeploymentInput extends Component
         if isvalid(self.resultWin) then self.resultWin:SetEnable(result == "WIN") end
         if isvalid(self.resultLose) then self.resultLose:SetEnable(result == "LOSE") end
         if isvalid(self.resultDraw) then self.resultDraw:SetEnable(result == "DRAW") end
+        if isvalid(self.resultPanel) then
+            self.resultPanel:SetEnable(self.observedInMap and isvalid(self.session) and self.session.Phase == "RESULT" and result ~= "")
+        end
         self.displayedResult = result
         if result ~= "" then log("[M1][DeploymentUI] result=" .. result) end
+        if result ~= "" then log("[VRF][BattleUI] result=" .. result) end
     end
 
 end
