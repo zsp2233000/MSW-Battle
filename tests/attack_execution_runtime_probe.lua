@@ -48,6 +48,8 @@ local function catalogProfile(monsterId)
     if source == nil then return nil end
     local copy = {}
     for key, value in pairs(source) do copy[key] = value end
+    -- Pin controlled contact damage independently of the formal catalog's balance.
+    if monsterId == "monster_tank" then copy.AttackDamage = 40 end
     return copy
 end
 
@@ -405,7 +407,7 @@ do
     local targetName = "Issue16_FrozenTankTarget"
     local reserveName = "Issue16_FrozenTankReserve"
     if not controlledCase("accepted tank hit survives reconfiguration", {
-        row("monster_tank", actorName, -1, 0, activeProfile(0.18, 2)),
+        row("monster_tank", actorName, -1, 0, activeProfile(0.18, 2, 40)),
     }, {
         row("monster_warrior", targetName, -0.5, 0, quietProfile()),
         row("monster_warrior", reserveName, 3.4, 1.4, quietProfile()),
@@ -607,7 +609,7 @@ do
     local secondName = "Issue16_TankMultiSecond"
     local thirdName = "Issue16_TankMultiThird"
     if not controlledCase("tank multi-target contact cooldowns", {
-        row("monster_tank", actorName, -1, 0, activeProfile(0.18, 2)),
+        row("monster_tank", actorName, -1, 0, activeProfile(0.18, 2, 40)),
     }, {
         row("monster_warrior", firstName, -0.5, 0, quietProfile()),
         row("monster_warrior", secondName, -1, 0.3, quietProfile()),

@@ -322,11 +322,13 @@ local runOk, runDetail = pcall(function()
 
     runTerminalScenario("natural same-batch DRAW", row("monster_tank", "Issue17_DrawPlayer", Vector3(0, 0, 0), {
         MaxHp = 40,
+        AttackDamage = 40,
         MoveSpeed = 0,
         AttackRange = 10,
         RetargetIntervalSeconds = 0,
     }), row("monster_tank", "Issue17_DrawEnemy", Vector3(0, 0, 0), {
         MaxHp = 40,
+        AttackDamage = 40,
         MoveSpeed = 0,
         AttackRange = 10,
         RetargetIntervalSeconds = 0,

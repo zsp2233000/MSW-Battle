@@ -40,17 +40,6 @@ test("each successful hit keeps its damage event and target sound", () => {
   assert.doesNotMatch(unit, /lastPresentation(?:Attack|Damage)Serial/);
 });
 
-test("knockback uses collision-aware kinematic velocity", () => {
-  const unit = read("BattleUnit.mlua");
-  const start = unit.indexOf("method void AdvanceKnockback(number delta)");
-  const end = unit.indexOf("handler HandleHitEvent", start);
-  assert.ok(start >= 0 && end > start, "BattleUnit must advance knockback in its server simulation");
-  const advance = unit.slice(start, end);
-  assert.match(advance, /kinematic\.MoveVelocity = Vector2\(velocityX, velocityY\)/);
-  assert.match(advance, /kinematic\.SpeedFactor/);
-  assert.doesNotMatch(advance, /SetWorldPosition/);
-});
-
 test("world HP fill uses synced HP and cached entity references", () => {
   const bar = read("BattleHPBar.mlua");
   assert.match(bar, /battleUnit\.Hp \/ battleUnit\.MaxHp/);

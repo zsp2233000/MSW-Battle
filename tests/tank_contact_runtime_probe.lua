@@ -50,6 +50,7 @@ local function prepareScene()
     local prepared = session:PrepareBattleForTest(
         { row("monster_tank", "Issue17_Tank", Vector3(0, 0, 0), {
             MaxHp = 500,
+            AttackDamage = 40,
             MoveSpeed = 0,
             AttackRange = 10,
             RetargetIntervalSeconds = 0,

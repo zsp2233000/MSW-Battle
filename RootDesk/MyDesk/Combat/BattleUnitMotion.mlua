@@ -1,0 +1,334 @@
+@Component
+script BattleUnitMotion extends Component
+
+    @ExecSpace("ServerOnly")
+    method void Configure(BattleUnit unit, BattleSession session)
+        -- Bind the actor and the sole roster owner, resetting motion on every configuration.
+        self._T.unit = unit
+        self._T.session = session
+        self:Stop()
+        log("[VRF][BattleUnitMotion] CONFIGURED " .. self.Entity.Name)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Advance(number delta)
+        -- Pursue first, then let knockback override velocity even during hit stop.
+        local unit = self._T.unit
+        local session = self._T.session
+        if not isvalid(unit) or unit.IsDead then return end
+        if not isvalid(session) or not session:IsBattleActive() then
+            unit:StopForResult()
+            return
+        end
+        self:AdvancePursuit(delta)
+        self:AdvanceKnockback(delta)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void OnResolvedHit()
+        -- Reset the actor's profile hit stop without freezing attack or knockback clocks.
+        local unit = self._T.unit
+        if not isvalid(unit) or not unit:IsAlive() then return end
+        self._T.hitStopRemaining = unit.HitStopDuration
+        local movement = self.Entity.MovementComponent
+        if isvalid(movement) then movement:Stop() end
+        unit.CombatState = "ON_HIT"
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean Knockback(Entity attacker, number distance)
+        -- Accept displacement intent and hide direction, bounds and safe-path calculation.
+        local unit = self._T.unit
+        local session = self._T.session
+        if not isvalid(attacker) or not isvalid(unit) or not unit:IsAlive() then return false end
+        local attackerUnit = attacker:GetComponent("script.BattleUnit")
+        local attackerTransform = attacker.TransformComponent
+        local defenderTransform = self.Entity.TransformComponent
+        local body = self.Entity.KinematicbodyComponent
+        if not isvalid(attackerUnit) or not isvalid(attackerTransform) or not isvalid(defenderTransform)
+            or not isvalid(body) or attackerUnit.Faction == unit.Faction or distance == nil or distance <= 0 then return false end
+        local from = attackerTransform.WorldPosition
+        local current = defenderTransform.WorldPosition
+        local dx = current.x - from.x
+        local dy = current.y - from.y
+        local length = math.sqrt(dx * dx + dy * dy)
+        if length < 0.001 then
+            if attackerUnit.Faction == "PLAYER" then dx = 1 else dx = -1 end
+            dy = 0
+            length = 1
+        end
+        local nextX = self:Clamp(current.x + dx / length * distance, session.ArenaMinX, session.ArenaMaxX)
+        local nextY = self:Clamp(current.y + dy / length * distance, session.ArenaMinY, session.ArenaMaxY)
+        local safe = self:GetSafeKnockbackPosition(current.x, current.y, nextX, nextY)
+        if math.abs(safe.x - nextX) > 0.0001 or math.abs(safe.y - nextY) > 0.0001 then
+            log("[VRF][BattleUnitMotion] KNOCKBACK blocked by RectTile collision")
+        end
+        self:StartKnockback(safe)
+        return true
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Stop()
+        -- Clear owned work and keep the actor's existing public observations authoritative.
+        self._T.currentTarget = nil
+        self._T.retargetRemaining = 0
+        self._T.hitStopRemaining = 0
+        self._T.knockbackRemaining = 0
+        self._T.knockbackStepX = 0
+        self._T.knockbackStepY = 0
+        local unit = self._T.unit
+        if isvalid(unit) then
+            unit.CurrentTargetName = ""
+            unit.KnockbackActive = false
+        end
+        local movement = self.Entity.MovementComponent
+        if isvalid(movement) then movement:Stop() end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void OnEndPlay()
+        -- Release actor and session references when this per-unit module is removed.
+        self:Stop()
+        self._T.unit = nil
+        self._T.session = nil
+    end
+
+    method Entity GetCurrentTarget()
+        -- Return the current target only while the entity reference is still valid.
+        if self._T.currentTarget ~= nil and isvalid(self._T.currentTarget) then return self._T.currentTarget end
+        return nil
+    end
+
+    @ExecSpace("ServerOnly")
+    method void AdvancePursuit(number delta)
+        -- Select a target and deliver movement/attack intent without owning attack timing.
+        local unit = self._T.unit
+        local session = self._T.session
+        self:ConstrainToArena()
+
+        if self._T.hitStopRemaining > 0 then
+            self._T.hitStopRemaining = math.max(0, self._T.hitStopRemaining - delta)
+            local hitStopMovement = self.Entity:GetComponent("MovementComponent")
+            if isvalid(hitStopMovement) then hitStopMovement:Stop() end
+            if self._T.hitStopRemaining > 0 then
+                unit.CombatState = "ON_HIT"
+                return
+            end
+        end
+
+        self._T.retargetRemaining = self._T.retargetRemaining - delta
+        local target = self:GetCurrentTarget()
+        local targetUnit = nil
+        if isvalid(target) then targetUnit = target:GetComponent("script.BattleUnit") end
+        if target == nil or not isvalid(targetUnit) or not targetUnit:IsAlive() or self._T.retargetRemaining <= 0 then
+            self._T.retargetRemaining = unit.RetargetInterval
+            target = self:FindNearestEnemy(target)
+            self._T.currentTarget = target
+            unit.CurrentTargetName = ""
+            if isvalid(target) then unit.CurrentTargetName = target.Name end
+        end
+        if not isvalid(target) then
+            unit.CombatState = "IDLE"
+            local idleMovement = self.Entity:GetComponent("MovementComponent")
+            if isvalid(idleMovement) then idleMovement:Stop() end
+            return
+        end
+
+        local transform = self.Entity:GetComponent("TransformComponent")
+        local targetTransform = target:GetComponent("TransformComponent")
+        if not isvalid(transform) or not isvalid(targetTransform) then return end
+        local position = transform.WorldPosition
+        local targetPosition = targetTransform.WorldPosition
+        local dx = targetPosition.x - position.x
+        local dy = targetPosition.y - position.y
+        local distanceSquared = dx * dx + dy * dy
+        if distanceSquared > unit.AttackRange * unit.AttackRange then
+            local distance = math.sqrt(distanceSquared)
+            local directionX = dx / distance
+            local directionY = dy / distance
+            local maximumStep = unit.MoveSpeed * delta
+            if position.x + directionX * maximumStep < session.ArenaMinX or position.x + directionX * maximumStep > session.ArenaMaxX then directionX = 0 end
+            if position.y + directionY * maximumStep < session.ArenaMinY or position.y + directionY * maximumStep > session.ArenaMaxY then directionY = 0 end
+            local directionLength = math.sqrt(directionX * directionX + directionY * directionY)
+            local movement = self.Entity:GetComponent("MovementComponent")
+            if isvalid(movement) then
+                if directionLength > 0.0001 then
+                    unit:FaceDirection(directionX)
+                    movement.InputSpeed = unit.MoveSpeed * 1.2
+                    movement:MoveToDirection(Vector2(directionX / directionLength, directionY / directionLength), delta)
+                else
+                    movement:Stop()
+                end
+            end
+            unit.CombatState = "MOVE"
+            unit:DriveAttack(target, false)
+        else
+            local movement = self.Entity:GetComponent("MovementComponent")
+            if isvalid(movement) then movement:Stop() end
+            unit:FaceTarget(target)
+            if unit.UnitKind == "TANK" then
+                unit.CombatState = "IDLE"
+            else
+                unit.CombatState = "ATTACK"
+            end
+            unit:DriveAttack(target, true)
+        end
+    end
+
+    @ExecSpace("ServerOnly")
+    method Entity FindNearestEnemy(Entity preferred)
+        -- Pick the nearest alive opposing unit, preserving a valid equal-distance target.
+        local source = self.Entity
+        local sourceUnit = self._T.unit
+        local sourceTransform = source:GetComponent("TransformComponent")
+        if not isvalid(sourceUnit) or not isvalid(sourceTransform) then return nil end
+        if sourceUnit.IsDead then return nil end
+        local sourcePosition = sourceTransform.WorldPosition
+        local best = nil
+        local bestDistance = 0
+        for _, candidate in ipairs(self._T.session:GetTargetCandidates()) do
+            local unit = nil
+            if isvalid(candidate) then unit = candidate:GetComponent("script.BattleUnit") end
+            if isvalid(candidate) and isvalid(unit) and candidate ~= source and unit.Faction ~= sourceUnit.Faction and unit:IsAlive() then
+                local transform = candidate:GetComponent("TransformComponent")
+                if isvalid(transform) then
+                    local position = transform.WorldPosition
+                    local dx = position.x - sourcePosition.x
+                    local dy = position.y - sourcePosition.y
+                    local distance = dx * dx + dy * dy
+                    if best == nil or distance < bestDistance or (distance == bestDistance and candidate == preferred) then
+                        best = candidate
+                        bestDistance = distance
+                    end
+                end
+            end
+        end
+        return best
+    end
+
+    @ExecSpace("ServerOnly")
+    method void ConstrainToArena()
+        -- Correct any physics movement that carried a battle unit beyond the arena limits.
+        local entity = self.Entity
+        local session = self._T.session
+        local transform = entity:GetComponent("TransformComponent")
+        local kinematic = entity:GetComponent("KinematicbodyComponent")
+        if not isvalid(transform) or not isvalid(kinematic) then return end
+        local position = transform.WorldPosition
+        local nextX = self:Clamp(position.x, session.ArenaMinX, session.ArenaMaxX)
+        local nextY = self:Clamp(position.y, session.ArenaMinY, session.ArenaMaxY)
+        if nextX == position.x and nextY == position.y then return end
+        local movement = entity:GetComponent("MovementComponent")
+        if isvalid(movement) then movement:Stop() end
+        kinematic:SetWorldPosition(Vector2(nextX, nextY))
+    end
+
+    @ExecSpace("ServerOnly")
+    method number Clamp(number value, number minimum, number maximum)
+        -- Keep every knockback destination inside the playable RectTile boundary.
+        return math.max(minimum, math.min(maximum, value))
+    end
+
+    @ExecSpace("ServerOnly")
+    method Vector2 GetSafeKnockbackPosition(number fromX, number fromY, number toX, number toY)
+        -- Stop at the last free point before the knockback path enters a collidable tile.
+        local tileMap = self._T.session:GetRectTileMapComponent()
+        if not isvalid(tileMap) then return Vector2(toX, toY) end
+        local deltaX = toX - fromX
+        local deltaY = toY - fromY
+        local distance = math.sqrt(deltaX * deltaX + deltaY * deltaY)
+        local stepCount = math.max(1, math.ceil(distance / 0.05))
+        local safeX = fromX
+        local safeY = fromY
+        for step = 1, stepCount do
+            local progress = step / stepCount
+            local candidateX = fromX + deltaX * progress
+            local candidateY = fromY + deltaY * progress
+            if self._T.session:IsRectTilePositionBlocked(tileMap, Vector3(candidateX, candidateY, 0)) then break end
+            safeX = candidateX
+            safeY = candidateY
+        end
+        return Vector2(safeX, safeY)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void StartKnockback(Vector2 position)
+        -- Travel toward the already validated destination while normal AI keeps running.
+        local unit = self._T.unit
+        if position == nil or unit.IsDead then return end
+        local transform = self.Entity:GetComponent("TransformComponent")
+        local kinematic = self.Entity:GetComponent("KinematicbodyComponent")
+        if not isvalid(transform) or not isvalid(kinematic) then return end
+        local current = transform.WorldPosition
+        if math.abs(position.x - current.x) + math.abs(position.y - current.y) <= 0.0001 then return end
+        self._T.knockbackStepX = position.x - current.x
+        self._T.knockbackStepY = position.y - current.y
+        self._T.knockbackRemaining = unit.KnockbackRecoveryDuration
+        unit.KnockbackActive = true
+        log("[VRF][BattleUnitMotion] KNOCKBACK_START " .. self.Entity.Name
+            .. ", distance=" .. tostring(math.sqrt(self._T.knockbackStepX * self._T.knockbackStepX
+                + self._T.knockbackStepY * self._T.knockbackStepY)))
+    end
+
+    @ExecSpace("ServerOnly")
+    method void AdvanceKnockback(number delta)
+        -- Apply the validated knockback step through the kinematic body's collision-aware velocity.
+        local unit = self._T.unit
+        if unit.IsDead or self._T.knockbackRemaining <= 0 or delta <= 0 then return end
+        local kinematic = self.Entity:GetComponent("KinematicbodyComponent")
+        local transform = self.Entity:GetComponent("TransformComponent")
+        if not isvalid(kinematic) or not isvalid(transform) then return end
+        local fraction = math.min(1, delta / self._T.knockbackRemaining)
+        local stepX = self._T.knockbackStepX * fraction
+        local stepY = self._T.knockbackStepY * fraction
+        local current = transform.WorldPosition
+        local targetX = current.x + stepX
+        local targetY = current.y + stepY
+        local session = self._T.session
+        if isvalid(session) then
+            targetX = self:Clamp(targetX, session.ArenaMinX, session.ArenaMaxX)
+            targetY = self:Clamp(targetY, session.ArenaMinY, session.ArenaMaxY)
+        end
+
+        local safe = self:GetSafeKnockbackPosition(current.x, current.y, targetX, targetY)
+        local displacementX = safe.x - current.x
+        local displacementY = safe.y - current.y
+        local speedFactor = kinematic.SpeedFactor
+        if (math.abs(displacementX) > 0.0001 and speedFactor.x == 0)
+            or (math.abs(displacementY) > 0.0001 and speedFactor.y == 0) then
+            kinematic.MoveVelocity = Vector2(0, 0)
+            self._T.knockbackStepX = 0
+            self._T.knockbackStepY = 0
+            self._T.knockbackRemaining = 0
+            unit.KnockbackActive = false
+            log("[VRF][BattleUnitMotion] KNOCKBACK_BLOCKED " .. self.Entity.Name)
+            return
+        end
+
+        local velocityX = 0
+        local velocityY = 0
+        if math.abs(displacementX) > 0.0001 then velocityX = displacementX / (delta * speedFactor.x) end
+        if math.abs(displacementY) > 0.0001 then velocityY = displacementY / (delta * speedFactor.y) end
+        kinematic.MoveVelocity = Vector2(velocityX, velocityY)
+
+        if math.abs(safe.x - targetX) + math.abs(safe.y - targetY) > 0.0001 then
+            -- End at the last collision-free point; the body resolves the movement through physics.
+            self._T.knockbackStepX = 0
+            self._T.knockbackStepY = 0
+            self._T.knockbackRemaining = 0
+            unit.KnockbackActive = false
+            log("[VRF][BattleUnitMotion] KNOCKBACK_BLOCKED " .. self.Entity.Name)
+            return
+        end
+
+        self._T.knockbackStepX = self._T.knockbackStepX - stepX
+        self._T.knockbackStepY = self._T.knockbackStepY - stepY
+        self._T.knockbackRemaining = math.max(0, self._T.knockbackRemaining - delta)
+        if self._T.knockbackRemaining == 0 then
+            kinematic.MoveVelocity = Vector2(0, 0)
+            unit.KnockbackActive = false
+            log("[VRF][BattleUnitMotion] KNOCKBACK_FINISHED " .. self.Entity.Name)
+        end
+    end
+
+end
