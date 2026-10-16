@@ -96,11 +96,6 @@ script BattleAttackComposition extends Component
             return
         end
         self._T.cooldownRemaining = math.max(0, (self._T.cooldownRemaining or 0) - delta)
-        for targetName, remaining in pairs(self._T.targetCooldowns or {}) do
-            local nextRemaining = remaining - delta
-            if nextRemaining <= 0 then self._T.targetCooldowns[targetName] = nil
-            else self._T.targetCooldowns[targetName] = nextRemaining end
-        end
         if self._T.pendingTarget == nil then return end
         local target = self._T.pendingTarget
         if not isvalid(self:GetActiveSession()) or not isvalid(target) then
@@ -129,13 +124,6 @@ script BattleAttackComposition extends Component
         if reason == "RECONFIGURE" or self._T.profile == nil or self._T.profile.MonsterType ~= "ASSAULT" then
             self._T.cooldownRemaining = 0
         end
-        self._T.targetCooldowns = {}
-    end
-
-    @ExecSpace("ServerOnly")
-    method boolean CanContact(Entity defender)
-        -- Keep tank contact cooldowns independent for each native defender name.
-        return (self._T.targetCooldowns[defender.Name] or 0) <= 0
     end
 
     @ExecSpace("ServerOnly")
@@ -144,7 +132,6 @@ script BattleAttackComposition extends Component
         if not self:IsCurrentAdapter(adapter) or not isvalid(defender) then return end
         local session = self:GetActiveSession()
         if self._T.profile.MonsterType == "TANK" then
-            self._T.targetCooldowns[defender.Name] = self._T.profile.ContactCooldownSeconds
             self:PublishAttack("TANK_CONTACT_HIT", defender)
             session:QueueKnockback(self.Entity, defender, self._T.profile.KnockbackDistance)
         else
