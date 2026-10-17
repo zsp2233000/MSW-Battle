@@ -147,7 +147,6 @@ script MonsterCatalog extends Component
         if self.ErrorMessage ~= "" then return nil end
         local contactMinimum = 0
         if monsterType == "TANK" then contactMinimum = 0.0001 end
-        profile.ContactCooldownSeconds = self:ReadNumber(row:GetItem("ContactCooldownSeconds"), "ContactCooldownSeconds", monsterId, contactMinimum)
         profile.ContactSizeX = self:ReadNumber(row:GetItem("ContactSizeX"), "ContactSizeX", monsterId, contactMinimum)
         profile.ContactSizeY = self:ReadNumber(row:GetItem("ContactSizeY"), "ContactSizeY", monsterId, contactMinimum)
         profile.KnockbackDistance = self:ReadNumber(row:GetItem("KnockbackDistance"), "KnockbackDistance", monsterId, contactMinimum)
@@ -241,7 +240,7 @@ script MonsterCatalog extends Component
         local requiredColumns = {
             "MonsterId", "MonsterName", "MonsterType", "ModelId", "MaxHp", "MoveSpeed", "AttackDamage",
             "AttackIntervalSeconds", "AttackRange", "AttackImpactFrame", "RetargetIntervalSeconds",
-            "HitStopDurationSeconds", "ContactCooldownSeconds", "ContactSizeX", "ContactSizeY",
+            "HitStopDurationSeconds", "ContactSizeX", "ContactSizeY",
             "KnockbackDistance", "StandAnimationRUID", "MoveAnimationRUID", "AttackAnimationRUID",
             "HitAnimationRUID", "DieAnimationRUID", "HitEffectRUID", "AttackSoundRUID",
             "OnHitSoundRUID", "DieSoundRUID",

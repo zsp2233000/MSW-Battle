@@ -23,17 +23,18 @@ script BattleSession extends Component
     property string EnemyModelId = "battleunit"
     property string MonsterDataSetName = "MonsterData"
     property number EnemyOpeningDelay = 0.12 -- Deterministic M1 lead; DRAW remains for same-batch edge cases.
-    property number ArenaMinX = -5.5
-    property number ArenaMaxX = 3.5
-    property number ArenaMinY = -3.5
+    property number ArenaMinX = -14.5
+    property number ArenaMaxX = 12.5
+    property number ArenaMinY = -4.5
     property number ArenaMaxY = 1.5
-    property number DeploymentMinX = -5.5
-    property number DeploymentMaxX = 3.5
-    property number DeploymentMinY = -3.5
+    property number DeploymentMinX = -14.5
+    property number DeploymentMaxX = 12.5
+    property number DeploymentMinY = -4.5
     property number DeploymentMaxY = 1.5
-    property number DeploymentMinDistance = 0.6
+    property number DeploymentMinDistance = 0.3
     property number DeploymentRemoveRadius = 0.5
     property integer DeploymentMaxUnits = 6
+    property Vector2 CharacterPosition = Vector2(-2.5, 2.5)
 
     @ExecSpace("ServerOnly")
     method void OnBeginPlay()
@@ -122,6 +123,7 @@ script BattleSession extends Component
     @ExecSpace("ServerOnly")
     method void OnUpdate(number delta)
         -- Advance the live server simulation without bypassing native movement or hit resolution.
+        self:DisableDefaultPlayer()
         if self._T.initialized ~= true then return end
         if self._T.manualSimulation == true then return end
         if self.Phase == "CONFIG_ERROR" then self:CheckConfigurationReentry() end
@@ -881,7 +883,6 @@ script BattleSession extends Component
         -- Run one complete combat step and settle its outcome only after all accepted damage resolves.
         if delta < 0 then return end
         if self.Phase == "RESULT" then return end
-        self:DisableDefaultPlayer()
         if self.Phase == "BATTLE" then
             for _, record in ipairs(self._T.units) do
                 if isvalid(record.unit) then
@@ -992,7 +993,7 @@ script BattleSession extends Component
 
     @ExecSpace("ServerOnly")
     method void DisableDefaultPlayer()
-        -- Keep DefaultPlayer visible while removing control and collision.
+        -- Keep the character in the upper-left spectator position without control or collision.
         local map = self:GetMapEntity()
         if not isvalid(map) or _UserService.UserEntities == nil then return end
         for _, player in ipairs(_UserService.UserEntities.Values) do
@@ -1019,6 +1020,15 @@ script BattleSession extends Component
                 if isvalid(playerHit) then playerHit.Enable = false end
                 local hit = player:GetComponent("HitComponent")
                 if isvalid(hit) then hit.Enable = false end
+                local transform = player:GetComponent("TransformComponent")
+                if isvalid(transform) then
+                    local position = transform.WorldPosition
+                    if math.abs(position.x - self.CharacterPosition.x) > 0.001
+                        or math.abs(position.y - self.CharacterPosition.y) > 0.001 then
+                        transform.WorldPosition = Vector3(self.CharacterPosition.x, self.CharacterPosition.y, position.z)
+                        log("[VRF][BattleCharacter] spectator position=" .. tostring(self.CharacterPosition.x) .. "," .. tostring(self.CharacterPosition.y))
+                    end
+                end
             end
         end
     end

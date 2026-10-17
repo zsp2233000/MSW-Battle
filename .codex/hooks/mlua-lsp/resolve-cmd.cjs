@@ -304,7 +304,7 @@ function spawnLspSync(resolved, subArgs, spawnOpts) {
 }
 
 /**
- * Starts `mlua-lsp` in the background and returns immediately.
+ * Starts `mlua-lsp` in the background and returns after launch is dispatched.
  *
  * Used by SessionStart prewarm so a first-run VSIX download or daemon warmup
  * never blocks the agent session. Follow-up diagnose calls still use
@@ -322,24 +322,52 @@ function spawnLspDetached(resolved, subArgs, spawnOpts) {
   const allArgs = (resolved.baseArgs || []).concat(subArgs || []);
 
   try {
-    let child;
-    if (process.platform === 'win32' && resolved.useShell) {
+    if (process.platform === 'win32') {
+      // detached/unref do not leave a Windows Job or prevent unrelated pipe
+      // handles from being inherited. The native helper handles both explicitly.
+      const comspec = process.env.ComSpec || process.env.COMSPEC ||
+        path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'cmd.exe');
+      const executable = resolved.useShell ? comspec : resolved.cmd;
       const tokens = [resolved.cmd, ...allArgs].map(quoteForCmd);
-      const cmdLine = `"${tokens.join(' ')}"`;
-      const comspec = process.env.ComSpec || process.env.COMSPEC || 'cmd.exe';
-      child = spawn(comspec, ['/d', '/s', '/c', cmdLine], Object.assign({}, opts, {
-        shell: false,
-        windowsVerbatimArguments: true,
-        detached: true,
-        stdio: 'ignore',
-      }));
-    } else {
-      child = spawn(resolved.cmd, allArgs, Object.assign({}, opts, {
-        shell: resolved.useShell || false,
-        detached: true,
-        stdio: 'ignore',
-      }));
+      const commandLine = resolved.useShell
+        ? `${quoteForCmd(comspec)} /d /s /c "${tokens.join(' ')}"`
+        : tokens.join(' ');
+      const powershell = path.join(process.env.SystemRoot || 'C:\\Windows',
+        'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+      const launched = spawnSync(powershell, [
+        '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+        '-File', path.join(__dirname, 'windows-detached-launcher.ps1'),
+      ], {
+        cwd: opts.cwd,
+        env: opts.env,
+        windowsHide: true,
+        encoding: 'utf8',
+        timeout: 10000,
+        maxBuffer: 256 * 1024,
+        input: JSON.stringify({
+          executable,
+          commandLine,
+          workingDirectory: path.resolve(opts.cwd || process.cwd()),
+        }),
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      if (launched.error) throw launched.error;
+      if (launched.status !== 0) {
+        throw new Error(String(launched.stderr || '').trim() ||
+          `Windows LSP launcher exited with status ${launched.status}`);
+      }
+      const result = JSON.parse(String(launched.stdout || '').trim());
+      if (!Number.isInteger(result.pid) || result.pid <= 0) {
+        throw new Error('Windows LSP launcher did not return a process ID');
+      }
+      return { pid: result.pid };
     }
+
+    const child = spawn(resolved.cmd, allArgs, Object.assign({}, opts, {
+      shell: resolved.useShell || false,
+      detached: true,
+      stdio: 'ignore',
+    }));
     child.unref();
     return { pid: child.pid };
   } catch (err) {

@@ -7,7 +7,7 @@
   "Usage": 0,
   "UsePublish": 1,
   "UseService": 0,
-  "CoreVersion": "26.7.0.0",
+  "CoreVersion": "26.10.0.0",
   "StudioVersion": "0.1.0.0",
   "DynamicLoading": 0,
   "ContentProto": {
@@ -35,13 +35,13 @@
           "Name": "Position",
           "ValueType": {
             "$type": "MODNativeType",
-            "type": "MOD.Core.MODVector3, MOD.Core, Version=26.7.0.0, Culture=neutral, PublicKeyToken=null"
+            "type": "MOD.Core.MODVector3, MOD.Core, Version=26.10.0.0, Culture=neutral, PublicKeyToken=null"
           },
           "Value": {
             "$type": "MOD.Core.MODVector3, MOD.Core",
-            "x": 0,
-            "y": 0,
-            "z": 0
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
           }
         },
         {
@@ -76,12 +76,12 @@
           "Name": "SpeedFactor",
           "ValueType": {
             "$type": "MODNativeType",
-            "type": "MOD.Core.MODVector2, MOD.Core, Version=26.7.0.0, Culture=neutral, PublicKeyToken=null"
+            "type": "MOD.Core.MODVector2, MOD.Core, Version=26.10.0.0, Culture=neutral, PublicKeyToken=null"
           },
           "Value": {
             "$type": "MOD.Core.MODVector2, MOD.Core",
-            "x": 1,
-            "y": 1
+            "x": 1.0,
+            "y": 1.0
           }
         },
         {
@@ -116,7 +116,7 @@
           "Name": "BoxSize",
           "ValueType": {
             "$type": "MODNativeType",
-            "type": "MOD.Core.MODVector2, MOD.Core, Version=26.7.0.0, Culture=neutral, PublicKeyToken=null"
+            "type": "MOD.Core.MODVector2, MOD.Core, Version=26.10.0.0, Culture=neutral, PublicKeyToken=null"
           },
           "Value": {
             "$type": "MOD.Core.MODVector2, MOD.Core",
@@ -129,11 +129,11 @@
           "Name": "ColliderOffset",
           "ValueType": {
             "$type": "MODNativeType",
-            "type": "MOD.Core.MODVector2, MOD.Core, Version=26.7.0.0, Culture=neutral, PublicKeyToken=null"
+            "type": "MOD.Core.MODVector2, MOD.Core, Version=26.10.0.0, Culture=neutral, PublicKeyToken=null"
           },
           "Value": {
             "$type": "MOD.Core.MODVector2, MOD.Core",
-            "x": 0,
+            "x": 0.0,
             "y": 0.4
           }
         },
@@ -142,7 +142,7 @@
           "Name": "ColliderType",
           "ValueType": {
             "$type": "MODNativeType",
-            "type": "MOD.Core.ColliderType, MOD.Core, Version=26.7.0.0, Culture=neutral, PublicKeyToken=null"
+            "type": "MOD.Core.ColliderType, MOD.Core, Version=26.10.0.0, Culture=neutral, PublicKeyToken=null"
           },
           "Value": 1
         },
@@ -151,7 +151,7 @@
           "Name": "CollisionGroup",
           "ValueType": {
             "$type": "MODNativeType",
-            "type": "MOD.Core.Physics.CollisionGroup, MOD.Core, Version=26.7.0.0, Culture=neutral, PublicKeyToken=null"
+            "type": "MOD.Core.Physics.CollisionGroup, MOD.Core, Version=26.10.0.0, Culture=neutral, PublicKeyToken=null"
           },
           "Value": {
             "$type": "MOD.Core.Physics.CollisionGroup, MOD.Core",
@@ -172,14 +172,14 @@
           "Name": "QuaternionRotation",
           "ValueType": {
             "$type": "MODNativeType",
-            "type": "MOD.Core.MODQuaternion, MOD.Core, Version=26.7.0.0, Culture=neutral, PublicKeyToken=null"
+            "type": "MOD.Core.MODQuaternion, MOD.Core, Version=26.10.0.0, Culture=neutral, PublicKeyToken=null"
           },
           "Value": {
             "$type": "MOD.Core.MODQuaternion, MOD.Core",
-            "x": 0,
-            "y": 0,
-            "z": 0,
-            "w": 1
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0,
+            "w": 1.0
           }
         },
         {
@@ -207,7 +207,7 @@
           "Name": "RenderSetting",
           "ValueType": {
             "$type": "MODNativeType",
-            "type": "MOD.Core.RenderSettingType, MOD.Core, Version=26.7.0.0, Culture=neutral, PublicKeyToken=null"
+            "type": "MOD.Core.RenderSettingType, MOD.Core, Version=26.10.0.0, Culture=neutral, PublicKeyToken=null"
           },
           "Value": 0
         },
@@ -234,12 +234,12 @@
           "Name": "MoveVelocity",
           "ValueType": {
             "$type": "MODNativeType",
-            "type": "MOD.Core.MODVector2, MOD.Core, Version=26.7.0.0, Culture=neutral, PublicKeyToken=null"
+            "type": "MOD.Core.MODVector2, MOD.Core, Version=26.10.0.0, Culture=neutral, PublicKeyToken=null"
           },
           "Value": {
             "$type": "MOD.Core.MODVector2, MOD.Core",
-            "x": 0,
-            "y": 0
+            "x": 0.0,
+            "y": 0.0
           }
         },
         {
@@ -301,7 +301,7 @@
           "Name": "DamageSkinId",
           "ValueType": {
             "$type": "MODNativeType",
-            "type": "MOD.Core.MODDataRef, MOD.Core, Version=26.7.0.0, Culture=neutral, PublicKeyToken=null"
+            "type": "MOD.Core.MODDataRef, MOD.Core, Version=26.10.0.0, Culture=neutral, PublicKeyToken=null"
           },
           "Value": {
             "$type": "MOD.Core.MODDataRef, MOD.Core",
@@ -313,13 +313,22 @@
           "Name": "DamageSkinOffset",
           "ValueType": {
             "$type": "MODNativeType",
-            "type": "MOD.Core.MODVector2, MOD.Core, Version=26.7.0.0, Culture=neutral, PublicKeyToken=null"
+            "type": "MOD.Core.MODVector2, MOD.Core, Version=26.10.0.0, Culture=neutral, PublicKeyToken=null"
           },
           "Value": {
             "$type": "MOD.Core.MODVector2, MOD.Core",
-            "x": 0,
+            "x": 0.0,
             "y": 0.8
           }
+        },
+        {
+          "TargetType": "MOD.Core.DamageSkinSettingComponent",
+          "Name": "TweenType",
+          "ValueType": {
+            "$type": "MODNativeType",
+            "type": "MOD.Core.Common.Enums.DamageSkinTweenType, MOD.Core, Version=26.10.0.0, Culture=neutral, PublicKeyToken=null"
+          },
+          "Value": 2
         }
       ],
       "EventLinks": [],
@@ -362,13 +371,13 @@
                 "Name": "Position",
                 "ValueType": {
                   "$type": "MODNativeType",
-                  "type": "MOD.Core.MODVector3, MOD.Core, Version=26.7.0.0, Culture=neutral, PublicKeyToken=null"
+                  "type": "MOD.Core.MODVector3, MOD.Core, Version=26.10.0.0, Culture=neutral, PublicKeyToken=null"
                 },
                 "Value": {
                   "$type": "MOD.Core.MODVector3, MOD.Core",
                   "x": -0.4389,
                   "y": 1.0555,
-                  "z": 0
+                  "z": 0.0
                 }
               },
               {
@@ -376,13 +385,13 @@
                 "Name": "Scale",
                 "ValueType": {
                   "$type": "MODNativeType",
-                  "type": "MOD.Core.MODVector3, MOD.Core, Version=26.7.0.0, Culture=neutral, PublicKeyToken=null"
+                  "type": "MOD.Core.MODVector3, MOD.Core, Version=26.10.0.0, Culture=neutral, PublicKeyToken=null"
                 },
                 "Value": {
                   "$type": "MOD.Core.MODVector3, MOD.Core",
-                  "x": 1,
-                  "y": 1,
-                  "z": 1
+                  "x": 1.0,
+                  "y": 1.0,
+                  "z": 1.0
                 }
               },
               {
@@ -408,14 +417,14 @@
                 "Name": "QuaternionRotation",
                 "ValueType": {
                   "$type": "MODNativeType",
-                  "type": "MOD.Core.MODQuaternion, MOD.Core, Version=26.7.0.0, Culture=neutral, PublicKeyToken=null"
+                  "type": "MOD.Core.MODQuaternion, MOD.Core, Version=26.10.0.0, Culture=neutral, PublicKeyToken=null"
                 },
                 "Value": {
                   "$type": "MOD.Core.MODQuaternion, MOD.Core",
-                  "x": 0,
-                  "y": 0,
-                  "z": 0,
-                  "w": 1
+                  "x": 0.0,
+                  "y": 0.0,
+                  "z": 0.0,
+                  "w": 1.0
                 }
               },
               {
@@ -443,7 +452,7 @@
                 "Name": "RenderSetting",
                 "ValueType": {
                   "$type": "MODNativeType",
-                  "type": "MOD.Core.RenderSettingType, MOD.Core, Version=26.7.0.0, Culture=neutral, PublicKeyToken=null"
+                  "type": "MOD.Core.RenderSettingType, MOD.Core, Version=26.10.0.0, Culture=neutral, PublicKeyToken=null"
                 },
                 "Value": 0
               },
@@ -526,13 +535,13 @@
                 "Name": "Position",
                 "ValueType": {
                   "$type": "MODNativeType",
-                  "type": "MOD.Core.MODVector3, MOD.Core, Version=26.7.0.0, Culture=neutral, PublicKeyToken=null"
+                  "type": "MOD.Core.MODVector3, MOD.Core, Version=26.10.0.0, Culture=neutral, PublicKeyToken=null"
                 },
                 "Value": {
                   "$type": "MOD.Core.MODVector3, MOD.Core",
                   "x": 0.0059,
                   "y": 0.9805,
-                  "z": 0
+                  "z": 0.0
                 }
               },
               {
@@ -540,13 +549,13 @@
                 "Name": "Scale",
                 "ValueType": {
                   "$type": "MODNativeType",
-                  "type": "MOD.Core.MODVector3, MOD.Core, Version=26.7.0.0, Culture=neutral, PublicKeyToken=null"
+                  "type": "MOD.Core.MODVector3, MOD.Core, Version=26.10.0.0, Culture=neutral, PublicKeyToken=null"
                 },
                 "Value": {
                   "$type": "MOD.Core.MODVector3, MOD.Core",
                   "x": 1.45402253,
                   "y": 1.39695954,
-                  "z": 1
+                  "z": 1.0
                 }
               },
               {
@@ -572,14 +581,14 @@
                 "Name": "QuaternionRotation",
                 "ValueType": {
                   "$type": "MODNativeType",
-                  "type": "MOD.Core.MODQuaternion, MOD.Core, Version=26.7.0.0, Culture=neutral, PublicKeyToken=null"
+                  "type": "MOD.Core.MODQuaternion, MOD.Core, Version=26.10.0.0, Culture=neutral, PublicKeyToken=null"
                 },
                 "Value": {
                   "$type": "MOD.Core.MODQuaternion, MOD.Core",
-                  "x": 0,
-                  "y": 0,
-                  "z": 0,
-                  "w": 1
+                  "x": 0.0,
+                  "y": 0.0,
+                  "z": 0.0,
+                  "w": 1.0
                 }
               },
               {
@@ -607,7 +616,7 @@
                 "Name": "RenderSetting",
                 "ValueType": {
                   "$type": "MODNativeType",
-                  "type": "MOD.Core.RenderSettingType, MOD.Core, Version=26.7.0.0, Culture=neutral, PublicKeyToken=null"
+                  "type": "MOD.Core.RenderSettingType, MOD.Core, Version=26.10.0.0, Culture=neutral, PublicKeyToken=null"
                 },
                 "Value": 0
               },

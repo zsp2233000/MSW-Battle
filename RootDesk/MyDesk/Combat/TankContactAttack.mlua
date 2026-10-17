@@ -5,7 +5,7 @@ script TankContactAttack extends AttackComponent
 
     @ExecSpace("ServerOnly")
     method void Configure(table profile, Component execution)
-        -- Receive the native contact shape; composition owns per-defender cooldowns.
+        -- Receive the native contact shape and execution owner.
         self.AttackDamage = profile.AttackDamage
         self.ContactSize = Vector2(profile.ContactSizeX, profile.ContactSizeY)
         self._T.execution = execution
@@ -31,18 +31,17 @@ script TankContactAttack extends AttackComponent
     end
 
     method boolean IsAttackTarget(Entity defender, string attackInfo)
-        -- Accept opposing live units with an elapsed independent contact cooldown.
+        -- Accept opposing live units without a per-target contact cooldown.
         if not isvalid(self._T.execution) or not self._T.execution:IsCurrentAdapter(self) then return false end
         local attackerUnit = self.Entity:GetComponent("script.BattleUnit")
         local defenderUnit = nil
         if isvalid(defender) then defenderUnit = defender:GetComponent("script.BattleUnit") end
         if not isvalid(defenderUnit) or not defenderUnit:IsAlive() or attackerUnit.Faction == defenderUnit.Faction then return false end
-        if not self._T.execution:CanContact(defender) then return false end
         return __base:IsAttackTarget(defender, attackInfo)
     end
 
     method void OnAttack(Entity defender)
-        -- Report each successful defender for notification, cooldown, and queued knockback.
+        -- Report each successful defender for notification and queued knockback.
         if isvalid(self._T.execution) then self._T.execution:OnNativeHit(self, defender) end
     end
 end
