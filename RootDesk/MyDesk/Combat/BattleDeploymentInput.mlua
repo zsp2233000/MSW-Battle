@@ -318,6 +318,14 @@ script BattleDeploymentInput extends Component
         end
         for _, card in ipairs(self.optionCards) do
             if isvalid(card.glow) then card.glow:SetEnable(card.glow == glowEntity) end
+            if card.monsterId == monsterId and isvalid(card.entity) then
+                local nameEntity = card.entity:GetChildByName("MonsterName", true)
+                if isvalid(nameEntity) and isvalid(nameEntity.UITransformComponent) then
+                    -- Keep the label above the selected frame's opaque nameplate.
+                    _UILogic:SetSiblingIndex(nameEntity.UITransformComponent, #nameEntity.Parent.Children:ToTable())
+                    log("[VRF][BattleUI] selected name index=" .. tostring(_UILogic:GetSiblingIndex(nameEntity.UITransformComponent)))
+                end
+            end
         end
         log("[M1][DeploymentUI] selected MonsterId=" .. monsterId)
     end
