@@ -145,7 +145,8 @@ end
 
 local function boot(attempt)
     if not isvalid(adapter) then check(false, "deployment adapter unavailable"); finish(); return end
-    if not adapter.optionsReady and attempt < 100 then later(function() boot(attempt + 1) end, 0.1); return end
+    if (not adapter.optionsReady or adapter.optionsBuilding) and attempt < 100 then later(function() boot(attempt + 1) end, 0.1); return end
+    if adapter.optionsReady and not adapter.optionsBuilding then adapter:SetPreviewCardCount(0) end
     check(adapter.optionsReady and #adapter.optionCards == 3, "formal catalog supplies three named cards")
     if not adapter.optionsReady then finish(); return end
     for index, card in ipairs(adapter.optionCards) do

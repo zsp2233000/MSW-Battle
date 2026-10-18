@@ -29,12 +29,28 @@ For every runtime probe, use a fresh Play test. Stop, clear logs, Refresh, read 
 | `monster_catalog_identity_runtime_probe.lua` | Temporary catalog rename and duplicate TANK identity through `MonsterCatalog` and official deployment | No manual clock; fresh Play with temporary CSV; execute in `server_main` |
 | `monster_catalog_restored_runtime_probe.lua` | Confirm the original formal catalog is loaded after the temporary fixture is removed | No manual clock; fresh Play after restore and Refresh; execute in `server_main` |
 | `deployment_ui_runtime_probe.lua` | Connected named-card / start events, deployment removal and input locking | `client`; final `[M1][DeploymentUIProbe] PASS` |
+| `deployment_scroll_runtime_probe.lua` | Eighteen Maker-only test cards, native scrolling, connected toggle events, cleanup and deployment through an original MonsterId | `client`; fresh formal catalog and zero deployed player units; final `[VRF][DeploymentScroll] PASS` |
+| `deployment_scroll_wheel_runtime_probe.lua` | Native wheel input with a stationary simulated cursor crossing card gaps | `client`; 18 ready cards, then move once to `(600,150)` and send 13 scroll events at `delta=-0.2`, each followed by 250ms; final `[VRF][DeploymentWheel] PASS` |
 | `six_vs_six_ui_runtime_probe.lua` | Connected named-card selection, repeated deployment, capacity, natural six-versus-six result UI, and full death playback | `client`; observes native renderer events; final `[VRF][SixVsSixUI] PASS` |
 | `monster_catalog_validation_runtime_probe.lua` | Real catalog values, missing / duplicate ID, invalid type / numeric cells, blank impact frame, rename and shared resources | `server_main`; public `MonsterCatalog:ParseRow` returns validation diagnostics without logging expected invalid inputs as errors; final `[VRF][CatalogValidation] PASS` |
 | `monster_catalog_variant_runtime_probe.lua` | Independently configured same-type identities, shared resources and same-ID opposing factions using native contact hits | `server_main` with the numeric variant fixture below; owns and releases its manual clock; final `[VRF][CatalogVariant] PASS` |
 | `monster_catalog_variant_ui_runtime_probe.lua` | Renamed original and same-type variant produce separate named cards bound to their IDs | `client` with the numeric variant fixture; fresh Play before execution; final `[VRF][VariantUI] PASS` |
 
 Hand-clock probes must acquire `BeginManualSimulation` before preparing a scene and release only the clock they acquired, including exception paths. They may call the existing unit attack interface. They must not inspect `session._T`, write session state or counts, spawn through internal methods, remove roster indexes, call damage / knockback queues or settlement helpers, or force a result. A complete `AdvanceForTest` / `StepSimulation` owns damage resolution and result settlement. Manual clock time does not advance native Body movement; prove movement, contact, crowding, and knockback with Maker frames.
+
+## Deployment scroll preview
+
+Maker Play starts with 18 display cards by repeating the server's catalog on the client. The first three keep their original names; extra copies have numbered labels and deploy the corresponding original `MonsterId`. `MonsterData.csv` and combat values are unchanged. Published play always uses the original catalog.
+
+Use the preview toggle in the deployment panel to return to the original three cards or show 18 again. Set `BattleDeploymentInput.PreviewCardCount` to `0` to start Maker Play without the preview. Cards fill a fixed five-column grid (18 cards make four rows) inside an 812px-wide viewport; the deployment panel is 1240px wide. Scroll with the mouse wheel, or drag vertically using the cards or right-side scrollbar. The scrollbar automatically hides when all cards fit. These controls currently target the POC's PC mouse input.
+
+Run `deployment_scroll_runtime_probe.lua` in a fresh client Play with the formal catalog and zero deployed player units. It verifies connected button events, native layout/scroll positions, selected-copy labels, original-ID deployment/removal, and destruction of previous cards after toggling. It restores the original preview count and leaves deployment open. Drag gestures and visual scrollbar readability still require real PC input. The formal six-versus-six and variant UI probes turn off the preview before checking catalog counts.
+
+The native scrollbar uses `BottomToTop` so its handle starts at the top. The MSW scroll API still reports top=0 and bottom=1 independently of that handle direction. The viewport has a transparent raycast surface so wheel input continues over card gaps with a stationary cursor. `deployment_scroll_wheel_runtime_probe.lua` verifies the native wheel path through `maker_mouse_input`, including the first gap that previously swallowed wheel events. Change its `expectedEvents` to 38 for the longer reproduction, or set `startAtBottom=true` and send positive deltas to test upward scrolling. On this Maker version each wheel delta unit moves 30 UI pixels, so the 13-event case must travel 78px and the 38-event case 228px. It releases its event connection and timeout after either result.
+
+Keep the 250ms interval so Maker has time to process each simulated wheel input between observations. The same 38-event sequence at 250ms reproduces the missing-hit-surface bug: without the viewport renderer it stops at 72px; with the renderer every event advances, totaling 228px.
+
+`ResetScrollPosition` readback settles on the following frame. The wheel probe measures from the requested endpoint, rather than immediately reading a stale offset left by an earlier probe.
 
 ## Temporary MonsterData identity case
 

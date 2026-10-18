@@ -6,6 +6,11 @@ script BattleDeploymentInput extends Component
     property any optionContainer = nil
     property any startButton = nil
     property any startButtonAction = nil
+    property Entity previewToggle = "cd467f56-9649-4a24-833c-41627e7d8928"
+    @Description("Maker-only test cards. Set to 0 to show the original catalog.")
+    property integer PreviewCardCount = 18
+    property any catalogOptions = nil
+    property boolean optionsBuilding = false
     property any resultWin = nil
     property any resultLose = nil
     property any resultDraw = nil
@@ -42,6 +47,8 @@ script BattleDeploymentInput extends Component
         self.buttonBindings = {}
         self.optionCards = {}
         self.optionData = {}
+        self.catalogOptions = {}
+        self.optionsBuilding = false
         self.optionContainer = self:FindNamedUiEntity("MonsterOptionContainer")
         self.optionTemplate = self:FindNamedUiEntity("MonsterOptionTemplate")
         self.startButton = self:FindNamedUiEntity("BtnStart")
@@ -64,11 +71,22 @@ script BattleDeploymentInput extends Component
             local callback = self.startButton:ConnectEvent(ButtonClickEvent, self.startButtonAction)
             table.insert(self.buttonBindings, { entity = self.startButton, eventCallback = callback })
         end
+        if isvalid(self.previewToggle) then
+            self.previewToggle:SetEnable(Environment:IsMakerPlay())
+            local action = function()
+                local count = 18
+                if self.PreviewCardCount > 0 then count = 0 end
+                self:SetPreviewCardCount(count)
+            end
+            local callback = self.previewToggle:ConnectEvent(ButtonClickEvent, action)
+            table.insert(self.buttonBindings, { entity = self.previewToggle, eventCallback = callback, action = action, persistent = true })
+        end
+        self:SyncPreviewToggle()
         self.screenTouchHandler = _InputService:ConnectEvent(ScreenTouchEvent, self.HandleScreenTouch)
         self.keyDownHandler = _InputService:ConnectEvent(KeyDownEvent, self.HandleRightClick)
         self.optionsRetryCountdown = 0
         log("[M1][DeploymentUI] initialized")
-        log("[VRF][BattleUI] initialized theme=dark dock=bottom layout=horizontal")
+        log("[VRF][BattleUI] initialized theme=dark dock=bottom layout=grid scroll=vertical")
     end
 
     @ExecSpace("ClientOnly")
@@ -98,6 +116,7 @@ script BattleDeploymentInput extends Component
             end
         end
         self:SyncBattleHud()
+        self:SyncPreviewToggle()
     end
 
     @ExecSpace("ClientOnly")
@@ -226,17 +245,30 @@ script BattleDeploymentInput extends Component
         if self.optionsReady or not isvalid(self.session) or self.session.Phase ~= "DEPLOYMENT" or generation ~= self.session.SessionGeneration or generation ~= self.observedGeneration or not isvalid(self.optionTemplate) or not isvalid(self.optionContainer) then return end
         -- Clone can yield while loading UI assets; reserve this catalog before cloning.
         self.optionsReady = true
+        self.optionsBuilding = true
         local buildSerial = self._T.optionBuildSerial
-        self.optionData = options
-        -- The horizontal ScrollLayoutGroup owns card placement and clipping.
+        self.catalogOptions = options
+        local displayOptions = options
+        if Environment:IsMakerPlay() and self.PreviewCardCount > 0 and #options > 0 then
+            displayOptions = {}
+            for index = 1, math.max(#options, math.min(60, self.PreviewCardCount)) do
+                local source = options[(index - 1) % #options + 1]
+                local name = source[2]
+                if index > #options then name = name .. " " .. tostring(index) end
+                table.insert(displayOptions, { source[1], name, source[3] })
+            end
+        end
+        self.optionData = displayOptions
+        self:SyncPreviewToggle()
+        -- The fixed-column ScrollLayoutGroup owns card placement and vertical clipping.
         -- Keep the authored dock position and size stable as the catalog grows.
-        for index, option in ipairs(options) do
-            if buildSerial ~= self._T.optionBuildSerial or generation ~= self.session.SessionGeneration then return end
+        for index, option in ipairs(displayOptions) do
+            if buildSerial ~= self._T.optionBuildSerial or not isvalid(self.session) or generation ~= self.session.SessionGeneration then return end
             local monsterId = option[1]
             local monsterName = option[2]
             local standRUID = option[3]
             local card = self.optionTemplate:Clone("MonsterOption_" .. tostring(index))
-            if buildSerial ~= self._T.optionBuildSerial or generation ~= self.session.SessionGeneration then
+            if buildSerial ~= self._T.optionBuildSerial or not isvalid(self.session) or generation ~= self.session.SessionGeneration then
                 if isvalid(card) then card:Destroy() end
                 return
             end
@@ -267,13 +299,55 @@ script BattleDeploymentInput extends Component
                 local clickAction = function() self:SelectMonsterCard(monsterId, glowEntity) end
                 local callback = card:ConnectEvent(ButtonClickEvent, clickAction)
                 table.insert(self.buttonBindings, { entity = card, eventCallback = callback })
-                table.insert(self.optionCards, { entity = card, monsterId = monsterId, glow = glowEntity, clickAction = clickAction, portrait = portraitEntity, portraitCallback = portraitCallback })
+                table.insert(self.optionCards, { entity = card, monsterId = monsterId, monsterName = monsterName, glow = glowEntity, clickAction = clickAction, portrait = portraitEntity, portraitCallback = portraitCallback })
                 card:SetEnable(true)
             end
         end
         self.optionsReady = true
+        self.optionsBuilding = false
+        local layout = self.optionContainer.ScrollLayoutGroupComponent
+        if isvalid(layout) then layout:ResetScrollPosition(UITransformAxis.Vertical) end
+        if isvalid(self.previewToggle) then
+            local text = "顯示 18 張測試卡"
+            if Environment:IsMakerPlay() and self.PreviewCardCount > 0 then text = "測試卡 " .. tostring(#self.optionCards) .. " 張 / 關閉" end
+            self:SetUiText(self.previewToggle, text)
+        end
+        self:SyncPreviewToggle()
         log("[M1][DeploymentUI] cards=" .. tostring(#self.optionCards))
-        log("[VRF][BattleUI] cards=" .. tostring(#self.optionCards) .. " layout=horizontal")
+        log("[VRF][BattleUI] cards=" .. tostring(#self.optionCards) .. " catalog=" .. tostring(#options) .. " layout=grid columns=" .. tostring(self.optionContainer.ScrollLayoutGroupComponent.ConstraintCount) .. " scroll=vertical")
+    end
+
+    @ExecSpace("ClientOnly")
+    method void SetPreviewCardCount(integer count)
+        -- Rebuild only the client display; every test card keeps an authoritative MonsterId.
+        if not Environment:IsMakerPlay() or count < 0 or count > 60 or self.optionsBuilding or not self.optionsReady then return end
+        if not isvalid(self.session) or self.session.Phase ~= "DEPLOYMENT" then return end
+        if count == self.PreviewCardCount then return end
+        local options = self.catalogOptions
+        local generation = self.observedGeneration
+        self.PreviewCardCount = count
+        self:ClearMonsterOptions()
+        self:ShowMonsterOptions(options, generation)
+    end
+
+    @ExecSpace("ClientOnly")
+    method number GetMonsterOptionsScrollRange()
+        -- Measure vertical overflow from the authored grid, including its row spacing and padding.
+        if not isvalid(self.optionContainer) or #self.optionCards == 0 then return 0 end
+        local layout = self.optionContainer.ScrollLayoutGroupComponent
+        if not isvalid(layout) then return 0 end
+        local rows = math.ceil(#self.optionCards / math.max(1, layout.ConstraintCount))
+        local height = rows * layout.CellSize.y + math.max(0, rows - 1) * layout.GridSpacing.y
+            + layout.Padding.top + layout.Padding.bottom
+        return math.max(0, height - self.optionContainer.UITransformComponent.RectSize.y)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void SyncPreviewToggle()
+        -- Disable the preview toggle while cards are being rebuilt.
+        local ready = self.optionsReady and not self.optionsBuilding and self.observedInMap
+            and isvalid(self.session) and self.session.Phase == "DEPLOYMENT"
+        if isvalid(self.previewToggle) then self.previewToggle.ButtonComponent.Enable = ready end
     end
 
     @ExecSpace("ClientOnly")
@@ -282,7 +356,7 @@ script BattleDeploymentInput extends Component
         self._T.optionBuildSerial = (self._T.optionBuildSerial or 0) + 1
         local retainedBindings = {}
         for _, binding in ipairs(self.buttonBindings or {}) do
-            if binding.entity == self.startButton then
+            if binding.entity == self.startButton or binding.persistent == true then
                 table.insert(retainedBindings, binding)
             elseif isvalid(binding.entity) and binding.eventCallback ~= nil then
                 binding.entity:DisconnectEvent(ButtonClickEvent, binding.eventCallback)
@@ -297,14 +371,16 @@ script BattleDeploymentInput extends Component
         end
         self.optionCards = {}
         self.optionData = {}
+        self.catalogOptions = {}
         self.optionsReady = false
+        self.optionsBuilding = false
         self.selectedMonsterId = ""
         self._T.selectedMonsterName = ""
         self._T.hudKey = nil
         self.optionsRetryCountdown = 0
         if isvalid(self.optionContainer) then
             local layout = self.optionContainer.ScrollLayoutGroupComponent
-            if isvalid(layout) then layout:ResetScrollPosition(UITransformAxis.Horizontal) end
+            if isvalid(layout) then layout:ResetScrollPosition(UITransformAxis.Vertical) end
         end
     end
 
@@ -312,13 +388,12 @@ script BattleDeploymentInput extends Component
     method void SelectMonsterCard(string monsterId, Entity glowEntity)
         -- Move the persistent selection glow to the card carrying this MonsterId.
         if not isvalid(self.session) or self.session.Phase ~= "DEPLOYMENT" then return end
+        if not isvalid(glowEntity) then return end
         self.selectedMonsterId = monsterId
-        for _, option in ipairs(self.optionData or {}) do
-            if option[1] == monsterId then self._T.selectedMonsterName = option[2] break end
-        end
         for _, card in ipairs(self.optionCards) do
             if isvalid(card.glow) then card.glow:SetEnable(card.glow == glowEntity) end
-            if card.monsterId == monsterId and isvalid(card.entity) then
+            if card.monsterId == monsterId and card.glow == glowEntity and isvalid(card.entity) then
+                self._T.selectedMonsterName = card.monsterName
                 local nameEntity = card.entity:GetChildByName("MonsterName", true)
                 if isvalid(nameEntity) and isvalid(nameEntity.UITransformComponent) then
                     -- Keep the label above the selected frame's opaque nameplate.

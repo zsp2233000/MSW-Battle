@@ -7,13 +7,14 @@ local function check(value, message)
     else failures = failures + 1; log_error("[VRF][VariantUI][FAIL] " .. message) end
 end
 local function run(attempt)
-    if isvalid(ui) and not ui.optionsReady and attempt < 100 then
+    if isvalid(ui) and (not ui.optionsReady or ui.optionsBuilding) and attempt < 100 then
         _TimerService:SetTimerOnce(function() run(attempt + 1) end, 0.1)
         return
     end
     local ok, detail = pcall(function()
         check(isvalid(ui) and ui.optionsReady, "temporary catalog produces client cards")
         if not isvalid(ui) or not ui.optionsReady then return end
+        ui:SetPreviewCardCount(0)
         local names = {}
         for _, card in ipairs(ui.optionCards) do
             names[card.monsterId] = card.entity:GetChildByName("MonsterName", true).TextGUIRendererComponent.Text
