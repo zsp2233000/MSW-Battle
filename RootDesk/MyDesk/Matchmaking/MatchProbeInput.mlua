@@ -1,0 +1,31 @@
+@Logic
+script MatchProbeInput extends Logic
+
+    @ExecSpace("ClientOnly")
+    method void OnBeginPlay()
+        -- Map changes request recovery once; native services remain guarded on the server.
+        self._T.map = ""
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnUpdate(number delta)
+        -- Observe transitions only, without querying storage or matchmaking every frame.
+        if not _MatchProbe.Enabled then return end
+        local player = _UserService.LocalPlayer
+        if not isvalid(player) then return end
+        if player.CurrentMapName ~= self._T.map then
+            self._T.map = player.CurrentMapName
+            _MatchProbe:RequestStatus()
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    @EventSender("Service", "InputService")
+    handler HandleKeyDownEvent(KeyDownEvent event)
+        -- The controlled desktop test uses four explicit keys and the existing toast presentation.
+        if event.key == KeyboardKey.F6 then _MatchProbe:RequestQueue() end
+        if event.key == KeyboardKey.F7 then _MatchProbe:RequestCancel() end
+        if event.key == KeyboardKey.F8 then _MatchProbe:RequestStatus() end
+        if event.key == KeyboardKey.F9 then _MatchProbe:RequestReturn() end
+    end
+end

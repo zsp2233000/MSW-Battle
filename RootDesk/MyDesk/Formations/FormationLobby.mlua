@@ -39,6 +39,11 @@ script FormationLobby extends Logic
         -- Follow actual map transitions without polling storage or resetting login drafts.
         local player = _UserService.LocalPlayer
         if not isvalid(player) or not isvalid(self.root) then return end
+        if player.CurrentMapName == "matchprobe" then
+            self.root:SetEnable(false)
+            return
+        end
+        self.root:SetEnable(true)
         if not self._T.bound then
             self._T.bound = true
             self:Bind("Lobby/Edit", function() self:Travel("formationsim") end)
