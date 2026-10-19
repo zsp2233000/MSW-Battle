@@ -89,7 +89,7 @@ script FormationLobby extends Logic
 
     @ExecSpace("ClientOnly")
     method void BuildOptions(table options)
-        -- Clone catalog-driven cards once per catalog change, using registered monster thumbnails.
+        -- Clone the same five-column battle cards when the formal catalog changes.
         local parts = {}
         for _, option in ipairs(options) do table.insert(parts, option[1] .. "|" .. option[2] .. "|" .. option[3]) end
         local key = table.concat(parts, "\n")
@@ -107,19 +107,42 @@ script FormationLobby extends Logic
         for index, option in ipairs(options) do
             local monsterId = option[1]
             local card = template:Clone("Monster" .. tostring(index))
-            card.TextGUIRendererComponent.Text = option[2]
-            local portrait = card:GetChildByName("Portrait")
-            portrait.SpriteGUIRendererComponent.ImageRUID = DataRef("thumbnail://" .. option[3])
-            portrait.SpriteGUIRendererComponent.Color = Color.white
+            local name = card:GetChildByName("MonsterName", true)
+            if isvalid(name) then
+                local label = name:GetComponent("TextGUIRendererComponent")
+                if isvalid(label) then label.Text = option[2] end
+                local labelSprite = name:GetComponent("SpriteGUIRendererComponent")
+                if isvalid(labelSprite) then labelSprite.RaycastTarget = false end
+            end
+            local portrait = card:GetChildByName("Portrait", true)
+            if isvalid(portrait) then
+                portrait.SpriteGUIRendererComponent.ImageRUID = DataRef("thumbnail://" .. option[3])
+                portrait.SpriteGUIRendererComponent.Color = Color.white
+                portrait.SpriteGUIRendererComponent.RaycastTarget = false
+            end
+            local glow = card:GetChildByName("SelectedGlow", true)
+            if isvalid(glow) then
+                glow:SetEnable(self.SelectedMonsterId == monsterId)
+                local border = glow:GetChildByName("Border", true)
+                local check = glow:GetChildByName("Check", true)
+                if isvalid(border) then border.SpriteGUIRendererComponent.RaycastTarget = false end
+                if isvalid(check) then check.SpriteGUIRendererComponent.RaycastTarget = false end
+            end
             local callback = card:ConnectEvent(ButtonClickEvent, function()
                 self.SelectedMonsterId = monsterId
                 self.SelectedUnit = 0
                 self:Render()
             end)
-            table.insert(self._T.cards, { entity = card, callback = callback, monsterId = monsterId })
+            table.insert(self._T.cards, { entity = card, callback = callback, monsterId = monsterId, glow = glow })
             card:SetEnable(true)
         end
         if self.SelectedMonsterId == "" and #options > 0 then self.SelectedMonsterId = options[1][1] end
+        local catalog = self:Ui("Editor/Catalog")
+        if isvalid(catalog) then
+            local layout = catalog:GetComponent("ScrollLayoutGroupComponent")
+            if isvalid(layout) then layout:ResetScrollPosition(UITransformAxis.Vertical) end
+        end
+        log("[VRF][FormationUI] cards=" .. tostring(#options) .. " columns=5 scroll=vertical")
     end
 
     @ExecSpace("ClientOnly")
@@ -187,7 +210,14 @@ script FormationLobby extends Logic
         if isvalid(save) then save.ButtonComponent.Enable = writable and not state.pending and state.draftValid == true end
         if isvalid(activate) then activate.ButtonComponent.Enable = writable and not state.pending and saved ~= nil and #saved.slots["1"].units > 0 end
         for _, card in ipairs(self._T.cards or {}) do
-            card.entity.SpriteGUIRendererComponent.Color = card.monsterId == self.SelectedMonsterId and Color(0.3, 0.55, 0.8, 1) or Color.white
+            local selected = card.monsterId == self.SelectedMonsterId
+            if isvalid(card.glow) then card.glow:SetEnable(selected) end
+            if selected and isvalid(card.entity) then
+                local name = card.entity:GetChildByName("MonsterName", true)
+                if isvalid(name) and isvalid(name.UITransformComponent) then
+                    _UILogic:SetSiblingIndex(name.UITransformComponent, #name.Parent.Children:ToTable())
+                end
+            end
         end
     end
 
