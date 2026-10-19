@@ -1,0 +1,127 @@
+@Logic
+script FormationStorage extends Logic
+
+    @ExecSpace("ServerOnly")
+    method string LockName(string profile)
+        -- Hex-encode identity without collisions or shared-memory naming punctuation.
+        local parts = { "p" }
+        for index = 1, #profile do table.insert(parts, string.format("%02x", string.byte(profile, index))) end
+        return table.concat(parts)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void ReleaseGuard(any memory, string lockName, string etag)
+        -- Release only this ETag; retrying an ambiguous release cannot unlock a newer owner.
+        local result = nil
+        if Environment:IsMakerPlay() and (self._T.guardFailures or 0) > 0 then
+            self._T.guardFailures = self._T.guardFailures - 1
+        else
+            result = memory:UpdateVariableAndWait(SharedVariableKeyInfo(lockName, etag), "free")
+        end
+        self._T.releases = self._T.releases or {}
+        if result ~= nil and (result.Code == SharedMemoryResultCode.OK or result.Code == SharedMemoryResultCode.PreconditionFailed or result.Code == SharedMemoryResultCode.NotFound) then
+            self._T.releases[lockName] = nil
+        else
+            self._T.releases[lockName] = { memory = memory, etag = etag }
+            log("[VRF][Formations] guard cleanup deferred; next read/write retries ownership ETag")
+        end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void RetryRelease(string profile)
+        -- Recover a transient cleanup error without deleting or expiring a live writer's guard.
+        local lockName = self:LockName(profile)
+        local release = self._T.releases and self._T.releases[lockName] or nil
+        if release ~= nil then self:ReleaseGuard(release.memory, lockName, release.etag) end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void ConfigureMakerGuardFailures(integer count)
+        -- Inject a guard cleanup failure without bypassing the production acquire/release path.
+        if Environment:IsMakerPlay() then self._T.guardFailures = math.max(0, count) end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void ConfigureMakerFaults(integer reads, integer writes, number delaySeconds)
+        -- Exercise failure and delayed completion through the storage boundary only in Maker.
+        if not Environment:IsMakerPlay() then return end
+        self._T.readFailures = math.max(0, reads)
+        self._T.writeFailures = math.max(0, writes)
+        self._T.writeDelay = math.max(0, math.min(10, delaySeconds))
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Read(string profile, string key, any complete)
+        -- Keep reads event driven and surface an explicit error rather than constructing empty data.
+        self:RetryRelease(profile)
+        if Environment:IsMakerPlay() and (self._T.readFailures or 0) > 0 then
+            self._T.readFailures = self._T.readFailures - 1
+            complete(1000004, key, nil)
+            return
+        end
+        _DataStorageService:GetUserDataStorage(profile):GetAsync(key, function(code, loadedKey, raw)
+            -- A timed-out first creation is safe to release only after its exact bytes are observed.
+            local uncertain = self._T.uncertain and self._T.uncertain[profile] or nil
+            if uncertain ~= nil and uncertain.key == key and code == 0 and raw == uncertain.raw then
+                self:ReleaseGuard(uncertain.memory, uncertain.lockName, uncertain.etag)
+                self._T.uncertain[profile] = nil
+            end
+            complete(code, loadedKey, raw)
+        end)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Write(string profile, string key, string expected, string raw, any complete)
+        -- Use native callbacks; a profile's caller retains its write lock throughout any delay.
+        local delaySeconds = 0
+        local fail = false
+        if Environment:IsMakerPlay() then
+            delaySeconds = self._T.writeDelay or 0
+            fail = (self._T.writeFailures or 0) > 0
+            if fail then self._T.writeFailures = self._T.writeFailures - 1 end
+        end
+        local perform = function()
+            if fail then complete(1000004) return end
+            self:RetryRelease(profile)
+            local memoryCode, memory = _WorldInstanceService:GetSharedMemory("BattleFormationWrites")
+            local lockName = self:LockName(profile)
+            if memoryCode ~= SharedMemoryResultCode.OK or #lockName > 100 then complete(1000001) return end
+            local acquired = memory:CreateVariableAndWait(lockName, "writing")
+            if acquired.Code == SharedMemoryResultCode.AlreadyExists then
+                local currentGuard = memory:GetVariableAndWait(lockName)
+                if currentGuard.Code == SharedMemoryResultCode.OK and currentGuard.Info.Value == "free" then
+                    acquired = memory:UpdateVariableAndWait(SharedVariableKeyInfo(lockName, currentGuard.Info.ETag), "writing")
+                end
+            end
+            if acquired.Code ~= SharedMemoryResultCode.OK then complete(1000007) return end
+            local etag = acquired.Info.ETag
+            local storage = _DataStorageService:GetUserDataStorage(profile)
+            if expected == "" then
+                -- Creation has no native CAS. Serialize across instances and recheck under ownership.
+                storage:GetAsync(key, function(readCode, loadedKey, current)
+                    if not (readCode == 1000002 or (readCode == 0 and current == nil)) then
+                        self:ReleaseGuard(memory, lockName, etag)
+                        complete(readCode == 0 and 2000000 or readCode)
+                        return
+                    end
+                    storage:SetAsync(key, raw, function(code, savedKey)
+                        if code == 0 then
+                            self:ReleaseGuard(memory, lockName, etag)
+                        else
+                            -- Never expire an ambiguous unconditional creation and permit a newer write.
+                            self._T.uncertain = self._T.uncertain or {}
+                            self._T.uncertain[profile] = { memory = memory, lockName = lockName, etag = etag, key = key, raw = raw }
+                        end
+                        complete(code)
+                    end)
+                end)
+            else
+                storage:UpdateAsync(key, expected, raw, function(code, savedKey, value)
+                    self:ReleaseGuard(memory, lockName, etag)
+                    complete(code)
+                end)
+            end
+        end
+        if delaySeconds > 0 then _TimerService:SetTimerOnce(perform, delaySeconds) else perform() end
+    end
+end

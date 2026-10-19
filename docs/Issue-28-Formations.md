@@ -12,7 +12,8 @@
 - 同次登入的草稿放在世界生命週期 `FormationService` 中，切換地圖不重建；離開登入不自動保存草稿。重新登入只讀取成功保存內容。沒有自動儲存 timer。
 - UI 分辨未保存、儲存中、保存成功及儲存失敗；載入中、首次使用、讀取失敗另有提示。找不到 key（含 Maker 的成功但 nil）是首次使用；其他讀取錯誤、無效 JSON 或 schema 不相容不會寫入空資料。
 - 每筆寫入保留獨立內容與草稿版本快照，只有原生持久儲存成功回覆才更新確認內容。寫入途中仍可編輯；舊成功只確認舊版本，目前草稿仍顯示未保存。重複／過期儲存命令不會排入較晚的盲寫。
-- 每個 profile 有世界內寫入序列鎖及跨 instance 的 shared-memory creation guard。所有寫入都須取得 guard；新增 key 前在 guard 內重讀，既有 key 使用原生 `UpdateAsync(expectedRaw, newRaw)`。讀到別人已建立的 key 時拒絕舊的新增請求，要求重新讀取。
+- 每個 profile 有世界內寫入序列鎖及跨 instance 的 shared-memory guard。以 CreateVariable 首次建立，或以 ETag CAS 從 free 取得所有權；釋放亦以持有的 ETag CAS 回到 free，不刪除或搶占其他寫入者的鎖。新增 key 前在 guard 內重讀，既有 key 使用原生 `UpdateAsync(expectedRaw, newRaw)`。讀到別人已建立的 key 時拒絕舊的新增請求，要求重新讀取。
+- guard 清理失敗會保留原所有權 ETag，於下一次讀取／寫入重試；即使前次清理逾時後其實成功，過期 ETag 也不能解鎖新的持有者。
 - 無條件首次寫入若結果不確定，保留 guard，避免後續寫入被延遲的首次寫入覆蓋；擁有該 guard 的 instance 重新讀到該次寫入的完整相同內容後才可釋放。guard 不以時間到期或搶占解除。若儲存服務持續無法確認首次寫入結果，保存會維持失敗且保留草稿；不能把此狀態顯示成成功。
 - 明確寫入失敗保留原版本及草稿；先重新讀取對帳，再重試保存。MSW 的 JSONEncode 不支援空 Lua table，序列化明確輸出未使用欄位的空陣列 `[]`。
 
@@ -40,9 +41,19 @@
 | `formation_relogin_runtime_probe.lua` | flow 後 Stop → Play；client；確認兩個保存單位，草稿第三個單位不恢復 | `[VRF][FormationRelogin] PASS` |
 | `formation_failure_runtime_probe.lua` | server 先 `ConfigureMakerFaults(1,1,1)`；client 探針；讀取失敗、重試、寫入失敗、重新讀取對帳及重試保存 | `[VRF][FormationFailure] PASS` |
 | `formation_delayed_runtime_probe.lua` | server 先 `ConfigureMakerFaults(0,0,2)`；client；保存中再編輯、拒絕重複保存、舊回覆不清除新草稿、再保存新版本 | `[VRF][FormationDelay] PASS` |
-| `formation_validation_runtime_probe.lua` | client；未知 ID、非法座標、數字字串、重疊、超量、稀疏陣列及過期命令 | 執行結果待最終紀錄 |
-| `formation_storage_runtime_probe.lua` | server_main；正式 catalog 的非有限值／能力白名單／空欄位序列化；原生持久儲存的延遲首次建立與過期 CAS；只刪除此探針建立的獨立測試 key | 執行結果待最終紀錄 |
+| `formation_validation_runtime_probe.lua` | client；未知 ID、非法座標、數字字串、重疊、超量、稀疏陣列及過期命令 | `[VRF][FormationValidation] PASS` |
+| `formation_storage_runtime_probe.lua` | server_main；正式 catalog 的非有限值／能力白名單／空欄位序列化；原生持久儲存的延遲首次建立與過期 CAS；釋放失敗後恢復；只刪除此探針建立的獨立測試 key | `[VRF][FormationStorage] PASS` |
+| `formation_poc_regression_runtime_probe.lua` | server_main；先由大廳的正式入口進入 map01，再依當前 authored bounds 檢查部署／重複兵種／移除／容量 | `[VRF][FormationPOC] PASS` |
+| 既有 `six_vs_six_full_battle_probe.lua` | 延續上列乾淨部署狀態；原探針不修改；自然十二單位交戰、唯一合法 RESULT，結算後一秒無攻擊／損血／移動 | `[M1][SixVsSixFullBattle] PASS` |
 
 `ConfigureMakerFaults` 僅 ServerOnly 且有 `Environment:IsMakerPlay()` gate，發布環境不能啟用。測試後重設 `(0,0,0)`。失敗注入只替換儲存邊界回覆，不替換正式 UI、草稿驗證或保存狀態機。原生儲存另以 storage probe 檢驗，不將注入測試當成原生失敗證據。
 
-本票同時重新執行既有部署與自然六對六戰鬥探針；最終結果與本地測試數待最終紀錄。實際滑鼠視覺可讀性、第二名真實客戶端及發布環境多 instance 屬後續人工驗證邊界。
+2026-10-19 最終紀錄：Maker build 有 74 筆 Info、零 Error／Warning；上述編隊及 POC runtime 證據已取得，最後停止 Play 回到編輯模式。UI lint 為零 finding。Standards 審查零問題；Spec 審查指出的首次寫入競爭及 guard 清理失敗已修正並追加原生儲存驗證，最終審查無剩餘問題。
+
+本地 `node --test tests/*.test.cjs` 為 **23/26 通過**；本票新增契約 **3/3 通過**。三項既有失敗與本票無關，對應檔案與 HEAD 完全一致：
+
+- `battle_session_contract.test.cjs` 的相機契約仍要求舊 `CameraZoomPercent`／`CameraOffset` 腳本欄位；當前 `BattleFixedCamera` 改為使用 Maker 保存的 CameraAnchor 設定。
+- 同檔的部署來源斷言仍要求 `DeploymentMinDistance = 0.6`；當前值為 0.3，且部署範圍由 Arena 設定。舊 `deployment_runtime_probe.lua` 也硬編舊範圍，因此改以新增的 public-boundary 部署回歸探針檢查當前 authored bounds，未改動戰鬥程式或舊測試。
+- `monster_catalog_variant_fixture.test.cjs` 仍要求正式 Tank HP 500；當前正式資料是 300。
+
+這些 baseline 斷言保留待另票更新；未為讓測試通過而改動既有相機、部署設定或平衡資料。實際滑鼠視覺可讀性、第二名真實客戶端及發布環境多 instance 屬後續人工驗證邊界。

@@ -1,0 +1,246 @@
+@Logic
+script FormationLobby extends Logic
+
+    property Entity root = "e4b13887-3a93-4ded-8a7e-c5793ab473c0"
+    property table Snapshot = {}
+    property integer ObservedSequence = -1
+    property string SelectedMonsterId = ""
+    property integer SelectedUnit = 0
+
+    @ExecSpace("ClientOnly")
+    method void OnBeginPlay()
+        -- Wait for the local player and authored UI before wiring the personal lobby once.
+        self._T.bound = false
+        self._T.bindings = {}
+        self._T.cards = {}
+        self._T.optionsKey = ""
+        self._T.mapName = ""
+        self.ObservedSequence = -1
+    end
+
+    @ExecSpace("ClientOnly")
+    method Entity Ui(string path)
+        -- Keep all presentation lookups under this screen's unique group.
+        return _EntityService:GetEntityByPath("/ui/FormationGroup/" .. path)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Bind(string path, any action)
+        -- Own each connected button callback so teardown cannot leak across Play sessions.
+        local entity = self:Ui(path)
+        if not isvalid(entity) then return end
+        local callback = entity:ConnectEvent(ButtonClickEvent, action)
+        table.insert(self._T.bindings, { entity = entity, callback = callback })
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnUpdate(number delta)
+        -- Follow actual map transitions without polling storage or resetting login drafts.
+        local player = _UserService.LocalPlayer
+        if not isvalid(player) or not isvalid(self.root) then return end
+        if not self._T.bound then
+            self._T.bound = true
+            self:Bind("Lobby/Edit", function() self:Travel("formationsim") end)
+            self:Bind("Lobby/Legacy", function() self:Travel("map01") end)
+            self:Bind("Editor/Back", function() self:Travel("formationlobby") end)
+            self:Bind("ReturnLobby", function() self:Travel("formationlobby") end)
+            self:Bind("Retry", function() _FormationService:RequestRetryLoad() end)
+            self:Bind("Editor/Save", function() _FormationService:RequestSave(self.Snapshot.draftVersion or 0) end)
+            self:Bind("Editor/Activate", function() _FormationService:RequestActivate() end)
+            self:Bind("Editor/Remove", function() self:RemoveSelected() end)
+            self:Bind("Editor/AddMode", function() self.SelectedUnit = 0 self:Render() end)
+            for index = 1, 6 do
+                local unitIndex = index
+                self:Bind("Editor/Units/Unit" .. tostring(index), function()
+                    self.SelectedUnit = unitIndex
+                    self:Render()
+                end)
+            end
+            for row = 1, 5 do
+                for column = 1, 7 do
+                    local x = column - 4
+                    local y = 3 - row
+                    self:Bind("Editor/Board/Cell" .. tostring(column) .. "_" .. tostring(row), function() self:Place(x, y) end)
+                end
+            end
+            _FormationService:RequestOpen()
+            self:Travel("formationlobby")
+            log("[VRF][FormationUI] connected lobby and first-slot editor")
+        end
+        local mapName = player.CurrentMapName
+        if mapName ~= self._T.mapName then
+            self._T.mapName = mapName
+            self:Render()
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Travel(string destination)
+        -- Let the server choose the traveller; the client never supplies another player's identity.
+        _FormationService:RequestTravel(destination)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Observe(table snapshot, integer sequence)
+        -- Ignore out-of-order replies and keep edits made during a save visibly unsaved.
+        if sequence <= self.ObservedSequence then return end
+        self.ObservedSequence = sequence
+        self.Snapshot = snapshot
+        self:BuildOptions(snapshot.options or {})
+        if self.SelectedUnit > #(snapshot.draft or {}) then self.SelectedUnit = 0 end
+        self:Render()
+        log("[VRF][FormationUI] load=" .. snapshot.loadState .. " save=" .. snapshot.saveState .. " draft=" .. tostring(snapshot.draftVersion) .. " confirmed=" .. tostring(snapshot.savedDraftVersion))
+    end
+
+    @ExecSpace("ClientOnly")
+    method void BuildOptions(table options)
+        -- Clone catalog-driven cards once per catalog change, using registered monster thumbnails.
+        local parts = {}
+        for _, option in ipairs(options) do table.insert(parts, option[1] .. "|" .. option[2] .. "|" .. option[3]) end
+        local key = table.concat(parts, "\n")
+        if key == self._T.optionsKey then return end
+        self._T.optionsKey = key
+        for _, card in ipairs(self._T.cards) do
+            if isvalid(card.entity) then
+                card.entity:DisconnectEvent(ButtonClickEvent, card.callback)
+                card.entity:Destroy()
+            end
+        end
+        self._T.cards = {}
+        local template = self:Ui("Editor/Catalog/Template")
+        if not isvalid(template) then return end
+        for index, option in ipairs(options) do
+            local monsterId = option[1]
+            local card = template:Clone("Monster" .. tostring(index))
+            card.TextGUIRendererComponent.Text = option[2]
+            local portrait = card:GetChildByName("Portrait")
+            portrait.SpriteGUIRendererComponent.ImageRUID = DataRef("thumbnail://" .. option[3])
+            portrait.SpriteGUIRendererComponent.Color = Color.white
+            local callback = card:ConnectEvent(ButtonClickEvent, function()
+                self.SelectedMonsterId = monsterId
+                self.SelectedUnit = 0
+                self:Render()
+            end)
+            table.insert(self._T.cards, { entity = card, callback = callback, monsterId = monsterId })
+            card:SetEnable(true)
+        end
+        if self.SelectedMonsterId == "" and #options > 0 then self.SelectedMonsterId = options[1][1] end
+    end
+
+    @ExecSpace("ClientOnly")
+    method string MonsterName(string monsterId)
+        -- Display the formal catalog name while retaining stable IDs in draft commands.
+        for _, option in ipairs(self.Snapshot.options or {}) do if option[1] == monsterId then return option[2] end end
+        return monsterId
+    end
+
+    @ExecSpace("ClientOnly")
+    method void SetText(string path, string value)
+        -- Update authored labels without allocating runtime UI entities.
+        local entity = self:Ui(path)
+        if isvalid(entity) then entity.TextGUIRendererComponent.Text = value end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void SetEnabled(string path, boolean value)
+        -- Toggle a whole authored subtree, including its input receivers.
+        local entity = self:Ui(path)
+        if isvalid(entity) then entity:SetEnable(value) end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Render()
+        -- Present private draft, confirmed content and save state in both lobby and simulation.
+        if not isvalid(self.root) then return end
+        local mapName = self._T.mapName
+        local inLobby = mapName == "formationlobby"
+        local inEditor = mapName == "formationsim"
+        self:SetEnabled("Lobby", inLobby)
+        self:SetEnabled("Editor", inEditor)
+        self:SetEnabled("ReturnLobby", not inLobby and not inEditor)
+        self:SetEnabled("Status", inLobby or inEditor)
+        local state = self.Snapshot
+        local load = state.loadState or "LOADING"
+        local writable = load == "READY" or load == "NEW"
+        self:SetEnabled("Retry", (inLobby or inEditor) and (load == "ERROR" or load == "CONFLICT"))
+        local labels = { UNSAVED = "未保存", SAVING = "儲存中", SAVED = "保存成功", FAILED = "儲存失敗" }
+        local text = labels[state.saveState] or "讀取中"
+        if load == "LOADING" then text = "讀取中" end
+        if load == "ERROR" or load == "CONFLICT" then text = "讀取需重試 / " .. text end
+        if load == "NEW" then text = "首次使用 / " .. text end
+        self:SetText("Status", text .. "    " .. (state.message or "正在讀取個人編隊"))
+        local units = state.draft or {}
+        local saved = state.saved
+        local summary = "尚無預存編隊"
+        if saved ~= nil then
+            summary = "預存編隊：" .. tostring(#saved.slots["1"].units) .. " / 6    已保存版本：" .. tostring(saved.revision)
+                .. "    出戰：" .. (saved.activeSlot == 1 and "第一組" or "尚未選定")
+        end
+        self:SetText("Lobby/Summary", summary .. "\n草稿：" .. tostring(#units) .. " / 6（本次登入保留）")
+        self:SetText("Editor/Summary", summary)
+        self:SetText("Editor/Selection", self.SelectedUnit > 0 and ("移動單位 " .. tostring(self.SelectedUnit) .. "：點選新站位") or ("放置：" .. self:MonsterName(self.SelectedMonsterId)))
+        for index = 1, 6 do
+            local entry = units[index]
+            local label = tostring(index) .. ". 空位"
+            if entry ~= nil then label = tostring(index) .. ". " .. self:MonsterName(entry.monsterId) .. "  (" .. tostring(entry.x) .. ", " .. tostring(entry.y) .. ")" end
+            if self.SelectedUnit == index then label = "> " .. label end
+            self:SetText("Editor/Units/Unit" .. tostring(index), label)
+        end
+        for row = 1, 5 do
+            for column = 1, 7 do
+                local label = ""
+                for index, entry in ipairs(units) do
+                    if math.abs(entry.x - (column - 4)) < 0.5 and math.abs(entry.y - (3 - row)) < 0.5 then label = tostring(index) .. "\n" .. self:MonsterName(entry.monsterId) end
+                end
+                self:SetText("Editor/Board/Cell" .. tostring(column) .. "_" .. tostring(row), label)
+            end
+        end
+        local save = self:Ui("Editor/Save")
+        local activate = self:Ui("Editor/Activate")
+        if isvalid(save) then save.ButtonComponent.Enable = writable and not state.pending and #units > 0 end
+        if isvalid(activate) then activate.ButtonComponent.Enable = writable and not state.pending and saved ~= nil and #saved.slots["1"].units > 0 end
+        for _, card in ipairs(self._T.cards or {}) do
+            card.entity.SpriteGUIRendererComponent.Color = card.monsterId == self.SelectedMonsterId and Color(0.3, 0.55, 0.8, 1) or Color.white
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Place(number x, number y)
+        -- Send only IDs and relative positions through the same public draft command used by real buttons.
+        local state = self.Snapshot
+        if state.draft == nil then return end
+        local units = _FormationSchema:CopyUnits(state.draft)
+        if self.SelectedUnit > 0 and units[self.SelectedUnit] ~= nil then
+            units[self.SelectedUnit].x = x
+            units[self.SelectedUnit].y = y
+        elseif self.SelectedMonsterId ~= "" then
+            table.insert(units, { monsterId = self.SelectedMonsterId, x = x, y = y })
+        else return end
+        _FormationService:RequestDraft(units, state.draftVersion)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void RemoveSelected()
+        -- Removing an editor unit modifies only the login draft until an explicit successful save.
+        if self.Snapshot.draft == nil then return end
+        local units = _FormationSchema:CopyUnits(self.Snapshot.draft)
+        if self.SelectedUnit < 1 or self.SelectedUnit > #units then return end
+        table.remove(units, self.SelectedUnit)
+        self.SelectedUnit = 0
+        _FormationService:RequestDraft(units, self.Snapshot.draftVersion)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnEndPlay()
+        -- Release authored and cloned button subscriptions at world session shutdown.
+        for _, binding in ipairs(self._T.bindings or {}) do
+            if isvalid(binding.entity) then binding.entity:DisconnectEvent(ButtonClickEvent, binding.callback) end
+        end
+        for _, card in ipairs(self._T.cards or {}) do
+            if isvalid(card.entity) then
+                card.entity:DisconnectEvent(ButtonClickEvent, card.callback)
+                card.entity:Destroy()
+            end
+        end
+    end
+end
