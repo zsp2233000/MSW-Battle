@@ -14,9 +14,31 @@ test('personal lobby and simulation are reachable RectTile maps without battle c
 
 test('first formation has explicit save, activation, retry and placement controls', () => {
   const ui = UIBuilder.read('ui/FormationGroup.ui');
-  for (const name of ['Lobby/Edit', 'Editor/Save', 'Editor/Activate', 'Retry', 'Editor/Board', 'Editor/Remove']) {
+  for (const name of ['Lobby/Edit', 'Editor/Save', 'Editor/Activate', 'Retry', 'Editor/Remove']) {
     assert.ok(ui.find(name), name);
   }
+  assert.equal(ui.find('Editor/Board'), null, 'formation placement is in world space');
+  const dock = ui.listEntities().find(e => e.path === '/ui/FormationGroup/Editor');
+  assert.ok(dock.size[1] <= 260, 'editor controls leave the terrain visible');
+});
+
+test('formation simulation retains map01 terrain, dimensions and camera framing', () => {
+  const reference = MapBuilder.read('map/map01.map');
+  const simulation = MapBuilder.read('map/formationsim.map');
+  assert.deepEqual(simulation.getTileBounds(), reference.getTileBounds());
+  assert.deepEqual(simulation.component('RectTileMap', 'MOD.Core.RectTileMapComponent'), reference.component('RectTileMap', 'MOD.Core.RectTileMapComponent'));
+  for (const component of ['MOD.Core.TransformComponent', 'MOD.Core.CameraComponent']) {
+    assert.deepEqual(simulation.component('BattleCameraAnchor', component), reference.component('BattleCameraAnchor', component));
+  }
+  assert.ok(simulation.listEntities().find(e => e.name === 'formationsim').componentNames.includes('script.FormationMapInput'));
+  assert.ok(simulation.listEntities().find(e => e.name === 'formationsim').componentNames.includes('script.BattleFixedCamera'));
+});
+
+test('private map previews contain renderers without AI or combat components', () => {
+  const { ModelBuilder } = require('../.agents/skills/msw-general/scripts/model/msw_model_builder.cjs');
+  const preview = ModelBuilder.snapshot('RootDesk/MyDesk/Models/MapObjects/FormationPreview.model');
+  assert.ok(preview.components.includes('MOD.Core.SpriteRendererComponent'));
+  assert.ok(preview.components.every(c => !/BattleUnit|Attack|HitComponent|AIComponent/.test(c)));
 });
 
 test('private formation RPCs accept no player identity or combat statistics', () => {

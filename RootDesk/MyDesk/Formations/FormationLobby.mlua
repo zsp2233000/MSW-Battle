@@ -15,6 +15,7 @@ script FormationLobby extends Logic
         self._T.cards = {}
         self._T.optionsKey = ""
         self._T.mapName = ""
+        self._T.showUnits = false
         self.ObservedSequence = -1
     end
 
@@ -49,19 +50,13 @@ script FormationLobby extends Logic
             self:Bind("Editor/Activate", function() _FormationService:RequestActivate() end)
             self:Bind("Editor/Remove", function() self:RemoveSelected() end)
             self:Bind("Editor/AddMode", function() self.SelectedUnit = 0 self:Render() end)
+            self:Bind("Editor/ToggleUnits", function() self._T.showUnits = not self._T.showUnits self:Render() end)
             for index = 1, 6 do
                 local unitIndex = index
                 self:Bind("Editor/Units/Unit" .. tostring(index), function()
                     self.SelectedUnit = unitIndex
                     self:Render()
                 end)
-            end
-            for row = 1, 5 do
-                for column = 1, 7 do
-                    local x = column - 4
-                    local y = 3 - row
-                    self:Bind("Editor/Board/Cell" .. tostring(column) .. "_" .. tostring(row), function() self:Place(x, y) end)
-                end
             end
             _FormationService:RequestOpen()
             self:Travel("formationlobby")
@@ -157,6 +152,7 @@ script FormationLobby extends Logic
         local inEditor = mapName == "formationsim"
         self:SetEnabled("Lobby", inLobby)
         self:SetEnabled("Editor", inEditor)
+        self:SetEnabled("Editor/Units", inEditor and self._T.showUnits)
         self:SetEnabled("ReturnLobby", not inLobby and not inEditor)
         self:SetEnabled("Status", inLobby or inEditor)
         local state = self.Snapshot
@@ -182,22 +178,13 @@ script FormationLobby extends Logic
         for index = 1, 6 do
             local entry = units[index]
             local label = tostring(index) .. ". 空位"
-            if entry ~= nil then label = tostring(index) .. ". " .. self:MonsterName(entry.monsterId) .. "  (" .. tostring(entry.x) .. ", " .. tostring(entry.y) .. ")" end
+            if entry ~= nil then label = tostring(index) .. ". " .. self:MonsterName(entry.monsterId) .. string.format("  (%.2f, %.2f)", entry.x, entry.y) end
             if self.SelectedUnit == index then label = "> " .. label end
             self:SetText("Editor/Units/Unit" .. tostring(index), label)
         end
-        for row = 1, 5 do
-            for column = 1, 7 do
-                local label = ""
-                for index, entry in ipairs(units) do
-                    if math.abs(entry.x - (column - 4)) < 0.5 and math.abs(entry.y - (3 - row)) < 0.5 then label = tostring(index) .. "\n" .. self:MonsterName(entry.monsterId) end
-                end
-                self:SetText("Editor/Board/Cell" .. tostring(column) .. "_" .. tostring(row), label)
-            end
-        end
         local save = self:Ui("Editor/Save")
         local activate = self:Ui("Editor/Activate")
-        if isvalid(save) then save.ButtonComponent.Enable = writable and not state.pending and #units > 0 end
+        if isvalid(save) then save.ButtonComponent.Enable = writable and not state.pending and state.draftValid == true end
         if isvalid(activate) then activate.ButtonComponent.Enable = writable and not state.pending and saved ~= nil and #saved.slots["1"].units > 0 end
         for _, card in ipairs(self._T.cards or {}) do
             card.entity.SpriteGUIRendererComponent.Color = card.monsterId == self.SelectedMonsterId and Color(0.3, 0.55, 0.8, 1) or Color.white

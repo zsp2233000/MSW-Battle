@@ -1,0 +1,48 @@
+@Logic
+script FormationMapLayout extends Logic
+
+    property string ReferenceMapName = "map01"
+    property number MinimumSeparation = 0.3
+
+    method any ReferenceTiles()
+        -- Use the authored reference terrain as the shared formation coordinate system.
+        local map = _EntityService:GetEntityByPath("/maps/" .. self.ReferenceMapName)
+        if not isvalid(map) then return nil end
+        local entity = map:GetChildByName("RectTileMap", true)
+        if not isvalid(entity) then return nil end
+        return entity.RectTileMapComponent
+    end
+
+    method any Bounds()
+        -- Derive world-space edges from tile centres and GridSize, never from screen pixels.
+        if self._T.bounds ~= nil then return self._T.bounds end
+        local tiles = self:ReferenceTiles()
+        if not isvalid(tiles) then return nil end
+        local positions = tiles:GetAllTilePositions():ToTable()
+        if #positions == 0 then return nil end
+        local minX, maxX = math.huge, -math.huge
+        local minY, maxY = math.huge, -math.huge
+        for _, cell in ipairs(positions) do
+            local centre = tiles:ToWorldPosition(cell)
+            minX, maxX = math.min(minX, centre.x), math.max(maxX, centre.x)
+            minY, maxY = math.min(minY, centre.y), math.max(maxY, centre.y)
+        end
+        local half = tiles.GridSize * 0.5
+        self._T.bounds = { minX = minX - half.x, maxX = maxX + half.x, minY = minY - half.y, maxY = maxY + half.y }
+        return self._T.bounds
+    end
+
+    method boolean Contains(number x, number y)
+        -- Keep continuous formation positions within the standard map footprint.
+        local bounds = self:Bounds()
+        return bounds ~= nil and x >= bounds.minX and x < bounds.maxX and y >= bounds.minY and y < bounds.maxY
+    end
+
+    method boolean IsWalkable(number x, number y)
+        -- Reject walls and missing terrain while preserving the submitted fractional coordinates.
+        if not self:Contains(x, y) then return false end
+        local tiles = self:ReferenceTiles()
+        local tile = tiles:GetTile(tiles:ToCellPosition(Vector3(x, y, 0)))
+        return tile ~= nil and not tile.IsCollidable
+    end
+end

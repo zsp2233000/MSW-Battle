@@ -43,7 +43,9 @@ script FormationService extends Logic
         local catalog = self:GetCatalog()
         local options = {}
         if catalog ~= nil then options = catalog:GetDeploymentOptions() end
-        local snapshot = { loadState = record.loadState, saveState = record.saveState, draft = _FormationSchema:CopyUnits(record.draft), draftVersion = record.draftVersion, savedDraftVersion = record.savedDraftVersion, saved = _FormationSchema:CopyDocument(record.saved), message = record.message, options = options, pending = record.pending }
+        local validDraft = false
+        if catalog ~= nil then validDraft = _FormationSchema:ValidateUnits(record.draft, catalog, false) ~= nil end
+        local snapshot = { loadState = record.loadState, saveState = record.saveState, draft = _FormationSchema:CopyUnits(record.draft), draftVersion = record.draftVersion, savedDraftVersion = record.savedDraftVersion, saved = _FormationSchema:CopyDocument(record.saved), message = record.message, options = options, pending = record.pending, draftValid = validDraft }
         self:Receive(snapshot, record.sequence, record.userId)
     end
 
@@ -113,6 +115,9 @@ script FormationService extends Logic
                 record.initialized = true
                 record.saveState = record.savedDraftVersion == record.draftVersion and "SAVED" or "UNSAVED"
                 record.message = missing and "首次使用，尚無預存編隊" or "已讀取預存編隊；草稿只在本次登入保留"
+                if #record.draft > 0 and _FormationSchema:ValidateUnits(record.draft, catalog, false) == nil then
+                    record.message = "既有站位需調整至可行走地形；原保存內容保留，調整完成後再儲存"
+                end
             end
             log("[VRF][Formations] load=" .. record.loadState)
             self:Publish(record)
@@ -127,9 +132,9 @@ script FormationService extends Logic
         if not record.initialized or expectedVersion ~= record.draftVersion then self:Publish(record) return end
         local catalog = self:GetCatalog()
         local clean = nil
-        if catalog ~= nil then clean = _FormationSchema:ValidateUnits(units, catalog, true) end
+        if catalog ~= nil then clean = _FormationSchema:ValidateEdit(units, catalog, record.draft) end
         if clean == nil then
-            record.message = "編隊不合法：最多六個單位、合法兵種與站位，單位不可重疊"
+            record.message = "無法放置：請選擇地圖內可行走的空地，最多六個單位且不可重疊"
         else
             if _FormationSchema:SameUnits(record.draft, clean) then self:Publish(record) return end
             record.draft = clean
@@ -151,7 +156,7 @@ script FormationService extends Logic
         local units = _FormationSchema:ValidateUnits(record.draft, catalog, false)
         if units == nil then
             record.saveState = "FAILED"
-            record.message = "請配置一至六個單位後再儲存"
+            record.message = "請配置一至六個單位，並將全部單位移至可行走地形後再儲存"
             self:Publish(record)
             return
         end
@@ -169,6 +174,12 @@ script FormationService extends Logic
         if record == nil or record.pending then return end
         if #record.saved.slots["1"].units == 0 then
             record.message = "請先成功儲存第一組編隊"
+            self:Publish(record)
+            return
+        end
+        local catalog = self:GetCatalog()
+        if catalog == nil or _FormationSchema:ValidateUnits(record.saved.slots["1"].units, catalog, false) == nil then
+            record.message = "已保存站位需調整，請修正並儲存後再設為出戰編隊"
             self:Publish(record)
             return
         end

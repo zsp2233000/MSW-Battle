@@ -16,7 +16,7 @@
       {
         "id": "03c21300-d3ab-40d3-98eb-94ac248e8dca",
         "path": "/maps/formationsim",
-        "componentNames": "MOD.Core.MapComponent,MOD.Core.FootholdComponent",
+        "componentNames": "MOD.Core.MapComponent,MOD.Core.FootholdComponent,script.FormationMapInput,script.BattleFixedCamera",
         "jsonString": {
           "name": "formationsim",
           "path": "/maps/formationsim",
@@ -39,6 +39,14 @@
               "@type": "MOD.Core.FootholdComponent",
               "FootholdsByLayer": {},
               "Enable": true
+            },
+            {
+              "Enable": true,
+              "@type": "script.FormationMapInput"
+            },
+            {
+              "Enable": true,
+              "@type": "script.BattleFixedCamera"
             }
           ],
           "@version": 1

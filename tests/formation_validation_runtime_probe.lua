@@ -10,8 +10,9 @@ local function reject(units,label)
     check(l.ObservedSequence>sequence and l.Snapshot.draftVersion==version,label)
 end
 local ok,detail=pcall(function()
+    reject({{monsterId='monster_tank',x=-1,y=2}},'collidable terrain')
     reject({{monsterId='unknown',x=0,y=0}},'unknown ID')
-    reject({{monsterId='monster_tank',x=100,y=0}},'outside relative bounds')
+    reject({{monsterId='monster_tank',x=100,y=0}},'outside reference terrain bounds')
     reject({{monsterId='monster_tank',x='0',y=0}},'numeric string')
     reject({{monsterId='monster_tank',x=0,y=0},{monsterId='monster_tank',x=0,y=0}},'overlapping units')
     local seven={}

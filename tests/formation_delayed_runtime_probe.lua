@@ -7,21 +7,21 @@ local l=_FormationLobby
 local ok,detail=pcall(function()
     local version=l.Snapshot.draftVersion
     click('Editor/Units/Unit1')
-    click('Editor/Board/Cell2_3')
+    _UserService.LocalPlayer.CurrentMap:GetComponent('FormationMapInput'):HandleWorldClick(Vector3(-5.25, -0.35, 0))
     await(function() return l.Snapshot.draftVersion>version end)
     local savingVersion=l.Snapshot.draftVersion
     local oldRevision=l.Snapshot.saved.revision
     click('Editor/Save')
     check(await(function() return l.Snapshot.pending end),'write in flight')
-    click('Editor/Board/Cell2_2')
+    _UserService.LocalPlayer.CurrentMap:GetComponent('FormationMapInput'):HandleWorldClick(Vector3(-5.25, 0.65, 0))
     check(await(function() return l.Snapshot.draftVersion>savingVersion end),'edit during pending write accepted')
     _FormationService:RequestSave(l.Snapshot.draftVersion)
     check(await(function() return not l.Snapshot.pending end),'old write completes')
     check(l.Snapshot.saveState=='UNSAVED' and l.Snapshot.savedDraftVersion==savingVersion,'old success cannot mark newer draft saved')
-    check(l.Snapshot.saved.revision==oldRevision+1 and l.Snapshot.saved.slots['1'].units[1].y==0 and l.Snapshot.draft[1].y==1,'old reply corresponds exactly to captured version')
+    check(l.Snapshot.saved.revision==oldRevision+1 and math.abs(l.Snapshot.saved.slots['1'].units[1].y + 0.35)<0.001 and math.abs(l.Snapshot.draft[1].y-0.65)<0.001,'old reply corresponds exactly to captured version')
     click('Editor/Save')
     check(await(function() return l.Snapshot.saveState=='SAVED' end),'new version separately saved')
-    check(l.Snapshot.saved.revision==oldRevision+2 and l.Snapshot.saved.slots['1'].units[1].y==1,'delayed write never replaces newer confirmed version')
+    check(l.Snapshot.saved.revision==oldRevision+2 and math.abs(l.Snapshot.saved.slots['1'].units[1].y-0.65)<0.001,'delayed write never replaces newer confirmed version')
 end)
 if not ok then failures=failures+1 log('[VRF][FormationDelay] exception='..tostring(detail)) end
 log(failures==0 and '[VRF][FormationDelay] PASS' or '[VRF][FormationDelay] FAILURES='..failures)
