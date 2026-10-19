@@ -2,6 +2,7 @@
 script FormationService extends Logic
 
     property string StorageKey = "BattleFormationsV1"
+    property Vector2 SimulationSpectatorPosition = Vector2(-6.5, 2.5)
 
     @ExecSpace("ServerOnly")
     method void OnBeginPlay()
@@ -278,9 +279,31 @@ script FormationService extends Logic
         if destination ~= "formationlobby" and destination ~= "formationsim" and destination ~= "map01" then return end
         local player = _UserService:GetUserEntityByUserId(senderUserId)
         if not isvalid(player) then return end
+        if destination ~= "formationsim" then
+            local controller = player:GetComponent("PlayerControllerComponent")
+            if isvalid(controller) then controller.Enable = true end
+            local movement = player:GetComponent("MovementComponent")
+            if isvalid(movement) then movement:Stop() end
+        end
         _TeleportService:TeleportToMapPosition(player, Vector3(0, 0, 0), destination)
         local record = self:GetSession(senderUserId)
         if record ~= nil then self:Publish(record) end
+    end
+
+    @ExecSpace("Server")
+    method void RequestSimulationSpectator()
+        -- Position and lock only the authenticated sender while they are on the formation simulation map.
+        local player = _UserService:GetUserEntityByUserId(senderUserId)
+        local map = _EntityService:GetEntityByPath("/maps/formationsim")
+        if not isvalid(player) or not isvalid(map) or player.CurrentMap ~= map then return end
+        local controller = player:GetComponent("PlayerControllerComponent")
+        if isvalid(controller) then controller.Enable = false end
+        local movement = player:GetComponent("MovementComponent")
+        if isvalid(movement) then movement:Stop() end
+        local position = Vector3(self.SimulationSpectatorPosition.x, self.SimulationSpectatorPosition.y, 0)
+        _TeleportService:TeleportToMapPosition(player, position, "formationsim")
+        log("[VRF][FormationMap] server spectator locked=" .. tostring(isvalid(controller) and not controller.Enable)
+            .. " position=" .. tostring(position.x) .. "," .. tostring(position.y) .. " teleported=true")
     end
 
     @ExecSpace("ServerOnly")
