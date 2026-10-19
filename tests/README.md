@@ -8,9 +8,11 @@ node --test tests/*.test.cjs
 
 Runtime probes use the Maker server or client runtime, native `AttackComponent` / `HitEvent`, and `BattleSession`; JavaScript does not recreate combat.
 
+Five-slot formation probes and their ordered setup, fault injection, login restoration and recorded evidence are in [Issue #29](../docs/Issue-29-Formations.md). The sequence is `formation_slots_runtime_probe.lua` → `formation_slots_delayed_runtime_probe.lua` → `formation_slots_failure_runtime_probe.lua` → Stop/Play → `formation_slots_relogin_runtime_probe.lua`. All run in the client context; configure faults from the server as documented and reset them to `(0,0,0)` afterwards. `formation_slots_save_failure_runtime_probe.lua` separately checks cross-slot save failure. Legacy first-slot probes now pass explicit slot IDs to formation commands.
+
 ## Maker runtime procedure
 
-For every runtime probe, use a fresh Play test. Stop, clear logs, Refresh, read build logs, then Play and wait until `map01` reaches `DEPLOYMENT`. Pass the entire Lua file to `maker_execute_script` with `context=server_main`, except the client probes identified below. A successful script dispatch is not a passing test: read normal logs until that probe's final `PASS` or `FAILURES=...` marker appears. Inspect all build and normal Error / Warning entries. The only expected diagnostic in this suite is the single `unsupported attack profile` message intentionally caused by the first invalid-profile case in `attack_execution_runtime_probe.lua`. Stop after each probe.
+For each combat runtime probe listed below, use a fresh Play test. The formation sequence above shares a session until its explicit Stop/Play step. Stop, clear logs, Refresh, read build logs, then Play and wait until `map01` reaches `DEPLOYMENT`. Pass the entire Lua file to `maker_execute_script` with `context=server_main`, except the client probes identified below. A successful script dispatch is not a passing test: read normal logs until that probe's final `PASS` or `FAILURES=...` marker appears. Inspect all build and normal Error / Warning entries. The only expected diagnostic in this suite is the single `unsupported attack profile` message intentionally caused by the first invalid-profile case in `attack_execution_runtime_probe.lua`. Stop after each combat probe.
 
 | Probe | Runtime role | Clock / evidence |
 |---|---|---|

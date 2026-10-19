@@ -5,7 +5,7 @@ local l=_FormationLobby
 local function reject(units,label)
     local version=l.Snapshot.draftVersion
     local sequence=l.ObservedSequence
-    _FormationService:RequestDraft(units,version)
+    _FormationService:RequestDraft(units,version,1)
     for index=1,50 do if l.ObservedSequence>sequence then break end wait(0.1) end
     check(l.ObservedSequence>sequence and l.Snapshot.draftVersion==version,label)
 end
@@ -21,7 +21,7 @@ local ok,detail=pcall(function()
     reject({[2]={monsterId='monster_tank',x=0,y=0}},'sparse array')
     local seq=l.ObservedSequence
     local version=l.Snapshot.draftVersion
-    _FormationService:RequestDraft({{monsterId='monster_tank',x=0,y=0}},version-1)
+    _FormationService:RequestDraft({{monsterId='monster_tank',x=0,y=0}},version-1,1)
     for index=1,50 do if l.ObservedSequence>seq then break end wait(0.1) end
     check(l.ObservedSequence>seq and l.Snapshot.draftVersion==version,'stale draft command rejected')
 end)

@@ -9,7 +9,7 @@ script FormationLobby extends Logic
 
     @ExecSpace("ClientOnly")
     method void OnBeginPlay()
-        -- Wait for the local player and authored UI before wiring the personal lobby once.
+        -- Wait for the local player and authored UI before wiring all five formation selectors once.
         self._T.bound = false
         self._T.bindings = {}
         self._T.cards = {}
@@ -46,11 +46,20 @@ script FormationLobby extends Logic
             self:Bind("Editor/Back", function() self:Travel("formationlobby") end)
             self:Bind("ReturnLobby", function() self:Travel("formationlobby") end)
             self:Bind("Retry", function() _FormationService:RequestRetryLoad() end)
-            self:Bind("Editor/Save", function() _FormationService:RequestSave(self.Snapshot.draftVersion or 0) end)
-            self:Bind("Editor/Activate", function() _FormationService:RequestActivate() end)
+            self:Bind("Editor/Save", function() _FormationService:RequestSave(self.Snapshot.draftVersion or 0, self.Snapshot.editSlot or 1) end)
+            self:Bind("Editor/Activate", function()
+                local state = self.Snapshot
+                if state.saved == nil then return end
+                _FormationService:RequestActivate(state.editSlot, state.saved.slots[tostring(state.editSlot)].revision)
+            end)
             self:Bind("Editor/Remove", function() self:RemoveSelected() end)
             self:Bind("Editor/AddMode", function() self.SelectedUnit = 0 self:Render() end)
             self:Bind("Editor/ToggleUnits", function() self._T.showUnits = not self._T.showUnits self:Render() end)
+            for index = 1, 5 do
+                local slotId = index
+                self:Bind("Lobby/Slots/Slot" .. tostring(index), function() _FormationService:RequestSelectSlot(slotId) end)
+                self:Bind("Editor/Slots/Slot" .. tostring(index), function() _FormationService:RequestSelectSlot(slotId) end)
+            end
             for index = 1, 6 do
                 local unitIndex = index
                 self:Bind("Editor/Units/Unit" .. tostring(index), function()
@@ -60,7 +69,7 @@ script FormationLobby extends Logic
             end
             _FormationService:RequestOpen()
             self:Travel("formationlobby")
-            log("[VRF][FormationUI] connected lobby and first-slot editor")
+            log("[VRF][FormationUI] connected lobby and five-slot editor")
         end
         local mapName = player.CurrentMapName
         if mapName ~= self._T.mapName then
@@ -80,11 +89,12 @@ script FormationLobby extends Logic
         -- Ignore out-of-order replies and keep edits made during a save visibly unsaved.
         if sequence <= self.ObservedSequence then return end
         self.ObservedSequence = sequence
+        if snapshot.editSlot ~= self.Snapshot.editSlot then self.SelectedUnit = 0 end
         self.Snapshot = snapshot
         self:BuildOptions(snapshot.options or {})
         if self.SelectedUnit > #(snapshot.draft or {}) then self.SelectedUnit = 0 end
         self:Render()
-        log("[VRF][FormationUI] load=" .. snapshot.loadState .. " save=" .. snapshot.saveState .. " draft=" .. tostring(snapshot.draftVersion) .. " confirmed=" .. tostring(snapshot.savedDraftVersion))
+        log("[VRF][FormationUI] slot=" .. tostring(snapshot.editSlot) .. " load=" .. snapshot.loadState .. " save=" .. snapshot.saveState .. " draft=" .. tostring(snapshot.draftVersion) .. " confirmed=" .. tostring(snapshot.savedDraftVersion))
     end
 
     @ExecSpace("ClientOnly")
@@ -190,13 +200,33 @@ script FormationLobby extends Logic
         self:SetText("Status", text .. "    " .. (state.message or "正在讀取個人編隊"))
         local units = state.draft or {}
         local saved = state.saved
+        local editSlot = state.editSlot or 1
         local summary = "尚無預存編隊"
         if saved ~= nil then
-            summary = "預存編隊：" .. tostring(#saved.slots["1"].units) .. " / 6    已保存版本：" .. tostring(saved.revision)
-                .. "    出戰：" .. (saved.activeSlot == 1 and "第一組" or "尚未選定")
+            summary = "編輯第 " .. tostring(editSlot) .. " 組 / 已保存 " .. tostring(#saved.slots[tostring(editSlot)].units) .. " / 6"
+                .. "    出戰：" .. (saved.activeSlot > 0 and ("第 " .. tostring(saved.activeSlot) .. " 組") or "尚未選定")
         end
         self:SetText("Lobby/Summary", summary .. "\n草稿：" .. tostring(#units) .. " / 6（本次登入保留）")
         self:SetText("Editor/Summary", summary)
+        for index = 1, 5 do
+            local key = tostring(index)
+            local slot = saved and saved.slots[key] or nil
+            local info = state.slots and state.slots[key] or nil
+            local label = "第 " .. key .. " 組"
+            if index == editSlot then label = label .. " [編輯]" end
+            if saved ~= nil and saved.activeSlot == index then label = label .. " [出戰]" end
+            if slot == nil then
+                label = label .. "\n讀取中"
+            else
+                label = label .. (#slot.units == 0 and "\n空欄位" or ("\n已保存 " .. tostring(#slot.units) .. "/6 v" .. tostring(slot.revision)))
+                if info ~= nil and #slot.units > 0 and not info.savedValid then label = label .. " / 需修正" end
+                if info ~= nil and info.dirty then label = label .. " / 有草稿" end
+                if info ~= nil and info.saveState == "FAILED" then label = label .. " / 保存失敗" end
+                if state.pending and state.pendingSlot == index then label = label .. (state.pendingKind == "SAVE" and " / 儲存中" or " / 出戰確認中") end
+            end
+            self:SetText("Lobby/Slots/Slot" .. key, label)
+            self:SetText("Editor/Slots/Slot" .. key, label)
+        end
         self:SetText("Editor/Selection", self.SelectedUnit > 0 and ("移動單位 " .. tostring(self.SelectedUnit) .. "：點選新站位") or ("放置：" .. self:MonsterName(self.SelectedMonsterId)))
         for index = 1, 6 do
             local entry = units[index]
@@ -208,7 +238,8 @@ script FormationLobby extends Logic
         local save = self:Ui("Editor/Save")
         local activate = self:Ui("Editor/Activate")
         if isvalid(save) then save.ButtonComponent.Enable = writable and not state.pending and state.draftValid == true end
-        if isvalid(activate) then activate.ButtonComponent.Enable = writable and not state.pending and saved ~= nil and #saved.slots["1"].units > 0 end
+        local slotInfo = state.slots and state.slots[tostring(editSlot)] or nil
+        if isvalid(activate) then activate.ButtonComponent.Enable = writable and not state.pending and slotInfo ~= nil and slotInfo.savedValid == true end
         for _, card in ipairs(self._T.cards or {}) do
             local selected = card.monsterId == self.SelectedMonsterId
             if isvalid(card.glow) then card.glow:SetEnable(selected) end
@@ -233,7 +264,7 @@ script FormationLobby extends Logic
         elseif self.SelectedMonsterId ~= "" then
             table.insert(units, { monsterId = self.SelectedMonsterId, x = x, y = y })
         else return end
-        _FormationService:RequestDraft(units, state.draftVersion)
+        _FormationService:RequestDraft(units, state.draftVersion, state.editSlot)
     end
 
     @ExecSpace("ClientOnly")
@@ -244,7 +275,7 @@ script FormationLobby extends Logic
         if self.SelectedUnit < 1 or self.SelectedUnit > #units then return end
         table.remove(units, self.SelectedUnit)
         self.SelectedUnit = 0
-        _FormationService:RequestDraft(units, self.Snapshot.draftVersion)
+        _FormationService:RequestDraft(units, self.Snapshot.draftVersion, self.Snapshot.editSlot)
     end
 
     @ExecSpace("ClientOnly")

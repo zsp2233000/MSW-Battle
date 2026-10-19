@@ -20,7 +20,7 @@ local ok, detail = pcall(function()
     check(isvalid(input), 'world input component attached')
     -- Clear the draft through the formal draft command; confirmed content remains separate.
     local version = lobby.Snapshot.draftVersion
-    _FormationService:RequestDraft({}, version)
+    _FormationService:RequestDraft({}, version, 1)
     untilState(function() return lobby.Snapshot.draftVersion > version end)
     click('Editor/Catalog/Monster1')
     version = lobby.Snapshot.draftVersion

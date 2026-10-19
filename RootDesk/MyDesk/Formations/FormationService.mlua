@@ -30,7 +30,10 @@ script FormationService extends Logic
         if record ~= nil then return record end
         local profile = player.PlayerComponent.ProfileCode
         if profile == nil or profile == "" then return nil end
-        record = { userId = forUserId, profile = profile, loadState = "NOT_LOADED", saveState = "UNSAVED", draft = {}, draftVersion = 0, savedDraftVersion = -1, sequence = 0, pending = false, initialized = false, raw = "", saved = _FormationSchema:EmptyDocument(), message = "" }
+        record = { userId = forUserId, profile = profile, loadState = "NOT_LOADED", editSlot = 1, drafts = {}, sequence = 0, pending = false, pendingSlot = 0, pendingKind = "", initialized = false, raw = "", saved = _FormationSchema:EmptyDocument(), message = "" }
+        for index = 1, 5 do
+            record.drafts[tostring(index)] = { units = {}, version = 0, savedVersion = -1, saveState = "UNSAVED" }
+        end
         self._T.sessions[forUserId] = record
         return record
     end
@@ -43,9 +46,15 @@ script FormationService extends Logic
         local catalog = self:GetCatalog()
         local options = {}
         if catalog ~= nil then options = catalog:GetDeploymentOptions() end
-        local validDraft = false
-        if catalog ~= nil then validDraft = _FormationSchema:ValidateUnits(record.draft, catalog, false) ~= nil end
-        local snapshot = { loadState = record.loadState, saveState = record.saveState, draft = _FormationSchema:CopyUnits(record.draft), draftVersion = record.draftVersion, savedDraftVersion = record.savedDraftVersion, saved = _FormationSchema:CopyDocument(record.saved), message = record.message, options = options, pending = record.pending, draftValid = validDraft }
+        local draft = record.drafts[tostring(record.editSlot)]
+        local slots = {}
+        for index = 1, 5 do
+            local key = tostring(index)
+            local entry = record.drafts[key]
+            local saved = record.saved.slots[key]
+            slots[key] = { saveState = entry.saveState, dirty = entry.savedVersion ~= entry.version and #entry.units > 0 or (#saved.units > 0 and entry.savedVersion ~= entry.version), savedValid = catalog ~= nil and _FormationSchema:ValidateUnits(saved.units, catalog, false) ~= nil }
+        end
+        local snapshot = { loadState = record.loadState, editSlot = record.editSlot, slots = slots, saveState = draft.saveState, draft = _FormationSchema:CopyUnits(draft.units), draftVersion = draft.version, savedDraftVersion = draft.savedVersion, saved = _FormationSchema:CopyDocument(record.saved), message = record.message, options = options, pending = record.pending, pendingSlot = record.pendingSlot, pendingKind = record.pendingKind, draftValid = catalog ~= nil and _FormationSchema:ValidateUnits(draft.units, catalog, false) ~= nil }
         self:Receive(snapshot, record.sequence, record.userId)
     end
 
@@ -107,15 +116,18 @@ script FormationService extends Logic
                 record.saved = doc
                 record.raw = raw or ""
                 record.loadState = missing and "NEW" or "READY"
-                if not record.initialized then
-                    record.draft = _FormationSchema:CopyUnits(doc.slots["1"].units)
+                for index = 1, 5 do
+                    local key = tostring(index)
+                    local draft = record.drafts[key]
+                    if not record.initialized then draft.units = _FormationSchema:CopyUnits(doc.slots[key].units) end
+                    draft.savedVersion = -1
+                    if #draft.units > 0 and _FormationSchema:SameUnits(draft.units, doc.slots[key].units) then draft.savedVersion = draft.version end
+                    draft.saveState = draft.savedVersion == draft.version and "SAVED" or "UNSAVED"
                 end
-                record.savedDraftVersion = -1
-                if #record.draft > 0 and _FormationSchema:SameUnits(record.draft, doc.slots["1"].units) then record.savedDraftVersion = record.draftVersion end
                 record.initialized = true
-                record.saveState = record.savedDraftVersion == record.draftVersion and "SAVED" or "UNSAVED"
                 record.message = missing and "首次使用，尚無預存編隊" or "已讀取預存編隊；草稿只在本次登入保留"
-                if #record.draft > 0 and _FormationSchema:ValidateUnits(record.draft, catalog, false) == nil then
+                local draft = record.drafts[tostring(record.editSlot)]
+                if #draft.units > 0 and _FormationSchema:ValidateUnits(draft.units, catalog, false) == nil then
                     record.message = "既有站位需調整至可行走地形；原保存內容保留，調整完成後再儲存"
                 end
             end
@@ -125,72 +137,87 @@ script FormationService extends Logic
     end
 
     @ExecSpace("Server")
-    method void RequestDraft(table units, integer expectedVersion)
+    method void RequestSelectSlot(integer slotId)
+        -- Switching retains every login draft and never writes storage or changes the active slot.
+        local record = self:GetSession(senderUserId)
+        if record == nil or not record.initialized or slotId < 1 or slotId > 5 then return end
+        record.editSlot = slotId
+        record.message = "正在編輯第 " .. tostring(slotId) .. " 組；各組草稿保留至本次登入結束"
+        self:Publish(record)
+        log("[VRF][Formations] editSlot=" .. tostring(slotId) .. " activeSlot=" .. tostring(record.saved.activeSlot))
+    end
+
+    @ExecSpace("Server")
+    method void RequestDraft(table units, integer expectedVersion, integer slotId)
         -- Validate an edit atomically and reject stale client commands without overwriting newer edits.
         local record = self:GetSession(senderUserId)
         if record == nil then return end
-        if not record.initialized or expectedVersion ~= record.draftVersion then self:Publish(record) return end
+        local draft = record.drafts[tostring(slotId)]
+        if not record.initialized or draft == nil or slotId ~= record.editSlot or expectedVersion ~= draft.version then self:Publish(record) return end
         local catalog = self:GetCatalog()
         local clean = nil
-        if catalog ~= nil then clean = _FormationSchema:ValidateEdit(units, catalog, record.draft) end
+        if catalog ~= nil then clean = _FormationSchema:ValidateEdit(units, catalog, draft.units) end
         if clean == nil then
             record.message = "無法放置：請選擇地圖內可行走的空地，最多六個單位且不可重疊"
         else
-            if _FormationSchema:SameUnits(record.draft, clean) then self:Publish(record) return end
-            record.draft = clean
-            record.draftVersion = record.draftVersion + 1
-            if not record.pending then record.saveState = "UNSAVED" end
+            if _FormationSchema:SameUnits(draft.units, clean) then self:Publish(record) return end
+            draft.units = clean
+            draft.version = draft.version + 1
+            if not (record.pending and record.pendingSlot == slotId and record.pendingKind == "SAVE") then draft.saveState = "UNSAVED" end
             record.message = "草稿尚未保存"
         end
         self:Publish(record)
     end
 
     @ExecSpace("Server")
-    method void RequestSave(integer expectedVersion)
+    method void RequestSave(integer expectedVersion, integer slotId)
         -- Freeze this exact draft version; edits remain available while persistence is in flight.
         local record = self:GetSession(senderUserId)
         if record == nil then return end
-        if expectedVersion ~= record.draftVersion or record.pending then self:Publish(record) return end
+        local draft = record.drafts[tostring(slotId)]
+        if draft == nil or slotId ~= record.editSlot or expectedVersion ~= draft.version or record.pending then self:Publish(record) return end
         local catalog = self:GetCatalog()
         if catalog == nil then return end
-        local units = _FormationSchema:ValidateUnits(record.draft, catalog, false)
+        local units = _FormationSchema:ValidateUnits(draft.units, catalog, false)
         if units == nil then
-            record.saveState = "FAILED"
+            draft.saveState = "FAILED"
             record.message = "請配置一至六個單位，並將全部單位移至可行走地形後再儲存"
             self:Publish(record)
             return
         end
-        if record.savedDraftVersion == record.draftVersion then self:Publish(record) return end
+        if draft.savedVersion == draft.version then self:Publish(record) return end
         local doc = _FormationSchema:CopyDocument(record.saved)
-        doc.slots["1"].units = units
-        doc.slots["1"].revision = doc.slots["1"].revision + 1
-        self:Write(record, doc, record.draftVersion)
+        doc.slots[tostring(slotId)].units = units
+        doc.slots[tostring(slotId)].revision = doc.slots[tostring(slotId)].revision + 1
+        self:Write(record, doc, draft.version, slotId)
     end
 
     @ExecSpace("Server")
-    method void RequestActivate()
+    method void RequestActivate(integer slotId, integer expectedRevision)
         -- Activation writes only the confirmed slot; it never saves or activates a draft implicitly.
         local record = self:GetSession(senderUserId)
         if record == nil or record.pending then return end
-        if #record.saved.slots["1"].units == 0 then
-            record.message = "請先成功儲存第一組編隊"
+        local slot = record.saved.slots[tostring(slotId)]
+        if slot == nil or slotId ~= record.editSlot or slot.revision ~= expectedRevision then self:Publish(record) return end
+        if #slot.units == 0 then
+            record.message = "請先成功儲存第 " .. tostring(slotId) .. " 組編隊"
             self:Publish(record)
             return
         end
         local catalog = self:GetCatalog()
-        if catalog == nil or _FormationSchema:ValidateUnits(record.saved.slots["1"].units, catalog, false) == nil then
+        if catalog == nil or _FormationSchema:ValidateUnits(slot.units, catalog, false) == nil then
             record.message = "已保存站位需調整，請修正並儲存後再設為出戰編隊"
             self:Publish(record)
             return
         end
-        if record.saved.activeSlot == 1 then self:Publish(record) return end
+        if record.saved.activeSlot == slotId then self:Publish(record) return end
         local doc = _FormationSchema:CopyDocument(record.saved)
-        doc.activeSlot = 1
-        self:Write(record, doc, -1)
+        doc.activeSlot = slotId
+        self:Write(record, doc, -1, slotId)
     end
 
     @ExecSpace("ServerOnly")
-    method void Write(table record, table doc, integer draftVersion)
+    method void Write(table record, table doc, integer draftVersion, integer slotId)
         -- Serialize per profile and compare existing bytes so delayed old writers cannot replace newer saves.
         if record.loadState ~= "NEW" and record.loadState ~= "READY" then
             record.message = "必須先成功讀取資料；請重試讀取"
@@ -201,36 +228,45 @@ script FormationService extends Logic
         doc.revision = doc.revision + 1
         local raw = _FormationSchema:EncodeDocument(doc)
         if #raw > 4000 then
-            record.saveState = "FAILED"
+            record.drafts[tostring(slotId)].saveState = "FAILED"
             record.message = "編隊資料過大，未儲存"
             self:Publish(record)
             return
         end
         local expected = record.raw
+        local draft = record.drafts[tostring(slotId)]
+        local kind = draftVersion >= 0 and "SAVE" or "ACTIVATE"
+        local description = "第 " .. tostring(slotId) .. " 組" .. (kind == "SAVE" and "儲存" or "設為出戰")
         record.pending = true
-        record.saveState = "SAVING"
-        record.message = "正在儲存，等待持久儲存確認"
+        record.pendingSlot = slotId
+        record.pendingKind = kind
+        if kind == "SAVE" then draft.saveState = "SAVING" end
+        record.message = description .. "中，等待持久儲存確認"
         self._T.writers[record.profile] = record
         self:Publish(record)
         local complete = function(code)
             self._T.writers[record.profile] = nil
             record.pending = false
+            record.pendingSlot = 0
+            record.pendingKind = ""
             if code == 0 then
                 record.saved = doc
                 record.raw = raw
                 record.loadState = "READY"
-                if draftVersion >= 0 then record.savedDraftVersion = draftVersion end
-                record.saveState = record.savedDraftVersion == record.draftVersion and "SAVED" or "UNSAVED"
-                record.message = "已確認儲存版本 " .. tostring(doc.revision)
-                if record.saveState == "UNSAVED" then record.message = record.message .. "；目前草稿仍未保存" end
+                if kind == "SAVE" then
+                    draft.savedVersion = draftVersion
+                    draft.saveState = draft.savedVersion == draft.version and "SAVED" or "UNSAVED"
+                end
+                record.message = description .. "成功；已確認版本 " .. tostring(doc.revision)
+                if draft.savedVersion ~= draft.version then record.message = record.message .. "；該組草稿仍未保存" end
             else
-                record.saveState = "FAILED"
-                record.message = "儲存失敗，保留原版本及草稿；請重試"
+                if kind == "SAVE" then draft.saveState = "FAILED" end
+                record.message = description .. "失敗（代碼 " .. tostring(code) .. "），保留原出戰選擇、保存版本及所有草稿"
                 -- A timeout may have committed. Reload before another write rather than blind retry.
                 record.loadState = "CONFLICT"
                 record.message = record.message .. "，先重試讀取"
             end
-            log("[VRF][Formations] save=" .. record.saveState .. " revision=" .. tostring(doc.revision) .. " code=" .. tostring(code))
+            log("[VRF][Formations] operation=" .. kind .. " slot=" .. tostring(slotId) .. " editSlot=" .. tostring(record.editSlot) .. " activeSlot=" .. tostring(record.saved.activeSlot) .. " revision=" .. tostring(doc.revision) .. " code=" .. tostring(code))
             self:Publish(record)
         end
         _FormationStorage:Write(record.profile, self.StorageKey, expected, raw, complete)

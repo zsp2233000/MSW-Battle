@@ -103,7 +103,7 @@ script FormationSchema extends Logic
     end
 
     method table CopyDocument(table doc)
-        -- Preserve all five slots when saving the first formation or its active selection.
+        -- Preserve all five slots when saving one formation or its independent active selection.
         local copy = self:EmptyDocument()
         copy.revision = doc.revision
         copy.activeSlot = doc.activeSlot

@@ -37,7 +37,7 @@ script FormationMapInput extends Component
         self._T.inMap = true
         local snapshot = _FormationLobby.Snapshot
         if snapshot.draft == nil then return end
-        if self.PreviewVersion ~= snapshot.draftVersion or self.PreviewCount ~= #snapshot.draft or self._T.optionCount ~= #(snapshot.options or {}) then self:SyncPreviews(snapshot) end
+        if self._T.previewSlot ~= snapshot.editSlot or self.PreviewVersion ~= snapshot.draftVersion or self.PreviewCount ~= #snapshot.draft or self._T.optionCount ~= #(snapshot.options or {}) then self:SyncPreviews(snapshot) end
         local selected = _FormationLobby.SelectedUnit
         if self._T.selected ~= selected then
             self:ClearSelectionEffect()
@@ -65,6 +65,7 @@ script FormationMapInput extends Component
         -- Upsert local sprites at exact world positions using the formal catalog's idle animation.
         self:ClearSelectionEffect()
         self.PreviewVersion = snapshot.draftVersion
+        self._T.previewSlot = snapshot.editSlot
         self._T.optionCount = #(snapshot.options or {})
         for index, unit in ipairs(snapshot.draft) do
             local entity = self._T.previews[index]

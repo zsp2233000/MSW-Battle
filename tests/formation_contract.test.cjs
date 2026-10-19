@@ -12,14 +12,21 @@ test('personal lobby and simulation are reachable RectTile maps without battle c
   }
 });
 
-test('first formation has explicit save, activation, retry and placement controls', () => {
+test('five formations expose stable selectors in lobby and editor with explicit save and activation', () => {
   const ui = UIBuilder.read('ui/FormationGroup.ui');
   for (const name of ['Lobby/Edit', 'Editor/Save', 'Editor/Activate', 'Retry', 'Editor/Remove']) {
     assert.ok(ui.find(name), name);
   }
+  for (const screen of ['Lobby', 'Editor']) {
+    for (let slot = 1; slot <= 5; slot++) {
+      const path = `${screen}/Slots/Slot${slot}`;
+      assert.ok(ui.find(path), path);
+      assert.ok(ui.hasComponent(path, 'MOD.Core.ButtonComponent'), path);
+    }
+  }
   assert.equal(ui.find('Editor/Board'), null, 'formation placement is in world space');
   const dock = ui.listEntities().find(e => e.path === '/ui/FormationGroup/Editor');
-  assert.ok(dock.size[1] <= 260, 'editor controls leave the terrain visible');
+  assert.ok(dock.size[1] <= 350, 'editor controls leave the terrain visible');
 });
 
 test('formation simulation retains map01 terrain, dimensions and camera framing', () => {
