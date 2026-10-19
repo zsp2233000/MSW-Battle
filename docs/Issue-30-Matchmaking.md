@@ -1,96 +1,109 @@
-# #30 跨 WorldInstance 集合測試
+# #30 統一配對與入場
 
-本次交付受控測試程式與操作說明。**尚未取得公開發布環境的跨 WorldInstance 成功證據，#30 不應關閉。** 測試世界、leaderboard 與兩個真實帳號尚未備妥。Maker 的模擬玩家不等於另一個 WorldInstance。
+## 操作方式
 
-## 程式入口與設定
+大廳與對局畫面右下角提供一顆可見按鈕；陣容編輯區會移到右上方並避開平台選單，避免遮住編輯操作：
 
-`RootDesk/MyDesk/Matchmaking/MatchProbe.mlua` 是各 Room 的協調 Logic；`MatchProbeInput` 提供 PC 快捷鍵與地圖切換時的一次狀態更新。所有 RPC 都從 `senderUserId` 取得玩家身分，不接受對手、能力值、房間 key 或目的 instance 參數。狀態透過既有 toast 與 `[VRF][MatchProbe]` 日誌顯示。
+1. 在整備區儲存一組有效編隊並設為出戰。
+2. 按「開始配對」，按鈕切換為「取消配對」，持續顯示已等候秒數。排隊期間仍可編輯草稿。
+3. 找到對手後等待既有保存結束，固定本局編隊並封存最新草稿，雙方自動進入同一隔離對局房間。
+4. 房內顯示玩家人數，按鈕切換為「返回大廳」。返回後自動還原預存編隊與未保存草稿，再次提供「開始配對」。
 
-僅在專用公開測試世界設定下列伺服器屬性，之後 Refresh、儲存並發布：
+**不再使用 F6／F7／F8／F9，也不需要手動按狀態鍵推進入場。** 狀態持續顯示在面板；原生日誌保留診斷資訊。
 
-| 屬性 | 設定 |
+目前範圍是配對、隔離入場與返回，沒有在 `matchprobe` 房內啟動戰鬥核心。
+
+## Maker 測試同 WorldInstance 配對
+
+1. Refresh 後開始 Play。
+2. 用 Maker Play 視窗的「新增虛擬玩家」開第二個客戶端；也可在 Maker Command Console 執行 `add_virtual_player`，不要指定 user_id，讓 Maker 配發身分。
+3. 兩個視窗各自建立並保存有效出戰編隊，然後各按一次「開始配對」。
+4. 第一人應留在排隊狀態，第二人入列後雙方自動進入同一房間。
+5. 雙方應看到「玩家 2 / 2」與「返回大廳」，返回後仍可編輯原來草稿、再次配對。
+6. 另測只有一人排隊後取消，等待時間停止，之後可重新加入；連按按鈕不應重複入列或建立房間。
+
+Maker 使用伺服器 FIFO 佇列，參與者是真正連線的玩家／Maker 虛擬玩家；它沒有偽造原生配對 callback，也沒有使用真人世界的 leaderboard。虛擬玩家同樣必須有有效出戰編隊，不會自動複製其他玩家能力或繞過資格。兩個客戶端都能透過相同的可見按鈕操作。
+
+## 公開發布環境：同／跨 WorldInstance 使用同一服務
+
+公開發布環境使用原生 MatchmakingService；原本同一個 instance 或不同 instance 的玩家皆使用同一個「開始配對」入口與 queueName。測試需準備此世界的測試 leaderboard 與初始分數。
+
+設定 `RootDesk/MyDesk/Matchmaking/MatchProbe.mlua`：
+
+| 屬性 | 行為 |
 | --- | --- |
-| `Enabled` | 預設 `false`；測試世界才改為 `true` |
-| `TestProfileA` / `TestProfileB` | 兩個不同的真實 ProfileCode，必須都是受控測試帳號 |
-| `LeaderboardId` | 此測試世界內的測試 leaderboard ID，事先由管理者建立並設定配對所需初始分數 |
-| `QueueName` | 預設 `issue30-controlled-v1`，兩名玩家使用相同值 |
-| `SaveDelaySeconds` | 預設 0；可用 5、30、120 秒測試成功後延後傳送，程式上限 120 秒 |
-| `TransferLifetimeSeconds` | 預設 900，為應用程式的入場期限，**不是原生排隊／結果有效期限** |
+| Enabled | 預設 true；false 可關閉配對 |
+| LeaderboardId | 公開發布環境必填；Maker 本機配對不需要 |
+| QueueName | 預設 issue30-controlled-v1，須在各 instance 一致 |
+| TestProfileA / TestProfileB | 預設空白。皆空白時允許符合編隊資格的玩家；填入時限制發布測試帳號 |
+| SaveDelaySeconds | 預設 0，可在受控測試中以 5／30／120 秒觀察成功後延遲封存的原生限制 |
+| TransferLifetimeSeconds | 預設 900，是應用程式的入場期限，不能當成原生排隊或結果期限 |
 
-此探針沒有建立或刪除 leaderboard、更新勝負分數，也不會替帳號捏造有效出戰編隊。兩名玩家須先透過現有整備流程儲存有效編隊並設為出戰。準備一份與出戰內容不同的未保存編隊草稿，以便驗證往返保留；不要將草稿保存後再聲稱驗證未保存內容。
+跨 instance 的實際發布驗收仍需要兩個真實帳號；目前未準備發布測試世界與帳號，**尚不能宣稱跨 instance 驗收成功或關閉 #30**。
 
-| 快捷鍵 | 公開命令 | 行為 |
+## 共用的交接流程
+
+- 加入佇列時以 FormationService.ExportTransfer 驗證已保存且啟用的有效出戰編隊，固定本局編隊。
+- 配對成立後，SealTransfer 等待既有保存完成，原子封存五組草稿、保存版本、編輯組及確認保存 bytes，並鎖定後續編輯，避免最後修改遺失。
+- 使用每個 ProfileCode 專屬的 UserDataStorage key `Issue30TransferV1` 交接。探針的 capsule 上限為 16,000 UTF-8 bytes；這是應用限制，不能當成原生 extras 容量證據。
+- 發布環境由 GetMatchUserInfosAndWait 驗證 Home／Away。伺服器 attempt GUID 與來源 WorldInstanceId 放在 native extras，參與者與目的房間都由伺服器驗證。
+- 雙方 capsule 確認保存後，MatchTransferReadyEvent 喚醒來源協調器。接收端仍重新驗證原生配對與持久票據；事件內容本身不構成入場授權。
+- Home 端持久化一次性 warpIssued 後呼叫 WarpMatchUser。同 instance 已集合的玩家可直接建立房間；跨 instance 先集合，再建立同一 match key 的 InstanceRoom。
+- 到達事件自動推進剩餘入場與返回還原，沒有每幀或持續計時器輪詢 DataStorage。
+- 就緒通知若傳送失敗，最多重試三次；繁忙期間收到的就緒提示會保留並在當次處理完成後推進。失敗後面板提供可見的重試入場操作。
+- 返回時若目錄或先前保存尚未就緒，以快取 capsule 最多重試十次，之後提供「重試返回」。一旦還原成功，清理票據的重試不會再次匯入舊草稿，也不會覆蓋返回後的新編輯。
+- 返回到**目的 WorldInstance 的整備區**，不保證返回原始來源 instance。還原後刪除 capsule 的編隊／草稿 payload，保留終止墓碑防止舊回覆重用。
+- 玩家移到另一個 Room 後，來源 Room 不再向已離開的玩家送 UI RPC；目的 Room 重新發佈其狀態。
+- 引擎回收空 InstanceRoom，RoomEnd 清掉失效本地 handle。
+
+成功與取消的邊界是 SAVING → COMMITTING。封存前可以取消；封存寫入期間按鈕暫時停用。交接開始後可用可見的「取消入場」／「返回大廳」處理。原生 warp 一旦送出，能否撤銷其非同步移動仍需發布實驗，不能宣稱應用程式已能撤銷原生傳送。
+
+原生服務回覆模糊、票據過期或傳送未完成時，不盲目重送 warp。應保留發布日誌並核對雙方狀態；斷線重返原對局不在本次保證內。
+
+## 發布驗收表
+
+| 實驗 | 必要證據 | 狀態 |
 | --- | --- | --- |
-| F6 | `RequestQueue()` | 驗證已讀取、有效的出戰編隊且沒有未完成保存，固定本局編隊並呼叫原生配對 |
-| F7 | `RequestCancel()` | 封存前撤銷本地成功回覆、呼叫原生取消、保存取消墓碑 |
-| F8 | `RequestStatus()` | 顯示狀態、等候秒數、WorldInstanceId、RoomKey；重試可恢復的入場與還原步驟 |
-| F9 | `RequestReturn()` | 從對局房回到**目前目的 WorldInstance 的整備區**；尚未入房時中止交接並還原 |
+| 同來源配對 | 兩名玩家相同來源 instance，真實原生配對結果，同一目的房間 | 待發布驗證 |
+| 不同來源配對 | 兩個不同來源 instance，同一 match key、目的 instance、room key，實際房內 2 人 | 待發布驗證 |
+| 未保存草稿往返 | 本局編隊不隨排隊後編輯而改變，返回後五組草稿與版本保留 | Maker 已檢查；發布待驗證 |
+| 自動推進 | 雙方開始配對後，不需狀態鍵即完成集合、入場、返回還原 | Maker 已檢查；發布待驗證 |
+| 原生期限與容量 | 排隊／結果期限、extras 容量、成功後延遲保存、讀取時機 | 待發布實驗 |
+| 取消與重複操作 | 舊成功回覆不傳送已取消玩家，同一通知不建重複房間 | Maker 已檢查；發布待驗證 |
+| 失敗與清理 | storage／建房／warp 失敗回覆，雙方返回後 payload 清理及房間回收 | Maker 往返已檢查；原生失敗待發布實驗 |
 
-F9 不保證返回原始來源 WorldInstance。返回同一目的 instance 的整備區是本次最小返回路徑；來源 instance 可能已滿或退休，若後續需要回原來源，須另加保留與失敗策略。
+證據僅保留帳號 A/B 別名、WorldInstanceId／RoomKey、代碼、時間、版本及 bytes；遮蔽 ProfileCode、UserId、編隊與 capsule 原文。
 
-## 交接與隔離
+## 執行紀錄與限制
 
-1. `RequestMatchingAndWait` 的 extras 僅含伺服器產生的 attempt GUID 與來源 WorldInstanceId。
-2. `GetMatchUserInfosAndWait` 的 Home/Away 結果決定參與者及兩個 attempt 組成的唯一 match key。兩個來源 ID 是否相異會記錄為 `differentSources`。
-3. 成功回覆後先等待既有保存結束。`SealTransfer` 將當下五組草稿、確認保存內容、編輯組及原始保存 bytes 封存，同時鎖定後續編輯／保存／切換出戰，避免傳送前的最後修改遺失。本局編隊始終使用 F6 時固定的內容。保存失敗狀態和草稿一起保留，不會被假裝成保存成功。
-4. 使用每個 ProfileCode 的獨立 UserDataStorage key `Issue30TransferV1` 攜帶交接；沒有使用或宣稱 `WarpMatchUser` 能接受 warpData。採用既有 `FormationStorage` guard／compare 寫入。原生 storage 容量和這個探針的限制不同：探針拒絕超過 16,000 UTF-8 bytes 的 capsule；日誌僅記錄 bytes 數。原生 Matchmaking extras 容量仍待發布環境量測。
-5. **雙方 capsule 都確認為可交接後**，Home 端才呼叫一次 `WarpMatchUser`。若 Home 的第一次 F8 早於對方封存，雙方再按 F8。沒有計時器反覆讀 storage。
-6. 確認雙方已集合到同一 WorldInstance 後，才建立唯一 `matchprobe` InstanceRoom 並各自移入。第二人可能需要再按 F8；重複狀態更新沿用同一房間，建房失敗可重試。WorldInstance 與 InstanceRoom 的識別會分別輸出，不能只看地圖名稱判定集合。
-7. 房內不啟動戰鬥。F8 解碼固定編隊與草稿，輸出 `ARRIVED ... users=2 ... distinctDraft=true`；編隊草稿完整還原到編輯服務的時點是返回整備區。F9 保存 RETURNING 後透過 `MoveUserToStaticRoom` 返回；F8 完成還原及墓碑清理。舊讀取 callback 透過 loadEpoch 作廢。
+初版已檢查編隊／草稿序列化、隔離房間與雙人返回；本次補上真正的 Maker FIFO 佇列與共用可見按鈕。測試透過原生 ButtonClickEvent 連線、QueueForUser 的相同伺服器入列路徑與原生 InstanceRoom API，沒有直接捏造成功通知。
 
-成功與取消的應用程式邊界為 `SAVING → COMMITTING`。在該邊界以前 F7 可阻止舊成功 callback 傳送；封存開始後 F7 回覆 `COMMITTED_USE_RETURN_OR_STATUS`。有未完成封存寫入時 F9 會拒絕並等待寫入結束。封存失敗先 F8 重新讀取權威狀態，再 F9 中止。原生 warp 已送出後，無法用應用程式取消保證撤銷原生的非同步傳送；此競態必須發布實驗確認，不能宣稱已解決。
-
-`warpIssued` 在送出原生 warp 前持久化，避免重複傳送；模糊失敗不自動重送。若送出後玩家沒有移動，先保留原生 code、雙方來源及狀態，使用 F8/F9 恢復。若原生結果已過期、storage 回覆模糊或服務仍在傳送，停止該次實驗，由管理者確認雙方狀態後再清理測試 key，不能盲目重排。探針不宣稱提供斷線重連原對局保證。
-
-取消或返回完成後，持久票據僅保留 attempt／終止狀態等墓碑，移除編隊與草稿 payload，拒絕舊通知。原生取消 code 與墓碑寫入成功分別記錄。這條路徑未建立 teleport reservation 或動態訂閱；事件使用引擎管理的 handler。InstanceRoom 在玩家離開後由引擎回收，RoomEnd 清除失效本地 handle；回收時機須觀察 context／room 清單，不能以返回成功替代清理證據。
-
-## 發布環境實驗與證據
-
-依下表逐項記錄，未執行者保留「待驗證」，不要填入推測結果。測試期間使用 Creator 可取得的發布日誌；若日誌不可取得，錄下雙方 F8 狀態。紀錄帳號 A/B 別名，遮蔽 ProfileCode、UserId、草稿與 capsule 原文。
-
-| 實驗 | 必要紀錄 | 目前結果 |
-| --- | --- | --- |
-| 不同來源的真實配對 | A/B 原始 WorldInstanceId 不同，原生 request/callback/warp code，兩次 ARRIVED 的同一 match key、目的 instance、room key，房內 users=2 | 待驗證 |
-| 固定編隊與不同未保存草稿往返 | 出發前保存／草稿版本，ARRIVED distinctDraft=true，返回後逐單位／五組版本比對，編輯草稿仍為未保存 | 待驗證 |
-| 交接大小 | capsule bytes；原生 extras 允許大小另外測試，不以 16KB 應用上限代替 | 待驗證 |
-| 讀取時機與生命週期 | 封存確認、warp、首次到達、房內解碼、返回還原、終止墓碑移除 payload 的順序 | 待驗證 |
-| 排隊／結果期限 | 逐次延長等待並記錄原生 MatchingExpired／RequestNotFound 等實際 code 與秒數；過期後需 F7 清理再排 | 待驗證 |
-| 成功後延後保存／傳送 | SaveDelaySeconds=5/30/120，各次 request、callback、seal、warp code 與時間 | 待驗證 |
-| 取消競態 | 配對前、成功回覆前、SAVING 中、COMMITTING 後各自 F7；確認取消成功後舊回覆不傳送 | 待驗證 |
-| 重複操作／失敗 | 連按 F6/F8/F9，雙方晚到，容量不足、房間建立失敗、原生 warp 不成功、storage 寫入失敗 | 待驗證 |
-| 返回與清理 | 雙方返回、編隊還原、cleanup=true、InstanceRoom 被回收、再配對使用新 match key | 待驗證 |
-
-若 `WarpMatchUser` 的結果期限或集合行為不合需求，下一個具體候選是：保留原生 Home/Away 配對權威，以 Home extras 的來源 instance 為目的，雙方 durable capsule barrier 完成後，各自呼叫 `TeleportService.WarpUserToWorldInstanceAndWait(userId, homeSource, ticketReference)`，目的端再次核對原生 pair／attempt，最後建立同一 InstanceRoom。還需實驗滿員／退休 instance、結果過期與 warp record 的來源驗證；這是可試驗的替代方案，**尚無成功證據，也尚未實作**。
-
-## Maker 實際檢查紀錄
-
-2026-10-19，Maker `map01` root ID 與工作區一致；`matchprobe` 經 MapBuilder 複製既有 RectTile 地形，`TileMapMode=1`，沿用 DefaultPlayer 對應的 Kinematicbody。經 Maker 開啟並儲存後，地圖 entry `Usage=1` 且 `MapComponent.IsInstanceMap=true`。只改 component flag 時，原生建房曾回覆 LEA-3002；儲存後建房成功。不要將修正前的失敗當成原生跨 instance 能力結論。
-
-已取得以下正向日誌：
+2026-10-19 本次正向紀錄：
 
 ```text
-[VRF][MatchProbe] ready enabled=false room=__main__
-[VRF][MatchProbeCheck] restore=true fixed=true drafts=true
-[VRF][MatchProbeFinal] distinctDraft=true sealed=true restored=true fiveDrafts=true fixed=true
-[VRF][MatchProbeLockFinal2] distinctEditAttempted=true
-[VRF][MatchProbeLockFinal2] editingRejected=true restored=true
-[VRF][MatchProbe] DISABLED_OR_NOT_PUBLISHED
-[VRF][MatchProbeRoom] created=true
-[VRF][MatchProbeRoom] moved=true
-[VRF][MatchProbeRoom] clientMap=matchprobe lobbyHidden=true
-[VRF][MatchProbeRoom] sameRoomUsers=1 ...
-[VRF][MatchProbeRoom] returned=true
-[VRF][MatchProbeRoomFinal] sameRoomUsers=2 ...
-[VRF][MatchProbeRoomFinal] returned=2
-[VRF][MatchProbeRoomFinal] returnedMap=formationlobby lobbyVisible=true
+[VRF][UnifiedMatch] visible=true initial=開始配對
+[VRF][UnifiedMatch] queued=true cancelLabel=true
+[VRF][UnifiedMatch] cancelled=true startLabel=true
+[VRF][UnifiedMatch] arrivedState=IN_ROOM players=2 label=返回大廳
+[VRF][MatchProbe] ARRIVED match=local-... users=2 ... distinctDraft=true
+[VRF][MatchProbe] RETURNED restored=true cleanup=true
+[VRF][MatchCleanup3] editDuringCleanup=true
+[VRF][MatchCleanup3] newerDraftPreserved=true
+[VRF][MatchLayout] lobby=true
+[VRF][MatchLayout] editor=true
+[VRF][MatchLayout] lobbyRestored=true
+[VRF][MatchLayout] queued=true
+[VRF][MatchLayout] cancelled=true
 ```
 
-這些檢查使用原生 InstanceRoom API 與編隊服務公開交接方法，沒有偽造配對成功 callback。最後使用 Maker `add_virtual_player`（不傳自訂 user_id，由 Maker 分配）新增第二名虛擬玩家，原生 MoveUsers 將兩人送入同一 InstanceRoom；房內實際觀察 `sameRoomUsers=2`，MoveUsersToStaticRoom 回覆 `returned=2`，客戶端回到 formationlobby。返回後 context 清單剩 `server_main`、`client`，確認本次房間已回收。這仍是同一 WorldInstance 的兩名玩家，不能寫成真實跨 WorldInstance 驗收通過。
+主玩家使用可見按鈕的 ButtonClickEvent 入列／取消／返回；第二名實際 Maker 虛擬玩家以公開 ServerOnly QueueForUser 進入相同佇列，編隊 fixture 由現有有效編隊經 ImportTransfer 準備。這沒有模擬原生跨 instance 成功通知。一般手動測試可在第二個客戶端自己整備並按同一顆按鈕。
 
-Maker 編譯日誌沒有 Error／Warning，執行上述最終檢查也未出現 Error／Warning。既有編隊契約測試 5/5 通過；完整 Node suite 為 25/28。將本次開始的提交 `4c5671ff2747031d4c98d6f37d125e5ba1efa7ac` 以 git archive 解到獨立暫存目錄重新執行，也得到相同 25/28；三項既存失敗分別為相機 CameraZoomPercent 欄位斷言、DeploymentMinDistance=0.6 斷言，以及怪物 fixture 預期 HP=500、實際300。沒有為了讓測試變綠而變更既有戰鬥參數。
+返回失敗案例另外建立受控、伺服器產生的 RETURNING fixture，經相同 Recover／RestoreReturning 路徑執行，注入五次清理寫入失敗，在返回後編輯草稿，驗證清理完成後新內容仍存在。測試注入已復原為零。單次跨 Room 的 MakerScript 輪詢計時器曾因 context teardown 被引擎回收，該測試工具錯誤不作為產品成功證據；改以不跨 Room 的受控還原 fixture 完成上述檢查。
 
-Standards 與 Spec 兩軸審查提出的封存期間編輯、取消／提交競態、舊 Load 覆寫還原、取消後重新鎖定及失敗入房後卡住等問題均已修正並複查；最終無剩餘 P1/P2 審查發現。發布實驗仍是未完成驗收項。
+雙方正常返回後，Maker context 清單只剩 server_main 與 client，確認對局房間已回收。Standards／Spec 兩軸審查提出的單按鈕失敗復原、就緒通知遺失、重複還原覆寫草稿均已修正並複查。完整 Node suite 維持下列原始基線的 25/28。
 
-## 供正式流程接續的介面
+新 instance map 需要經 Maker 開啟儲存以更新 entry Usage。已保存的 matchprobe.map 為 Usage=1、TileMapMode=1、IsInstanceMap=true，沿用 DefaultPlayer 的 Kinematicbody。
 
-`FormationService.ExportTransfer(userId)` 驗證並固定有效出戰編隊；`SealTransfer(userId)` 在既有保存完成後原子鎖定並擷取最新草稿；`CaptureTransfer(userId)` 可攜帶保存失敗後保留的草稿；`ImportTransfer(userId, transfer)` 還原確認保存內容及五組草稿，作廢舊讀取 callback。這些方法皆為 ServerOnly。正式流程應自行持有有效的配對／交接權威；不能將 ImportTransfer 包成任意客戶端 payload RPC。
+完整 Node suite 的原始基線 `4c5671ff2747031d4c98d6f37d125e5ba1efa7ac` 為 25/28，相同三項既存失敗涉及 CameraZoomPercent、DeploymentMinDistance=0.6 與怪物 fixture HP 500/300，不屬於配對改動。
+
+若 WarpMatchUser 不符合發布實驗需求，可試驗以原生 Home/Away 為權威，封存 barrier 完成後透過 WarpUserToWorldInstanceAndWait 前往 Home 的來源 instance，再驗證票據並建立同一 InstanceRoom；滿員／退休 instance 與來源驗證仍需實驗。這個替代傳送方案尚未實作，不能當成已成功的路徑。
