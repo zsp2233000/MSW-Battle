@@ -389,8 +389,8 @@ script MatchProbe extends Logic
                     data.state = staleState
                     self:Report(userId, "STALE_QUEUE_CLEANUP_FAILED")
                 end
-            elseif Environment:IsMakerPlay() and (data.adapter == "local" or string.sub(data.matchKey, 1, 6) == "local-") and (data.state == "COMMITTING" or data.state == "TRANSFER") then
-                -- A local match cannot be looked up after its Maker session ends; restore its sealed draft.
+            elseif Environment:IsMakerPlay() and self._T.localMatches[data.profile] == nil and (data.adapter == "local" or string.sub(data.matchKey, 1, 6) == "local-") and (data.state == "COMMITTING" or data.state == "TRANSFER") then
+                -- Restore a local match only after its Maker session has lost the in-memory match entry.
                 local staleState = data.state
                 data.state = "RETURNING"
                 if self:Store(ticket) then
