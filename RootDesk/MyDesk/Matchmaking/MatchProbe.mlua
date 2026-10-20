@@ -362,7 +362,20 @@ script MatchProbe extends Logic
         if player == nil then return end
         if self._T.busy[userId] then self._T.pendingRecover[userId] = true return end
         local current = self._T.records[userId]
-        if current ~= nil and (current.data.state == "QUEUED" or current.data.state == "SAVING") then return end
+        if current ~= nil and (current.data.state == "QUEUED" or current.data.state == "SAVING") then
+            local localAdapter = Environment:IsMakerPlay() and (current.data.adapter == "local" or current.data.adapter == nil)
+            if not localAdapter then return end
+            local activeLocalTicket = false
+            if current.data.state == "QUEUED" then
+                for _, queuedUserId in ipairs(self._T.localQueue or {}) do
+                    if queuedUserId == userId then activeLocalTicket = true break end
+                end
+            else
+                activeLocalTicket = self._T.localMatches[current.data.profile] ~= nil
+            end
+            if activeLocalTicket then return end
+            -- A local ticket without its FIFO/match entry is stale; reload storage and retry cleanup.
+        end
         self._T.busy[userId] = true
         local ticket = self:ReadTicket(player.PlayerComponent.ProfileCode)
         if ticket ~= nil and ticket.data ~= nil then
@@ -378,6 +391,7 @@ script MatchProbe extends Logic
             if Environment:IsMakerPlay() and (data.adapter == "local" or data.adapter == nil) and (data.state == "QUEUED" or data.state == "SAVING") then
                 -- A Maker Play restart discards its local FIFO, so stale queue reservations cannot resume.
                 local staleState = data.state
+                local staleTransfer = data.transfer
                 data.state = "CANCELLED"
                 data.transfer = nil
                 if self:Store(ticket) then
@@ -387,6 +401,8 @@ script MatchProbe extends Logic
                     self:Report(userId, "CANCELLED")
                 else
                     data.state = staleState
+                    data.transfer = staleTransfer
+                    _FormationService:ReleaseTransfer(userId)
                     self:Report(userId, "STALE_QUEUE_CLEANUP_FAILED")
                 end
             elseif Environment:IsMakerPlay() and self._T.localMatches[data.profile] == nil and (data.adapter == "local" or string.sub(data.matchKey, 1, 6) == "local-") and (data.state == "COMMITTING" or data.state == "TRANSFER") then
@@ -585,6 +601,14 @@ script MatchProbe extends Logic
             self:Report(userId, "ABORT_TRANSFER stored=" .. tostring(stored))
             return
         end
+        if ticket.data.state == "RETURNING" then
+            -- A prior move may have failed after RETURNING was durably stored; keep the visible retry usable.
+            self._T.busy[userId] = true
+            local moved = _RoomService:MoveUserToStaticRoom(userId, "formationlobby")
+            self._T.busy[userId] = nil
+            self:Report(userId, "RETURN_RETRY_MOVE ok=" .. tostring(moved))
+            return
+        end
         if ticket.data.state == "IN_ROOM" and _RoomService.RoomKey ~= ticket.data.matchKey then
             self._T.busy[userId] = true
             ticket.data.state = "RETURNING"
@@ -598,8 +622,6 @@ script MatchProbe extends Logic
             local moved = _RoomService:MoveUserToStaticRoom(userId, "formationlobby")
             self._T.busy[userId] = nil
             if not moved then
-                ticket.data.state = "IN_ROOM"
-                self:Store(ticket)
                 self:Report(userId, "ROOM_MISMATCH_RETURN_FAILED")
             else
                 self:Report(userId, "ROOM_MISMATCH_RETURNING")
@@ -619,7 +641,6 @@ script MatchProbe extends Logic
         local moved = _RoomService:MoveUserToStaticRoom(userId, "formationlobby")
         self._T.busy[userId] = nil
         self:Report(userId, "RETURN_MOVE ok=" .. tostring(moved))
-        if not moved then ticket.data.state = "IN_ROOM" self:Store(ticket) end
     end
 
     @ExecSpace("ServerOnly")
