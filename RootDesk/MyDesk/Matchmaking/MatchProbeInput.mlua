@@ -73,6 +73,10 @@ script MatchProbeInput extends Logic
             _MatchProbe:RequestReturn()
         elseif self.State == "ROOM_MISMATCH" then
             _MatchProbe:RequestReturn()
+        elseif self.State == "WAITING" or self.State == "ENTRY_FAILED" or string.sub(self.State, 1, 7) == "RESULT_" then
+            _MatchProbe:RequestReturn()
+        elseif self.State == "BATTLE" then
+            return
         elseif self.State ~= "RETURNING" then
             _MatchProbe:RequestQueue()
         end
@@ -97,6 +101,19 @@ script MatchProbeInput extends Logic
         elseif self.State == "IN_ROOM" then
             text = "已進入對局房間 · 玩家 " .. tostring(self.Players) .. " / 2"
             label = "返回大廳"
+        elseif self.State == "WAITING" then
+            text = "正在確認雙方入場與本局編隊 · 玩家 " .. tostring(self.Players) .. " / 2"
+            label = "取消入場"
+        elseif self.State == "BATTLE" then
+            text = "自動戰鬥中，戰鬥結束後可返回大廳"
+            label = "戰鬥進行中…"
+        elseif self.State == "RESULT_WIN" or self.State == "RESULT_LOSE" or self.State == "RESULT_DRAW" then
+            local results = { RESULT_WIN = "勝利", RESULT_LOSE = "失敗", RESULT_DRAW = "平手" }
+            text = "戰鬥結果：" .. results[self.State]
+            label = "返回大廳"
+        elseif self.State == "ENTRY_FAILED" then
+            text = "對局入場未完成，請返回大廳重新配對"
+            label = "返回大廳"
         elseif self.State == "ROOM_MISMATCH" then
             text = "對局狀態需要恢復，請返回大廳重試"
             label = "返回大廳"
@@ -115,7 +132,7 @@ script MatchProbeInput extends Logic
         local mode = Environment:IsMakerPlay() and "本機配對" or "線上配對"
         self.status.TextGUIRendererComponent.Text = mode .. "\n" .. text
         self.action.TextGUIRendererComponent.Text = label
-        self.action.ButtonComponent.Enable = not (self.Busy and (self.State == "COMMITTING" or self.State == "RETURNING"))
+        self.action.ButtonComponent.Enable = self.State ~= "BATTLE" and not (self.Busy and (self.State == "COMMITTING" or self.State == "RETURNING"))
     end
 
     @ExecSpace("ClientOnly")

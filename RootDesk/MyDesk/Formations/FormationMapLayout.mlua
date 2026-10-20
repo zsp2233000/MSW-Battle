@@ -7,6 +7,7 @@ script FormationMapLayout extends Logic
     method any ReferenceTiles()
         -- Use the authored reference terrain as the shared formation coordinate system.
         local map = _EntityService:GetEntityByPath("/maps/" .. self.ReferenceMapName)
+        if not isvalid(map) then map = _EntityService:GetEntityByPath("/maps/matchprobe") end
         if not isvalid(map) then return nil end
         local entity = map:GetChildByName("RectTileMap", true)
         if not isvalid(entity) then return nil end
@@ -44,5 +45,14 @@ script FormationMapLayout extends Logic
         local tiles = self:ReferenceTiles()
         local tile = tiles:GetTile(tiles:ToCellPosition(Vector3(x, y, 0)))
         return tile ~= nil and not tile.IsCollidable
+    end
+
+    method any BattlePosition(number x, number y, boolean away)
+        -- Preserve the home preview exactly; mirror the opponent across the standard terrain's centre.
+        if not self:Contains(x, y) then return nil end
+        local bounds = self:Bounds()
+        local mappedX = away and (bounds.minX + bounds.maxX - x) or x
+        if not self:Contains(mappedX, y) then return nil end
+        return Vector3(mappedX, y, 0)
     end
 end

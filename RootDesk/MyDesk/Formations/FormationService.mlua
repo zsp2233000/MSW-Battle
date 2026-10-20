@@ -153,8 +153,14 @@ script FormationService extends Logic
 
     @ExecSpace("Server")
     method void RequestDraft(table units, integer expectedVersion, integer slotId)
+        -- Resolve the RPC caller before sharing the authoritative edit command.
+        self:UpdateDraftForUser(senderUserId, units, expectedVersion, slotId)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void UpdateDraftForUser(string forUserId, table units, integer expectedVersion, integer slotId)
         -- Validate an edit atomically and reject stale client commands without overwriting newer edits.
-        local record = self:GetSession(senderUserId)
+        local record = self:GetSession(forUserId)
         if record == nil then return end
         if record.transferLocked then record.message = "配對交接已封存，返回後可繼續編輯" self:Publish(record) return end
         local draft = record.drafts[tostring(slotId)]
@@ -176,8 +182,14 @@ script FormationService extends Logic
 
     @ExecSpace("Server")
     method void RequestSave(integer expectedVersion, integer slotId)
+        -- Resolve the RPC caller before sharing the authoritative save command.
+        self:SaveForUser(senderUserId, expectedVersion, slotId)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void SaveForUser(string forUserId, integer expectedVersion, integer slotId)
         -- Freeze this exact draft version; edits remain available while persistence is in flight.
-        local record = self:GetSession(senderUserId)
+        local record = self:GetSession(forUserId)
         if record == nil then return end
         local draft = record.drafts[tostring(slotId)]
         if record.transferLocked or draft == nil or slotId ~= record.editSlot or expectedVersion ~= draft.version or record.pending then self:Publish(record) return end
@@ -199,8 +211,14 @@ script FormationService extends Logic
 
     @ExecSpace("Server")
     method void RequestActivate(integer slotId, integer expectedRevision)
+        -- Resolve the RPC caller before sharing the authoritative activation command.
+        self:ActivateForUser(senderUserId, slotId, expectedRevision)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void ActivateForUser(string forUserId, integer slotId, integer expectedRevision)
         -- Activation writes only the confirmed slot; it never saves or activates a draft implicitly.
-        local record = self:GetSession(senderUserId)
+        local record = self:GetSession(forUserId)
         if record == nil or record.pending or record.transferLocked then return end
         local slot = record.saved.slots[tostring(slotId)]
         if slot == nil or slotId ~= record.editSlot or slot.revision ~= expectedRevision then self:Publish(record) return end

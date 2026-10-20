@@ -1,0 +1,51 @@
+@Component
+script MatchedBattle extends Component
+
+    @Sync property boolean AdmissionFailed = false
+    property number AdmissionTimeoutSeconds = 30
+
+    @ExecSpace("ServerOnly")
+    method void OnBeginPlay()
+        -- This map owns admission and result publication for exactly one match room.
+        self.AdmissionFailed = false
+        self._T.elapsed = 0
+        self._T.interval = 0
+        self._T.started = false
+        self._T.published = false
+        log("[VRF][MatchedBattle] room controller ready")
+    end
+
+    @ExecSpace("ServerOnly")
+    method void OnUpdate(number delta)
+        -- Await both durable admissions, then let BattleSession own every combat step and outcome.
+        local users = _UserService.UserEntities.Values
+        if #users == 0 then return end
+        self._T.elapsed = self._T.elapsed + delta
+        self._T.interval = self._T.interval + delta
+        if self._T.interval < 0.25 then return end
+        self._T.interval = 0
+        local battle = self.Entity.CurrentMap:GetComponent("script.BattleSession")
+        if not isvalid(battle) then return end
+        if not self._T.started and not self.AdmissionFailed then
+            local admission = _MatchProbe:RoomBattleAdmission()
+            if admission ~= nil and battle.Phase == "WAITING" then
+                self._T.started = battle:InitializeMatchedBattle(admission.key, admission.home, admission.away, admission.homeUnits, admission.awayUnits)
+                if not self._T.started then self.AdmissionFailed = true end
+            elseif battle.Phase == "CONFIG_ERROR" or self._T.elapsed >= self.AdmissionTimeoutSeconds then
+                self.AdmissionFailed = true
+            end
+            if self._T.started or self.AdmissionFailed then
+                for _, user in ipairs(users) do _MatchProbe:PublishState(user.PlayerComponent.UserId, self.AdmissionFailed and "ENTRY_FAILED" or "BATTLE_STARTED") end
+                log("[VRF][MatchedBattle] admission started=" .. tostring(self._T.started) .. " failed=" .. tostring(self.AdmissionFailed))
+            end
+        end
+        if battle.Phase == "RESULT" and not self._T.published then
+            self._T.published = true
+            for _, user in ipairs(users) do
+                local profile = user.PlayerComponent.ProfileCode
+                _MatchProbe:PublishState(user.PlayerComponent.UserId, "RESULT_" .. battle:ResultForProfile(profile))
+            end
+            log("[VRF][MatchedBattle] result published once home=" .. battle:ResultForProfile(battle.HomeProfile) .. " away=" .. battle:ResultForProfile(battle.AwayProfile))
+        end
+    end
+end

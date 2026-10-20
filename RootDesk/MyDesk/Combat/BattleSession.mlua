@@ -22,6 +22,10 @@ script BattleSession extends Component
     property string PlayerModelId = "battleunit"
     property string EnemyModelId = "battleunit"
     property string MonsterDataSetName = "MonsterData"
+    property boolean RequireMatchedFormations = false
+    @Sync property string MatchKey = ""
+    @Sync property string HomeProfile = ""
+    @Sync property string AwayProfile = ""
     property number EnemyOpeningDelay = 0.12 -- Deterministic M1 lead; DRAW remains for same-batch edge cases.
     property number ArenaMinX = -14.5
     property number ArenaMaxX = 12.5
@@ -85,6 +89,18 @@ script BattleSession extends Component
             self:RefreshSnapshot()
             self._T.initialized = true
             self._T.rebuilding = false
+            return
+        end
+
+        if self.RequireMatchedFormations then
+            self.MatchKey = ""
+            self.HomeProfile = ""
+            self.AwayProfile = ""
+            self.Phase = "WAITING"
+            self._T.initialized = true
+            self._T.rebuilding = false
+            self:RefreshSnapshot()
+            log("[VRF][MatchedBattle] waiting for authorized formations")
             return
         end
 
@@ -230,6 +246,7 @@ script BattleSession extends Component
     @ExecSpace("ServerOnly")
     method void CheckConfigurationReentry()
         -- Retry a stopped session once after an affected player leaves and returns to this map.
+        if self.RequireMatchedFormations then return end
         if self.Phase ~= "CONFIG_ERROR" or self._T.rebuilding == true then return end
         local map = self:GetMapEntity()
         for _, player in ipairs(_UserService.UserEntities.Values) do
@@ -447,7 +464,7 @@ script BattleSession extends Component
     @ExecSpace("ServerOnly")
     method boolean PrepareBattleForTest(table playerRoster, table enemyRoster)
         -- Swap to a fully validated Maker-only scene while the caller owns the existing test clock.
-        if not Environment:IsMakerPlay() or self._T.initialized ~= true or self._T.dataReady ~= true
+        if self.RequireMatchedFormations or not Environment:IsMakerPlay() or self._T.initialized ~= true or self._T.dataReady ~= true
             or self._T.rebuilding == true or self._T.manualSimulation ~= true
             or not isvalid(self._T.monsterCatalog) then
             return false
@@ -505,6 +522,87 @@ script BattleSession extends Component
         log("[M1][BattleSession] controlled test scene ready: playerUnits=" .. tostring(self.PlayerAlive)
             .. " enemyUnits=" .. tostring(self.EnemyAlive) .. " generation=" .. tostring(self.SessionGeneration))
         return true
+    end
+
+    @ExecSpace("ServerOnly")
+    method table PrepareMatchedRoster(table units, boolean away)
+        -- Accept only catalog identities and relative positions, never test overrides or client stats.
+        local count = _FormationSchema:ArrayCount(units, 6)
+        if count < 1 then return nil end
+        local tiles = self:GetRectTileMapComponent()
+        if not isvalid(tiles) then return nil end
+        local prepared = {}
+        for _, entry in ipairs(units) do
+            if type(entry) ~= "table" then return nil end
+            for key, _ in pairs(entry) do
+                if key ~= "monsterId" and key ~= "x" and key ~= "y" then return nil end
+            end
+            if type(entry.monsterId) ~= "string" or not _FormationSchema:IsFinite(entry.x) or not _FormationSchema:IsFinite(entry.y) then return nil end
+            local profile = self:GetMonsterProfile(entry.monsterId)
+            local position = _FormationMapLayout:BattlePosition(entry.x, entry.y, away)
+            if profile == nil or position == nil then return nil end
+            local tile = tiles:GetTile(tiles:ToCellPosition(position))
+            if tile == nil or tile.IsCollidable then return nil end
+            for _, other in ipairs(prepared) do
+                if self:IsDeploymentTooClose(position, other.position) then return nil end
+            end
+            table.insert(prepared, { profile = profile, position = position })
+        end
+        return prepared
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean InitializeMatchedBattle(string matchKey, string homeProfile, string awayProfile, table homeUnits, table awayUnits)
+        -- Validate the entire match atomically before generating both sides through the normal combat pipeline.
+        if not self.RequireMatchedFormations or self.Phase ~= "WAITING" or self._T.rebuilding
+            or self._T.initialized ~= true or self._T.dataReady ~= true
+            or not _RoomService:IsInstanceRoom() or _RoomService.RoomKey ~= matchKey
+            or homeProfile == "" or awayProfile == "" or homeProfile == awayProfile then return false end
+        local present = {}
+        for _, user in ipairs(_UserService.UserEntities.Values) do
+            if isvalid(user) and user.CurrentMap == self:GetMapEntity() then present[user.PlayerComponent.ProfileCode] = true end
+        end
+        if not present[homeProfile] or not present[awayProfile] then return false end
+        local home = self:PrepareMatchedRoster(homeUnits, false)
+        local away = self:PrepareMatchedRoster(awayUnits, true)
+        if home == nil or away == nil then return false end
+        self._T.rebuilding = true
+        self:ClearUnits()
+        self._T.resultEntered = false
+        self._T.eventHistory = {}
+        self.EventHistory = ""
+        self.Result = ""
+        self.ConfigurationError = ""
+        self.MatchKey = matchKey
+        self.HomeProfile = homeProfile
+        self.AwayProfile = awayProfile
+        for side, roster in ipairs({ home, away }) do
+            local faction = side == 1 and "PLAYER" or "ENEMY"
+            for index, entry in ipairs(roster) do
+                local entity = self:SpawnConfiguredUnit(entry.profile.ModelId, "Match_" .. faction .. "_" .. tostring(index), faction, entry.profile, entry.position)
+                if not isvalid(entity) then
+                    self._T.rebuilding = false
+                    self:FailConfiguration("matched roster spawn failed")
+                    self:RefreshSnapshot()
+                    return false
+                end
+            end
+        end
+        self.SessionGeneration = self.SessionGeneration + 1
+        self._T.rebuilding = false
+        self.Phase = "DEPLOYMENT"
+        local started = self:TryStartBattle()
+        log("[VRF][MatchedBattle] initialized home=" .. tostring(#home) .. " away=" .. tostring(#away) .. " started=" .. tostring(started))
+        return started
+    end
+
+    method string ResultForProfile(string profile)
+        -- Translate the single settled result into the participant's battle-side perspective.
+        if self.Phase ~= "RESULT" or (profile ~= self.HomeProfile and profile ~= self.AwayProfile) then return "" end
+        if profile == self.HomeProfile or self.Result == "DRAW" then return self.Result end
+        if self.Result == "WIN" then return "LOSE" end
+        if self.Result == "LOSE" then return "WIN" end
+        return ""
     end
 
     method table BuildPlacedRoster()

@@ -16,7 +16,7 @@
       {
         "id": "054bc469-6c77-4581-93d5-a36f05ce67a4",
         "path": "/maps/matchprobe",
-        "componentNames": "MOD.Core.MapComponent,MOD.Core.FootholdComponent",
+        "componentNames": "MOD.Core.MapComponent,MOD.Core.FootholdComponent,script.BattleSession",
         "jsonString": {
           "name": "matchprobe",
           "path": "/maps/matchprobe",
@@ -39,6 +39,15 @@
               "@type": "MOD.Core.FootholdComponent",
               "FootholdsByLayer": {},
               "Enable": true
+            },
+            {
+              "RequireMatchedFormations": true,
+              "EnemyOpeningDelay": 0,
+              "ArenaMinX": -15,
+              "ArenaMaxX": 14,
+              "ArenaMinY": -5,
+              "ArenaMaxY": 3,
+              "@type": "script.BattleSession"
             }
           ],
           "@version": 1
@@ -66,7 +75,7 @@
                 "r": 0.549019635,
                 "g": 0.34117648,
                 "b": 0.164705887,
-                "a": 1.0
+                "a": 1
               },
               "TemplateRUID": "794ad8421e2543d8a6d2c70307637450",
               "Type": 2,
@@ -138,22 +147,22 @@
             {
               "@type": "MOD.Core.TransformComponent",
               "Rotation": {
-                "x": 0.0,
-                "y": 0.0,
-                "z": 0.0
+                "x": 0,
+                "y": 0,
+                "z": 0
               },
               "Position": {
-                "x": 0.0,
-                "y": 0.0,
-                "z": 1000.0
+                "x": 0,
+                "y": 0,
+                "z": 1000
               },
               "QuaternionRotation": {
-                "x": 0.0,
-                "y": 0.0,
-                "z": 0.0,
-                "w": 1.0
+                "x": 0,
+                "y": 0,
+                "z": 0,
+                "w": 1
               },
-              "ZRotation": 0.0,
+              "ZRotation": 0,
               "Enable": true
             },
             {
@@ -2050,27 +2059,27 @@
             {
               "@type": "MOD.Core.TransformComponent",
               "Rotation": {
-                "x": 0.0,
-                "y": 0.0,
-                "z": 0.0
+                "x": 0,
+                "y": 0,
+                "z": 0
               },
               "Position": {
-                "x": -1.0,
-                "y": -1.0,
-                "z": 0.0
+                "x": -1,
+                "y": -1,
+                "z": 0
               },
               "QuaternionRotation": {
-                "x": 0.0,
-                "y": 0.0,
-                "z": 0.0,
-                "w": 1.0
+                "x": 0,
+                "y": 0,
+                "z": 0,
+                "w": 1
               },
               "Scale": {
-                "x": 1.0,
-                "y": 1.0,
-                "z": 1.0
+                "x": 1,
+                "y": 1,
+                "z": 1
               },
-              "ZRotation": 0.0,
+              "ZRotation": 0,
               "Enable": true
             },
             {
@@ -2081,12 +2090,12 @@
               },
               "ConfineCameraArea": false,
               "Damping": {
-                "x": 0.0,
-                "y": 0.0
+                "x": 0,
+                "y": 0
               },
               "DeadZone": {
-                "x": 0.0,
-                "y": 0.0
+                "x": 0,
+                "y": 0
               },
               "IsAllowZoomInOut": false,
               "ScreenOffset": {
@@ -2094,14 +2103,65 @@
                 "y": 0.5
               },
               "SoftZone": {
-                "x": 0.0,
-                "y": 0.0
+                "x": 0,
+                "y": 0
               },
-              "ZoomRatio": 70.0,
+              "ZoomRatio": 70,
               "Enable": true
             }
           ],
           "@version": 1
+        }
+      },
+      {
+        "id": "e56a6f0a-d276-4322-80f3-a06cd185603a",
+        "path": "/maps/matchprobe/MatchCoordinator",
+        "componentNames": "MOD.Core.TransformComponent,script.MatchedBattle",
+        "jsonString": {
+          "name": "MatchCoordinator",
+          "path": "/maps/matchprobe/MatchCoordinator",
+          "nameEditable": true,
+          "enable": true,
+          "visible": true,
+          "localize": false,
+          "displayOrder": 4,
+          "pathConstraints": "///",
+          "revision": 1,
+          "modelId": "mapempty",
+          "@components": [
+            {
+              "@type": "MOD.Core.TransformComponent",
+              "Position": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "QuaternionRotation": {
+                "x": 0,
+                "y": 0,
+                "z": 0,
+                "w": 1
+              },
+              "Scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "Enable": true
+            },
+            {
+              "@type": "script.MatchedBattle",
+              "Enable": true
+            }
+          ],
+          "@version": 1,
+          "origin": {
+            "type": "Model",
+            "entry_id": "mapempty",
+            "sub_entity_id": null,
+            "root_entity_id": "e56a6f0a-d276-4322-80f3-a06cd185603a",
+            "replaced_model_id": null
+          }
         }
       }
     ]

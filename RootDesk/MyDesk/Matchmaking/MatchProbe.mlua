@@ -67,6 +67,19 @@ script MatchProbe extends Logic
         local inMatchRoom = ticket ~= nil and state == "IN_ROOM" and _RoomService:IsInstanceRoom() and _RoomService.RoomKey == ticket.data.matchKey
         local count = inMatchRoom and #_UserService.UserEntities.Values or 0
         if state == "IN_ROOM" and not inMatchRoom then state = "ROOM_MISMATCH" end
+        if _RoomService:IsInstanceRoom() and not inMatchRoom and state ~= "RETURNING" then state = "ENTRY_FAILED" end
+        if inMatchRoom then
+            local map = _EntityService:GetEntityByPath("/maps/matchprobe")
+            local battle = isvalid(map) and map:GetComponent("script.BattleSession") or nil
+            local flow = isvalid(map) and map:GetFirstChildComponentByTypeName("script.MatchedBattle", true) or nil
+            if isvalid(flow) and flow.AdmissionFailed then
+                state = "ENTRY_FAILED"
+            elseif isvalid(battle) then
+                state = battle.Phase
+                if state == "RESULT" then state = "RESULT_" .. battle:ResultForProfile(ticket.data.profile) end
+                if state == "CONFIG_ERROR" then state = "ENTRY_FAILED" end
+            end
+        end
         self:ReceiveState(state, message, started, count, _RoomService.RoomKey, self._T.busy[userId] == true, userId)
     end
 
@@ -153,6 +166,7 @@ script MatchProbe extends Logic
         -- Share the authenticated entry path with server-driven Maker verification.
         local player = self:Player(userId)
         if player == nil then self:Report(userId, "DISABLED_OR_NOT_PUBLISHED") return end
+        if player.CurrentMapName ~= "formationlobby" and player.CurrentMapName ~= "formationsim" then return end
         if not Environment:IsMakerPlay() and self.LeaderboardId == "" then self:Report(userId, "MATCHMAKING_NOT_CONFIGURED") return end
         if _RoomService:IsInstanceRoom() or self._T.busy[userId] or self._T.records[userId] ~= nil then return end
         self._T.busy[userId] = true
@@ -255,6 +269,7 @@ script MatchProbe extends Logic
         latest.fixed = ticket.data.transfer.fixed
         ticket.data.transfer = latest
         ticket.data.matchKey = matched.key
+        ticket.data.match = matched
         ticket.data.expires = DateTime.UtcNow.Elapsed + self.TransferLifetimeSeconds * 1000
         -- Cancellation stops at this explicit commit boundary, before the first yielding write.
         self._T.busy[userId] = true
@@ -422,13 +437,9 @@ script MatchProbe extends Logic
                     self:Rendezvous(userId, ticket, matched)
                 end
             elseif data.state == "IN_ROOM" and _RoomService.RoomKey == data.matchKey then
-                -- The isolated probe room has no battle catalog; retain bytes until lobby restoration.
+                -- Retain durable authority for battle admission and later lobby restoration.
                 local count = #_UserService.UserEntities.Values
-                local fixed = _HttpService:JSONDecode(data.transfer.fixed)
-                local drafts = _HttpService:JSONDecode(data.transfer.drafts)
-                local draft = drafts[tostring(data.transfer.editSlot)]
-                local distinct = not _FormationSchema:SameUnits(fixed, _HttpService:JSONDecode(draft.units))
-                self:Report(userId, "ARRIVED match=" .. data.matchKey .. " instance=" .. _WorldInstanceService.WorldInstanceId .. " room=" .. _RoomService.RoomKey .. " users=" .. tostring(count) .. " capsuleBytes=" .. tostring(#ticket.raw) .. " distinctDraft=" .. tostring(distinct))
+                self:Report(userId, "ARRIVED match=" .. data.matchKey .. " users=" .. tostring(count))
             elseif data.state == "IN_ROOM" and not _RoomService:IsInstanceRoom() then
                 -- A prior Maker session or room exit left a durable ticket behind; restore it in the lobby.
                 data.state = "RETURNING"
@@ -465,6 +476,8 @@ script MatchProbe extends Logic
             local stored = self:Store(ticket)
             if stored then
                 self._T.records[userId] = nil
+                self._T.localMatches[ticket.data.profile] = nil
+                _FormationService:ReleaseTransfer(userId)
                 self:Report(userId, "RETURNED restored=true cleanup=true")
                 return
             end
@@ -584,6 +597,17 @@ script MatchProbe extends Logic
         local player = self:Player(userId)
         if player == nil or self._T.busy[userId] then return end
         local ticket = self._T.records[userId]
+        if _RoomService:IsInstanceRoom() then
+            local map = _EntityService:GetEntityByPath("/maps/matchprobe")
+            local battle = isvalid(map) and map:GetComponent("script.BattleSession") or nil
+            local profile = player.PlayerComponent.ProfileCode
+            if isvalid(battle) and battle:IsBattleActive() and (profile == battle.HomeProfile or profile == battle.AwayProfile) then self:Report(userId, "BATTLE_IN_PROGRESS") return end
+            if ticket == nil or ticket.data.state == "CANCELLED" or ticket.data.state == "RETURNED" then
+                local moved = _RoomService:MoveUserToStaticRoom(userId, "formationlobby")
+                log("[VRF][MatchedBattle] unadmitted return=" .. tostring(moved))
+                return
+            end
+        end
         if ticket == nil then return end
         if not _RoomService:IsInstanceRoom() then
             if ticket.data.state == "RETURNING" then self:Recover(userId) return end
@@ -650,6 +674,46 @@ script MatchProbe extends Logic
         for key, slot in pairs(self._T.rooms) do
             if not slot.creating and (slot.room == nil or not slot.room:IsValid()) then self._T.rooms[key] = nil end
         end
+    end
+
+    @ExecSpace("ServerOnly")
+    method any RoomBattleAdmission()
+        -- Read cached server-loaded capsules only; room updates never poll persistent storage.
+        if not _RoomService:IsInstanceRoom() then return nil end
+        local byProfile = {}
+        for _, player in ipairs(_UserService.UserEntities.Values) do
+            if isvalid(player) and player.CurrentMapName == "matchprobe" then
+                local userId = player.PlayerComponent.UserId
+                local ticket = self._T.records[userId]
+                if ticket == nil or self._T.busy[userId] then return nil end
+                local data = ticket.data
+                if data.state ~= "IN_ROOM" or data.matchKey ~= _RoomService.RoomKey
+                    or data.profile ~= player.PlayerComponent.ProfileCode or data.expires <= DateTime.UtcNow.Elapsed then return nil end
+                byProfile[data.profile] = { userId = userId, data = data }
+            end
+        end
+        local home, away = nil, nil
+        for _, entry in pairs(byProfile) do
+            local matched = entry.data.match
+            if type(matched) ~= "table" or matched.key ~= _RoomService.RoomKey
+                or type(matched.home) ~= "string" or type(matched.away) ~= "string" or matched.home == matched.away
+                or not self:Belongs(entry.data, matched) then return nil end
+            home, away = byProfile[matched.home], byProfile[matched.away]
+            if home == nil or away == nil then return nil end
+            local peer = away.data.match
+            local first = home.data.match
+            if type(peer) ~= "table" or type(first) ~= "table" then return nil end
+            for _, key in ipairs({ "key", "home", "away", "homeAttempt", "awayAttempt" }) do
+                if first[key] ~= matched[key] or peer[key] ~= matched[key] then return nil end
+            end
+            if not self:Belongs(home.data, matched) or not self:Belongs(away.data, matched) then return nil end
+        end
+        if home == nil or away == nil then return nil end
+        local ok, homeUnits, awayUnits = pcall(function()
+            return _HttpService:JSONDecode(home.data.transfer.fixed), _HttpService:JSONDecode(away.data.transfer.fixed)
+        end)
+        if not ok or type(homeUnits) ~= "table" or type(awayUnits) ~= "table" then return nil end
+        return { key = _RoomService.RoomKey, home = home.data.profile, away = away.data.profile, homeUnits = homeUnits, awayUnits = awayUnits }
     end
 
     @ExecSpace("ServerOnly")
