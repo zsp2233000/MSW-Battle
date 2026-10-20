@@ -24,6 +24,8 @@
 
 Maker 使用伺服器 FIFO 佇列，參與者是真正連線的玩家／Maker 虛擬玩家；它沒有偽造原生配對 callback，也沒有使用真人世界的 leaderboard。虛擬玩家同樣必須有有效出戰編隊，不會自動複製其他玩家能力或繞過資格。兩個客戶端都能透過相同的可見按鈕操作。
 
+Maker Play 重開後，本機 FIFO 會消失：舊的 `QUEUED`／`SAVING` 票據會自動取消並解除編隊鎖定；已封存的本機對局資料會在大廳還原草稿並清除票據。只有玩家位於票據指定的對局房間時，按鈕才會顯示「已進入對局房間」及房內人數。
+
 ## 公開發布環境：同／跨 WorldInstance 使用同一服務
 
 公開發布環境使用原生 MatchmakingService；原本同一個 instance 或不同 instance 的玩家皆使用同一個「開始配對」入口與 queueName。測試需準備此世界的測試 leaderboard 與初始分數。

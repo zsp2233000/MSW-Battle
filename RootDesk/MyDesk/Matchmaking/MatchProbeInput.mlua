@@ -71,6 +71,8 @@ script MatchProbeInput extends Logic
             _MatchProbe:RequestCancel()
         elseif self.State == "IN_ROOM" or self.State == "TRANSFER" or self.State == "COMMITTING" or self.State == "RETURNING" then
             _MatchProbe:RequestReturn()
+        elseif self.State == "ROOM_MISMATCH" then
+            _MatchProbe:RequestReturn()
         elseif self.State ~= "RETURNING" then
             _MatchProbe:RequestQueue()
         end
@@ -94,6 +96,9 @@ script MatchProbeInput extends Logic
             label = "取消入場"
         elseif self.State == "IN_ROOM" then
             text = "已進入對局房間 · 玩家 " .. tostring(self.Players) .. " / 2"
+            label = "返回大廳"
+        elseif self.State == "ROOM_MISMATCH" then
+            text = "對局狀態需要恢復，請返回大廳重試"
             label = "返回大廳"
         elseif self.State == "RETURNING" then
             text = "正在返回大廳並還原編隊草稿"

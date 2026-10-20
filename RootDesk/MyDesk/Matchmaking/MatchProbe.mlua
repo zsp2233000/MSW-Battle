@@ -64,7 +64,9 @@ script MatchProbe extends Logic
         local ticket = self._T.records[userId]
         local state = ticket ~= nil and ticket.data.state or "IDLE"
         local started = ticket ~= nil and ticket.data.started or 0
-        local count = _RoomService:IsInstanceRoom() and #_UserService.UserEntities.Values or 0
+        local inMatchRoom = ticket ~= nil and state == "IN_ROOM" and _RoomService:IsInstanceRoom() and _RoomService.RoomKey == ticket.data.matchKey
+        local count = inMatchRoom and #_UserService.UserEntities.Values or 0
+        if state == "IN_ROOM" and not inMatchRoom then state = "ROOM_MISMATCH" end
         self:ReceiveState(state, message, started, count, _RoomService.RoomKey, self._T.busy[userId] == true, userId)
     end
 
@@ -86,6 +88,7 @@ script MatchProbe extends Logic
         if not ok or type(data) ~= "table" or data.schema ~= 1 or data.profile ~= profile then return nil end
         if type(data.state) ~= "string" or type(data.attempt) ~= "string" or type(data.started) ~= "number" or type(data.expires) ~= "number" then return nil end
         if type(data.source) ~= "string" or type(data.matchKey) ~= "string" then return nil end
+        if data.adapter ~= nil and data.adapter ~= "local" and data.adapter ~= "native" then return nil end
         if data.state ~= "RETURNED" and data.state ~= "CANCELLED" then
             local transfer = data.transfer
             if type(transfer) ~= "table" or type(transfer.saved) ~= "string" or type(transfer.drafts) ~= "string" or type(transfer.fixed) ~= "string" then return nil end
@@ -166,7 +169,7 @@ script MatchProbe extends Logic
             self:Report(userId, "EXISTING_TICKET_USE_STATUS_OR_CANCEL")
             return
         end
-        ticket.data = { schema = 1, profile = profile, attempt = _UtilLogic:NewGuid(), source = _WorldInstanceService.WorldInstanceId, state = "QUEUED", transfer = transfer, started = DateTime.UtcNow.Elapsed, expires = 0, matchKey = "" }
+        ticket.data = { schema = 1, profile = profile, attempt = _UtilLogic:NewGuid(), source = _WorldInstanceService.WorldInstanceId, adapter = Environment:IsMakerPlay() and "local" or "native", state = "QUEUED", transfer = transfer, started = DateTime.UtcNow.Elapsed, expires = 0, matchKey = "" }
         self._T.records[userId] = ticket
         if not self:Store(ticket) then
             self._T.records[userId] = nil
@@ -372,7 +375,32 @@ script MatchProbe extends Logic
                 return
             end
             self._T.records[userId] = ticket
-            if data.state == "TRANSFER" and data.expires > DateTime.UtcNow.Elapsed and not _RoomService:IsInstanceRoom() then
+            if Environment:IsMakerPlay() and (data.adapter == "local" or data.adapter == nil) and (data.state == "QUEUED" or data.state == "SAVING") then
+                -- A Maker Play restart discards its local FIFO, so stale queue reservations cannot resume.
+                local staleState = data.state
+                data.state = "CANCELLED"
+                data.transfer = nil
+                if self:Store(ticket) then
+                    self._T.records[userId] = nil
+                    _FormationService:ReleaseTransfer(userId)
+                    log("[VRF][MatchProbe] stale local queue cancelled=true")
+                    self:Report(userId, "CANCELLED")
+                else
+                    data.state = staleState
+                    self:Report(userId, "STALE_QUEUE_CLEANUP_FAILED")
+                end
+            elseif Environment:IsMakerPlay() and (data.adapter == "local" or string.sub(data.matchKey, 1, 6) == "local-") and (data.state == "COMMITTING" or data.state == "TRANSFER") then
+                -- A local match cannot be looked up after its Maker session ends; restore its sealed draft.
+                local staleState = data.state
+                data.state = "RETURNING"
+                if self:Store(ticket) then
+                    self:Report(userId, "STALE_MATCH_RECOVERY")
+                    self:RestoreReturning(userId, ticket)
+                else
+                    data.state = staleState
+                    self:Report(userId, "STALE_MATCH_RECOVERY_SAVE_FAILED")
+                end
+            elseif data.state == "TRANSFER" and data.expires > DateTime.UtcNow.Elapsed and not _RoomService:IsInstanceRoom() then
                 local matched = self:Match(data.profile)
                 if matched ~= nil and self:Belongs(data, matched) and data.matchKey == matched.key then
                     self:Rendezvous(userId, ticket, matched)
@@ -385,6 +413,19 @@ script MatchProbe extends Logic
                 local draft = drafts[tostring(data.transfer.editSlot)]
                 local distinct = not _FormationSchema:SameUnits(fixed, _HttpService:JSONDecode(draft.units))
                 self:Report(userId, "ARRIVED match=" .. data.matchKey .. " instance=" .. _WorldInstanceService.WorldInstanceId .. " room=" .. _RoomService.RoomKey .. " users=" .. tostring(count) .. " capsuleBytes=" .. tostring(#ticket.raw) .. " distinctDraft=" .. tostring(distinct))
+            elseif data.state == "IN_ROOM" and not _RoomService:IsInstanceRoom() then
+                -- A prior Maker session or room exit left a durable ticket behind; restore it in the lobby.
+                data.state = "RETURNING"
+                if self:Store(ticket) then
+                    self:Report(userId, "STALE_ROOM_RECOVERY")
+                    self:RestoreReturning(userId, ticket)
+                else
+                    data.state = "IN_ROOM"
+                    self:Report(userId, "STALE_ROOM_RECOVERY_SAVE_FAILED")
+                end
+            elseif data.state == "IN_ROOM" then
+                -- A visible retry can send a stale room ticket back to a safe lobby before restoring it.
+                self:Report(userId, "ROOM_MISMATCH")
             elseif data.state == "RETURNING" and not _RoomService:IsInstanceRoom() then
                 self:RestoreReturning(userId, ticket)
             end
@@ -542,6 +583,27 @@ script MatchProbe extends Logic
             self._T.busy[userId] = nil
             if stored then self:Recover(userId) end
             self:Report(userId, "ABORT_TRANSFER stored=" .. tostring(stored))
+            return
+        end
+        if ticket.data.state == "IN_ROOM" and _RoomService.RoomKey ~= ticket.data.matchKey then
+            self._T.busy[userId] = true
+            ticket.data.state = "RETURNING"
+            self:PublishState(userId, "ROOM_MISMATCH")
+            if not self:Store(ticket) then
+                ticket.data.state = "IN_ROOM"
+                self._T.busy[userId] = nil
+                self:Report(userId, "ROOM_MISMATCH_SAVE_FAILED")
+                return
+            end
+            local moved = _RoomService:MoveUserToStaticRoom(userId, "formationlobby")
+            self._T.busy[userId] = nil
+            if not moved then
+                ticket.data.state = "IN_ROOM"
+                self:Store(ticket)
+                self:Report(userId, "ROOM_MISMATCH_RETURN_FAILED")
+            else
+                self:Report(userId, "ROOM_MISMATCH_RETURNING")
+            end
             return
         end
         if ticket.data.state ~= "IN_ROOM" or _RoomService.RoomKey ~= ticket.data.matchKey then return end
