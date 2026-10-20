@@ -5,16 +5,20 @@ script BattleFixedCamera extends Component
 
     @ExecSpace("ClientOnly")
     method void OnBeginPlay()
-        -- Wait for the local player, keeping all camera framing settings authored in Maker.
-        self._T.cameraConfigured = false
-        self._T.camera = nil
-        self._T.previousCamera = nil
+        -- Preserve a camera already selected by the entry router before this map begins playback.
+        self._T.cameraConfigured = self._T.cameraConfigured == true
+        self._T.switching = false
+        self._T.anchor = nil
+        self._T.anchorReady = nil
+        self._T.cameraReady = nil
+        self:WatchCameraAnchor()
         self:TryConfigureCamera()
     end
 
     @ExecSpace("ClientOnly")
     method void OnUpdate(number delta)
-        -- Track map entry and departure without changing position, zoom, or UI layout.
+        -- Recover late player/anchor creation; normal travel is handled synchronously by events.
+        self:WatchCameraAnchor()
         local player = _UserService.LocalPlayer
         local map = self.Entity.CurrentMap
         if not isvalid(map) then map = self.Entity end
@@ -22,12 +26,40 @@ script BattleFixedCamera extends Component
             self:RestoreCamera()
             return
         end
-        if self._T.cameraConfigured ~= true then self:TryConfigureCamera() end
+        self:TryConfigureCamera()
+    end
+
+    @ExecSpace("ClientOnly")
+    method void WatchCameraAnchor()
+        -- Switch in the activation event: map-change notification can precede the anchor becoming usable.
+        local map = self.Entity.CurrentMap
+        if not isvalid(map) then map = self.Entity end
+        local anchor = self.CameraAnchor
+        if not isvalid(anchor) or anchor.CurrentMap ~= map then anchor = map:GetChildByName("BattleCameraAnchor", false) end
+        if self._T.anchor == anchor then return end
+        if isvalid(self._T.anchor) then
+            if self._T.anchorReady ~= nil then self._T.anchor:DisconnectEvent(EntityEnabledInHierarchyChangedEvent, self._T.anchorReady) end
+            if self._T.cameraReady ~= nil then self._T.anchor:DisconnectEvent(ComponentEnabledInHierarchyChangedEvent, self._T.cameraReady) end
+        end
+        self._T.anchor = anchor
+        self._T.anchorReady = nil
+        self._T.cameraReady = nil
+        if isvalid(anchor) then
+            self._T.anchorReady = anchor:ConnectEvent(EntityEnabledInHierarchyChangedEvent, function() self:TryConfigureCamera() end)
+            self._T.cameraReady = anchor:ConnectEvent(ComponentEnabledInHierarchyChangedEvent, function() self:TryConfigureCamera() end)
+        end
     end
 
     @ExecSpace("ClientOnly")
     method void OnEndPlay()
         -- Restore on map departure; a stopping play session is already tearing its cameras down.
+        if isvalid(self._T.anchor) then
+            if self._T.anchorReady ~= nil then self._T.anchor:DisconnectEvent(EntityEnabledInHierarchyChangedEvent, self._T.anchorReady) end
+            if self._T.cameraReady ~= nil then self._T.anchor:DisconnectEvent(ComponentEnabledInHierarchyChangedEvent, self._T.cameraReady) end
+        end
+        self._T.anchor = nil
+        self._T.anchorReady = nil
+        self._T.cameraReady = nil
         local player = _UserService.LocalPlayer
         local map = self.Entity.CurrentMap
         if not isvalid(map) then map = self.Entity end
@@ -42,7 +74,9 @@ script BattleFixedCamera extends Component
     @ExecSpace("ClientOnly")
     method void TryConfigureCamera()
         -- Activate this map's camera using its saved Transform and CameraComponent settings.
-        if self._T.cameraConfigured == true then return end
+        if self._T.switching then return end
+        if self._T.cameraConfigured == true and isvalid(self._T.camera)
+            and _CameraService:GetCurrentCameraComponent() == self._T.camera then return end
         local player = _UserService.LocalPlayer
         if not isvalid(player) then return end
         local map = self.Entity.CurrentMap
@@ -55,18 +89,22 @@ script BattleFixedCamera extends Component
         end
         if not isvalid(anchor) then return end
         local camera = anchor.CameraComponent
-        if not isvalid(camera) then return end
+        if not isvalid(camera) or not camera.EnableInHierarchy then return end
 
-        local previousCamera = _CameraService:GetCurrentCameraComponent()
-        if not isvalid(previousCamera) or previousCamera == camera then
-            previousCamera = player.CameraComponent
+        if self._T.cameraConfigured ~= true then
+            local previousCamera = _CameraService:GetCurrentCameraComponent()
+            if not isvalid(previousCamera) or previousCamera == camera then
+                previousCamera = player.CameraComponent
+            end
+            self._T.previousCamera = previousCamera
         end
         self._T.camera = camera
-        self._T.previousCamera = previousCamera
-        local blendTime = _CameraService.TransitionBlendTime
+        self._T.switching = true
+        -- Apply after the native camera is ready, and retain through the render update.
+        _CameraService.TransitionBlendType = CameraBlendType.Cut
         _CameraService.TransitionBlendTime = 0
         _CameraService:SwitchCameraTo(camera)
-        _CameraService.TransitionBlendTime = blendTime
+        self._T.switching = false
         self._T.cameraConfigured = true
         log("[VRF][BattleCamera] manual anchor=" .. anchor.Name .. " zoom=" .. tostring(camera.ZoomRatio)
             .. " offset=" .. tostring(camera.CameraOffset.x) .. "," .. tostring(camera.CameraOffset.y))
@@ -78,7 +116,11 @@ script BattleFixedCamera extends Component
         if self._T.cameraConfigured ~= true then return end
         local currentCamera = _CameraService:GetCurrentCameraComponent()
         local player = _UserService.LocalPlayer
-        if not isvalid(currentCamera) or currentCamera == self._T.camera then
+        local destination = isvalid(player) and player.CurrentMap or nil
+        local nextControl = isvalid(destination) and destination:GetComponent("script.BattleFixedCamera") or nil
+        if isvalid(nextControl) and nextControl ~= self and nextControl.Enable then
+            nextControl:TryConfigureCamera()
+        elseif not isvalid(currentCamera) or currentCamera == self._T.camera then
             ---@type CameraComponent
             local previousCamera = self._T.previousCamera
             if isvalid(player) then
@@ -86,11 +128,8 @@ script BattleFixedCamera extends Component
                     previousCamera = player.CameraComponent
                 end
             end
-            if isvalid(previousCamera) then
-                local blendTime = _CameraService.TransitionBlendTime
-                _CameraService.TransitionBlendTime = 0
+            if isvalid(previousCamera) and previousCamera.EnableInHierarchy then
                 _CameraService:SwitchCameraTo(previousCamera)
-                _CameraService.TransitionBlendTime = blendTime
                 log("[VRF][BattleCamera] manual camera restored")
             end
         end

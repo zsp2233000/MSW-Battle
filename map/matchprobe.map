@@ -16,7 +16,7 @@
       {
         "id": "054bc469-6c77-4581-93d5-a36f05ce67a4",
         "path": "/maps/matchprobe",
-        "componentNames": "MOD.Core.MapComponent,MOD.Core.FootholdComponent,script.BattleSession",
+        "componentNames": "MOD.Core.MapComponent,MOD.Core.FootholdComponent,script.BattleSession,script.BattleFixedCamera",
         "jsonString": {
           "name": "matchprobe",
           "path": "/maps/matchprobe",
@@ -48,6 +48,10 @@
               "ArenaMinY": -5,
               "ArenaMaxY": 3,
               "@type": "script.BattleSession"
+            },
+            {
+              "Enable": true,
+              "@type": "script.BattleFixedCamera"
             }
           ],
           "@version": 1

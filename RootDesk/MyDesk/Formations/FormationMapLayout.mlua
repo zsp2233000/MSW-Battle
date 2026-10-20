@@ -23,10 +23,21 @@ script FormationMapLayout extends Logic
         if #positions == 0 then return nil end
         local minX, maxX = math.huge, -math.huge
         local minY, maxY = math.huge, -math.huge
+        local walkableMinX, walkableMaxX = math.huge, -math.huge
         for _, cell in ipairs(positions) do
             local centre = tiles:ToWorldPosition(cell)
             minX, maxX = math.min(minX, centre.x), math.max(maxX, centre.x)
             minY, maxY = math.min(minY, centre.y), math.max(maxY, centre.y)
+            local tile = tiles:GetTile(cell)
+            if tile ~= nil and not tile.IsCollidable then
+                walkableMinX = math.min(walkableMinX, centre.x)
+                walkableMaxX = math.max(walkableMaxX, centre.x)
+            end
+        end
+        -- Wall margins need not be symmetric around the authored fighting area.
+        if walkableMinX <= walkableMaxX then
+            self._T.battleMirrorXSum = walkableMinX + walkableMaxX
+            log("[VRF][FormationLayout] battle mirror centre x=" .. tostring(self._T.battleMirrorXSum * 0.5))
         end
         local half = tiles.GridSize * 0.5
         self._T.bounds = { minX = minX - half.x, maxX = maxX + half.x, minY = minY - half.y, maxY = maxY + half.y }
@@ -48,10 +59,10 @@ script FormationMapLayout extends Logic
     end
 
     method any BattlePosition(number x, number y, boolean away)
-        -- Preserve the home preview exactly; mirror the opponent across the standard terrain's centre.
+        -- Preserve home coordinates; reflect away positions across the walkable battlefield's centre.
         if not self:Contains(x, y) then return nil end
-        local bounds = self:Bounds()
-        local mappedX = away and (bounds.minX + bounds.maxX - x) or x
+        if away and self._T.battleMirrorXSum == nil then return nil end
+        local mappedX = away and (self._T.battleMirrorXSum - x) or x
         if not self:Contains(mappedX, y) then return nil end
         return Vector3(mappedX, y, 0)
     end

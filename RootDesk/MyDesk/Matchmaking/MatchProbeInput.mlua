@@ -4,6 +4,7 @@ script MatchProbeInput extends Logic
     property Entity root = "e81b5c52-278b-4bd8-95ca-59375028073f"
     property Entity status = "d5a3a2c6-453c-478a-a20e-3fc77c3156d6"
     property Entity action = "83089044-fcbf-4bec-9244-f766324f746c"
+    property Entity exitConfirmation = "363cab85-3a2b-4e8f-9e67-35ffb5032083"
     property string State = "IDLE"
     property string Message = ""
     property number Started = 0
@@ -32,7 +33,8 @@ script MatchProbeInput extends Logic
             log("[VRF][MatchUI] visible matchmaking button connected")
         end
         local map = player.CurrentMapName
-        self.root:SetEnable(map == "formationlobby" or map == "formationsim" or map == "matchprobe")
+        local confirming = isvalid(self.exitConfirmation) and self.exitConfirmation.Enable
+        self.root:SetEnable((map == "formationlobby" or map == "formationsim" or map == "matchprobe") and not confirming)
         if player.CurrentMapName ~= self._T.map then
             self._T.map = player.CurrentMapName
             local panel = self.root:GetChildByName("Match", false)

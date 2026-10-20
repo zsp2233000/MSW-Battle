@@ -1,0 +1,72 @@
+@Logic
+script BattleCameraEntry extends Logic
+
+    @ExecSpace("ClientOnly")
+    method void OnBeginPlay()
+        -- Keep native camera transitions as cuts until client teardown; rendering applies them after Lua returns.
+        self._T.originalBlendTime = _CameraService.TransitionBlendTime
+        self._T.originalBlendType = _CameraService.TransitionBlendType
+        _CameraService.TransitionBlendType = CameraBlendType.Cut
+        _CameraService.TransitionBlendTime = 0
+        log("[VRF][BattleCamera] transition mode=Cut blendTime=0")
+        -- Observe the local player across map lifetimes, before destination components begin playback.
+        self._T.player = nil
+        self._T.mapChanged = nil
+        self:WatchLocalPlayer()
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnUpdate(number delta)
+        -- Subscribe once when login or an instance transfer supplies a replacement local player.
+        self:WatchLocalPlayer()
+    end
+
+    @ExecSpace("ClientOnly")
+    method void WatchLocalPlayer()
+        -- Own one entry subscription and release the old player before replacing it.
+        local player = _UserService.LocalPlayer
+        if self._T.player == player then return end
+        if isvalid(self._T.player) and self._T.mapChanged ~= nil then
+            self._T.player:DisconnectEvent(EntityMapChangedEvent, self._T.mapChanged)
+        end
+        self._T.player = player
+        self._T.mapChanged = nil
+        if isvalid(player) then
+            self._T.mapChanged = player:ConnectEvent(EntityMapChangedEvent, function(event) self:EnterMap(event.NewMap) end)
+            self:EnterMap(player.CurrentMap)
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void EnterMap(Entity map)
+        -- Activate the destination's authored camera inside the native entry/switch event.
+        local player = _UserService.LocalPlayer
+        if not isvalid(player) or not isvalid(map) or player.CurrentMap ~= map then return end
+        local control = map:GetComponent("script.BattleFixedCamera")
+        if not isvalid(control) or not control.Enable then return end
+        control:TryConfigureCamera()
+        log("[VRF][BattleCamera] entry event routed map=" .. map.Name)
+    end
+
+    @ExecSpace("ClientOnly")
+    @EventSender("Service", "CameraService")
+    handler HandleCameraSwitchEvent(CameraSwitchEvent event)
+        -- Correct a late automatic player-camera selection in the same event dispatch.
+        local player = _UserService.LocalPlayer
+        if isvalid(player) and isvalid(event.SwitchedComponent) and event.SwitchedComponent.Entity == player then self:EnterMap(player.CurrentMap) end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnEndPlay()
+        -- Entry subscriptions cannot survive the owning client session.
+        if isvalid(self._T.player) and self._T.mapChanged ~= nil then
+            self._T.player:DisconnectEvent(EntityMapChangedEvent, self._T.mapChanged)
+        end
+        self._T.player = nil
+        self._T.mapChanged = nil
+        if self._T.originalBlendTime ~= nil then
+            _CameraService.TransitionBlendTime = self._T.originalBlendTime
+            _CameraService.TransitionBlendType = self._T.originalBlendType
+        end
+    end
+end
