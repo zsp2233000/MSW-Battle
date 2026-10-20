@@ -262,11 +262,11 @@ script FormationService extends Logic
                     draft.savedVersion = draftVersion
                     draft.saveState = draft.savedVersion == draft.version and "SAVED" or "UNSAVED"
                 end
-                record.message = description .. "成功；已確認版本 " .. tostring(doc.revision)
+                record.message = description .. "成功"
                 if draft.savedVersion ~= draft.version then record.message = record.message .. "；該組草稿仍未保存" end
             else
                 if kind == "SAVE" then draft.saveState = "FAILED" end
-                record.message = description .. "失敗（代碼 " .. tostring(code) .. "），保留原出戰選擇、保存版本及所有草稿"
+                record.message = description .. "失敗（代碼 " .. tostring(code) .. "），保留已保存編隊、原出戰選擇與所有草稿"
                 -- A timeout may have committed. Reload before another write rather than blind retry.
                 record.loadState = "CONFLICT"
                 record.message = record.message .. "，先重試讀取"
