@@ -10,6 +10,8 @@ script MatchProbeInput extends Logic
     property number Started = 0
     property integer Players = 0
     property boolean Busy = false
+    property string FixedSummary = ""
+    property string Attempt = ""
 
     @ExecSpace("ClientOnly")
     method void OnBeginPlay()
@@ -21,6 +23,11 @@ script MatchProbeInput extends Logic
         self.Started = 0
         self.Players = 0
         self.Busy = false
+        self.FixedSummary = ""
+        self.Attempt = ""
+        self._T.sequences = {}
+        self._T.pending = false
+        self._T.pendingSeconds = 0
     end
 
     @ExecSpace("ClientOnly")
@@ -33,6 +40,13 @@ script MatchProbeInput extends Logic
             log("[VRF][MatchUI] visible matchmaking button connected")
         end
         local map = player.CurrentMapName
+        if self._T.pending then
+            self._T.pendingSeconds = self._T.pendingSeconds + delta
+            if self._T.pendingSeconds >= 10 then
+                self._T.pendingSeconds = 0
+                _MatchProbe:RequestStatus()
+            end
+        end
         local confirming = isvalid(self.exitConfirmation) and self.exitConfirmation.Enable
         self.root:SetEnable((map == "formationlobby" or map == "formationsim" or map == "matchprobe") and not confirming)
         if player.CurrentMapName ~= self._T.map then
@@ -47,15 +61,19 @@ script MatchProbeInput extends Logic
                 panel.UITransformComponent.Pivot = anchor
                 panel.UITransformComponent.anchoredPosition = editor and Vector2(-24, -154) or Vector2(-24, 24)
             end
-            self.State = "IDLE"
             _MatchProbe:RequestStatus()
         end
         self:Render()
     end
 
     @ExecSpace("ClientOnly")
-    method void Observe(string state, string message, number started, integer count, boolean busy)
+    method void Observe(string state, string message, number started, integer count, boolean busy, string summary, string attempt, string sourceRoom, integer sequence)
         -- Retain server observations beyond a short toast lifetime.
+        if sequence <= (self._T.sequences[sourceRoom] or 0) then return end
+        self._T.sequences[sourceRoom] = sequence
+        self.FixedSummary = summary
+        self.Attempt = attempt
+        self._T.pending = false
         self.State = state
         self.Message = message
         self.Started = started
@@ -66,11 +84,14 @@ script MatchProbeInput extends Logic
 
     @ExecSpace("ClientOnly")
     method void Click()
-        -- Ordinary interaction is available through this authored button without keyboard shortcuts.
+        -- Identify each start with a GUID and each cancellation with the observed game attempt.
+        if self.Busy or self._T.pending or self.State == "BATTLE" then return end
+        self._T.pending = true
+        self._T.pendingSeconds = 0
         if self.Message == "READINESS_FAILED" then
             _MatchProbe:RequestStatus()
-        elseif self.State == "QUEUED" or self.State == "SAVING" then
-            _MatchProbe:RequestCancel()
+        elseif self.State == "QUEUED" or self.State == "SAVING" or self.State == "RENEWING" or self.State == "QUEUE_ERROR" or self.State == "CANCELLED" then
+            _MatchProbe:RequestCancel(self.Attempt)
         elseif self.State == "IN_ROOM" or self.State == "TRANSFER" or self.State == "COMMITTING" or self.State == "RETURNING" then
             _MatchProbe:RequestReturn()
         elseif self.State == "ROOM_MISMATCH" then
@@ -80,8 +101,9 @@ script MatchProbeInput extends Logic
         elseif self.State == "BATTLE" then
             return
         elseif self.State ~= "RETURNING" then
-            _MatchProbe:RequestQueue()
+            _MatchProbe:RequestQueue(_UtilLogic:NewGuid())
         end
+        self:Render()
     end
 
     @ExecSpace("ClientOnly")
@@ -94,6 +116,15 @@ script MatchProbeInput extends Logic
         if self.State == "QUEUED" then
             text = "正在尋找對手 · 已等候 " .. tostring(elapsed) .. " 秒"
             label = "取消配對"
+        elseif self.State == "RENEWING" then
+            text = "服務請求已到期，正在續候 · 累計 " .. tostring(elapsed) .. " 秒"
+            label = "取消配對"
+        elseif self.State == "QUEUE_ERROR" then
+            text = "配對服務失效或回覆異常，已停止等候；請取消後重試"
+            label = "清理並取消"
+        elseif self.State == "CANCELLED" then
+            text = "正在確認取消；若服務或清理失敗可重試"
+            label = "重試取消"
         elseif self.State == "SAVING" then
             text = "已找到對手，正在封存編隊與草稿"
             label = "取消配對"
@@ -130,11 +161,16 @@ script MatchProbeInput extends Logic
         if self.Message == "HANDOFF_SAVE_FAILED" or self.Message == "HANDOFF_SEAL_FAILED" then text = "入場資料保存失敗，可取消入場後重試" end
         if self.Message == "READINESS_FAILED" then text = "連線通知失敗，請重試入場" label = "重試入場" end
         if self.Message == "RESTORE_RETRY_REQUIRED" then text = "草稿尚未完成還原，請重試返回" end
-        if self.Message == "RETURNED" or self.Message == "CANCELLED" then text = "已返回或取消，可以重新開始配對" end
+        if self.State == "IDLE" and (self.Message == "RETURNED" or self.Message == "CANCELLED") then text = "已返回或取消，可以重新開始配對" end
         local mode = Environment:IsMakerPlay() and "本機配對" or "線上配對"
         self.status.TextGUIRendererComponent.Text = mode .. "\n" .. text
+        local summary = self.root:GetChildByName("FixedSummary", true)
+        if isvalid(summary) then
+            local fixed = self.FixedSummary ~= "" and self.FixedSummary or "尚未開始"
+            summary.TextGUIRendererComponent.Text = "本局編隊：" .. fixed .. "\n保存與切換出戰組僅供後續配對使用"
+        end
         self.action.TextGUIRendererComponent.Text = label
-        self.action.ButtonComponent.Enable = self.State ~= "BATTLE" and not (self.Busy and (self.State == "COMMITTING" or self.State == "RETURNING"))
+        self.action.ButtonComponent.Enable = self.State ~= "BATTLE" and not self.Busy and not self._T.pending
     end
 
     @ExecSpace("ClientOnly")

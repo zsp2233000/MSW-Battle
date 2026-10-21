@@ -482,7 +482,7 @@ script FormationLobby extends Logic
         local summary = "尚無預存編隊"
         if saved ~= nil then
             summary = "編輯第 " .. tostring(editSlot) .. " 組 / 已保存 " .. tostring(#saved.slots[tostring(editSlot)].units) .. " / 6"
-                .. "    出戰：" .. (saved.activeSlot > 0 and ("第 " .. tostring(saved.activeSlot) .. " 組") or "尚未選定")
+                .. "    後續出戰：" .. (saved.activeSlot > 0 and ("第 " .. tostring(saved.activeSlot) .. " 組") or "尚未選定")
         end
         self:SetText("Lobby/Summary", summary .. "\n草稿：" .. tostring(#units) .. " / 6（本次登入保留）")
         self:SetText("Editor/Summary", summary)

@@ -77,7 +77,7 @@ script FormationService extends Logic
     method void RequestRetryLoad()
         -- Explicitly reconcile failed or conflicting reads while retaining an existing login draft.
         local record = self:GetSession(senderUserId)
-        if record == nil or record.pending or record.loadState == "LOADING" then return end
+        if record == nil or record.transferLocked or record.pending or record.loadState == "LOADING" then return end
         self:Load(record)
     end
 
@@ -301,6 +301,8 @@ script FormationService extends Logic
         if destination ~= "formationlobby" and destination ~= "formationsim" and destination ~= "map01" then return end
         local player = _UserService:GetUserEntityByUserId(senderUserId)
         if not isvalid(player) then return end
+        local record = self:GetSession(senderUserId)
+        if record ~= nil and record.transferLocked then self:Publish(record) return end
         if player.CurrentMapName == "matchprobe" then return end
         if destination ~= "formationsim" then
             local controller = player:GetComponent("PlayerControllerComponent")
@@ -309,7 +311,6 @@ script FormationService extends Logic
             if isvalid(movement) then movement:Stop() end
         end
         _TeleportService:TeleportToMapPosition(player, Vector3(0, 0, 0), destination)
-        local record = self:GetSession(senderUserId)
         if record ~= nil then self:Publish(record) end
     end
 
@@ -333,7 +334,7 @@ script FormationService extends Logic
     method any CaptureTransfer(string forUserId)
         -- Carry retained drafts even after a failed save; a queue owner supplies its already frozen roster.
         local record = self:GetSession(forUserId)
-        if record == nil or not record.initialized or record.pending then return nil end
+        if record == nil or not record.initialized or record.pending or record.loadState == "LOADING" then return nil end
         local drafts = {}
         for index = 1, 5 do
             local draft = record.drafts[tostring(index)]
@@ -395,6 +396,8 @@ script FormationService extends Logic
     method void RequestSimulationSpectator()
         -- Position and lock only the authenticated sender while they are on the formation simulation map.
         local player = _UserService:GetUserEntityByUserId(senderUserId)
+        local record = self:GetSession(senderUserId)
+        if record ~= nil and record.transferLocked then return end
         local map = _EntityService:GetEntityByPath("/maps/formationsim")
         if not isvalid(player) or not isvalid(map) or player.CurrentMap ~= map then return end
         local controller = player:GetComponent("PlayerControllerComponent")

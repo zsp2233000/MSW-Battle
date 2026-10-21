@@ -22,6 +22,9 @@ script MatchProbe extends Logic
         self._T.recoveryTimers = {}
         self._T.notifyTimers = {}
         self._T.restoredAttempts = {}
+        self._T.queueTimers = {}
+        self._T.presentationSequence = {}
+        self._T.queueCommands = {}
         log("[VRF][MatchProbe] ready enabled=" .. tostring(self.Enabled) .. " room=" .. _RoomService.RoomKey)
     end
 
@@ -80,15 +83,18 @@ script MatchProbe extends Logic
                 if state == "CONFIG_ERROR" then state = "ENTRY_FAILED" end
             end
         end
-        self:ReceiveState(state, message, started, count, _RoomService.RoomKey, self._T.busy[userId] == true, userId)
+        local summary = ticket ~= nil and ticket.data.summary or ""
+        local attempt = ticket ~= nil and ticket.data.attempt or ""
+        self._T.presentationSequence[userId] = (self._T.presentationSequence[userId] or 0) + 1
+        self:ReceiveState(state, message, started, count, _RoomService.RoomKey, self._T.busy[userId] == true, summary, attempt, _WorldInstanceService.WorldInstanceId .. ":" .. _RoomService.RoomKey, self._T.presentationSequence[userId], userId)
     end
 
     @ExecSpace("Client")
-    method void ReceiveState(string state, string message, number started, integer count, string sourceRoom, boolean busy)
+    method void ReceiveState(string state, string message, number started, integer count, string sourceRoom, boolean busy, string summary, string attempt, string sequenceKey, integer sequence)
         -- Deliver state and in-flight ownership to the visible button controller.
         local player = _UserService.LocalPlayer
         if isvalid(player) and (player.CurrentMapName == "matchprobe") ~= (sourceRoom ~= "__main__") then return end
-        _MatchProbeInput:Observe(state, message, started, count, busy)
+        _MatchProbeInput:Observe(state, message, started, count, busy, summary, attempt, sequenceKey, sequence)
     end
 
     @ExecSpace("ServerOnly")
@@ -152,12 +158,18 @@ script MatchProbe extends Logic
     @ExecSpace("ServerOnly")
     method boolean Belongs(table data, table matched)
         -- A stale successful notification cannot authorize another attempt or a cancelled ticket.
-        return (data.profile == matched.home and data.attempt == matched.homeAttempt) or (data.profile == matched.away and data.attempt == matched.awayAttempt)
+        local requestId = data.requestId or data.attempt
+        return (data.profile == matched.home and requestId == matched.homeAttempt) or (data.profile == matched.away and requestId == matched.awayAttempt)
     end
 
     @ExecSpace("Server")
-    method void RequestQueue()
+    method void RequestQueue(string commandId)
         -- Freeze the valid saved active formation; the test never supplies client-authored opponents or stats.
+        if #commandId ~= 32 or not string.match(commandId, "^%x+$") then return end
+        local commands = self._T.queueCommands[senderUserId] or {}
+        if commands[commandId] then self:PublishState(senderUserId, "DUPLICATE_START") return end
+        commands[commandId] = true
+        self._T.queueCommands[senderUserId] = commands
         self:QueueForUser(senderUserId)
     end
 
@@ -180,10 +192,15 @@ script MatchProbe extends Logic
         end
         if ticket.data ~= nil and ticket.data.state ~= "RETURNED" and ticket.data.state ~= "CANCELLED" then
             self._T.busy[userId] = nil
+            self:Recover(userId)
             self:Report(userId, "EXISTING_TICKET_USE_STATUS_OR_CANCEL")
             return
         end
-        ticket.data = { schema = 1, profile = profile, attempt = _UtilLogic:NewGuid(), source = _WorldInstanceService.WorldInstanceId, adapter = Environment:IsMakerPlay() and "local" or "native", state = "QUEUED", transfer = transfer, started = DateTime.UtcNow.Elapsed, expires = 0, matchKey = "" }
+        local fixed = _HttpService:JSONDecode(transfer.fixed)
+        local saved = _HttpService:JSONDecode(transfer.saved)
+        local slot = saved.slots[tostring(saved.activeSlot)]
+        local summary = "第 " .. tostring(saved.activeSlot) .. " 組 · 版本 " .. tostring(slot.revision) .. " · " .. tostring(#fixed) .. " / 6"
+        ticket.data = { schema = 1, profile = profile, attempt = _UtilLogic:NewGuid(), requestId = _UtilLogic:NewGuid(), summary = summary, source = _WorldInstanceService.WorldInstanceId, adapter = Environment:IsMakerPlay() and "local" or "native", state = "QUEUED", transfer = transfer, started = DateTime.UtcNow.Elapsed, expires = 0, matchKey = "" }
         self._T.records[userId] = ticket
         if not self:Store(ticket) then
             self._T.records[userId] = nil
@@ -198,18 +215,65 @@ script MatchProbe extends Logic
             self:TryLocalMatch()
             return
         end
-        local extras = _HttpService:JSONEncode({ schema = 1, attempt = ticket.data.attempt, source = ticket.data.source })
-        self:Report(userId, "QUEUED source=" .. ticket.data.source)
-        local code = _MatchmakingService:RequestMatchingAndWait(self.LeaderboardId, self.QueueName, profile, extras, function(info)
-            if self._T.records[userId] ~= ticket or ticket.data.state ~= "QUEUED" then return end
-            if info == nil then self:Report(userId, "CALLBACK_MISSING_RESULT") return end
-            if info.ResultCode ~= MatchmakingResultCode.Ok then
-                self:Report(userId, "CALLBACK code=" .. tostring(info.ResultCode) .. "; cancel before retry")
-                return
-            end
-            self:Matched(userId, ticket)
+        self:SubmitQueue(userId, ticket)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void SubmitQueue(string userId, table ticket)
+        -- Own one native registration until it completes; map changes never submit a second request.
+        if self._T.records[userId] ~= ticket or ticket.data.state ~= "QUEUED" then return end
+        if Environment:IsMakerPlay() then
+            self:Report(userId, "QUEUED_LOCAL")
+            self:TryLocalMatch()
+            return
+        end
+        local requestId = ticket.data.requestId
+        local extras = _HttpService:JSONEncode({ schema = 1, attempt = requestId, source = ticket.data.source })
+        ticket.submitting = true
+        self:Report(userId, "SUBMITTING")
+        local code = _MatchmakingService:RequestMatchingAndWait(self.LeaderboardId, self.QueueName, ticket.data.profile, extras, function(info)
+            local result = info ~= nil and tostring(info.ResultCode) or "MISSING"
+            self:QueueResult(userId, ticket, requestId, result)
         end)
-        self:Report(userId, "REQUEST code=" .. tostring(code))
+        ticket.submitting = false
+        if self._T.records[userId] ~= ticket or ticket.data.requestId ~= requestId or ticket.data.state ~= "QUEUED" then return end
+        if code ~= MatchmakingResultCode.Ok then
+            self:QueueResult(userId, ticket, requestId, tostring(code))
+        else
+            self:Report(userId, "QUEUED")
+        end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void QueueResult(string userId, table ticket, string requestId, string result)
+        -- Ignore stale generations and duplicate completion; expiry renews the same frozen game attempt.
+        if self._T.records[userId] ~= ticket or ticket.data.requestId ~= requestId or ticket.data.state ~= "QUEUED" then return end
+        if result == tostring(MatchmakingResultCode.Ok) or result == tostring(MatchmakingResultCode.AlreadyMatched) then
+            self:Matched(userId, ticket)
+        elseif result == tostring(MatchmakingResultCode.MatchingExpired) or result == tostring(MatchmakingResultCode.NotMatched)
+            or result == tostring(MatchmakingResultCode.NotMatching) or result == tostring(MatchmakingResultCode.RequestNotFound) then
+            ticket.data.state = "RENEWING"
+            self:Report(userId, "QUEUE_RENEWING")
+            self._T.queueTimers[userId] = _TimerService:SetTimerOnce(function()
+                if self._T.records[userId] ~= ticket or ticket.data.state ~= "RENEWING" then return end
+                while ticket.submitting or self._T.busy[userId] do
+                    wait(0.1)
+                    if self._T.records[userId] ~= ticket or ticket.data.state ~= "RENEWING" then return end
+                end
+                self._T.busy[userId] = true
+                self:PublishState(userId, "QUEUE_RENEWING")
+                ticket.data.requestId = _UtilLogic:NewGuid()
+                local stored = self:Store(ticket)
+                self._T.busy[userId] = nil
+                if not stored then ticket.data.state = "QUEUE_ERROR" self:Report(userId, "QUEUE_RENEW_SAVE_FAILED") return end
+                ticket.data.state = "QUEUED"
+                log("[VRF][Queue] renewed; original clock and fixed formation retained")
+                self:SubmitQueue(userId, ticket)
+            end, 1)
+        else
+            ticket.data.state = "QUEUE_ERROR"
+            self:Report(userId, "QUEUE_SERVICE_FAILED code=" .. result)
+        end
     end
 
     @ExecSpace("ServerOnly")
@@ -235,7 +299,7 @@ script MatchProbe extends Logic
             self:Report(secondId, "DUPLICATE_PROFILE")
             return
         end
-        local matched = { key = "local-" .. _UtilLogic:NewGuid(), home = first.data.profile, away = second.data.profile, homeAttempt = first.data.attempt, awayAttempt = second.data.attempt, homeSource = first.data.source, awaySource = second.data.source, differentSources = false }
+        local matched = { key = "local-" .. _UtilLogic:NewGuid(), home = first.data.profile, away = second.data.profile, homeAttempt = first.data.requestId or first.data.attempt, awayAttempt = second.data.requestId or second.data.attempt, homeSource = first.data.source, awaySource = second.data.source, differentSources = false }
         self._T.localMatches[first.data.profile] = matched
         self._T.localMatches[second.data.profile] = matched
         self:Matched(firstId, first)
@@ -246,10 +310,12 @@ script MatchProbe extends Logic
     @ExecSpace("ServerOnly")
     method void Matched(string userId, table ticket)
         -- Seal the handoff before warp, retaining the queue-time fixed roster and the latest drafts.
+        if self._T.records[userId] ~= ticket or ticket.data.state ~= "QUEUED" then return end
         ticket.data.state = "SAVING"
         self:PublishState(userId, "MATCHED")
         local matched = self:Match(ticket.data.profile)
-        if ticket.data.state ~= "SAVING" or matched == nil or not self:Belongs(ticket.data, matched) then return end
+        if self._T.records[userId] ~= ticket or ticket.data.state ~= "SAVING" then return end
+        if matched == nil or not self:Belongs(ticket.data, matched) then ticket.data.state = "QUEUE_ERROR" self:Report(userId, "QUEUE_RESULT_INVALID") return end
         if self.SaveDelaySeconds > 0 then wait(math.min(120, self.SaveDelaySeconds)) end
         if ticket.data.state ~= "SAVING" then return end
         local latest = _FormationService:SealTransfer(userId)
@@ -262,7 +328,7 @@ script MatchProbe extends Logic
         end
         if ticket.data.state ~= "SAVING" then return end
         if latest == nil then
-            ticket.data.state = "QUEUED"
+            ticket.data.state = "QUEUE_ERROR"
             self:Report(userId, "CAPTURE_NOT_READY; cancel and retry")
             return
         end
@@ -339,8 +405,10 @@ script MatchProbe extends Logic
     end
 
     @ExecSpace("Server")
-    method void RequestCancel()
+    method void RequestCancel(string expectedAttempt)
         -- Invalidate the local callback before yielding to native cancellation or storage.
+        local ticket = self._T.records[senderUserId]
+        if ticket == nil or ticket.data.attempt ~= expectedAttempt then return end
         self:CancelForUser(senderUserId)
     end
 
@@ -357,17 +425,20 @@ script MatchProbe extends Logic
         end
         if ticket == nil or ticket.data == nil then return end
         local state = ticket.data.state
-        if state ~= "QUEUED" and state ~= "SAVING" and state ~= "CANCELLED" then self:Report(userId, "COMMITTED_USE_RETURN_OR_STATUS") return end
+        if state ~= "QUEUED" and state ~= "RENEWING" and state ~= "QUEUE_ERROR" and state ~= "SAVING" and state ~= "CANCELLED" then self:Report(userId, "COMMITTED_USE_RETURN_OR_STATUS") return end
         ticket.data.state = "CANCELLED"
         ticket.data.transfer = nil
         self._T.busy[userId] = true
+        self:PublishState(userId, "CANCELLING")
+        while ticket.submitting do wait(0.1) end
         local code = MatchmakingResultCode.Ok
         if not Environment:IsMakerPlay() then code = _MatchmakingService:CancelMatchingAndWait(ticket.data.profile) end
         local stored = self:Store(ticket)
         self._T.busy[userId] = nil
-        if stored and (code == MatchmakingResultCode.Ok or code == MatchmakingResultCode.NotMatching or code == MatchmakingResultCode.AlreadyMatched or code == MatchmakingResultCode.RequestNotFound) then self._T.records[userId] = nil end
+        if stored and (code == MatchmakingResultCode.Ok or code == MatchmakingResultCode.NotMatching or code == MatchmakingResultCode.AlreadyMatched or code == MatchmakingResultCode.RequestNotFound or code == MatchmakingResultCode.MatchingExpired) then self._T.records[userId] = nil end
         self:Report(userId, "CANCEL code=" .. tostring(code) .. " tombstone=" .. tostring(stored))
         _FormationService:ReleaseTransfer(userId)
+        self:PublishState(userId, "CANCELLED")
     end
 
     @ExecSpace("ServerOnly")
@@ -377,7 +448,7 @@ script MatchProbe extends Logic
         if player == nil then return end
         if self._T.busy[userId] then self._T.pendingRecover[userId] = true return end
         local current = self._T.records[userId]
-        if current ~= nil and (current.data.state == "QUEUED" or current.data.state == "SAVING") then
+        if current ~= nil and (current.data.state == "QUEUED" or current.data.state == "SAVING" or current.data.state == "RENEWING" or current.data.state == "QUEUE_ERROR") then
             local localAdapter = Environment:IsMakerPlay() and (current.data.adapter == "local" or current.data.adapter == nil)
             if not localAdapter then return end
             local activeLocalTicket = false
@@ -403,7 +474,11 @@ script MatchProbe extends Logic
                 return
             end
             self._T.records[userId] = ticket
-            if Environment:IsMakerPlay() and (data.adapter == "local" or data.adapter == nil) and (data.state == "QUEUED" or data.state == "SAVING") then
+            if not Environment:IsMakerPlay() and (data.state == "QUEUED" or data.state == "SAVING" or data.state == "RENEWING" or data.state == "QUEUE_ERROR") then
+                -- A restored reservation has no live callback owner; never present it as a healthy queue.
+                data.state = "QUEUE_ERROR"
+                self:Report(userId, "QUEUE_OWNER_LOST; cancel before retry")
+            elseif Environment:IsMakerPlay() and (data.adapter == "local" or data.adapter == nil) and (data.state == "QUEUED" or data.state == "SAVING" or data.state == "RENEWING" or data.state == "QUEUE_ERROR") then
                 -- A Maker Play restart discards its local FIFO, so stale queue reservations cannot resume.
                 local staleState = data.state
                 local staleTransfer = data.transfer
@@ -529,6 +604,7 @@ script MatchProbe extends Logic
     @EventSender("Service", "UserService")
     handler HandleUserLeaveEvent(UserLeaveEvent event)
         -- Stop outstanding source callbacks on disconnect, preserving committed transfer capsules.
+        self._T.queueCommands[event.UserId] = nil
         local ticket = self._T.records[event.UserId]
         if ticket == nil then return end
         if ticket.data.state == "QUEUED" or ticket.data.state == "SAVING" then
@@ -721,5 +797,6 @@ script MatchProbe extends Logic
         -- Retry timers belong to this room coordinator and cannot survive its teardown.
         for _, timer in pairs(self._T.recoveryTimers or {}) do _TimerService:ClearTimer(timer) end
         for _, timer in ipairs(self._T.notifyTimers or {}) do _TimerService:ClearTimer(timer) end
+        for _, timer in pairs(self._T.queueTimers or {}) do _TimerService:ClearTimer(timer) end
     end
 end
