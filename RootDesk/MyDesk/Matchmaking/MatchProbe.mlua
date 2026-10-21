@@ -86,15 +86,16 @@ script MatchProbe extends Logic
         local summary = ticket ~= nil and ticket.data.summary or ""
         local attempt = ticket ~= nil and ticket.data.attempt or ""
         self._T.presentationSequence[userId] = (self._T.presentationSequence[userId] or 0) + 1
-        self:ReceiveState(state, message, started, count, _RoomService.RoomKey, self._T.busy[userId] == true, summary, attempt, _WorldInstanceService.WorldInstanceId .. ":" .. _RoomService.RoomKey, self._T.presentationSequence[userId], userId)
+        local notice = ticket ~= nil and ticket.data.transfer ~= nil and ticket.data.transfer.autoSaveMessage or ""
+        self:ReceiveState(state, message, started, count, _RoomService.RoomKey, self._T.busy[userId] == true, summary, attempt, _WorldInstanceService.WorldInstanceId .. ":" .. _RoomService.RoomKey, self._T.presentationSequence[userId], notice, userId)
     end
 
     @ExecSpace("Client")
-    method void ReceiveState(string state, string message, number started, integer count, string sourceRoom, boolean busy, string summary, string attempt, string sequenceKey, integer sequence)
+    method void ReceiveState(string state, string message, number started, integer count, string sourceRoom, boolean busy, string summary, string attempt, string sequenceKey, integer sequence, string autoSaveNotice)
         -- Deliver state and in-flight ownership to the visible button controller.
         local player = _UserService.LocalPlayer
         if isvalid(player) and (player.CurrentMapName == "matchprobe") ~= (sourceRoom ~= "__main__") then return end
-        _MatchProbeInput:Observe(state, message, started, count, busy, summary, attempt, sequenceKey, sequence)
+        _MatchProbeInput:Observe(state, message, started, count, busy, summary, attempt, sequenceKey, sequence, autoSaveNotice)
     end
 
     @ExecSpace("ServerOnly")
@@ -120,7 +121,8 @@ script MatchProbe extends Logic
     method boolean Store(table record)
         -- Guard creation and compare subsequent bytes, preventing late callbacks from replacing a new attempt.
         local raw = _HttpService:JSONEncode(record.data)
-        if #raw > 16000 then return false end
+        -- Five full drafts plus confirmation metadata fit below native UpdateAsync's 50 KB limit.
+        if #raw > 48000 then return false end
         local done, result = false, -1
         _FormationStorage:Write(record.data.profile, self.StorageKey, record.raw, raw, function(code)
             result = code
@@ -309,7 +311,7 @@ script MatchProbe extends Logic
 
     @ExecSpace("ServerOnly")
     method void Matched(string userId, table ticket)
-        -- Seal the handoff before warp, retaining the queue-time fixed roster and the latest drafts.
+        -- Confirm the editor save before sealing the handoff; retain the queue-time roster and latest drafts.
         if self._T.records[userId] ~= ticket or ticket.data.state ~= "QUEUED" then return end
         ticket.data.state = "SAVING"
         self:PublishState(userId, "MATCHED")
@@ -318,6 +320,10 @@ script MatchProbe extends Logic
         if matched == nil or not self:Belongs(ticket.data, matched) then ticket.data.state = "QUEUE_ERROR" self:Report(userId, "QUEUE_RESULT_INVALID") return end
         if self.SaveDelaySeconds > 0 then wait(math.min(120, self.SaveDelaySeconds)) end
         if ticket.data.state ~= "SAVING" then return end
+        local autoSaveMessage = _FormationService:AutoSaveForMatch(userId, function()
+            return self._T.records[userId] == ticket and ticket.data.state == "SAVING"
+        end)
+        if self._T.records[userId] ~= ticket or ticket.data.state ~= "SAVING" then return end
         local latest = _FormationService:SealTransfer(userId)
         local remaining = 200
         while latest == nil and remaining > 0 and ticket.data.state == "SAVING" do
@@ -333,6 +339,7 @@ script MatchProbe extends Logic
             return
         end
         latest.fixed = ticket.data.transfer.fixed
+        latest.autoSaveMessage = autoSaveMessage
         ticket.data.transfer = latest
         ticket.data.matchKey = matched.key
         ticket.data.match = matched

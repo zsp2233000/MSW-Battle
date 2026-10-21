@@ -65,8 +65,8 @@ script FormationSchema extends Logic
 
     method table EmptyDocument()
         -- Reserve five stable IDs; an empty account has no active battle formation.
-        local doc = { schema = 1, revision = 0, activeSlot = 0, slots = {} }
-        for index = 1, 5 do doc.slots[tostring(index)] = { id = index, revision = 0, units = {} } end
+        local doc = { schema = 1, revision = 0, activeSlot = 0, slots = {}, writeId = "" }
+        for index = 1, 5 do doc.slots[tostring(index)] = { id = index, revision = 0, units = {}, savedSession = "", savedVersion = -1 } end
         return doc
     end
 
@@ -75,7 +75,9 @@ script FormationSchema extends Logic
         if type(value) ~= "table" or value.schema ~= 1 or type(value.slots) ~= "table" then return nil end
         if not self:IsFinite(value.revision) or value.revision < 0 or value.revision % 1 ~= 0 then return nil end
         if not self:IsFinite(value.activeSlot) or value.activeSlot < 0 or value.activeSlot > 5 or value.activeSlot % 1 ~= 0 then return nil end
+        if value.writeId ~= nil and (type(value.writeId) ~= "string" or (value.writeId ~= "" and (#value.writeId ~= 32 or not string.match(value.writeId, "^%x+$")))) then return nil end
         local doc = self:EmptyDocument()
+        doc.writeId = value.writeId or ""
         doc.revision = value.revision
         doc.activeSlot = value.activeSlot
         local count = 0
@@ -89,7 +91,11 @@ script FormationSchema extends Logic
             if type(slot) ~= "table" or slot.id ~= index or not self:IsFinite(slot.revision) or slot.revision < 0 or slot.revision % 1 ~= 0 then return nil end
             local units = self:SanitizeUnits(slot.units, catalog, true)
             if units == nil then return nil end
-            doc.slots[tostring(index)] = { id = index, revision = slot.revision, units = units }
+            local savedSession = slot.savedSession or ""
+            local savedVersion = slot.savedVersion or -1
+            if type(savedSession) ~= "string" or (savedSession ~= "" and (#savedSession ~= 32 or not string.match(savedSession, "^%x+$"))) then return nil end
+            if not self:IsFinite(savedVersion) or savedVersion < -1 or savedVersion % 1 ~= 0 then return nil end
+            doc.slots[tostring(index)] = { id = index, revision = slot.revision, units = units, savedSession = savedSession, savedVersion = savedVersion }
         end
         if doc.activeSlot > 0 and #doc.slots[tostring(doc.activeSlot)].units == 0 then return nil end
         return doc
@@ -106,10 +112,11 @@ script FormationSchema extends Logic
         -- Preserve all five slots when saving one formation or its independent active selection.
         local copy = self:EmptyDocument()
         copy.revision = doc.revision
+        copy.writeId = doc.writeId or ""
         copy.activeSlot = doc.activeSlot
         for index = 1, 5 do
             local slot = doc.slots[tostring(index)]
-            copy.slots[tostring(index)] = { id = index, revision = slot.revision, units = self:CopyUnits(slot.units) }
+            copy.slots[tostring(index)] = { id = index, revision = slot.revision, units = self:CopyUnits(slot.units), savedSession = slot.savedSession or "", savedVersion = slot.savedVersion or -1 }
         end
         return copy
     end
@@ -122,9 +129,10 @@ script FormationSchema extends Logic
             local units = {}
             for _, unit in ipairs(slot.units) do table.insert(units, _HttpService:JSONEncode(unit)) end
             table.insert(slots, '"' .. tostring(index) .. '":{"id":' .. tostring(index)
-                .. ',"revision":' .. tostring(slot.revision) .. ',"units":[' .. table.concat(units, ",") .. ']}')
+                .. ',"revision":' .. tostring(slot.revision) .. ',"savedSession":"' .. (slot.savedSession or "")
+                .. '","savedVersion":' .. tostring(slot.savedVersion or -1) .. ',"units":[' .. table.concat(units, ",") .. ']}')
         end
-        return '{"schema":1,"revision":' .. tostring(doc.revision) .. ',"activeSlot":' .. tostring(doc.activeSlot)
+        return '{"schema":1,"writeId":"' .. (doc.writeId or "") .. '","revision":' .. tostring(doc.revision) .. ',"activeSlot":' .. tostring(doc.activeSlot)
             .. ',"slots":{' .. table.concat(slots, ",") .. '}}'
     end
 

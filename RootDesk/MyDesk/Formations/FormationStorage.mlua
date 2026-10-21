@@ -2,11 +2,11 @@
 script FormationStorage extends Logic
 
     @ExecSpace("ServerOnly")
-    method string LockName(string profile)
+    method string LockName(string profile, string key)
         -- Hex-encode identity without collisions or shared-memory naming punctuation.
         local parts = { "p" }
         for index = 1, #profile do table.insert(parts, string.format("%02x", string.byte(profile, index))) end
-        return table.concat(parts)
+        return table.concat(parts) .. "_" .. key
     end
 
     @ExecSpace("ServerOnly")
@@ -28,9 +28,9 @@ script FormationStorage extends Logic
     end
 
     @ExecSpace("ServerOnly")
-    method void RetryRelease(string profile)
+    method void RetryRelease(string profile, string key)
         -- Recover a transient cleanup error without deleting or expiring a live writer's guard.
-        local lockName = self:LockName(profile)
+        local lockName = self:LockName(profile, key)
         local release = self._T.releases and self._T.releases[lockName] or nil
         if release ~= nil then self:ReleaseGuard(release.memory, lockName, release.etag) end
     end
@@ -51,9 +51,29 @@ script FormationStorage extends Logic
     end
 
     @ExecSpace("ServerOnly")
+    method void ConfigureMakerSaveResponse(string mode, number delaySeconds)
+        -- Fault only formation acknowledgements; transfer persistence continues through the real boundary.
+        if not Environment:IsMakerPlay() then return end
+        self._T.saveResponse = mode
+        self._T.saveResponseDelay = math.max(0, math.min(15, delaySeconds))
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Schedule(any callback, number delaySeconds)
+        -- Keep delayed boundary work owned by this room, including Maker fault acknowledgements.
+        self._T.timers = self._T.timers or {}
+        local timer = 0
+        timer = _TimerService:SetTimerOnce(function()
+            self._T.timers[timer] = nil
+            callback()
+        end, delaySeconds)
+        self._T.timers[timer] = true
+    end
+
+    @ExecSpace("ServerOnly")
     method void Read(string profile, string key, any complete)
         -- Keep reads event driven and surface an explicit error rather than constructing empty data.
-        self:RetryRelease(profile)
+        self:RetryRelease(profile, key)
         if Environment:IsMakerPlay() and (self._T.readFailures or 0) > 0 then
             self._T.readFailures = self._T.readFailures - 1
             complete(1000004, key, nil)
@@ -61,10 +81,11 @@ script FormationStorage extends Logic
         end
         _DataStorageService:GetUserDataStorage(profile):GetAsync(key, function(code, loadedKey, raw)
             -- A timed-out first creation is safe to release only after its exact bytes are observed.
-            local uncertain = self._T.uncertain and self._T.uncertain[profile] or nil
+            local lockName = self:LockName(profile, key)
+            local uncertain = self._T.uncertain and self._T.uncertain[lockName] or nil
             if uncertain ~= nil and uncertain.key == key and code == 0 and raw == uncertain.raw then
                 self:ReleaseGuard(uncertain.memory, uncertain.lockName, uncertain.etag)
-                self._T.uncertain[profile] = nil
+                self._T.uncertain[lockName] = nil
             end
             complete(code, loadedKey, raw)
         end)
@@ -73,6 +94,18 @@ script FormationStorage extends Logic
     @ExecSpace("ServerOnly")
     method void Write(string profile, string key, string expected, string raw, any complete)
         -- Use native callbacks; a profile's caller retains its write lock throughout any delay.
+        if Environment:IsMakerPlay() and key == _FormationService.StorageKey then
+            local mode = self._T.saveResponse or ""
+            if mode == "SILENT" then return end
+            if mode == "FAIL" then complete(1000001) return end
+            if mode == "LATE" then
+                local notify = complete
+                local responseDelay = self._T.saveResponseDelay or 0
+                complete = function(code)
+                    self:Schedule(function() notify(code) end, responseDelay)
+                end
+            end
+        end
         local delaySeconds = 0
         local fail = false
         if Environment:IsMakerPlay() then
@@ -82,9 +115,15 @@ script FormationStorage extends Logic
         end
         local perform = function()
             if fail then complete(1000004) return end
-            self:RetryRelease(profile)
+            local storage = _DataStorageService:GetUserDataStorage(profile)
+            if expected ~= "" then
+                -- Native CAS fences late writers without a guard that could outlive a missing callback.
+                storage:UpdateAsync(key, expected, raw, function(code, savedKey, value) complete(code) end)
+                return
+            end
+            self:RetryRelease(profile, key)
             local memoryCode, memory = _WorldInstanceService:GetSharedMemory("BattleFormationWrites")
-            local lockName = self:LockName(profile)
+            local lockName = self:LockName(profile, key)
             if memoryCode ~= SharedMemoryResultCode.OK or #lockName > 100 then complete(1000001) return end
             local acquired = memory:CreateVariableAndWait(lockName, "writing")
             if acquired.Code == SharedMemoryResultCode.AlreadyExists then
@@ -95,10 +134,8 @@ script FormationStorage extends Logic
             end
             if acquired.Code ~= SharedMemoryResultCode.OK then complete(1000007) return end
             local etag = acquired.Info.ETag
-            local storage = _DataStorageService:GetUserDataStorage(profile)
-            if expected == "" then
-                -- Creation has no native CAS. Serialize across instances and recheck under ownership.
-                storage:GetAsync(key, function(readCode, loadedKey, current)
+            -- Creation has no native CAS. Serialize across instances and recheck under ownership.
+            storage:GetAsync(key, function(readCode, loadedKey, current)
                     if not (readCode == 1000002 or (readCode == 0 and current == nil)) then
                         self:ReleaseGuard(memory, lockName, etag)
                         complete(readCode == 0 and 2000000 or readCode)
@@ -110,18 +147,18 @@ script FormationStorage extends Logic
                         else
                             -- Never expire an ambiguous unconditional creation and permit a newer write.
                             self._T.uncertain = self._T.uncertain or {}
-                            self._T.uncertain[profile] = { memory = memory, lockName = lockName, etag = etag, key = key, raw = raw }
+                            self._T.uncertain[lockName] = { memory = memory, lockName = lockName, etag = etag, key = key, raw = raw }
                         end
                         complete(code)
                     end)
-                end)
-            else
-                storage:UpdateAsync(key, expected, raw, function(code, savedKey, value)
-                    self:ReleaseGuard(memory, lockName, etag)
-                    complete(code)
-                end)
-            end
+            end)
         end
-        if delaySeconds > 0 then _TimerService:SetTimerOnce(perform, delaySeconds) else perform() end
+        if delaySeconds > 0 then self:Schedule(perform, delaySeconds) else perform() end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void OnEndPlay()
+        -- Release every delayed storage-boundary callback when this room shuts down.
+        for timer, _ in pairs(self._T.timers or {}) do _TimerService:ClearTimer(timer) end
     end
 end

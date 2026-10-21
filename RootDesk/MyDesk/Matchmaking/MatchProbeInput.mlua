@@ -12,6 +12,7 @@ script MatchProbeInput extends Logic
     property boolean Busy = false
     property string FixedSummary = ""
     property string Attempt = ""
+    property string AutoSaveNotice = ""
 
     @ExecSpace("ClientOnly")
     method void OnBeginPlay()
@@ -25,6 +26,7 @@ script MatchProbeInput extends Logic
         self.Busy = false
         self.FixedSummary = ""
         self.Attempt = ""
+        self.AutoSaveNotice = ""
         self._T.sequences = {}
         self._T.pending = false
         self._T.pendingSeconds = 0
@@ -67,10 +69,11 @@ script MatchProbeInput extends Logic
     end
 
     @ExecSpace("ClientOnly")
-    method void Observe(string state, string message, number started, integer count, boolean busy, string summary, string attempt, string sourceRoom, integer sequence)
+    method void Observe(string state, string message, number started, integer count, boolean busy, string summary, string attempt, string sourceRoom, integer sequence, string autoSaveNotice)
         -- Retain server observations beyond a short toast lifetime.
         if sequence <= (self._T.sequences[sourceRoom] or 0) then return end
         self._T.sequences[sourceRoom] = sequence
+        self.AutoSaveNotice = autoSaveNotice or ""
         self.FixedSummary = summary
         self.Attempt = attempt
         self._T.pending = false
@@ -126,7 +129,7 @@ script MatchProbeInput extends Logic
             text = "正在確認取消；若服務或清理失敗可重試"
             label = "重試取消"
         elseif self.State == "SAVING" then
-            text = "已找到對手，正在封存編隊與草稿"
+            text = "已找到對手，正在自動保存目前編輯組與交接草稿"
             label = "取消配對"
         elseif self.State == "COMMITTING" or self.State == "TRANSFER" then
             text = "配對成功，正在進入對局房間"
@@ -164,6 +167,7 @@ script MatchProbeInput extends Logic
         if self.State == "IDLE" and (self.Message == "RETURNED" or self.Message == "CANCELLED") then text = "已返回或取消，可以重新開始配對" end
         local mode = Environment:IsMakerPlay() and "本機配對" or "線上配對"
         self.status.TextGUIRendererComponent.Text = mode .. "\n" .. text
+        if self.AutoSaveNotice ~= "" then self.status.TextGUIRendererComponent.Text = self.status.TextGUIRendererComponent.Text .. "\n" .. self.AutoSaveNotice end
         local summary = self.root:GetChildByName("FixedSummary", true)
         if isvalid(summary) then
             local fixed = self.FixedSummary ~= "" and self.FixedSummary or "尚未開始"
