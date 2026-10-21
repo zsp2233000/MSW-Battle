@@ -1,0 +1,12 @@
+@Component
+script BattlePresentation extends Component
+
+    @Description("Show deployment controls during this map's deployment phase.")
+    property boolean ShowDeploymentUI = false
+
+    @ExecSpace("ClientOnly")
+    method void OnBeginPlay()
+        -- Keep presentation policy on each map, editable in the Maker inspector.
+        log("[VRF][BattlePresentation] map=" .. self.Entity.Name .. " deployment=" .. tostring(self.ShowDeploymentUI))
+    end
+end

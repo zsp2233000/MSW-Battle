@@ -1,0 +1,100 @@
+@Logic
+script BattleUIController extends Logic
+
+    property Entity root = "00bb16a7-f6b2-460b-9f01-bcb5d8a11965"
+    property Entity hud = "5861735e-bf7d-4f58-b4b2-a2d85393af74"
+    property Entity deployment = "7d847e11-5404-42fb-8650-92f19590dbc1"
+    property Entity result = "0ef318f3-194b-4a52-9b1d-62fa14756a5c"
+    property Entity phaseText = "0520e489-e0d2-46a9-9aa7-f2da9cb9943a"
+    property Entity phaseHint = "899225eb-db2f-4d8c-8606-e76f503ae893"
+    property Entity playerCount = "e0503105-2f34-4b5c-9277-4479fe444482"
+    property Entity enemyCount = "74377a90-4118-4205-8354-1545a024002f"
+    property Entity configErrorGroup = "b54bf636-0511-441c-9947-d1a0f3c3fe34"
+
+    @ExecSpace("ClientOnly")
+    method void OnBeginPlay()
+        -- One client owner presents whichever battle map the local player currently occupies.
+        self._T.hudKey = ""
+        self:SetEnabled(self.root, false)
+        self:SetEnabled(self.configErrorGroup, false)
+        log("[VRF][BattlePresentation] UI controller ready")
+    end
+
+    @ExecSpace("ClientOnly")
+    method void SetEnabled(Entity entity, boolean enabled)
+        -- Avoid redundant hierarchy changes while owning all shared panel visibility.
+        if isvalid(entity) and entity.Enable ~= enabled then entity:SetEnable(enabled) end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void SetText(Entity entity, string value)
+        -- Update authored labels only when the visible value changes.
+        if not isvalid(entity) then return end
+        local label = entity.TextGUIRendererComponent
+        if isvalid(label) and label.Text ~= value then label.Text = value end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnUpdate(number delta)
+        -- Follow current-map synchronization, map policy and the local player's battle side.
+        local player = _UserService.LocalPlayer
+        local map = isvalid(player) and player.CurrentMap or nil
+        local session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
+        local presentation = isvalid(map) and map:GetComponent("script.BattlePresentation") or nil
+        local active = isvalid(session)
+        self:SetEnabled(self.root, active)
+        if not active then
+            self:SetEnabled(self.hud, false)
+            self:SetEnabled(self.deployment, false)
+            self:SetEnabled(self.result, false)
+            self:SetEnabled(self.configErrorGroup, false)
+            self._T.hudKey = ""
+            return
+        end
+        local phase = session.Phase
+        local matched = session.RequireMatchedFormations
+        local showDeployment = isvalid(presentation) and presentation.ShowDeploymentUI and phase == "DEPLOYMENT"
+        local poc = not matched and isvalid(map:GetComponent("script.BattleDeploymentInput"))
+        self:SetEnabled(self.hud, phase ~= "CONFIG_ERROR")
+        self:SetEnabled(self.deployment, showDeployment)
+        self:SetEnabled(self.result, poc and phase == "RESULT" and session.Result ~= "")
+        self:SetEnabled(self.configErrorGroup, poc and phase == "CONFIG_ERROR")
+
+        local playerAlive, enemyAlive = session.PlayerAlive, session.EnemyAlive
+        local ready = session.SessionGeneration > 0 and (phase == "DEPLOYMENT" or phase == "BATTLE" or phase == "RESULT")
+        if matched then
+            local profile = isvalid(player.PlayerComponent) and player.PlayerComponent.ProfileCode or ""
+            if profile ~= "" and session.AwayProfile == profile then
+                playerAlive, enemyAlive = enemyAlive, playerAlive
+            elseif profile == "" or session.HomeProfile ~= profile then
+                ready = false
+            end
+        end
+        local own = ready and tostring(playerAlive) or "—"
+        local opponent = ready and tostring(enemyAlive) or "—"
+        local key = map.Name .. ":" .. tostring(session.SessionGeneration) .. ":" .. phase .. ":" .. own .. ":" .. opponent .. ":" .. tostring(showDeployment)
+        if self._T.hudKey == key then return end
+        self._T.hudKey = key
+        local title, hint = "準備中", "等待戰場就緒"
+        if phase == "DEPLOYMENT" then
+            title, hint = "部署階段", "選擇怪物，組成你的編隊"
+        elseif phase == "BATTLE" then
+            title, hint = "戰鬥進行中", "雙方編隊自動交戰"
+        elseif phase == "RESULT" then
+            title, hint = "戰鬥結束", "本次對戰已結算"
+        end
+        self:SetText(self.phaseText, title)
+        self:SetText(self.phaseHint, hint)
+        self:SetText(self.playerCount, own)
+        self:SetText(self.enemyCount, opponent)
+        log("[VRF][BattlePresentation] map=" .. map.Name .. " phase=" .. phase .. " own=" .. own .. " enemy=" .. opponent .. " deployment=" .. tostring(showDeployment))
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnEndPlay()
+        -- Release shared presentation when this client session ends.
+        self:SetEnabled(self.root, false)
+        self:SetEnabled(self.configErrorGroup, false)
+        self._T.hudKey = ""
+    end
+end

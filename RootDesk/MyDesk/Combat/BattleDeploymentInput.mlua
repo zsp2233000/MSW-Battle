@@ -14,13 +14,6 @@ script BattleDeploymentInput extends Component
     property any resultWin = nil
     property any resultLose = nil
     property any resultDraw = nil
-    property Entity deploymentPanel = "7d847e11-5404-42fb-8650-92f19590dbc1"
-    property Entity hudPanel = "5861735e-bf7d-4f58-b4b2-a2d85393af74"
-    property Entity resultPanel = "0ef318f3-194b-4a52-9b1d-62fa14756a5c"
-    property Entity phaseText = "0520e489-e0d2-46a9-9aa7-f2da9cb9943a"
-    property Entity phaseHintText = "899225eb-db2f-4d8c-8606-e76f503ae893"
-    property Entity playerCountText = "e0503105-2f34-4b5c-9277-4479fe444482"
-    property Entity enemyCountText = "74377a90-4118-4205-8354-1545a024002f"
     property Entity deploymentCountText = "e750d0ba-eb3b-41b2-8dc0-fc59a43dd448"
     property Entity selectionText = "a6da5bc2-713c-4834-ab97-227ac9d0e174"
     property Entity resultPlayerText = "506bb73b-00a6-4313-ba14-ba1d3189f3a9"
@@ -99,7 +92,7 @@ script BattleDeploymentInput extends Component
         end
         self:SyncDeploymentControls()
         if not self.observedInMap then return end
-        if not self.optionsReady and self.session.Phase == "DEPLOYMENT" then
+        if not self.optionsReady and self:IsDeploymentEnabled() then
             self.optionsRetryCountdown = self.optionsRetryCountdown - delta
             if self.optionsRetryCountdown <= 0 then
                 self.optionsRetryCountdown = 0.5
@@ -137,9 +130,6 @@ script BattleDeploymentInput extends Component
             end
         end
         self.buttonBindings = {}
-        if isvalid(self.configErrorGroup) then self.configErrorGroup:SetEnable(false) end
-        if isvalid(self.deploymentPanel) then self.deploymentPanel:SetEnable(false) end
-        if isvalid(self.hudPanel) then self.hudPanel:SetEnable(false) end
         self:SetResultEntities("")
         self._T.hudKey = nil
         self._T.portraitFrameSizes = nil
@@ -242,7 +232,7 @@ script BattleDeploymentInput extends Component
     @ExecSpace("ClientOnly")
     method void ShowMonsterOptions(table options, integer generation)
         -- Clone one card per validated MonsterData row and bind its stable ID.
-        if self.optionsReady or not isvalid(self.session) or self.session.Phase ~= "DEPLOYMENT" or generation ~= self.session.SessionGeneration or generation ~= self.observedGeneration or not isvalid(self.optionTemplate) or not isvalid(self.optionContainer) then return end
+        if self.optionsReady or not self:IsDeploymentEnabled() or generation ~= self.session.SessionGeneration or generation ~= self.observedGeneration or not isvalid(self.optionTemplate) or not isvalid(self.optionContainer) then return end
         -- Clone can yield while loading UI assets; reserve this catalog before cloning.
         self.optionsReady = true
         self.optionsBuilding = true
@@ -263,7 +253,7 @@ script BattleDeploymentInput extends Component
         -- The fixed-column ScrollLayoutGroup owns card placement and vertical clipping.
         -- Keep the authored dock position and size stable as the catalog grows.
         for index, option in ipairs(displayOptions) do
-            if buildSerial ~= self._T.optionBuildSerial or not isvalid(self.session) or generation ~= self.session.SessionGeneration then return end
+            if buildSerial ~= self._T.optionBuildSerial or not self:IsDeploymentEnabled() or generation ~= self.session.SessionGeneration then self.optionsReady = false self.optionsBuilding = false return end
             local monsterId = option[1]
             local monsterName = option[2]
             local standRUID = option[3]
@@ -321,7 +311,7 @@ script BattleDeploymentInput extends Component
     method void SetPreviewCardCount(integer count)
         -- Rebuild only the client display; every test card keeps an authoritative MonsterId.
         if not Environment:IsMakerPlay() or count < 0 or count > 60 or self.optionsBuilding or not self.optionsReady then return end
-        if not isvalid(self.session) or self.session.Phase ~= "DEPLOYMENT" then return end
+        if not self:IsDeploymentEnabled() then return end
         if count == self.PreviewCardCount then return end
         local options = self.catalogOptions
         local generation = self.observedGeneration
@@ -345,8 +335,7 @@ script BattleDeploymentInput extends Component
     @ExecSpace("ClientOnly")
     method void SyncPreviewToggle()
         -- Disable the preview toggle while cards are being rebuilt.
-        local ready = self.optionsReady and not self.optionsBuilding and self.observedInMap
-            and isvalid(self.session) and self.session.Phase == "DEPLOYMENT"
+        local ready = self.optionsReady and not self.optionsBuilding and self:IsDeploymentEnabled()
         if isvalid(self.previewToggle) then self.previewToggle.ButtonComponent.Enable = ready end
     end
 
@@ -387,7 +376,7 @@ script BattleDeploymentInput extends Component
     @ExecSpace("ClientOnly")
     method void SelectMonsterCard(string monsterId, Entity glowEntity)
         -- Move the persistent selection glow to the card carrying this MonsterId.
-        if not isvalid(self.session) or self.session.Phase ~= "DEPLOYMENT" then return end
+        if not self:IsDeploymentEnabled() then return end
         if not isvalid(glowEntity) then return end
         self.selectedMonsterId = monsterId
         for _, card in ipairs(self.optionCards) do
@@ -408,26 +397,32 @@ script BattleDeploymentInput extends Component
     @ExecSpace("ClientOnly")
     method void HandleStartButton()
         -- Ask the server to start only while deployment is open.
-        if isvalid(self.session) and self.session.Phase == "DEPLOYMENT" and self.session.PlayerAlive > 0 then self.session:RequestStartBattle() end
+        if self:IsDeploymentEnabled() and self.session.PlayerAlive > 0 then self.session:RequestStartBattle() end
+    end
+
+    @ExecSpace("ClientOnly")
+    method boolean IsDeploymentEnabled()
+        -- Gate POC inputs with the same map policy used by the shared presentation controller.
+        local player = _UserService.LocalPlayer
+        if not isvalid(player) or player.CurrentMap ~= self.Entity.CurrentMap or not isvalid(self.session) then return false end
+        local presentation = self.Entity:GetComponent("script.BattlePresentation")
+        return isvalid(presentation) and presentation.ShowDeploymentUI and self.session.Phase == "DEPLOYMENT"
     end
 
     @ExecSpace("ClientOnly")
     method void SyncDeploymentControls()
-        -- Hide selection and start controls as soon as the synchronized phase leaves deployment.
+        -- Track this map's phase and policy; BattleUIController alone owns shared panel visibility.
         if not isvalid(self.session) then return end
         local phase = self.session.Phase
         local player = _UserService.LocalPlayer
         local inMap = isvalid(player) and player.CurrentMap == self.Entity.CurrentMap
-        if phase == self.observedPhase and inMap == self.observedInMap then return end
+        local enabled = self:IsDeploymentEnabled()
+        if phase == self.observedPhase and inMap == self.observedInMap and enabled == self._T.deploymentEnabled then return end
         self.observedPhase = phase
         self.observedInMap = inMap
-        local enabled = inMap and phase == "DEPLOYMENT"
-        if isvalid(self.deploymentPanel) then self.deploymentPanel:SetEnable(enabled) end
-        if isvalid(self.hudPanel) then self.hudPanel:SetEnable(inMap and phase ~= "CONFIG_ERROR") end
-        if isvalid(self.optionContainer) then self.optionContainer:SetEnable(enabled) end
-        if isvalid(self.startButton) then self.startButton:SetEnable(enabled) end
-        if isvalid(self.resultPanel) then self.resultPanel:SetEnable(inMap and phase == "RESULT" and self.session.Result ~= "") end
-        if isvalid(self.configErrorGroup) then self.configErrorGroup:SetEnable(inMap and phase == "CONFIG_ERROR") end
+        self._T.deploymentEnabled = enabled
+        self._T.hudKey = nil
+        if not enabled and (self.optionsReady or self.optionsBuilding or #self.optionCards > 0) then self:ClearMonsterOptions() end
         log("[M1][DeploymentUI] deployment controls=" .. tostring(enabled) .. " phase=" .. tostring(phase))
     end
 
@@ -453,29 +448,13 @@ script BattleDeploymentInput extends Component
         local key = phase .. ":" .. tostring(playerAlive) .. ":" .. tostring(enemyAlive) .. ":" .. tostring(initialPlayer) .. ":" .. tostring(initialEnemy) .. ":" .. tostring(limit) .. ":" .. selectedName
         if self._T.hudKey == key then return end
         self._T.hudKey = key
-        local phaseName = "準備中"
-        local phaseHint = "等待戰場就緒"
-        if phase == "DEPLOYMENT" then
-            phaseName = "部署階段"
-            phaseHint = "選擇怪物，組成你的編隊"
-        elseif phase == "BATTLE" then
-            phaseName = "戰鬥進行中"
-            phaseHint = "雙方編隊自動交戰"
-        elseif phase == "RESULT" then
-            phaseName = "戰鬥結束"
-            phaseHint = "本次對戰已結算"
-        end
-        self:SetUiText(self.phaseText, phaseName)
-        self:SetUiText(self.phaseHintText, phaseHint)
-        self:SetUiText(self.playerCountText, tostring(playerAlive))
-        self:SetUiText(self.enemyCountText, tostring(enemyAlive))
         self:SetUiText(self.deploymentCountText, "已部署  " .. tostring(playerAlive) .. " / " .. tostring(limit))
         if selectedName == "" then selectedName = "請先選擇怪物" end
         self:SetUiText(self.selectionText, selectedName)
         self:SetUiText(self.resultPlayerText, tostring(playerAlive) .. " / " .. tostring(initialPlayer))
         self:SetUiText(self.resultEnemyText, tostring(enemyAlive) .. " / " .. tostring(initialEnemy))
         if isvalid(self.startButton) then
-            local ready = phase == "DEPLOYMENT" and playerAlive > 0
+            local ready = self:IsDeploymentEnabled() and playerAlive > 0
             local button = self.startButton.ButtonComponent
             if isvalid(button) then button.Enable = ready end
             self:SetUiText(self.startButton, ready and "開始戰鬥" or "請先部署怪物")
@@ -486,7 +465,7 @@ script BattleDeploymentInput extends Component
     @ExecSpace("ClientOnly")
     method void HandleScreenTouch(ScreenTouchEvent event)
         -- Keep left-clicks dedicated to deploying the selected monster.
-        if event == nil or event.TouchId ~= 1 or not isvalid(self.session) or self.session.Phase ~= "DEPLOYMENT" then return end
+        if event == nil or event.TouchId ~= 1 or not self:IsDeploymentEnabled() then return end
         if _InputService:IsPointerOverUI(event.TouchId) then return end
         local world = _UILogic:ScreenToWorldPosition(event.TouchPoint)
         self:HandleBattlefieldClick(Vector3(world.x, world.y, 0))
@@ -495,7 +474,7 @@ script BattleDeploymentInput extends Component
     @ExecSpace("ClientOnly")
     method void HandleRightClick(KeyDownEvent event)
         -- Use Mouse1 and the cursor location to request removal only on right-click.
-        if event == nil or event.key ~= KeyboardKey.Mouse1 or not isvalid(self.session) or self.session.Phase ~= "DEPLOYMENT" then return end
+        if event == nil or event.key ~= KeyboardKey.Mouse1 or not self:IsDeploymentEnabled() then return end
         if _InputService:IsPointerOverUI() then return end
         local cursor = _InputService:GetCursorPosition()
         local world = _UILogic:ScreenToWorldPosition(cursor)
@@ -505,14 +484,14 @@ script BattleDeploymentInput extends Component
     @ExecSpace("ClientOnly")
     method void HandleBattlefieldClick(Vector3 position)
         -- Send a left-click deployment request to the authoritative map session.
-        if position == nil or not isvalid(self.session) or self.session.Phase ~= "DEPLOYMENT" then return end
+        if position == nil or not self:IsDeploymentEnabled() then return end
         self.session:RequestBattlefieldClick(self.selectedMonsterId, position)
     end
 
     @ExecSpace("ClientOnly")
     method void HandleBattlefieldRemovalClick(Vector3 position)
         -- Send a right-click removal request to the authoritative map session.
-        if position == nil or not isvalid(self.session) or self.session.Phase ~= "DEPLOYMENT" then return end
+        if position == nil or not self:IsDeploymentEnabled() then return end
         self.session:RequestRemoveDeployedUnit(position)
     end
 
@@ -522,9 +501,6 @@ script BattleDeploymentInput extends Component
         if isvalid(self.resultWin) then self.resultWin:SetEnable(result == "WIN") end
         if isvalid(self.resultLose) then self.resultLose:SetEnable(result == "LOSE") end
         if isvalid(self.resultDraw) then self.resultDraw:SetEnable(result == "DRAW") end
-        if isvalid(self.resultPanel) then
-            self.resultPanel:SetEnable(self.observedInMap and isvalid(self.session) and self.session.Phase == "RESULT" and result ~= "")
-        end
         self.displayedResult = result
         if result ~= "" then log("[M1][DeploymentUI] result=" .. result) end
         if result ~= "" then log("[VRF][BattleUI] result=" .. result) end
