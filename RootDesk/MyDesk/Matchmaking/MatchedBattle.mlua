@@ -12,6 +12,7 @@ script MatchedBattle extends Component
         self._T.interval = 0
         self._T.started = false
         self._T.published = false
+        self._T.matchKey = _RoomService.RoomKey
         log("[VRF][MatchedBattle] room controller ready")
     end
 
@@ -39,13 +40,14 @@ script MatchedBattle extends Component
                 log("[VRF][MatchedBattle] admission started=" .. tostring(self._T.started) .. " failed=" .. tostring(self.AdmissionFailed))
             end
         end
-        if battle.Phase == "RESULT" and not self._T.published then
+        if battle.Phase == "RESULT" and battle.MatchKey == self._T.matchKey and not self._T.published then
             self._T.published = true
             for _, user in ipairs(users) do
                 local profile = user.PlayerComponent.ProfileCode
-                _MatchProbe:PublishState(user.PlayerComponent.UserId, "RESULT_" .. battle:ResultForProfile(profile))
+                local result = battle:ResultForProfile(profile)
+                if result ~= "" then _MatchProbe:PublishState(user.PlayerComponent.UserId, "RESULT_" .. result) end
             end
-            log("[VRF][MatchedBattle] result published once home=" .. battle:ResultForProfile(battle.HomeProfile) .. " away=" .. battle:ResultForProfile(battle.AwayProfile))
+            log("[VRF][MatchedBattle] result published once match=" .. self._T.matchKey .. " home=" .. battle:ResultForProfile(battle.HomeProfile) .. " away=" .. battle:ResultForProfile(battle.AwayProfile))
         end
     end
 end

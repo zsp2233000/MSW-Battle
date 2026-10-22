@@ -149,6 +149,12 @@ script BattleSession extends Component
     @ExecSpace("ServerOnly")
     method void OnEndPlay()
         -- Release session-only references when the map instance ends.
+        if self.RequireMatchedFormations and self.Phase ~= "RESULT" and self.Phase ~= "ABORTED" then
+            self.Phase = "ABORTED"
+            self.Result = ""
+            self._T.resultEntered = true
+            log("[VRF][MatchedBattle] aborted match=" .. self.MatchKey .. " reason=ROOM_RECLAIMED")
+        end
         self:ClearConfigurationUsers()
         self:ClearUnits()
         self._T.pendingDamage = {}
@@ -158,6 +164,7 @@ script BattleSession extends Component
         self._T.dataReady = false
         self._T.initialized = false
         self._T.manualSimulation = false
+        log("[VRF][BattleCleanup] match=" .. self.MatchKey .. " units=0 pending=0 subscriptions=0")
     end
 
     @ExecSpace("ServerOnly")

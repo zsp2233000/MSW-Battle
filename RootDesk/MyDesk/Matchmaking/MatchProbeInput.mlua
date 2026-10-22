@@ -87,7 +87,7 @@ script MatchProbeInput extends Logic
 
     @ExecSpace("ClientOnly")
     method void Click()
-        -- Identify each start with a GUID and each cancellation with the observed game attempt.
+        -- Identify start, cancellation and return commands with the observed attempt generation.
         if self.Busy or self._T.pending or self.State == "BATTLE" then return end
         self._T.pending = true
         self._T.pendingSeconds = 0
@@ -95,12 +95,9 @@ script MatchProbeInput extends Logic
             _MatchProbe:RequestStatus()
         elseif self.State == "QUEUED" or self.State == "SAVING" or self.State == "RENEWING" or self.State == "QUEUE_ERROR" or self.State == "CANCELLED" then
             _MatchProbe:RequestCancel(self.Attempt)
-        elseif self.State == "IN_ROOM" or self.State == "TRANSFER" or self.State == "COMMITTING" or self.State == "RETURNING" then
-            _MatchProbe:RequestReturn()
-        elseif self.State == "ROOM_MISMATCH" then
-            _MatchProbe:RequestReturn()
-        elseif self.State == "WAITING" or self.State == "ENTRY_FAILED" or string.sub(self.State, 1, 7) == "RESULT_" then
-            _MatchProbe:RequestReturn()
+        elseif self.State == "IN_ROOM" or self.State == "TRANSFER" or self.State == "COMMITTING" or self.State == "RETURNING"
+            or self.State == "ROOM_MISMATCH" or self.State == "WAITING" or self.State == "ENTRY_FAILED" or self.State == "ABORTED" or string.sub(self.State, 1, 7) == "RESULT_" then
+            _MatchProbe:RequestReturn(self.Attempt)
         elseif self.State == "BATTLE" then
             return
         elseif self.State ~= "RETURNING" then
@@ -150,6 +147,9 @@ script MatchProbeInput extends Logic
         elseif self.State == "ENTRY_FAILED" then
             text = "對局入場未完成，請返回大廳重新配對"
             label = "返回大廳"
+        elseif self.State == "ABORTED" then
+            text = "本場對局已中止，請返回大廳重新配對"
+            label = "返回大廳"
         elseif self.State == "ROOM_MISMATCH" then
             text = "對局狀態需要恢復，請返回大廳重試"
             label = "返回大廳"
@@ -164,6 +164,11 @@ script MatchProbeInput extends Logic
         if self.Message == "HANDOFF_SAVE_FAILED" or self.Message == "HANDOFF_SEAL_FAILED" then text = "入場資料保存失敗，可取消入場後重試" end
         if self.Message == "READINESS_FAILED" then text = "連線通知失敗，請重試入場" label = "重試入場" end
         if self.Message == "RESTORE_RETRY_REQUIRED" then text = "草稿尚未完成還原，請重試返回" end
+        if self.Message == "RETURN_MOVE ok=false" or self.Message == "RETURN_RETRY_MOVE ok=false" or self.Message == "ROOM_MISMATCH_RETURN_FAILED" then text = "返回大廳失敗，編隊草稿仍保留；請重試返回" label = "重試返回" end
+        if self.Message == "RETURN_SAVE_FAILED" or self.Message == "ROOM_MISMATCH_SAVE_FAILED" then text = "返回資料保存失敗，請重試返回" label = "重試返回" end
+        if self.Message == "ROOM_MOVE ok=false" then text = "進入戰場失敗，可取消入場後重新配對" end
+        if self.Message == "ROOM_CREATE_FAILED" or self.Message == "ADMISSION_SAVE_FAILED" then text = "戰場建立或入場資料保存失敗，可取消入場後重試" end
+        if self.Message == "TRANSFER_EXPIRED" then text = "入場預約已逾期，正在恢復編隊草稿" end
         if self.State == "IDLE" and (self.Message == "RETURNED" or self.Message == "CANCELLED") then text = "已返回或取消，可以重新開始配對" end
         local mode = Environment:IsMakerPlay() and "本機配對" or "線上配對"
         self.status.TextGUIRendererComponent.Text = mode .. "\n" .. text
