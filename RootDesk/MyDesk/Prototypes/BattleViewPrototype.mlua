@@ -144,7 +144,7 @@ script BattleViewPrototype extends Component
 
     @ExecSpace("ClientOnly")
     method void UpdateAvatars(number sign)
-        -- Two bodyless costume displays share the position mapping, with no extra name panel.
+        -- Keep each spectator's native name tag attached to its mapped avatar.
         local player = _UserService.LocalPlayer
         if not isvalid(player) then return end
         for index, userId in ipairs({ self.HomeUserId, self.AwayUserId }) do
@@ -152,12 +152,32 @@ script BattleViewPrototype extends Component
             if record == nil then
                 local avatar = _SpawnService:SpawnByModelId("battleviewavatar", "ViewAvatar_" .. tostring(index), Vector3(0, 3, 0), self.Entity)
                 if not isvalid(avatar) then return end
+                if not isvalid(avatar.NameTagComponent) then avatar:AddComponent("MOD.Core.NameTagComponent") end
+                local nameTag = avatar.NameTagComponent
+                if isvalid(player.NameTagComponent) then
+                    nameTag.NameTagRUID = player.NameTagComponent.NameTagRUID
+                    nameTag.FontSize = player.NameTagComponent.FontSize
+                    nameTag.FontColor = player.NameTagComponent.FontColor
+                end
+                nameTag.OffsetY = 1.1
                 record = { entity = avatar }
                 self._T.avatars[index] = record
             end
             if record.userId ~= userId then
                 record.entity.CostumeManagerComponent.DefaultEquipUserId = userId
                 record.userId = userId
+            end
+            local participant = _UserService:GetUserEntityByUserId(userId)
+            local displayName = "測試對手"
+            if isvalid(participant) and isvalid(participant.PlayerComponent) then
+                displayName = participant.PlayerComponent.Nickname
+                if displayName == nil or displayName == "" then displayName = "玩家" end
+            end
+            if record.displayName ~= displayName then
+                record.entity.NameTagComponent.Name = displayName
+                record.entity.NameTagComponent.Enable = true
+                record.displayName = displayName
+                log("[VRF][BattleView] SPECTATOR_NAME avatar=" .. tostring(index) .. " name=" .. displayName)
             end
             local x = index == 1 and -5 or 5
             record.entity.TransformComponent.WorldPosition = Vector3(sign * x, 3, 0)
