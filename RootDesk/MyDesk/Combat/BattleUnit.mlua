@@ -213,6 +213,9 @@ script BattleUnit extends Component
         if amount == nil or amount <= 0 or not self:IsAlive() then return end
         self.Hp = math.max(0, self.Hp - amount)
         self.DamageTakenSerial = self.DamageTakenSerial + 1
+        local map = self.Entity.CurrentMap
+        local view = isvalid(map) and map:GetComponent("script.BattleViewPrototype") or nil
+        if isvalid(view) and view:IsPrototype() then view:PresentDamage(self.Entity, amount) end
         if self.OnHitSoundRUID ~= nil and self.OnHitSoundRUID ~= "" then
             self.OnHitSoundSerial = self.OnHitSoundSerial + 1
             self:PlayCombatSound(self.OnHitSoundRUID)

@@ -1,0 +1,209 @@
+@Component
+script BattleViewPrototype extends Component
+
+    @Sync property string HomeUserId = ""
+    @Sync property string AwayUserId = ""
+
+    @ExecSpace("ClientOnly")
+    method void OnBeginPlay()
+        -- Keep this experiment opt-in on its isolated map and within Maker Play.
+        self._T.visuals = {}
+        self._T.avatars = {}
+        log("[VRF][BattleView] prototype ready map=" .. self.Entity.Name)
+    end
+
+    method boolean IsPrototype()
+        -- Refuse presentation hooks outside the explicitly named Maker scene.
+        return Environment:IsMakerPlay() and self.Entity.Name == "battleviewprototype"
+    end
+
+    @ExecSpace("ClientOnly")
+    method string GetLocalFaction()
+        -- Derive allegiance from the actual local user's server-assigned participant entry.
+        local player = _UserService.LocalPlayer
+        if not self:IsPrototype() or not isvalid(player) or player.CurrentMap ~= self.Entity then return "" end
+        local userId = player.PlayerComponent.UserId
+        if userId == self.HomeUserId then return "PLAYER" end
+        if userId == self.AwayUserId then return "ENEMY" end
+        return ""
+    end
+
+    @ExecSpace("ClientOnly")
+    method Entity GetVisual(Entity source)
+        -- Expose only the render target; callers cannot alter the authoritative roster through it.
+        if not isvalid(source) then return nil end
+        local record = (self._T.visuals or {})[source.Id]
+        if record ~= nil and isvalid(record.visual) then return record.visual end
+        return nil
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnUpdate(number delta)
+        -- Follow synchronized state every frame without running combat or writing source transforms.
+        local mine = self:GetLocalFaction()
+        if mine == "" then self:ClearVisuals(); return end
+        local sign = mine == "PLAYER" and 1 or -1
+        local present = {}
+        for _, unit in ipairs(self.Entity:GetChildComponentsByTypeName("script.BattleUnit", false)) do
+            local source = unit.Entity
+            present[source.Id] = true
+            local record = self._T.visuals[source.Id]
+            if record == nil then
+                record = self:CreateVisual(source)
+                if record ~= nil then self._T.visuals[source.Id] = record end
+            end
+            if record ~= nil then self:UpdateVisual(record, unit, sign, mine) end
+        end
+        for id, record in pairs(self._T.visuals) do
+            if not present[id] then
+                self:ReleaseVisual(record)
+                self._T.visuals[id] = nil
+            end
+        end
+        self:UpdateAvatars(sign)
+    end
+
+    @ExecSpace("ClientOnly")
+    method any CreateVisual(Entity source)
+        -- Spawn a native-only visual model so no client attack, trigger, or Body can be installed.
+        local visual = _SpawnService:SpawnByModelId("battleviewvisual", "View_" .. source.Name, Vector3(0, 0, 0), self.Entity)
+        if not isvalid(visual) then return nil end
+        local fill = visual:GetChildByName("HPBarFill")
+        local gauge = source:GetComponent("script.BattleHPBar")
+        if not isvalid(gauge) then visual:Destroy(); return nil end
+        local record = { source = source, visual = visual, fill = fill,
+            color = source.SpriteRendererComponent.Color, clip = "", attack = -1, damage = -1,
+            fillScale = fill.TransformComponent.Scale, fillPosition = fill.TransformComponent.Position,
+            fillColor = fill.SpriteRendererComponent.Color,
+            barWidth = gauge.BarWidth, fillWidthRatio = gauge.FillWidthRatio,
+            hiddenChildren = {}, callbacks = {} }
+        for _, child in ipairs(source.Children:ToTable()) do
+            if child.Name == "HPBarBackground" or child.Name == "HPBarFill" then
+                table.insert(record.hiddenChildren, { entity = child, visible = child.Visible })
+                child:SetVisible(false, false, false)
+            end
+        end
+        local spawner = source:GetComponent("DamageSkinSpawnerComponent")
+        if isvalid(spawner) then record.spawnerEnabled = spawner.Enable; spawner.Enable = false end
+        local body = source.KinematicbodyComponent
+        if isvalid(body) then record.shadowEnabled = body.EnableShadow; body.EnableShadow = false end
+        -- Original playback remains alive for its existing completion/death event handlers.
+        source.SpriteRendererComponent.Color = Color(record.color.r, record.color.g, record.color.b, 0)
+        local callback = visual:ConnectEvent(SpriteAnimPlayerStartEvent, function(event)
+            log("[VRF][BattleView] ANIMATION target=" .. visual.Name .. " clip=" .. visual.SpriteRendererComponent.SpriteRUID)
+        end)
+        table.insert(record.callbacks, { eventType = SpriteAnimPlayerStartEvent, callback = callback })
+        log("[VRF][BattleView] CREATED " .. source.Name)
+        return record
+    end
+
+    @ExecSpace("ClientOnly")
+    method void UpdateVisual(any record, any unit, number sign, string mine)
+        -- Reflect positions and sprite facing separately; gauge parents always retain positive scale.
+        local source = record.source
+        local visual = record.visual
+        local position = source.TransformComponent.WorldPosition
+        visual.TransformComponent.WorldPosition = Vector3(sign * position.x, position.y, position.z)
+        local scale = source.TransformComponent.Scale
+        visual.TransformComponent.Scale = Vector3(math.abs(scale.x), math.abs(scale.y), math.abs(scale.z))
+        visual.SpriteRendererComponent.FlipX = (scale.x * sign < 0) ~= source.SpriteRendererComponent.FlipX
+        visual:SetVisible(source.Visible, false, false)
+        local clip = source.SpriteRendererComponent.SpriteRUID
+        if record.clip ~= clip or record.attack ~= unit.AttackSerial or record.damage ~= unit.DamageTakenSerial then
+            if visual.SpriteRendererComponent.SpriteRUID == clip and record.clip == clip then
+                visual.SpriteRendererComponent.SpriteRUID = unit.StandAnimationRUID
+            end
+            visual.SpriteRendererComponent.SpriteRUID = clip
+            record.clip = clip
+            record.attack = unit.AttackSerial
+            record.damage = unit.DamageTakenSerial
+        end
+        local ratio = 0
+        if unit.MaxHp > 0 then ratio = math.max(0, math.min(1, unit.Hp / unit.MaxHp)) end
+        record.fill.TransformComponent.Scale = Vector3(record.fillScale.x * ratio, record.fillScale.y, record.fillScale.z)
+        record.fill.TransformComponent.Position = Vector3(record.fillPosition.x - record.barWidth * record.fillWidthRatio * (1 - ratio) * 0.5, record.fillPosition.y, record.fillPosition.z)
+        if unit.Faction == mine then record.fill.SpriteRendererComponent.Color = record.fillColor
+        else record.fill.SpriteRendererComponent.Color = Color(1, 0, 0, 1) end
+        if record.ratio ~= ratio then
+            record.ratio = ratio
+            log("[VRF][BattleView] HP " .. source.Name .. " ratio=" .. tostring(ratio) .. " own=" .. tostring(unit.Faction == mine))
+        end
+    end
+
+    @ExecSpace("Multicast")
+    method void PresentDamage(Entity source, integer amount)
+        -- Render the server-resolved amount at the same bodyless target as the hit effect.
+        if not self:IsPrototype() or self:GetLocalFaction() == "" then return end
+        local visual = self:GetVisual(source)
+        if not isvalid(visual) then return end
+        local settings = source.DamageSkinSettingComponent
+        _DamageSkinService:Play(visual, settings.DamageSkinId.DataId, settings.DelayPerAttack, { amount }, settings.TweenType, false,
+            Vector2(0, 0.8), settings.DamageSkinScale, settings.PlayRate, settings.Alpha, settings.LitMode)
+        log("[VRF][BattleView] DAMAGE target=" .. visual.Name .. " amount=" .. tostring(amount))
+    end
+
+    @ExecSpace("ClientOnly")
+    method void UpdateAvatars(number sign)
+        -- Two bodyless costume displays share the position mapping, with no extra name panel.
+        local player = _UserService.LocalPlayer
+        if not isvalid(player) then return end
+        for index, userId in ipairs({ self.HomeUserId, self.AwayUserId }) do
+            local record = self._T.avatars[index]
+            if record == nil then
+                local avatar = _SpawnService:SpawnByModelId("battleviewavatar", "ViewAvatar_" .. tostring(index), Vector3(0, 3, 0), self.Entity)
+                if not isvalid(avatar) then return end
+                record = { entity = avatar }
+                self._T.avatars[index] = record
+            end
+            if record.userId ~= userId then
+                record.entity.CostumeManagerComponent.DefaultEquipUserId = userId
+                record.userId = userId
+            end
+            local x = index == 1 and -5 or 5
+            record.entity.TransformComponent.WorldPosition = Vector3(sign * x, 3, 0)
+            record.entity.TransformComponent.Scale = Vector3(sign * x < 0 and -1 or 1, 1, 1)
+        end
+        if self._T.player ~= player then
+            self._T.player = player
+            self._T.playerVisible = player.Visible
+            player:SetVisible(false, false, false)
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ReleaseVisual(any record)
+        -- Restore only local presentation fields owned by this adapter and destroy its visual.
+        if isvalid(record.source) then
+            record.source.SpriteRendererComponent.Color = record.color
+            local spawner = record.source:GetComponent("DamageSkinSpawnerComponent")
+            if isvalid(spawner) and record.spawnerEnabled ~= nil then spawner.Enable = record.spawnerEnabled end
+            local body = record.source.KinematicbodyComponent
+            if isvalid(body) and record.shadowEnabled ~= nil then body.EnableShadow = record.shadowEnabled end
+            for _, child in ipairs(record.hiddenChildren) do
+                if isvalid(child.entity) then child.entity:SetVisible(child.visible, false, false) end
+            end
+        end
+        if isvalid(record.visual) then
+            for _, entry in ipairs(record.callbacks) do record.visual:DisconnectEvent(entry.eventType, entry.callback) end
+            record.visual:Destroy()
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ClearVisuals()
+        -- Release map-local entities and visibility on departure, re-entry, or play teardown.
+        for _, record in pairs(self._T.visuals or {}) do self:ReleaseVisual(record) end
+        self._T.visuals = {}
+        for _, record in pairs(self._T.avatars or {}) do if isvalid(record.entity) then record.entity:Destroy() end end
+        self._T.avatars = {}
+        if isvalid(self._T.player) then self._T.player:SetVisible(self._T.playerVisible, false, false) end
+        self._T.player = nil
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnEndPlay()
+        -- Map unload must not retain any prototype presentation objects or event connections.
+        self:ClearVisuals()
+        log("[VRF][BattleView] CLEANUP")
+    end
+end

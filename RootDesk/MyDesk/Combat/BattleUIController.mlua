@@ -52,7 +52,8 @@ script BattleUIController extends Logic
             return
         end
         local phase = session.Phase
-        local matched = session.RequireMatchedFormations
+        local view = map:GetComponent("script.BattleViewPrototype")
+        local matched = session.RequireMatchedFormations or (isvalid(view) and view:IsPrototype())
         local showDeployment = isvalid(presentation) and presentation.ShowDeploymentUI and phase == "DEPLOYMENT"
         local poc = not matched and isvalid(map:GetComponent("script.BattleDeploymentInput"))
         self:SetEnabled(self.hud, phase ~= "CONFIG_ERROR")
