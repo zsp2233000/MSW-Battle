@@ -1,0 +1,22 @@
+{
+  "Id": "",
+  "GameId": "",
+  "EntryKey": "scriptfile://21a81fab-448c-48e5-8e72-082b408db9e1",
+  "ContentType": "x-mod/scriptfile",
+  "Content": "",
+  "Usage": 0,
+  "UsePublish": 1,
+  "UseService": 0,
+  "CoreVersion": "26.10.0.0",
+  "StudioVersion": "0.1.0.0",
+  "DynamicLoading": 0,
+  "ContentProto": {
+    "Use": "Json",
+    "Json": {
+      "Name": "UIPaginationReadMe",
+      "Id": "21a81fab-448c-48e5-8e72-082b408db9e1",
+      "Script": "--[[\n# UIPagination\nThis package provides pagination UI components.\nIt includes base pagination, fixed pagination, and centered pagination, making them easy to use.\n\n---\n\n## Key Features\n\n### UIPagination\n- Base pagination component\n\n### UIFixedPagination\n- Fixed pagination with block-based navigation\n- `<`, `>` buttons: Move in block units\n- Example: 1 2 3 4 5 → 6 7 8 9 10\n- Does not use ellipsis\n\n### UICenteredPagination\n- Centered pagination with ellipsis support\n- `<`, `>` buttons: Move one page at a time\n- Current page is always positioned in the center\n- Uses ellipsis to indicate hidden pages\n- Example: 1 ... 4 5 **6** 7 8 ... 100\n\n---\n## Usage\n\n### 1. Use models in UIModel. Set component properties.\n\n**UIPagination:**\n- CurrentPage\n- TotalPages\n\n**UIFizedPagination:**\n- BlockSize\n\n**UICenteredPagination:**\n- UseEllipsis\n- TotalPagesToShow\n- OuterPagesToShow\n\n### 2. Register Event Handling\n-- Connect to pagination item clicked event\nentity:ConnectEvent(UIPaginationItemClickedEvent, function(evt)\n    print(\\\"Page clicked: \\\" .. evt.PageNumber)\n\n\t-- Call the SetPage function when the page number has been confirmed and you're ready to show the new page.\n\tself:SetPage(evt.PageNumber)\nend)\n\n---\n\n## Core Components\n\n### UIPagination (Base Pagination)\nThis is the base class for all pagination components.\n\n**Key Properties:**\n- `CurrentPage`: Currently selected page\n- `TotalPages`: Total number of pages\n- `First`: First page button entity\n- `Last`: Last page button entity\n- `Prev`: Previous page button entity\n- `Next`: Next page button entity\n- `ScrollLayout`: Container for page number buttons\n- `Item`: Page number button template\n- `PaginationItems`: List of pagination item entities\n\n### UIFixedPagination (Fixed Pagination)\nA pagination component that moves pages in block units.\n\n**Key Properties:**\n- `BlockSize`: Number of pages to display at once (default: 5)\n- Inherits all properties from UIPagination\n\n### UICenteredPagination (Centered Pagination)\nA pagination component that centers the current page with ellipsis support.\n\n**Key Properties:**\n- `UseEllipsis`: Whether to use ellipsis (default: true)\n- `TotalPagesToShow`: Total number of page buttons to display (default: 7)\n- `OuterPagesToShow`: Number of pages to show at boundaries (default: 1)\n- Inherits all properties from UIPagination\n\n### UIPaginationItem\nA component for managing individual pagination items.\n\n**Key Properties:**\n- `ItemType`: Type of item (0: page number, 1: left ellipsis, 2: right ellipsis)\n- `PageNumber`: Page number (only used when ItemType is 0)\n- `Index`: Order in ScrollLayout\n- `ParentPagination`: Reference to parent pagination component\n- `Ellipsis`: Whether this item shows ellipsis\n- `Selected`: Whether this item is selected\n\n---\n\n## Event System\n\n### UIPaginationItemClickedEvent\nTriggered when a pagination item is clicked.\n\n---\n\n## UI Structure Requirements\n\n### Basic Buttons\n- `First`: Move to first page\n- `Last`: Move to last page\n- `Prev`: Move to previous page\n- `Next`: Move to next page\n\n### ScrollLayout\n- `ScrollLayout`: Container where page number buttons and ellipsis buttons are dynamically generated\n- Each child Entity of ScrollLayout must have a `UIPaginationItem` component\n\n### UIPaginationItem Component\n- Common component for page number buttons and ellipsis buttons\n- `ItemType`: 0 (page number), 1 (left ellipsis), 2 (right ellipsis)\n- `PageNumber`: Page number (only used when ItemType is 0)\n- `Index`: Order in ScrollLayout\n- `ParentPagination`: Reference to parent pagination component\n\n---\n\n## License\n\nThis project is licensed under the MIT License.\nYou are free to use, modify, and distribute this project.\n\nHowever, the software is provided \"as is\", without warranty of any kind.\nFor more details, please see the LICENSE.(https://opensource.org/licenses/MIT)\n\n---\n\n## Happy Coding!\n]]--",
+      "ModifyTime": "10/22/2026 22:08:10"
+    }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "Id": "",
+  "GameId": "",
+  "EntryKey": "scriptfile://3bf23504-e786-4440-8437-97c43e9be9ee",
+  "ContentType": "x-mod/scriptfile",
+  "Content": "",
+  "Usage": 0,
+  "UsePublish": 1,
+  "UseService": 0,
+  "CoreVersion": "26.10.0.0",
+  "StudioVersion": "0.1.0.0",
+  "DynamicLoading": 0,
+  "ContentProto": {
+    "Use": "Json",
+    "Json": {
+      "Name": "UIHorizontalSelectorReadMe",
+      "Id": "3bf23504-e786-4440-8437-97c43e9be9ee",
+      "Script": "--[[\n# UIHorizontalSelector\nThis package provides a horizontal selector UI component for choosing from a list of options.\nIt includes navigation buttons, visual indicators, and smooth animations for a polished user experience.\n\n---\n## Key Features\n\n1. **Horizontal Navigation**\n   - Previous/Next buttons for navigation\n   - Loop selection support\n   - Smooth text transitions\n\n2. **Visual Indicators**\n   - Configurable selection indicators\n   - Color-coded selection states\n   - Optional indicator display\n\n---\n## Core Components\n\n### UIHorizontalSelector\nA horizontal selector component for choosing from string options.\n\n**Key Properties:**\n- `Text`: Main text display component\n- `ScrollLayout`: Layout for selection indicators\n- `Item`: Indicator item template\n- `Btn_Prev`: Previous navigation button\n- `Btn_Next`: Next navigation button\n- `IsLoop`: Enable loop selection (wrap around)\n- `UseIndicator`: Show/hide selection indicators\n- `IndicatorSelectColor`: Color for selected indicator\n- `IndicatorDeselectColor`: Color for deselected indicator\n- `SelectedIndex`: Currently selected index\n- `StringList`: List of selectable strings\n- `UseAnimation`: Enable text transition animations\n- `AnimationDuration`: Duration of text animations\n\n---\n## Event System\n\n### UIHorizontalSelectorIndexChangedEvent\nTriggered when the selected index changes.\n\n**Event Properties:**\n- `Index`: New selected index\n\n---\n## Usage\n\n### 1. Basic Horizontal Selector Usage\n-- Set up string list\nlocal selector = entity.UIHorizontalSelector\nlocal stringList = {\"Option 1\", \"Option 2\", \"Option 3\", \"Option 4\"}\nselector:SetStringList(stringList)\n\n### 2. Navigation Control\n-- Navigate programmatically\nselector:Prev()  -- Go to previous option\nselector:Next()  -- Go to next option\n\n-- Set specific index\nselector:SetSelectedIndex(2, true)  -- Set to index 2 with animation\n\n### 3. Loop Selection\n-- Enable loop selection (wrap around)\nselector.IsLoop = true\n-- When at last item, Next() goes to first item\n-- When at first item, Prev() goes to last item\n\n### 4. Visual Indicators\n-- Configure indicator colors\nselector.IndicatorSelectColor = Color(1, 0, 0, 1)    -- Red for selected\nselector.IndicatorDeselectColor = Color(0.5, 0.5, 0.5, 1)  -- Gray for deselected\n\n-- Toggle indicators on/off\nselector:SetUseIndicator(false)  -- Hide indicators\n\n### 5. Animation Configuration\n-- Enable/disable animations\nselector.UseAnimation = true\nselector.AnimationDuration = 0.3  -- 300ms animation duration\n\n### 6. Event Handling\n-- Listen for selection changes\nentity:ConnectEvent(UIHorizontalSelectorIndexChangedEvent, function(evt)\n    print(\"Selected index changed to: \" .. evt.Index)\n    local selectedText = selector.StringList[evt.Index]\n    print(\"Selected text: \" .. selectedText)\nend)\n\n---\n## License\n\nThis project is licensed under the MIT License.\nYou are free to use, modify, and distribute this project.\n\nHowever, the software is provided \"as is\", without warranty of any kind.\nFor more details, please see the LICENSE.(https://opensource.org/licenses/MIT)\n\n---\n## Happy Coding!\n]]",
+      "ModifyTime": "10/22/2026 22:08:09"
+    }
+  }
+}

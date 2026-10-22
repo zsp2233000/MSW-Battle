@@ -1,0 +1,22 @@
+{
+  "Id": "",
+  "GameId": "",
+  "EntryKey": "scriptfile://6deb5f7a-3256-4bbb-a76a-8d1139eea6d3",
+  "ContentType": "x-mod/scriptfile",
+  "Content": "",
+  "Usage": 0,
+  "UsePublish": 1,
+  "UseService": 0,
+  "CoreVersion": "26.10.0.0",
+  "StudioVersion": "0.1.0.0",
+  "DynamicLoading": 0,
+  "ContentProto": {
+    "Use": "Json",
+    "Json": {
+      "Name": "UITimePickerReadMe",
+      "Id": "6deb5f7a-3256-4bbb-a76a-8d1139eea6d3",
+      "Script": "--[[\n# UITimePicker\nThis package provides a time picker UI component with hour, minute, second selection.\nIt includes 12/24-hour format support, AM/PM selection, and smooth picker integration.\n\n---\n## Key Features\n\n1. **Time Selection Interface**\n   - Hour, minute, second pickers\n   - 12/24-hour format support\n   - AM/PM button selection\n\n2. **Format Flexibility**\n   - Automatic format conversion\n   - 12-hour display with 24-hour internal storage\n   - Configurable time format\n\n---\n## Core Components\n\n### UITimePicker\nA comprehensive time picker component.\n\n**Key Properties:**\n- `Hour`: Currently selected hour (0-23)\n- `Minute`: Currently selected minute (0-59)\n- `Second`: Currently selected second (0-59)\n- `Is24Hour`: Use 24-hour format (true) or 12-hour format (false)\n- `IsPm`: Current time is PM (true) or AM (false)\n- `HourPicker`: Hour picker component\n- `MinutePicker`: Minute picker component\n- `SecondPicker`: Second picker component\n- `MeridiemButtonGroup`: AM/PM button group\n- `Btn_Am`: AM button component\n- `Btn_Pm`: PM button component\n\n---\n## Event System\n\n### UITimePickerValueChangedEvent\nTriggered when the time selection changes.\n\n**Event Properties:**\n- `Hour`: New hour value\n- `Minute`: New minute value\n- `Second`: New second value\n\n---\n## Usage\n\n### 1. Basic Time Picker Usage\n-- Get time picker component\nlocal timePicker = entity.UITimePicker\n\n-- Set time format\ntimePicker.Is24Hour = false  -- Use 12-hour format\n\n### 2. Setting Time Values\n-- Set time in 24-hour format\ntimePicker:SetTime(14, 30, 0, true)  -- 2:30:00 PM, send callback\n\n-- Set time in 12-hour format\ntimePicker:SetTime12h(2, 30, 0, true, true)  -- 2:30:00 PM, send callback\n\n### 3. Getting Current Time\n-- Get current time values\nlocal hour = timePicker.Hour\nlocal minute = timePicker.Minute\nlocal second = timePicker.Second\nlocal isPm = timePicker.IsPm\n\nprint(string.format(\"Current time: %02d:%02d:%02d\", hour, minute, second))\n\n### 4. Event Handling\n-- Listen for time changes\nentity:ConnectEvent(UITimePickerValueChangedEvent, function(evt)\n    print(string.format(\"Time changed to: %02d:%02d:%02d\", evt.Hour, evt.Minute, evt.Second))\nend)\n\n### 5. Format Examples\n-- 24-hour format example\ntimePicker:SetTime(23, 59, 59, false)  -- 23:59:59\n\n-- 12-hour format example\ntimePicker:SetTime12h(11, 59, 59, true, false)  -- 11:59:59 PM\n\n### 6. Complete Setup Example\n-- Complete time picker setup\nlocal function setupTimePicker()\n    local timePicker = entity.UITimePicker\n    \n    -- Set initial time (3:45:30 PM)\n\ttimePicker:SetTime12h(3, 45, 30, true, false)\n    \n    -- Listen for changes\n    entity:ConnectEvent(UITimerPickerValueChangedEvent, function(evt)\n        local timeStr = string.format(\"%02d:%02d:%02d\", evt.Hour, evt.Minute, evt.Second)\n        print(\"Time selected: \" .. timeStr)\n    end)\nend\n\n---\n## License\n\nThis project is licensed under the MIT License.\nYou are free to use, modify, and distribute this project.\n\nHowever, the software is provided \"as is\", without warranty of any kind.\nFor more details, please see the LICENSE.(https://opensource.org/licenses/MIT)\n\n---\n## Happy Coding!\n]]",
+      "ModifyTime": "10/22/2026 22:08:10"
+    }
+  }
+}

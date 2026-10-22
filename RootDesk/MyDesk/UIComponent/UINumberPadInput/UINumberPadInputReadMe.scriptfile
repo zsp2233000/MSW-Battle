@@ -1,0 +1,22 @@
+{
+  "Id": "",
+  "GameId": "",
+  "EntryKey": "scriptfile://27377379-ae56-4c32-a7a4-3f0ffddf08f2",
+  "ContentType": "x-mod/scriptfile",
+  "Content": "",
+  "Usage": 0,
+  "UsePublish": 1,
+  "UseService": 0,
+  "CoreVersion": "26.10.0.0",
+  "StudioVersion": "0.1.0.0",
+  "DynamicLoading": 0,
+  "ContentProto": {
+    "Use": "Json",
+    "Json": {
+      "Name": "UINumberPadInputReadMe",
+      "Id": "27377379-ae56-4c32-a7a4-3f0ffddf08f2",
+      "Script": "--[[\n# UINumberPadInput\nThis package provides a number pad input UI component for numeric value input.\nIt includes a slider, number pad buttons, and various utility buttons for easy numeric input.\n\n---\n## Key Features\n\n1. **Complete Number Pad Interface**\n   - Number buttons (0-9) for digit input\n   - Min/Max buttons for quick value setting\n   - Plus/Minus buttons for increment/decrement\n   - Clear button to reset to default value\n   - Enter/Close buttons for confirmation/cancellation\n\n2. **Slider Integration**\n   - Visual slider component for value adjustment\n   - Synchronized with number pad input\n\n---\n## Core Components\n\n### UINumberPadInput\nA comprehensive number input component with slider and button interface.\n\n**Key Properties:**\n- `Text_Title`: Title text component\n- `Text_Value`: Value display text component\n- `Slider`: Value slider component\n- `Btn_0` to `Btn_9`: Number pad buttons (0-9)\n- `Btn_Min`: Minimum value button\n- `Btn_Max`: Maximum value button\n- `Btn_Plus`: Increment button\n- `Btn_Minus`: Decrement button\n- `Btn_Clear`: Clear/reset button\n- `Btn_Close`: Close button\n- `Btn_Enter`: Enter/confirm button\n- `MinValue`: Minimum allowed value\n- `MaxValue`: Maximum allowed value\n- `DefaultValue`: Default value\n- `EnterCallback`: Callback function for enter action\n- `CloseCallback`: Callback function for close action\n- `Value`: Current input value\n\n---\n## Event System\n\n### Button Events\n- Number pad buttons trigger value updates\n- Min/Max buttons set extreme values\n- Plus/Minus buttons increment/decrement\n- Clear button resets to default\n- Enter/Close buttons trigger callbacks\n\n### Slider Events\n- `SliderValueChangedEvent`: Synchronized with number pad input\n\n---\n## Usage\n\n### 1. Basic Number Pad Usage\n-- Open number pad with initial value and range\nlocal numberPad = entity.UINumberPadInput\nnumberPad:Open(50, 0, 100, enterCallback, closeCallback)\n\n### 2. Programmatic Value Setting\n-- Set value programmatically\nnumberPad:SetValue(75)\n\n---\n## License\n\nThis project is licensed under the MIT License.\nYou are free to use, modify, and distribute this project.\n\nHowever, the software is provided \"as is\", without warranty of any kind.\nFor more details, please see the LICENSE.(https://opensource.org/licenses/MIT)\n\n---\n## Happy Coding!\n]]",
+      "ModifyTime": "10/22/2026 22:08:09"
+    }
+  }
+}
