@@ -15,6 +15,8 @@ script FormationLobby extends Logic
         self._T.cards = {}
         self._T.optionsKey = ""
         self._T.mapName = ""
+        self._T.identityElapsed = 0
+        self._T.identityKey = ""
         self._T.showUnits = false
         self._T.returnConfirm = false
         self._T.returnAfterSave = false
@@ -49,6 +51,11 @@ script FormationLobby extends Logic
         -- Follow actual map transitions without polling storage or resetting login drafts.
         local player = _UserService.LocalPlayer
         if not isvalid(player) or not isvalid(self.root) then return end
+        self._T.identityElapsed = self._T.identityElapsed + delta
+        if player.CurrentMapName == "formationlobby" and self._T.identityElapsed >= 0.5 then
+            self._T.identityElapsed = 0
+            self:UpdateIdentity()
+        end
         if self._T.returnAfterSave then
             self._T.returnSaveElapsed = self._T.returnSaveElapsed + delta
             if self._T.returnSaveElapsed >= 20 then self:CancelReturnSave("timed out") end
@@ -102,6 +109,42 @@ script FormationLobby extends Logic
             end
             self:Render()
         end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void UpdateIdentity()
+        -- Mirror this window's local avatar and identity; shared room player order never chooses the portrait.
+        local player = _UserService.LocalPlayer
+        local avatar = self:Ui("Lobby/Identity/Avatar")
+        if not isvalid(player) or not isvalid(player.PlayerComponent) or not isvalid(avatar) then return end
+        local identity = player.PlayerComponent
+        self:SetText("Lobby/Identity/Name", identity.Nickname ~= "" and identity.Nickname or "目前玩家")
+        self:SetText("Lobby/Identity/Profile", "玩家代碼：" .. identity.ProfileCode)
+        local source = player.CostumeManagerComponent
+        local costume = avatar.CostumeManagerComponent
+        if not isvalid(source) or not isvalid(costume) then return end
+        local categories = {
+            MapleAvatarItemCategory.Body, MapleAvatarItemCategory.Hair, MapleAvatarItemCategory.Face,
+            MapleAvatarItemCategory.Cap, MapleAvatarItemCategory.Cape, MapleAvatarItemCategory.Coat,
+            MapleAvatarItemCategory.Longcoat, MapleAvatarItemCategory.Pants, MapleAvatarItemCategory.Glove,
+            MapleAvatarItemCategory.Shoes, MapleAvatarItemCategory.OneHandedWeapon, MapleAvatarItemCategory.TwoHandedWeapon,
+            MapleAvatarItemCategory.SubWeapon, MapleAvatarItemCategory.FaceAccessory, MapleAvatarItemCategory.EyeAccessory,
+            MapleAvatarItemCategory.EarAccessory, MapleAvatarItemCategory.Ear
+        }
+        local equipment = {}
+        local parts = { identity.UserId }
+        for index, category in ipairs(categories) do
+            equipment[index] = source:GetEquip(category)
+            table.insert(parts, equipment[index])
+        end
+        -- The source avatar can finish loading after the lobby has already opened.
+        if equipment[1] == "" then return end
+        local key = table.concat(parts, "|")
+        if self._T.identityKey == key then return end
+        costume.UseCustomEquipOnly = true
+        for index, category in ipairs(categories) do costume:SetEquip(category, equipment[index]) end
+        self._T.identityKey = key
+        log("[VRF][LobbyIdentity] bound local player=" .. identity.UserId .. " profile=" .. identity.ProfileCode .. " nickname=" .. identity.Nickname)
     end
 
     @ExecSpace("ClientOnly")
