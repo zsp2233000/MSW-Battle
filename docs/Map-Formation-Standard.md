@@ -31,3 +31,5 @@
 [#37 紀錄](Issue-37-Centered-Battlefield.md) 中的 636 地塊、Zoom 32 與舊取景數值屬當時版本，不作為目前地圖的驗收證據。現行地形與相機由 `formation_contract.test.cjs` 驗證，原生鏡射由 `centered_terrain_runtime_probe.lua` 驗證，POC／編隊邊界一致性由 `formation_poc_regression_runtime_probe.lua` 驗證。行動裝置適配與發布環境跨 WorldInstance 驗收仍不在本次驗證內。
 
 2026-10-23 本次修正後：Maker Refresh 與 build 零 Error；Play 中取得 map01／formationsim 各 209 地塊、153 可行走、原生世界邊界 (-8,9,-4,5) 及鏡射 PASS。FormationTerrain 的空草稿／空出戰拒絕、權威欄位清理與無效站位測試 PASS；FormationPOC 的 x=0／0.25／0.49 接受、x=0.5／0.51 拒絕與正式部署／移除測試 PASS，無保存玩家資料。相關 Node 契約 6/6，全套 26/29；剩餘三項相機欄位、間距與坦克 HP 的舊期望在 main 也不符合既有程式。本次未重跑完整保存／跨 instance 流程。
+
+2026-10-23 測試收尾：更新相機契約，檢查原生相機選取、先前相機還原及不覆寫地圖設定；部署間距改驗證現行 0.3，頭像與部署面板斷言跟隨現行責任分工；fixture 比對原始坦克的全部欄位，只允許測試名稱變更，不綁定舊 HP500。`node --test tests/*.test.cjs` 完整 29/29、零失敗，取代上一段的 26/29 狀態。這次僅修改測試與驗證文件，未改遊戲程式或正式資料，也未重跑 Maker 實機流程。
