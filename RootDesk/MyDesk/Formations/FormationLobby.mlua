@@ -18,6 +18,7 @@ script FormationLobby extends Logic
         self._T.identityElapsed = 0
         self._T.identityKey = ""
         self._T.showUnits = false
+        self._T.editorCollapsed = false
         self._T.returnConfirm = false
         self._T.returnAfterSave = false
         self._T.returnSaveSlots = {}
@@ -70,7 +71,15 @@ script FormationLobby extends Logic
             self:Bind("Lobby/Edit", function() self:Travel("formationsim") end)
             self:Bind("Lobby/Legacy", function() self:Travel("map01") end)
             self:Bind("Editor/Back", function() self:RequestReturnToLobby() end)
-            self:Bind("ReturnLobby", function() self:RequestReturnToLobby() end)
+            self:Bind("ReturnLobby", function()
+                if self._T.mapName == "formationsim" then
+                    self._T.editorCollapsed = not self._T.editorCollapsed
+                    self:Render()
+                    log("[VRF][FormationUI] editor collapsed=" .. tostring(self._T.editorCollapsed))
+                else
+                    self:RequestReturnToLobby()
+                end
+            end)
             self:Bind("ExitConfirm/Window/SaveAndReturn", function() self:SaveAndReturn() end)
             self:Bind("ExitConfirm/Window/ReturnWithoutSave", function() self:ReturnWithoutSaving() end)
             self:Bind("ExitConfirm/Window/ContinueEditing", function() self:ContinueEditing() end)
@@ -103,6 +112,7 @@ script FormationLobby extends Logic
         local mapName = player.CurrentMapName
         if mapName ~= self._T.mapName then
             self._T.mapName = mapName
+            self._T.editorCollapsed = false
             if mapName == "formationlobby" then
                 if self._T.returnAfterSave then self:CancelReturnSave("arrived in lobby") end
                 self:CloseReturnConfirmation()
@@ -484,9 +494,14 @@ script FormationLobby extends Logic
         local inEditor = mapName == "formationsim"
         self:SetEnabled("ExitConfirm", self._T.returnConfirm == true)
         self:SetEnabled("Lobby", inLobby)
-        self:SetEnabled("Editor", inEditor)
+        self:SetEnabled("Editor", inEditor and not self._T.editorCollapsed)
         self:SetEnabled("Editor/Units", inEditor and self._T.showUnits)
-        self:SetEnabled("ReturnLobby", not inLobby and not inEditor)
+        self:SetEnabled("ReturnLobby", not inLobby)
+        local toggle = self:Ui("ReturnLobby")
+        if isvalid(toggle) then
+            toggle.UITransformComponent.anchoredPosition = inEditor and Vector2(-780, 460) or Vector2(0, -400)
+            self:SetText("ReturnLobby", inEditor and (self._T.editorCollapsed and "展開整備面板" or "收起整備面板") or "遊戲大廳")
+        end
         self:SetEnabled("Status", inLobby or inEditor)
         local state = self.Snapshot
         local load = state.loadState or "LOADING"

@@ -1,8 +1,8 @@
 @Logic
 script FormationService extends Logic
 
-    property string StorageKey = "BattleFormationsV1"
-    property Vector2 SimulationSpectatorPosition = Vector2(-6.5, 2.5)
+    property string StorageKey = "BattleFormationsV2"
+    property Vector2 SimulationSpectatorPosition = Vector2(-6.5, 9.5)
     property number SaveTimeoutSeconds = 5
 
     @ExecSpace("ServerOnly")
@@ -191,7 +191,7 @@ script FormationService extends Logic
         local clean = nil
         if catalog ~= nil then clean = _FormationSchema:ValidateEdit(units, catalog, draft.units) end
         if clean == nil then
-            record.message = "無法放置：請選擇地圖內可行走的空地，最多六個單位且不可重疊"
+            record.message = "無法放置：請選擇左半場可行走且鏡射後合法的空地，最多六個單位且不可重疊"
         else
             if _FormationSchema:SameUnits(draft.units, clean) then self:Publish(record) return end
             draft.units = clean
@@ -434,7 +434,7 @@ script FormationService extends Logic
             drafts[tostring(index)] = { units = #draft.units == 0 and "[]" or _HttpService:JSONEncode(draft.units), version = draft.version, savedVersion = draft.savedVersion, saveState = draft.saveState }
         end
         local saved = _FormationSchema:EncodeDocument(record.saved)
-        return { saved = saved, confirmedRaw = record.raw == saved and "" or record.raw, confirmedMatchesSaved = record.raw == saved,
+        return { coordinateSchema = 2, saved = saved, confirmedRaw = record.raw == saved and "" or record.raw, confirmedMatchesSaved = record.raw == saved,
             sessionId = record.sessionId, loadState = record.loadState, drafts = _HttpService:JSONEncode(drafts), editSlot = record.editSlot, uncertain = record.uncertain ~= nil, message = record.message }
     end
 
@@ -459,7 +459,7 @@ script FormationService extends Logic
         -- Restore a server-owned handoff without writing unsaved drafts into persistent formations.
         local record = self:GetSession(forUserId)
         local catalog = self:GetCatalog()
-        if record == nil or record.pending or catalog == nil then return false end
+        if record == nil or record.pending or catalog == nil or transfer.coordinateSchema ~= 2 then return false end
         local ok, doc, drafts = pcall(function()
             return _FormationSchema:ValidateDocument(_HttpService:JSONDecode(transfer.saved), catalog), _HttpService:JSONDecode(transfer.drafts)
         end)

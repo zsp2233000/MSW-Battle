@@ -5,8 +5,8 @@ script MatchProbe extends Logic
     property string TestProfileA = ""
     property string TestProfileB = ""
     property string LeaderboardId = ""
-    property string QueueName = "issue30-controlled-v1"
-    property string StorageKey = "Issue30TransferV1"
+    property string QueueName = "battle-centered-v2"
+    property string StorageKey = "BattleTransferV2"
     property number SaveDelaySeconds = 0
     property integer TransferLifetimeSeconds = 900
 
@@ -131,6 +131,7 @@ script MatchProbe extends Logic
         if data.state ~= "RETURNED" and data.state ~= "CANCELLED" then
             local transfer = data.transfer
             if type(transfer) ~= "table" or type(transfer.saved) ~= "string" or type(transfer.drafts) ~= "string" or type(transfer.fixed) ~= "string" then return nil end
+            if transfer.coordinateSchema ~= 2 then return nil end
             if type(transfer.confirmedRaw) ~= "string" or type(transfer.editSlot) ~= "number" then return nil end
         end
         return { raw = raw, data = data }

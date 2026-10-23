@@ -142,11 +142,11 @@ local ok, detail = pcall(function()
 
     -- Reuse the map's existing collidable border tile as a temporary runtime wall.
     local tiles = map:GetChildByName("RectTileMap", true).RectTileMapComponent
-    local wall = tiles:GetTile(Vector2Int(4, 0))
+    local wall = tiles:GetTile(Vector2Int(15, 0))
     check(wall ~= nil and wall.IsCollidable, "runtime wall fixture uses the existing collidable tile")
     if wall == nil or not wall.IsCollidable then error("collidable tile unavailable") end
     changedTiles = tiles
-    tiles:SetTile(wall.Index, Vector2Int(1, 0))
+    tiles:SetTile(wall.Name, Vector2Int(1, 0))
     local wallCenter = tiles:ToWorldPosition(Vector2Int(1, 0))
     local wallEdge = wallCenter.x - tiles.GridSize.x / 2
     prepare({ row("monster_warrior", "WallContact", wallEdge - 0.6, wallCenter.y) }, {

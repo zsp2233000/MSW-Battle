@@ -19,7 +19,7 @@ script FormationSchema extends Logic
     end
 
     method any SanitizeUnits(any entries, any catalog, boolean allowEmpty)
-        -- Validate stored structure independently so old terrain-invalid positions remain recoverable.
+        -- Validate the new coordinate contract before accepting saved units or transferred drafts.
         local count = self:ArrayCount(entries, 6)
         if count < 0 or (count == 0 and not allowEmpty) then return nil end
         local units = {}
@@ -28,7 +28,7 @@ script FormationSchema extends Logic
             if type(entry) ~= "table" or type(entry.monsterId) ~= "string" then return nil end
             if catalog:GetProfile(entry.monsterId) == nil then return nil end
             if not self:IsFinite(entry.x) or not self:IsFinite(entry.y) then return nil end
-            if not _FormationMapLayout:Contains(entry.x, entry.y) then return nil end
+            if not _FormationMapLayout:CanDeploy(entry.x, entry.y) then return nil end
             for _, other in ipairs(units) do
                 if (entry.x - other.x)^2 + (entry.y - other.y)^2 < _FormationMapLayout.MinimumSeparation^2 then return nil end
             end
@@ -38,41 +38,25 @@ script FormationSchema extends Logic
     end
 
     method any ValidateUnits(any entries, any catalog, boolean allowEmpty)
-        -- A newly saved formation must stand on the reference map's actual walkable terrain.
-        local units = self:SanitizeUnits(entries, catalog, allowEmpty)
-        if units == nil then return nil end
-        for _, unit in ipairs(units) do
-            if not _FormationMapLayout:IsWalkable(unit.x, unit.y) then return nil end
-        end
-        return units
+        -- Apply the same coordinate and terrain contract to persistence and match intent.
+        return self:SanitizeUnits(entries, catalog, allowEmpty)
     end
 
     method any ValidateEdit(any entries, any catalog, table previous)
-        -- Allow old invalid units to be repaired one at a time, without accepting new invalid positions.
-        local units = self:SanitizeUnits(entries, catalog, true)
-        if units == nil then return nil end
-        for _, unit in ipairs(units) do
-            if not _FormationMapLayout:IsWalkable(unit.x, unit.y) then
-                local retained = false
-                for _, old in ipairs(previous) do
-                    if old.monsterId == unit.monsterId and old.x == unit.x and old.y == unit.y then retained = true break end
-                end
-                if not retained then return nil end
-            end
-        end
-        return units
+        -- A retained draft cannot exempt an invalid point from the new placement contract.
+        return self:ValidateUnits(entries, catalog, true)
     end
 
     method table EmptyDocument()
         -- Reserve five stable IDs; an empty account has no active battle formation.
-        local doc = { schema = 1, revision = 0, activeSlot = 0, slots = {}, writeId = "" }
+        local doc = { schema = 2, revision = 0, activeSlot = 0, slots = {}, writeId = "" }
         for index = 1, 5 do doc.slots[tostring(index)] = { id = index, revision = 0, units = {}, savedSession = "", savedVersion = -1 } end
         return doc
     end
 
     method any ValidateDocument(any value, any catalog)
         -- Fail closed on corrupt or newer schemas, leaving the original storage bytes intact.
-        if type(value) ~= "table" or value.schema ~= 1 or type(value.slots) ~= "table" then return nil end
+        if type(value) ~= "table" or value.schema ~= 2 or type(value.slots) ~= "table" then return nil end
         if not self:IsFinite(value.revision) or value.revision < 0 or value.revision % 1 ~= 0 then return nil end
         if not self:IsFinite(value.activeSlot) or value.activeSlot < 0 or value.activeSlot > 5 or value.activeSlot % 1 ~= 0 then return nil end
         if value.writeId ~= nil and (type(value.writeId) ~= "string" or (value.writeId ~= "" and (#value.writeId ~= 32 or not string.match(value.writeId, "^%x+$")))) then return nil end
@@ -132,7 +116,7 @@ script FormationSchema extends Logic
                 .. ',"revision":' .. tostring(slot.revision) .. ',"savedSession":"' .. (slot.savedSession or "")
                 .. '","savedVersion":' .. tostring(slot.savedVersion or -1) .. ',"units":[' .. table.concat(units, ",") .. ']}')
         end
-        return '{"schema":1,"writeId":"' .. (doc.writeId or "") .. '","revision":' .. tostring(doc.revision) .. ',"activeSlot":' .. tostring(doc.activeSlot)
+        return '{"schema":2,"writeId":"' .. (doc.writeId or "") .. '","revision":' .. tostring(doc.revision) .. ',"activeSlot":' .. tostring(doc.activeSlot)
             .. ',"slots":{' .. table.concat(slots, ",") .. '}}'
     end
 
