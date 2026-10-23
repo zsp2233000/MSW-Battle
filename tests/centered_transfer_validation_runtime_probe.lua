@@ -16,7 +16,8 @@ local ok, detail = pcall(function()
     local slot = tostring(transfer.editSlot)
     local draft = _HttpService:JSONDecode(transfer.drafts)[slot]
     local tiles = _EntityService:GetEntityByPath('/maps/map01/RectTileMap').RectTileMapComponent
-    local original, mirror = Vector2Int(-3,0), Vector2Int(2,0)
+    local original = tiles:ToCellPosition(Vector3(-2.25,0.25,0))
+    local mirror = tiles:ToCellPosition(Vector3(_FormationMapLayout:MirrorX(-2.25),0.25,0))
     local originalName, mirrorName = tiles:GetTile(original).Name, tiles:GetTile(mirror).Name
     local function reject(label)
         _FormationService:UpdateDraftForUser(userId, {{monsterId='monster_tank',x=-2.25,y=0.25}}, draft.version, transfer.editSlot)

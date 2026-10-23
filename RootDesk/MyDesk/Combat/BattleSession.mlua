@@ -31,10 +31,6 @@ script BattleSession extends Component
     property number ArenaMaxX = 15
     property number ArenaMinY = -8
     property number ArenaMaxY = 8
-    property number DeploymentMinX = -15
-    property number DeploymentMaxX = 0
-    property number DeploymentMinY = -8
-    property number DeploymentMaxY = 8
     property number DeploymentMinDistance = 0.3
     property number DeploymentRemoveRadius = 0.5
     property integer DeploymentMaxUnits = 6
@@ -43,11 +39,7 @@ script BattleSession extends Component
     @ExecSpace("ServerOnly")
     method void OnBeginPlay()
         -- Initialize the map session and build its first validated map roster.
-        self.DeploymentMinX = self.ArenaMinX
-        self.DeploymentMaxX = 0
-        self.DeploymentMinY = self.ArenaMinY
-        self.DeploymentMaxY = self.ArenaMaxY
-        log("[VRF] deployment bounds x=" .. tostring(self.DeploymentMinX) .. ".." .. tostring(self.DeploymentMaxX) .. " y=" .. tostring(self.DeploymentMinY) .. ".." .. tostring(self.DeploymentMaxY))
+        log("[VRF][BattleSession] deployment uses shared FormationMapLayout")
         self._T.configurationUsers = {}
         self._T.placedRoster = {}
         self._T.rebuilding = false
@@ -775,7 +767,6 @@ script BattleSession extends Component
         local profile = self:GetMonsterProfile(monsterId)
         if profile == nil or self.PlayerAlive >= self.DeploymentMaxUnits then return false end
         if not _FormationMapLayout:CanDeploy(position.x, position.y) then return false end
-        if position.x < self.DeploymentMinX or position.x > self.DeploymentMaxX or position.y < self.DeploymentMinY or position.y > self.DeploymentMaxY then return false end
         local tileMap = self:GetRectTileMapComponent()
         if not isvalid(tileMap) or self:IsRectTilePositionBlocked(tileMap, position) then
             log("[VRF] deployment rejected at collidable or unavailable tile")

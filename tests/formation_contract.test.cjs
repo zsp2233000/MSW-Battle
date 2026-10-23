@@ -29,18 +29,14 @@ test('five formations expose stable selectors in lobby and editor with explicit 
   assert.ok(dock.size[1] <= 350, 'editor controls leave the terrain visible');
 });
 
-test('simulation and matched battlefield share the centered 30 by 16 POC terrain and camera', () => {
+test('simulation and matched battlefield share the current POC terrain and camera', () => {
   const reference = MapBuilder.read('map/map01.map');
   for (const name of ['formationsim', 'matchprobe']) {
     const map = MapBuilder.read(`map/${name}.map`);
     assert.equal(map.getTileMapMode(), 1);
     assert.deepEqual(map.component('RectTileMap', 'MOD.Core.RectTileMapComponent'), reference.component('RectTileMap', 'MOD.Core.RectTileMapComponent'));
     for (const component of ['MOD.Core.TransformComponent', 'MOD.Core.CameraComponent']) {
-      const expected = { ...reference.component('BattleCameraAnchor', component) };
-      if (name === 'matchprobe' && component === 'MOD.Core.CameraComponent') {
-        expected.ZoomRatio = 60;
-        expected.CameraOffset = { x: 0.5, y: 0 };
-      }
+      const expected = reference.component('BattleCameraAnchor', component);
       assert.deepEqual(map.component('BattleCameraAnchor', component), expected);
     }
   }
@@ -49,23 +45,27 @@ test('simulation and matched battlefield share the centered 30 by 16 POC terrain
   assert.ok(simulation.listEntities().find(e => e.name === 'formationsim').componentNames.includes('script.BattleFixedCamera'));
   const palette = JSON.parse(fs.readFileSync('RootDesk/MyDesk/NewTileSet.tileset', 'utf8')).ContentProto.Json.datas;
   const tiles = new Map(reference.getTiles().map(t => [`${t.position.x},${t.position.y}`, t]));
-  for (let y = -8; y < 8; y++) {
-    for (let x = -15; x < 15; x++) {
+  assert.equal(tiles.size, 209);
+  for (let y = -4; y <= 4; y++) {
+    for (let x = -8; x <= 8; x++) {
       const tile = tiles.get(`${x},${y}`);
       assert.ok(tile, `floor ${x},${y}`);
       assert.equal(palette[tile.tileIndex].IsCollidable, false);
     }
   }
-  for (let y = -9; y <= 8; y++) {
-    for (let x = -16; x <= 15; x++) {
+  for (let y = -5; y <= 5; y++) {
+    for (let x = -9; x <= 9; x++) {
       const tile = tiles.get(`${x},${y}`);
-      const mirror = tiles.get(`${-x - 1},${y}`);
+      const mirror = tiles.get(`${-x},${y}`);
       assert.equal(palette[tile.tileIndex].IsCollidable, palette[mirror.tileIndex].IsCollidable);
-      if (x === -16 || x === 15 || y === -9 || y === 8) assert.equal(palette[tile.tileIndex].IsCollidable, true);
+      if (x === -9 || x === 9 || y === -5 || y === 5) assert.equal(palette[tile.tileIndex].IsCollidable, true);
     }
   }
   assert.deepEqual(reference.component('BattleCameraAnchor', 'MOD.Core.TransformComponent').Position, {x: 0, y: 0, z: 0});
   assert.deepEqual(reference.component('RectTileMap', 'MOD.Core.TransformComponent').Position, {x: 0, y: 0, z: 1000});
+  const camera = reference.component('BattleCameraAnchor', 'MOD.Core.CameraComponent');
+  assert.equal(camera.ZoomRatio, 60);
+  assert.deepEqual(camera.CameraOffset, {x: 0.5, y: 0});
 });
 
 test('private map previews contain renderers without AI or combat components', () => {

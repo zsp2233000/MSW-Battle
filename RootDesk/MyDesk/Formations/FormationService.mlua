@@ -189,7 +189,7 @@ script FormationService extends Logic
         if not record.initialized or draft == nil or slotId ~= record.editSlot or expectedVersion ~= draft.version then self:Publish(record) return end
         local catalog = self:GetCatalog()
         local clean = nil
-        if catalog ~= nil then clean = _FormationSchema:ValidateEdit(units, catalog, draft.units) end
+        if catalog ~= nil then clean = _FormationSchema:ValidateUnits(units, catalog, true) end
         if clean == nil then
             record.message = "無法放置：請選擇左半場可行走且鏡射後合法的空地，最多六個單位且不可重疊"
         else
@@ -469,7 +469,7 @@ script FormationService extends Logic
             local draft = drafts[tostring(index)]
             if type(draft) ~= "table" or type(draft.units) ~= "string" then return false end
             local parsed, units = pcall(function() return _HttpService:JSONDecode(draft.units) end)
-            if not parsed or _FormationSchema:SanitizeUnits(units, catalog, true) == nil then return false end
+            if not parsed or _FormationSchema:ValidateUnits(units, catalog, true) == nil then return false end
             draft.units = units
             if type(draft.version) ~= "number" or type(draft.savedVersion) ~= "number" or type(draft.saveState) ~= "string" then return false end
         end

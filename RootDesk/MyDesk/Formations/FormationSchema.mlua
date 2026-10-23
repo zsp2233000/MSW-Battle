@@ -18,7 +18,7 @@ script FormationSchema extends Logic
         return type(value) == "number" and value == value and value > -math.huge and value < math.huge
     end
 
-    method any SanitizeUnits(any entries, any catalog, boolean allowEmpty)
+    method any ValidateUnits(any entries, any catalog, boolean allowEmpty)
         -- Validate the new coordinate contract before accepting saved units or transferred drafts.
         local count = self:ArrayCount(entries, 6)
         if count < 0 or (count == 0 and not allowEmpty) then return nil end
@@ -35,16 +35,6 @@ script FormationSchema extends Logic
             table.insert(units, { monsterId = entry.monsterId, x = entry.x, y = entry.y })
         end
         return units
-    end
-
-    method any ValidateUnits(any entries, any catalog, boolean allowEmpty)
-        -- Apply the same coordinate and terrain contract to persistence and match intent.
-        return self:SanitizeUnits(entries, catalog, allowEmpty)
-    end
-
-    method any ValidateEdit(any entries, any catalog, table previous)
-        -- A retained draft cannot exempt an invalid point from the new placement contract.
-        return self:ValidateUnits(entries, catalog, true)
     end
 
     method table EmptyDocument()
@@ -73,7 +63,7 @@ script FormationSchema extends Logic
         for index = 1, 5 do
             local slot = value.slots[tostring(index)]
             if type(slot) ~= "table" or slot.id ~= index or not self:IsFinite(slot.revision) or slot.revision < 0 or slot.revision % 1 ~= 0 then return nil end
-            local units = self:SanitizeUnits(slot.units, catalog, true)
+            local units = self:ValidateUnits(slot.units, catalog, true)
             if units == nil then return nil end
             local savedSession = slot.savedSession or ""
             local savedVersion = slot.savedVersion or -1

@@ -32,11 +32,11 @@ local ok, detail = pcall(function()
         assert((lobby.Snapshot.draftVersion > before) == accepted, label)
     end
     local function unit(x, y) return {monsterId = 'monster_tank', x = x, y = y} end
-    for _, point in ipairs({{0,0}, {1,0}, {-15,0}, {-15.01,0}, {-16,0}, {-1,8}, {-1,-8.01}, {-1,9.5}, {-1,math.huge}, {-math.huge,0}, {0/0,0}}) do
+    for _, point in ipairs({{0.5,0}, {1,0}, {-8,0}, {-8.01,0}, {-9,0}, {-1,5}, {-1,-4.01}, {-1,9.5}, {-1,math.huge}, {-math.huge,0}, {0/0,0}}) do
         edit({unit(point[1], point[2])}, false, 'reject centre/right/wall/boundary/nonfinite')
     end
-    edit({unit(-14.99,-8)}, true, 'valid horizontal and bottom boundary')
-    edit({unit(-0.01,7.99)}, true, 'valid near centre and top')
+    edit({unit(-7.99,-4)}, true, 'valid horizontal and bottom boundary')
+    edit({unit(0.49,4.99)}, true, 'valid near centre and top')
     edit({unit(-3.25,0.65),unit(-3.25,0.65)}, false, 'reject overlap')
     edit({unit(-3.25,0.65),unit(-3.10,0.65)}, false, 'reject minimum separation')
     local seven = {}
