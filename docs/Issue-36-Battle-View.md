@@ -150,3 +150,19 @@ _TeleportService:TeleportToMapPosition(
 Standards 與 Spec 兩個獨立 agent 已審查。Standards 未發現阻擋問題；原本的血條尺寸
 重複常數改讀來源設定，具體原型路由掛鉤列為 #38 整合工作。Spec 指出的證據文件缺漏，
 已補上實際畫面、checkpoint、額外幾何／HP／重複顯示／角色／清理探針與以上限制。
+
+## 2026-10-23 使用者驗收
+
+使用者確認 Home／Away 開場，並於自然戰鬥重播、結算、離場及重新進場示範後回覆「通過」。
+暱稱使用原生 `NameTagComponent`，保留原版樣式並顯示於角色下方；Home／Away 原生樣式檢查均通過。
+
+本輪 Maker 實測紀錄：
+
+- 自然戰鬥重播：`NATURAL_PASS result=LOSE localFaction=ENEMY events=286`，最大取樣位置差約 0.21361 世界單位。
+- 結算：`USER_RESULT_PASS result=LOSE resultEvents=1 playerAlive=0 enemyAlive=1`，以及 `FINAL_GEOMETRY_HP_AVATARS_PASS`。
+- 離場：`DEPARTURE_CLEANUP_PASS destroyed=6`。
+- 重入：`USER_REENTRY_PASS units=4 avatars=2 nativeNameTags=true`，使用者確認畫面通過。
+- 最後讀取的 runtime／build logs 均為零錯誤；已結束 Play，回到編輯模式。
+
+本次通過範圍是隔離原型的本機身份切換驗證。正式配對視角整合仍依 #37／#38 推進，
+兩個實際客戶端及 #31 跨 WorldInstance 驗收仍待各票完成。
