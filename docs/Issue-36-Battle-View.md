@@ -166,3 +166,18 @@ Standards 與 Spec 兩個獨立 agent 已審查。Standards 未發現阻擋問�
 
 本次通過範圍是隔離原型的本機身份切換驗證。正式配對視角整合仍依 #37／#38 推進，
 兩個實際客戶端及 #31 跨 WorldInstance 驗收仍待各票完成。
+
+### 驗收後工作目錄收尾
+
+- 使用者確認未手動修改剩餘檔案；本次未將未提交差異歸因於使用者。
+- 透過 ModelBuilder／MapBuilder／UIBuilder，比對八個檔案與已提交版本：兩個原型模型與
+  `map01.map` 沒有語意變更。戰鬥與布陣 UI 的座標差異是引擎寫回的 `Position`，
+  `anchoredPosition`、錨點及尺寸均未變；另有浮點精度、元件順序與預設欄位的改寫。
+- 還原非必要改寫、三個 UIGroup 的顯示順序重排，以及套件範例 `UIStyleSwtich2.model`
+  的 Screen → World 模式／尺寸／初始化資料變更。#36 功能與暱稱程式已在先前提交中保留。
+- 保留並納入版本控制的 `PackageStorage/UI-Component.packageheader`（1.1、154 entries）與
+  `UI-Resource-CardGame.packageheader`（1.0、21 entries），是既有安裝套件的 Maker 管理資料。
+  曾嘗試移除，Refresh 回報兩筆 `LEA-3053 CannotDelete`；已完整恢復原檔。
+- 十個檔案的清理前完整備份位於本機暫存目錄 `msw-issue36-cleanup-UnRvqH/working/`。
+- 恢復套件標頭後，清空 normal logs 並再次 Refresh 成功；normal logs 為零筆，build errors 為零。
+  本輪僅確認編輯器重新載入，未重跑功能測試；原型功能驗收沿用上述使用者確認與實測紀錄。
