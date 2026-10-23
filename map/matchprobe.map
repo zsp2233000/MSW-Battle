@@ -16,7 +16,7 @@
       {
         "id": "054bc469-6c77-4581-93d5-a36f05ce67a4",
         "path": "/maps/matchprobe",
-        "componentNames": "MOD.Core.MapComponent,MOD.Core.FootholdComponent,script.BattleSession,script.BattleFixedCamera,script.BattlePresentation",
+        "componentNames": "MOD.Core.MapComponent,MOD.Core.FootholdComponent,script.BattleSession,script.BattleFixedCamera,script.BattlePresentation,script.BattleView",
         "jsonString": {
           "name": "matchprobe",
           "path": "/maps/matchprobe",
@@ -61,6 +61,10 @@
               "Enable": true,
               "ShowDeploymentUI": false,
               "@type": "script.BattlePresentation"
+            },
+            {
+              "Enable": true,
+              "@type": "script.BattleView"
             }
           ],
           "@version": 1
@@ -1919,7 +1923,7 @@
             {
               "@type": "MOD.Core.CameraComponent",
               "CameraOffset": {
-                "x": 0.5,
+                "x": 0,
                 "y": 0
               },
               "ConfineCameraArea": false,
@@ -1940,7 +1944,7 @@
                 "x": 0,
                 "y": 0
               },
-              "ZoomRatio": 60,
+              "ZoomRatio": 32,
               "Enable": true
             }
           ],

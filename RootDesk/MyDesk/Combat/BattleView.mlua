@@ -1,0 +1,301 @@
+@Component
+script BattleView extends Component
+
+    @ExecSpace("ClientOnly")
+    method void OnBeginPlay()
+        -- Presentation is map-local and follows the matched session; it never simulates combat.
+        self._T.visuals = {}
+        self._T.avatars = {}
+        self._T.hiddenPlayers = {}
+        self._T.loggedFaction = ""
+        log("[VRF][BattleView] ready map=" .. self.Entity.Name)
+    end
+
+    method boolean HasParticipants()
+        -- Server and client can both see the synced match sides without reading a local viewer.
+        local session = self.Entity:GetComponent("script.BattleSession")
+        return isvalid(session) and session.HomeProfile ~= "" and session.AwayProfile ~= "" and session.HomeProfile ~= session.AwayProfile
+    end
+
+    @ExecSpace("ClientOnly")
+    method string GetLocalFaction()
+        -- Own side is the local profile's server participant entry, never a fixed ENEMY flag.
+        local player = _UserService.LocalPlayer
+        if not isvalid(player) or player.CurrentMap ~= self.Entity or not isvalid(player.PlayerComponent) then return "" end
+        if not self:HasParticipants() then return "" end
+        local session = self.Entity:GetComponent("script.BattleSession")
+        local profile = player.PlayerComponent.ProfileCode
+        if profile == session.HomeProfile then return "PLAYER" end
+        if profile == session.AwayProfile then return "ENEMY" end
+        return ""
+    end
+
+    @ExecSpace("ClientOnly")
+    method Entity GetVisual(Entity source)
+        -- Callers may retarget effects here, but cannot change the authoritative unit.
+        if not isvalid(source) then return nil end
+        local record = (self._T.visuals or {})[source.Id]
+        if record ~= nil and isvalid(record.visual) then return record.visual end
+        return nil
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnUpdate(number delta)
+        -- Follow synchronized state every frame without writing source transforms or running combat.
+        local mine = self:GetLocalFaction()
+        if mine == "" then
+            self:ClearVisuals()
+            return
+        end
+        if self._T.loggedFaction ~= mine then
+            self._T.loggedFaction = mine
+            local sign = mine == "PLAYER" and 1 or -1
+            log("[VRF][BattleView] PRESENT localFaction=" .. mine .. " sign=" .. tostring(sign))
+        end
+        local sign = mine == "PLAYER" and 1 or -1
+        local present = {}
+        for _, unit in ipairs(self.Entity:GetChildComponentsByTypeName("script.BattleUnit", false)) do
+            local source = unit.Entity
+            present[source.Id] = true
+            local record = self._T.visuals[source.Id]
+            if record == nil then
+                record = self:CreateVisual(source)
+                if record ~= nil then self._T.visuals[source.Id] = record end
+            end
+            if record ~= nil then self:UpdateVisual(record, unit, sign, mine) end
+        end
+        for id, record in pairs(self._T.visuals) do
+            if not present[id] then
+                self:ReleaseVisual(record)
+                self._T.visuals[id] = nil
+            end
+        end
+        self:UpdateAvatars(sign)
+    end
+
+    @ExecSpace("ClientOnly")
+    method any CreateVisual(Entity source)
+        -- Spawn a native-only visual so no client attack, trigger, or Body can be installed.
+        local visual = _SpawnService:SpawnByModelId("battleviewvisual", "View_" .. source.Name, Vector3(0, 0, 0), self.Entity)
+        if not isvalid(visual) then
+            log("[VRF][BattleView] CREATE_FAILED " .. source.Name)
+            return nil
+        end
+        local fill = visual:GetChildByName("HPBarFill")
+        local gauge = source:GetComponent("script.BattleHPBar")
+        if not isvalid(gauge) or not isvalid(fill) then visual:Destroy(); return nil end
+        local record = { source = source, visual = visual, fill = fill,
+            color = source.SpriteRendererComponent.Color, clip = "", attack = -1, damage = -1,
+            fillScale = fill.TransformComponent.Scale, fillPosition = fill.TransformComponent.Position,
+            fillColor = fill.SpriteRendererComponent.Color,
+            barWidth = gauge.BarWidth, fillWidthRatio = gauge.FillWidthRatio,
+            hiddenChildren = {}, callbacks = {} }
+        for _, child in ipairs(source.Children:ToTable()) do
+            if child.Name == "HPBarBackground" or child.Name == "HPBarFill" then
+                table.insert(record.hiddenChildren, { entity = child, visible = child.Visible })
+                child:SetVisible(false, false, false)
+            end
+        end
+        local spawner = source:GetComponent("DamageSkinSpawnerComponent")
+        if isvalid(spawner) then record.spawnerEnabled = spawner.Enable; spawner.Enable = false end
+        local body = source.KinematicbodyComponent
+        if isvalid(body) then record.shadowEnabled = body.EnableShadow; body.EnableShadow = false end
+        -- Original playback remains alive for its existing completion and death handlers.
+        source.SpriteRendererComponent.Color = Color(record.color.r, record.color.g, record.color.b, 0)
+        local callback = visual:ConnectEvent(SpriteAnimPlayerStartEvent, function(event)
+            log("[VRF][BattleView] ANIMATION target=" .. visual.Name .. " clip=" .. visual.SpriteRendererComponent.SpriteRUID)
+        end)
+        table.insert(record.callbacks, { eventType = SpriteAnimPlayerStartEvent, callback = callback })
+        log("[VRF][BattleView] CREATED " .. source.Name)
+        return record
+    end
+
+    @ExecSpace("ClientOnly")
+    method void UpdateVisual(any record, any unit, number sign, string mine)
+        -- Mirror position and facing independently so gauges stay upright on a positive parent scale.
+        local source = record.source
+        local visual = record.visual
+        local position = source.TransformComponent.WorldPosition
+        visual.TransformComponent.WorldPosition = Vector3(sign * position.x, position.y, position.z)
+        local scale = source.TransformComponent.Scale
+        visual.TransformComponent.Scale = Vector3(math.abs(scale.x), math.abs(scale.y), math.abs(scale.z))
+        visual.SpriteRendererComponent.FlipX = (scale.x * sign < 0) ~= source.SpriteRendererComponent.FlipX
+        visual:SetVisible(source.Visible, false, false)
+        local clip = source.SpriteRendererComponent.SpriteRUID
+        if record.clip ~= clip or record.attack ~= unit.AttackSerial or record.damage ~= unit.DamageTakenSerial then
+            if visual.SpriteRendererComponent.SpriteRUID == clip and record.clip == clip then
+                visual.SpriteRendererComponent.SpriteRUID = unit.StandAnimationRUID
+            end
+            visual.SpriteRendererComponent.SpriteRUID = clip
+            record.clip = clip
+            record.attack = unit.AttackSerial
+            record.damage = unit.DamageTakenSerial
+        end
+        local ratio = 0
+        if unit.MaxHp > 0 then ratio = math.max(0, math.min(1, unit.Hp / unit.MaxHp)) end
+        record.fill.TransformComponent.Scale = Vector3(record.fillScale.x * ratio, record.fillScale.y, record.fillScale.z)
+        record.fill.TransformComponent.Position = Vector3(record.fillPosition.x - record.barWidth * record.fillWidthRatio * (1 - ratio) * 0.5, record.fillPosition.y, record.fillPosition.z)
+        local own = unit.Faction == mine
+        if own then record.fill.SpriteRendererComponent.Color = record.fillColor
+        else record.fill.SpriteRendererComponent.Color = Color(1, 0, 0, 1) end
+        if record.ratio ~= ratio or record.own ~= own then
+            record.ratio = ratio
+            record.own = own
+            log("[VRF][BattleView] HP " .. source.Name .. " ratio=" .. tostring(ratio) .. " own=" .. tostring(own) .. " faction=" .. unit.Faction)
+        end
+    end
+
+    @ExecSpace("Multicast")
+    method void PresentDamage(Entity source, integer amount)
+        -- Render the server-resolved amount on the same bodyless target as the hit effect.
+        if not self:HasParticipants() or not isvalid(_UserService.LocalPlayer) or self:GetLocalFaction() == "" then return end
+        local visual = self:GetVisual(source)
+        if not isvalid(visual) or not isvalid(source) then return end
+        local settings = source.DamageSkinSettingComponent
+        if not isvalid(settings) then return end
+        _DamageSkinService:Play(visual, settings.DamageSkinId.DataId, settings.DelayPerAttack, { amount }, settings.TweenType, false,
+            Vector2(0, 0.8), settings.DamageSkinScale, settings.PlayRate, settings.Alpha, settings.LitMode)
+        log("[VRF][BattleView] DAMAGE target=" .. visual.Name .. " amount=" .. tostring(amount))
+    end
+
+    @ExecSpace("ClientOnly")
+    method string UserIdForProfile(string profile)
+        if profile == nil or profile == "" or _UserService.UserEntities == nil then return "" end
+        for _, user in ipairs(_UserService.UserEntities.Values) do
+            if isvalid(user) and isvalid(user.PlayerComponent) and user.PlayerComponent.ProfileCode == profile then
+                return user.PlayerComponent.UserId
+            end
+        end
+        return ""
+    end
+
+    @ExecSpace("ClientOnly")
+    method void UpdateAvatars(number sign)
+        -- Place bodyless spectators from the map's display anchor, mirrored about x=0 for this viewer.
+        local session = self.Entity:GetComponent("script.BattleSession")
+        if not isvalid(session) then return end
+        local anchorX = session.CharacterPosition.x
+        local anchorY = session.CharacterPosition.y
+        local profiles = { session.HomeProfile, session.AwayProfile }
+        for index, profile in ipairs(profiles) do
+            local record = self._T.avatars[index]
+            if record == nil then
+                local avatar = _SpawnService:SpawnByModelId("battleviewavatar", "ViewAvatar_" .. tostring(index), Vector3(0, anchorY, 0), self.Entity)
+                if not isvalid(avatar) then
+                    log("[VRF][BattleView] AVATAR_FAILED index=" .. tostring(index))
+                    return
+                end
+                -- MapLayer0 is covered by the battlefield tile layer; spectators must use the player layer.
+                local renderer = avatar.AvatarRendererComponent
+                renderer.IgnoreMapLayerCheck = true
+                renderer.SortingLayer = "Default"
+                renderer.OrderInLayer = 20
+                if not isvalid(avatar.NameTagComponent) then avatar:AddComponent("MOD.Core.NameTagComponent") end
+                record = { entity = avatar }
+                self._T.avatars[index] = record
+            end
+            local userId = self:UserIdForProfile(profile)
+            if userId ~= "" and record.userId ~= userId then
+                record.entity.CostumeManagerComponent.DefaultEquipUserId = userId
+                record.userId = userId
+            end
+            local participant = userId ~= "" and _UserService:GetUserEntityByUserId(userId) or nil
+            if isvalid(participant) and isvalid(participant.NameTagComponent) and record.styled ~= true then
+                local nameTag = record.entity.NameTagComponent
+                local sourceTag = participant.NameTagComponent
+                nameTag.NameTagRUID = sourceTag.NameTagRUID
+                nameTag.FontSize = sourceTag.FontSize
+                nameTag.FontColor = sourceTag.FontColor
+                nameTag.Bold = sourceTag.Bold
+                nameTag.FontOffset = sourceTag.FontOffset
+                nameTag.OffsetY = sourceTag.OffsetY
+                record.styled = true
+            end
+            local displayName = "玩家"
+            if isvalid(participant) and isvalid(participant.PlayerComponent) then
+                displayName = participant.PlayerComponent.Nickname
+                if displayName == nil or displayName == "" then displayName = "玩家" end
+            end
+            if record.displayName ~= displayName then
+                record.entity.NameTagComponent.Name = displayName
+                record.entity.NameTagComponent.Enable = true
+                record.displayName = displayName
+            end
+            -- The local player stays on the left; the opponent is the x=0 mirror.
+            local displayedX = index == (sign == 1 and 1 or 2) and anchorX or -anchorX
+            -- shortcut: park y is outside zoom 32, so spectators use the visible row above the field
+            local displayedY = 7.2
+            local body = record.entity.KinematicbodyComponent
+            if isvalid(body) then body.Enable = false end
+            record.entity.TransformComponent.WorldPosition = Vector3(displayedX, displayedY, 0)
+            -- Verified avatar sheets face right when scale.x is negative on the viewer's left.
+            record.entity.TransformComponent.Scale = Vector3(displayedX < 0 and -1 or 1, 1, 1)
+        end
+        self:HideParticipants()
+        if self._T.loggedAvatars ~= true then
+            self._T.loggedAvatars = true
+            log("[VRF][BattleView] AVATARS anchor=" .. tostring(anchorX) .. "," .. tostring(anchorY) .. " sign=" .. tostring(sign))
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void HideParticipants()
+        -- Hide the parked authoritative bodies so only the symmetric spectators are visible.
+        local session = self.Entity:GetComponent("script.BattleSession")
+        if not isvalid(session) or _UserService.UserEntities == nil then return end
+        for _, player in ipairs(_UserService.UserEntities.Values) do
+            if isvalid(player) and player.CurrentMap == self.Entity and isvalid(player.PlayerComponent) then
+                local profile = player.PlayerComponent.ProfileCode
+                if (profile == session.HomeProfile or profile == session.AwayProfile) and self._T.hiddenPlayers[player.Id] == nil then
+                    self._T.hiddenPlayers[player.Id] = { entity = player, visible = player.Visible }
+                    player:SetVisible(false, false, false)
+                    log("[VRF][BattleView] HIDE_PLAYER " .. player.Name)
+                end
+            end
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ReleaseVisual(any record)
+        -- Restore only the local presentation fields this adapter owns, then destroy its visual.
+        if isvalid(record.source) then
+            record.source.SpriteRendererComponent.Color = record.color
+            local spawner = record.source:GetComponent("DamageSkinSpawnerComponent")
+            if isvalid(spawner) and record.spawnerEnabled ~= nil then spawner.Enable = record.spawnerEnabled end
+            local body = record.source.KinematicbodyComponent
+            if isvalid(body) and record.shadowEnabled ~= nil then body.EnableShadow = record.shadowEnabled end
+            for _, child in ipairs(record.hiddenChildren) do
+                if isvalid(child.entity) then child.entity:SetVisible(child.visible, false, false) end
+            end
+        end
+        if isvalid(record.visual) then
+            for _, entry in ipairs(record.callbacks) do record.visual:DisconnectEvent(entry.eventType, entry.callback) end
+            record.visual:Destroy()
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ClearVisuals()
+        -- Release map-local entities, callbacks, and player visibility on departure or before a side is known.
+        if self._T.cleared == true and next(self._T.visuals or {}) == nil and next(self._T.avatars or {}) == nil and next(self._T.hiddenPlayers or {}) == nil then return end
+        for _, record in pairs(self._T.visuals or {}) do self:ReleaseVisual(record) end
+        self._T.visuals = {}
+        for _, record in pairs(self._T.avatars or {}) do if isvalid(record.entity) then record.entity:Destroy() end end
+        self._T.avatars = {}
+        for _, record in pairs(self._T.hiddenPlayers or {}) do
+            if isvalid(record.entity) then record.entity:SetVisible(record.visible, false, false) end
+        end
+        self._T.hiddenPlayers = {}
+        self._T.loggedFaction = ""
+        self._T.loggedAvatars = false
+        self._T.cleared = true
+        log("[VRF][BattleView] CLEANUP")
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnEndPlay()
+        -- Map unload must not retain presentation objects or event connections.
+        self._T.cleared = false
+        self:ClearVisuals()
+    end
+end

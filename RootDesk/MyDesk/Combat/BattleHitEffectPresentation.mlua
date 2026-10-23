@@ -14,13 +14,13 @@ script BattleHitEffectPresentation extends Component
         if not isvalid(self.Entity) then return end
         local target = self.Entity
         local map = target.CurrentMap
-        local view = isvalid(map) and map:GetComponent("script.BattleViewPrototype") or nil
-        if isvalid(view) and view:IsPrototype() then
+        local view = isvalid(map) and map:GetComponent("script.BattleView") or nil
+        if isvalid(view) and view:GetLocalFaction() ~= "" then
             target = view:GetVisual(self.Entity)
             if not isvalid(target) then return end
         end
         local serial = _EffectService:PlayEffectAttached(effectRUID, target, Vector3(0, 0, 0), 0, Vector3(1, 1, 1), false)
-        if isvalid(view) and view:IsPrototype() then
+        if isvalid(view) and view:GetLocalFaction() ~= "" then
             log("[VRF][BattleView] EFFECT target=" .. target.Name .. " serial=" .. tostring(serial)
                 .. " position=" .. tostring(target.TransformComponent.WorldPosition))
         end

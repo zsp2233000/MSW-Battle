@@ -22,7 +22,8 @@
         "MOD.Core.AvatarRendererComponent",
         "MOD.Core.CostumeManagerComponent",
         "MOD.Core.AvatarBodyActionSelectorComponent",
-        "MOD.Core.AvatarFaceActionSelectorComponent"
+        "MOD.Core.AvatarFaceActionSelectorComponent",
+        "MOD.Core.KinematicbodyComponent"
       ],
       "Properties": [],
       "Values": [
@@ -33,7 +34,25 @@
             "$type": "MODNativeType",
             "type": "System.String, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089"
           },
-          "Value": "MapLayer0"
+          "Value": "Default"
+        },
+        {
+          "TargetType": "MOD.Core.AvatarRendererComponent",
+          "Name": "OrderInLayer",
+          "ValueType": {
+            "$type": "MODNativeType",
+            "type": "System.Int32, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089"
+          },
+          "Value": 20
+        },
+        {
+          "TargetType": "MOD.Core.AvatarRendererComponent",
+          "Name": "IgnoreMapLayerCheck",
+          "ValueType": {
+            "$type": "MODNativeType",
+            "type": "System.Boolean, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089"
+          },
+          "Value": true
         }
       ],
       "EventLinks": [],

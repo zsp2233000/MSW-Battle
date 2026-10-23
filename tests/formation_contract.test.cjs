@@ -36,7 +36,12 @@ test('simulation and matched battlefield share the centered 30 by 16 POC terrain
     assert.equal(map.getTileMapMode(), 1);
     assert.deepEqual(map.component('RectTileMap', 'MOD.Core.RectTileMapComponent'), reference.component('RectTileMap', 'MOD.Core.RectTileMapComponent'));
     for (const component of ['MOD.Core.TransformComponent', 'MOD.Core.CameraComponent']) {
-      assert.deepEqual(map.component('BattleCameraAnchor', component), reference.component('BattleCameraAnchor', component));
+      const expected = { ...reference.component('BattleCameraAnchor', component) };
+      if (name === 'matchprobe' && component === 'MOD.Core.CameraComponent') {
+        expected.ZoomRatio = 32;
+        expected.CameraOffset = { x: 0, y: 0 };
+      }
+      assert.deepEqual(map.component('BattleCameraAnchor', component), expected);
     }
   }
   const simulation = MapBuilder.read('map/formationsim.map');
