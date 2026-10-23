@@ -20,7 +20,8 @@ local ok, detail = pcall(function()
         assert(isvalid(visual), "missing visual " .. source.Name)
         local sourcePosition = source.TransformComponent.WorldPosition
         local visualPosition = visual.TransformComponent.WorldPosition
-        local difference = math.max(math.abs(visualPosition.x - sign * sourcePosition.x), math.abs(visualPosition.y - sourcePosition.y))
+        local expectedX = sign == 1 and sourcePosition.x or 1 - sourcePosition.x
+        local difference = math.max(math.abs(visualPosition.x - expectedX), math.abs(visualPosition.y - sourcePosition.y))
         assert(difference < 0.35, "position diverged " .. source.Name)
         assert(not isvalid(visual.KinematicbodyComponent) and not isvalid(visual.TriggerComponent), "visual has combat components")
         assert(source.SpriteRendererComponent.Color.a == 0, "original sprite still visible")
@@ -50,9 +51,14 @@ local ok, detail = pcall(function()
     local ownPosition = ownAvatar.TransformComponent.WorldPosition
     local otherPosition = otherAvatar.TransformComponent.WorldPosition
     assert(ownPosition.x < -1 and otherPosition.x > 1, "own spectator is not on the left")
-    assert(math.abs(ownPosition.x + otherPosition.x) < 0.05, "spectators are not symmetric")
-    assert(math.abs(ownPosition.y - 7.2) < 0.05, "spectators left the visible row")
-    assert(ownPosition.y > 6.5, "spectators overlap the combat field")
+    assert(math.abs(ownPosition.x + otherPosition.x - 1) < 0.05, "spectators are not symmetric about x=0.5")
+    assert(math.abs(ownPosition.y - 4.2) < 0.05 and math.abs(otherPosition.y - 4.2) < 0.05, "spectators left the visible row")
+    for _, position in ipairs({ownPosition, otherPosition}) do
+        for _, y in ipairs({position.y, position.y + 1.5}) do
+            local screen = _UILogic:WorldToScreenPosition(Vector2(position.x, y))
+            assert(screen.x > 0 and screen.x < _UILogic.ScreenWidth and screen.y > 0 and screen.y < _UILogic.ScreenHeight, "spectator or name tag is outside the view")
+        end
+    end
     assert(ownAvatar.TransformComponent.Scale.x < 0 and otherAvatar.TransformComponent.Scale.x > 0, "spectator facing is not inward")
     local body = ownAvatar.KinematicbodyComponent
     assert((not isvalid(body) or body.Enable == false) and not isvalid(ownAvatar.TriggerComponent) and not isvalid(ownAvatar:GetComponent("script.BattleUnit")), "spectator can fight")

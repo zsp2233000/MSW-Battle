@@ -224,8 +224,8 @@ script BattleView extends Component
             end
             -- The local player stays on the left; the opponent is the x=0.5 mirror.
             local displayedX = index == (sign == 1 and 1 or 2) and anchorX or _FormationMapLayout:MirrorX(anchorX)
-            -- shortcut: park y is outside zoom 32, so spectators use the visible row above the field
-            local displayedY = 7.2
+            -- Keep the avatar and name tag below the upper view edge at zoom 60, beside the HUD.
+            local displayedY = 4.2
             local body = record.entity.KinematicbodyComponent
             if isvalid(body) then body.Enable = false end
             record.entity.TransformComponent.WorldPosition = Vector3(displayedX, displayedY, 0)

@@ -38,8 +38,8 @@ test('simulation and matched battlefield share the centered 30 by 16 POC terrain
     for (const component of ['MOD.Core.TransformComponent', 'MOD.Core.CameraComponent']) {
       const expected = { ...reference.component('BattleCameraAnchor', component) };
       if (name === 'matchprobe' && component === 'MOD.Core.CameraComponent') {
-        expected.ZoomRatio = 32;
-        expected.CameraOffset = { x: 0, y: 0 };
+        expected.ZoomRatio = 60;
+        expected.CameraOffset = { x: 0.5, y: 0 };
       }
       assert.deepEqual(map.component('BattleCameraAnchor', component), expected);
     }
