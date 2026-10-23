@@ -1,0 +1,122 @@
+@Logic
+script FormationSchema extends Logic
+
+    method integer ArrayCount(any entries, integer limit)
+        -- Reject sparse arrays, extra keys and oversized payloads before iteration.
+        if type(entries) ~= "table" then return -1 end
+        local count = 0
+        for key, _ in pairs(entries) do
+            if type(key) ~= "number" or key % 1 ~= 0 or key < 1 or key > limit then return -1 end
+            count = count + 1
+        end
+        for index = 1, count do if entries[index] == nil then return -1 end end
+        return count
+    end
+
+    method boolean IsFinite(any value)
+        -- Accept only numeric finite world coordinates, never numeric strings.
+        return type(value) == "number" and value == value and value > -math.huge and value < math.huge
+    end
+
+    method any ValidateUnits(any entries, any catalog, boolean allowEmpty)
+        -- Validate the new coordinate contract before accepting saved units or transferred drafts.
+        local count = self:ArrayCount(entries, 6)
+        if count < 0 or (count == 0 and not allowEmpty) then return nil end
+        local units = {}
+        for index = 1, count do
+            local entry = entries[index]
+            if type(entry) ~= "table" or type(entry.monsterId) ~= "string" then return nil end
+            if catalog:GetProfile(entry.monsterId) == nil then return nil end
+            if not self:IsFinite(entry.x) or not self:IsFinite(entry.y) then return nil end
+            if not _FormationMapLayout:CanDeploy(entry.x, entry.y) then return nil end
+            for _, other in ipairs(units) do
+                if (entry.x - other.x)^2 + (entry.y - other.y)^2 < _FormationMapLayout.MinimumSeparation^2 then return nil end
+            end
+            table.insert(units, { monsterId = entry.monsterId, x = entry.x, y = entry.y })
+        end
+        return units
+    end
+
+    method table EmptyDocument()
+        -- Reserve five stable IDs; an empty account has no active battle formation.
+        local doc = { schema = 2, revision = 0, activeSlot = 0, slots = {}, writeId = "" }
+        for index = 1, 5 do doc.slots[tostring(index)] = { id = index, revision = 0, units = {}, savedSession = "", savedVersion = -1 } end
+        return doc
+    end
+
+    method any ValidateDocument(any value, any catalog)
+        -- Fail closed on corrupt or newer schemas, leaving the original storage bytes intact.
+        if type(value) ~= "table" or value.schema ~= 2 or type(value.slots) ~= "table" then return nil end
+        if not self:IsFinite(value.revision) or value.revision < 0 or value.revision % 1 ~= 0 then return nil end
+        if not self:IsFinite(value.activeSlot) or value.activeSlot < 0 or value.activeSlot > 5 or value.activeSlot % 1 ~= 0 then return nil end
+        if value.writeId ~= nil and (type(value.writeId) ~= "string" or (value.writeId ~= "" and (#value.writeId ~= 32 or not string.match(value.writeId, "^%x+$")))) then return nil end
+        local doc = self:EmptyDocument()
+        doc.writeId = value.writeId or ""
+        doc.revision = value.revision
+        doc.activeSlot = value.activeSlot
+        local count = 0
+        for key, _ in pairs(value.slots) do
+            if key ~= "1" and key ~= "2" and key ~= "3" and key ~= "4" and key ~= "5" then return nil end
+            count = count + 1
+        end
+        if count ~= 5 then return nil end
+        for index = 1, 5 do
+            local slot = value.slots[tostring(index)]
+            if type(slot) ~= "table" or slot.id ~= index or not self:IsFinite(slot.revision) or slot.revision < 0 or slot.revision % 1 ~= 0 then return nil end
+            local units = self:ValidateUnits(slot.units, catalog, true)
+            if units == nil then return nil end
+            local savedSession = slot.savedSession or ""
+            local savedVersion = slot.savedVersion or -1
+            if type(savedSession) ~= "string" or (savedSession ~= "" and (#savedSession ~= 32 or not string.match(savedSession, "^%x+$"))) then return nil end
+            if not self:IsFinite(savedVersion) or savedVersion < -1 or savedVersion % 1 ~= 0 then return nil end
+            doc.slots[tostring(index)] = { id = index, revision = slot.revision, units = units, savedSession = savedSession, savedVersion = savedVersion }
+        end
+        if doc.activeSlot > 0 and #doc.slots[tostring(doc.activeSlot)].units == 0 then return nil end
+        return doc
+    end
+
+    method table CopyUnits(table units)
+        -- Make detached values for draft, pending write, confirmed save and RPC snapshots.
+        local copy = {}
+        for _, unit in ipairs(units) do table.insert(copy, { monsterId = unit.monsterId, x = unit.x, y = unit.y }) end
+        return copy
+    end
+
+    method table CopyDocument(table doc)
+        -- Preserve all five slots when saving one formation or its independent active selection.
+        local copy = self:EmptyDocument()
+        copy.revision = doc.revision
+        copy.writeId = doc.writeId or ""
+        copy.activeSlot = doc.activeSlot
+        for index = 1, 5 do
+            local slot = doc.slots[tostring(index)]
+            copy.slots[tostring(index)] = { id = index, revision = slot.revision, units = self:CopyUnits(slot.units), savedSession = slot.savedSession or "", savedVersion = slot.savedVersion or -1 }
+        end
+        return copy
+    end
+
+    method string EncodeDocument(table doc)
+        -- MSW JSONEncode rejects empty Lua tables; emit explicit empty arrays for unused slots.
+        local slots = {}
+        for index = 1, 5 do
+            local slot = doc.slots[tostring(index)]
+            local units = {}
+            for _, unit in ipairs(slot.units) do table.insert(units, _HttpService:JSONEncode(unit)) end
+            table.insert(slots, '"' .. tostring(index) .. '":{"id":' .. tostring(index)
+                .. ',"revision":' .. tostring(slot.revision) .. ',"savedSession":"' .. (slot.savedSession or "")
+                .. '","savedVersion":' .. tostring(slot.savedVersion or -1) .. ',"units":[' .. table.concat(units, ",") .. ']}')
+        end
+        return '{"schema":2,"writeId":"' .. (doc.writeId or "") .. '","revision":' .. tostring(doc.revision) .. ',"activeSlot":' .. tostring(doc.activeSlot)
+            .. ',"slots":{' .. table.concat(slots, ",") .. '}}'
+    end
+
+    method boolean SameUnits(table left, table right)
+        -- Match confirmed content without relying on table identity or serialization ordering.
+        if #left ~= #right then return false end
+        for index, unit in ipairs(left) do
+            local other = right[index]
+            if unit.monsterId ~= other.monsterId or unit.x ~= other.x or unit.y ~= other.y then return false end
+        end
+        return true
+    end
+end

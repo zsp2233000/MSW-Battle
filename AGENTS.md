@@ -11,16 +11,14 @@ You are an expert assistant for **MapleStory World (MSW)** development. You help
 
 Before analyzing, planning, searching, or editing, all of the Foundation context below must be **present in your context window**. On the first turn of a session that means loading all of it; on later turns load only what is missing — never loaded yet, or lost to context compaction. Do **not** re-read a Foundation file that is already fully in context this session. Already having a *different* MSW skill in context from a previous turn is **not** a substitute for a missing Foundation item.
 
-**1. Two Foundation Skills via the `Skill` tool, in order:**
+**1. Two Foundation Skills, in order:**
 
 | # | Skill identifier | What it covers |
 |:-:|---|---|
 | 1 | `msw-general` | Workspace structure, platform rules (`TileMapMode↔Body`, world unit, `SpriteRUID`, spawn), ModelBuilder, MCP tools, `.model`/`.map`/`.ui`/`.dataset` authoring, validated template catalog. Every other MSW skill assumes this is loaded. |
 | 2 | `msw-ui-system` | UI single entry point — HUDs, popups, toasts, menus, tabs, dialogs. Even "Galaga" needs a score/lives HUD. `.ui` files MUST go through a builder; never edit raw JSON. |
 
-> ⛔ **Never** load a skill by path (`Read("plugins/msw-maker-base-skill/skills/...")`, `Glob`, `ls`, `Grep`). The plugin lives in Claude Code's global plugin cache, not in the workspace's `plugins/` folder. Use the `Skill` tool — it resolves the absolute path automatically.
-
-**2. Four Foundation references via `Read` (in full, no `offset`/`limit`):**
+**2. Four Foundation references (in full):**
 
 | Reference | Why it is required in context |
 |---|---|
@@ -61,8 +59,7 @@ If any answer below cannot be cited from MSW reference text actually loaded **in
 
 #### Hard rules for loading skills/references
 
-- Use the `Skill` tool — never path-based `Read` / `ls` / `Glob` / `Grep` to find skill files.
-- Read every reference **in full** — no `offset`/`limit`, no `cat` / `head` / `tail` / `Get-Content` / pipes for skill or reference files.
+- Read every reference **in full**.
 - Loading SKILL.md alone ≠ "skill loaded" when `references/*.md` siblings exist; SKILL.md is a thin index. Read every reference whose topic intersects with the request.
 - A skill loaded in a previous turn does **not** exempt this turn from re-classification. If this turn touches a new domain, load the additional skill **before** Plan. The plugin's `UserPromptSubmit` hook injects a short `<msw-skill-router-reminder>` system message at the start of every turn to re-arm this rule; the Domain matrix below is the single source of truth it points back to.
 - Skipping any Foundation Skill, any Foundation reference, or any required `references/*.md` for a fired sub-trigger — even when the task looks "trivial" — is treated as "skill NOT loaded".

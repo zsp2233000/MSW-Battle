@@ -12,7 +12,8 @@ test("same-type catalog fixture varies combat values without changing shared ass
   const rows = parseMonsterCsv(fixture).records;
   const primary = rows.find(row => row.MonsterId === "monster_tank");
   const variant = rows.find(row => row.MonsterId === "probe_tank_variant");
-  assert.equal(primary.MaxHp, "500");
+  const original = parseMonsterCsv(before).records.find(row => row.MonsterId === "monster_tank");
+  assert.deepEqual(primary, { ...original, MonsterName: "RenamedTank" });
   assert.equal(variant.MaxHp, "650");
   assert.equal(variant.AttackDamage, "25");
   assert.equal(variant.MoveSpeed, "0.7");

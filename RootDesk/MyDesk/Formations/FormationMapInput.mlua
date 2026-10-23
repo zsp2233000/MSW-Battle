@@ -1,0 +1,214 @@
+@Component
+script FormationMapInput extends Component
+
+    property integer PreviewCount = 0
+    property integer PreviewVersion = -1
+    property integer SelectionEffectSerial = 0
+
+    @ExecSpace("ClientOnly")
+    method void OnBeginPlay()
+        -- Listen only for this map's input and own private, visual-only preview entities.
+        self._T.previews = {}
+        self._T.previewIds = {}
+        self._T.touch = _InputService:ConnectEvent(ScreenTouchEvent, self.HandleTouch)
+        self._T.key = _InputService:ConnectEvent(KeyDownEvent, self.HandleRightClick)
+        self._T.inMap = false
+        self._T.selected = -1
+        self._T.spectatorRequested = false
+        self.SelectionEffectSerial = 0
+        log("[VRF][FormationMap] map input ready")
+    end
+
+    @ExecSpace("ClientOnly")
+    method boolean IsEditing()
+        -- Gate shared input services to the local player's actual simulation-map membership.
+        local player = _UserService.LocalPlayer
+        return isvalid(player) and player.CurrentMap == self.Entity
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnUpdate(number delta)
+        -- Render server-accepted draft positions without adding AI, combat or synchronized units.
+        local inMap = self:IsEditing()
+        if not inMap then
+            if self._T.inMap then
+                self:RestoreSpectatorControl()
+                self:ClearPreviews()
+            end
+            self._T.inMap = false
+            self._T.spectatorRequested = false
+            return
+        end
+        self._T.inMap = true
+        self:LockSpectator()
+        local snapshot = _FormationLobby.Snapshot
+        if snapshot.draft == nil then return end
+        if self._T.previewSlot ~= snapshot.editSlot or self.PreviewVersion ~= snapshot.draftVersion or self.PreviewCount ~= #snapshot.draft or self._T.optionCount ~= #(snapshot.options or {}) then self:SyncPreviews(snapshot) end
+        local selected = _FormationLobby.SelectedUnit
+        if self._T.selected ~= selected then
+            self:ClearSelectionEffect()
+            self._T.selected = selected
+            local entity = self._T.previews[selected]
+            if isvalid(entity) then
+                self.SelectionEffectSerial = _EffectService:PlayEffectAttached("619f638cdb634056bfbecf71920b6482", entity, Vector3.zero, 0, Vector3.one, true, { SortingLayer = "MapLayer0", OrderInLayer = 19 })
+                log("[VRF][FormationSelection] selected=" .. tostring(selected) .. " effect=" .. tostring(self.SelectionEffectSerial))
+            end
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void RestoreSpectatorControl()
+        -- Restore local input after leaving the formation simulation map.
+        local player = _UserService.LocalPlayer
+        if not isvalid(player) then return end
+        local controller = player:GetComponent("PlayerControllerComponent")
+        if isvalid(controller) then controller.Enable = true end
+        local movement = player:GetComponent("MovementComponent")
+        if isvalid(movement) then movement:Stop() end
+        log("[VRF][FormationMap] spectator control restored")
+    end
+
+    @ExecSpace("ClientOnly")
+    method void LockSpectator()
+        -- Disable local input immediately and ask the server to set the authoritative position.
+        local player = _UserService.LocalPlayer
+        if not isvalid(player) or player.CurrentMap ~= self.Entity then return end
+        local controller = player:GetComponent("PlayerControllerComponent")
+        if isvalid(controller) then controller.Enable = false end
+        local movement = player:GetComponent("MovementComponent")
+        if isvalid(movement) then movement:Stop() end
+        if self._T.spectatorRequested ~= true then
+            self._T.spectatorRequested = true
+            _FormationService:RequestSimulationSpectator()
+            log("[VRF][FormationMap] spectator position request sent")
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ClearSelectionEffect()
+        -- Remove the previous looping marker before switching, rebuilding or leaving the map.
+        if self.SelectionEffectSerial > 0 then
+            _EffectService:RemoveEffect(self.SelectionEffectSerial)
+            log("[VRF][FormationSelection] removed=" .. tostring(self.SelectionEffectSerial))
+            self.SelectionEffectSerial = 0
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void SyncPreviews(table snapshot)
+        -- Upsert local sprites at exact world positions using the formal catalog's idle animation.
+        self:ClearSelectionEffect()
+        self.PreviewVersion = snapshot.draftVersion
+        self._T.previewSlot = snapshot.editSlot
+        self._T.optionCount = #(snapshot.options or {})
+        for index, unit in ipairs(snapshot.draft) do
+            local entity = self._T.previews[index]
+            if not isvalid(entity) then
+                entity = _SpawnService:SpawnByModelId("formationpreview", "FormationPreview_" .. tostring(index), Vector3(unit.x, unit.y, 0), self.Entity)
+                if not isvalid(entity) then
+                    self.PreviewVersion = -1
+                    return
+                end
+                self._T.previews[index] = entity
+            end
+            entity.TransformComponent.Position = Vector3(unit.x, unit.y, 0)
+            if self._T.previewIds[index] ~= unit.monsterId then
+                for _, option in ipairs(snapshot.options or {}) do
+                    if option[1] == unit.monsterId then
+                        entity.SpriteRendererComponent.SpriteRUID = option[3]
+                        self._T.previewIds[index] = unit.monsterId
+                    end
+                end
+            end
+        end
+        for index = #self._T.previews, #snapshot.draft + 1, -1 do
+            local entity = self._T.previews[index]
+            if isvalid(entity) then entity:Destroy() end
+            self._T.previews[index] = nil
+            self._T.previewIds[index] = nil
+        end
+        self.PreviewCount = #snapshot.draft
+        self._T.selected = -1
+        log("[VRF][FormationMap] previews=" .. tostring(self.PreviewCount) .. " version=" .. tostring(self.PreviewVersion))
+    end
+
+    @ExecSpace("ClientOnly")
+    method integer UnitAt(Vector3 position)
+        -- Pick the nearest unit within a small world-space click radius.
+        local nearest = 0
+        local distance = 0.25
+        for index, unit in ipairs(_FormationLobby.Snapshot.draft or {}) do
+            local squared = (unit.x - position.x)^2 + (unit.y - position.y)^2
+            if squared <= distance then distance = squared nearest = index end
+        end
+        return nearest
+    end
+
+    @ExecSpace("ClientOnly")
+    method void HandleWorldClick(Vector3 position)
+        -- Select an existing unit or place/move a unit at an unsnapped world coordinate.
+        if not self:IsEditing() or position == nil then return end
+        local index = self:UnitAt(position)
+        if index > 0 then
+            _FormationLobby.SelectedUnit = index
+            _FormationLobby:Render()
+        else
+            _FormationLobby:Place(position.x, position.y)
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void HandleWorldRemoval(Vector3 position)
+        -- Right-click removal uses the same private draft command as the selected-unit button.
+        if not self:IsEditing() or position == nil then return end
+        local index = self:UnitAt(position)
+        if index < 1 then return end
+        _FormationLobby.SelectedUnit = index
+        _FormationLobby:RemoveSelected()
+    end
+
+    @ExecSpace("ClientOnly")
+    method void HandleTouch(ScreenTouchEvent event)
+        -- Convert actual screen input through the active map camera and ignore UI-covered points.
+        if not self:IsEditing() or event == nil or event.TouchId ~= 1 then return end
+        if _InputService:IsPointerOverUI(event.TouchId) then return end
+        local world = _UILogic:ScreenToWorldPosition(event.TouchPoint)
+        self:HandleWorldClick(Vector3(world.x, world.y, 0))
+    end
+
+    @ExecSpace("ClientOnly")
+    method void HandleRightClick(KeyDownEvent event)
+        -- Right-click cancels an active selection; with no selection it removes the unit under the cursor.
+        if not self:IsEditing() or event == nil or event.key ~= KeyboardKey.Mouse1 then return end
+        if _InputService:IsPointerOverUI() then return end
+        if _FormationLobby.SelectedUnit > 0 then
+            _FormationLobby.SelectedUnit = 0
+            self._T.selected = 0
+            self:ClearSelectionEffect()
+            _FormationLobby:Render()
+            log("[VRF][FormationSelection] cancelled=right-click")
+            return
+        end
+        local world = _UILogic:ScreenToWorldPosition(_InputService:GetCursorPosition())
+        self:HandleWorldRemoval(Vector3(world.x, world.y, 0))
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ClearPreviews()
+        -- Remove private visual entities on map departure and force reconstruction on re-entry.
+        self:ClearSelectionEffect()
+        for _, entity in ipairs(self._T.previews or {}) do if isvalid(entity) then entity:Destroy() end end
+        self._T.previews = {}
+        self._T.previewIds = {}
+        self.PreviewCount = 0
+        self.PreviewVersion = -1
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnEndPlay()
+        -- Release input callbacks and all local previews with this map component.
+        if self._T.touch ~= nil then _InputService:DisconnectEvent(ScreenTouchEvent, self._T.touch) end
+        if self._T.key ~= nil then _InputService:DisconnectEvent(KeyDownEvent, self._T.key) end
+        self:ClearPreviews()
+    end
+end

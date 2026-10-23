@@ -1,0 +1,22 @@
+{
+  "Id": "",
+  "GameId": "",
+  "EntryKey": "scriptfile://e77052f4-6ee3-4ec2-86f9-6a1844c0f1b1",
+  "ContentType": "x-mod/scriptfile",
+  "Content": "",
+  "Usage": 0,
+  "UsePublish": 1,
+  "UseService": 0,
+  "CoreVersion": "26.10.0.0",
+  "StudioVersion": "0.1.0.0",
+  "DynamicLoading": 0,
+  "ContentProto": {
+    "Use": "Json",
+    "Json": {
+      "Name": "UICompoundButtonReadMe",
+      "Id": "e77052f4-6ee3-4ec2-86f9-6a1844c0f1b1",
+      "Script": "--[[\n# UICompoundButton\nThis package provides an integrated UI system offering a variety of UI button components.\nIt includes toggles, switches, checkboxes, and radio buttons, making them easy to use.\n\n---\n## Key Features\n\n1. **Diverse Button Type Support**\n   - `UIToggle`: Basic toggle button\n   - `UISwitch`: Switch-style toggle\n   - `UICheckBox`: Checkbox\n   - `UIRadioButton`: Radio button\n   - `UIEntityToggle`: Entity-based toggle\n\n2. **Button Group System**\n   - Manages button groups via `UICompoundButtonGroup`\n   - Supports single/multiple selection\n   - Sets a maximum selection count\n   - Allows/disallows deselecting all items\n\n3. **Animations and Visual Effects**\n   - Smooth state transition animations\n   - Color change animations\n   - Visual representation of disabled state\n\n---\n## Core Components\n\n### UICompoundButton (Base Class)\nThis is the base class for all button components.\n\n**Key Properties:**\n- `IsOn`: Current activation state\n- `Interactable`: Whether the button is interactable\n- `ButtonGroup`: Associated button group\n- `AnimationDuration`: Duration of the animation\n- `SoundRUID`: Click sound RUID\n- `OnStateEntity`: Entity for active state\n- `OffStateEntity`: Entity for inactive state\n\nYou can pre-configure values via the Property panel. If you're using scripts, you must use functions to modify them.\n\n### UICompoundButtonGroup\nA component for managing buttons as a group.\n\n**Key Properties:**\n- `Buttons`: List of registered buttons\n- `AllowAllOff`: Whether to allow all buttons to be turned off\n- `AllowMultipleSelection`: Whether to allow multiple selections\n- `MaxSelectionCount`: Maximum number of selectable buttons\n- `ActiveButtons`: List of currently active buttons\n\n---\n## Event System\n\n### UICompoundButtonValueChangedEvent\nTriggered when the value of a button changes.\n\n### UICompoundButtonGroupValueChangedEvent \nTriggered when the selection state of a button group changes.\n\n---\n## Style System\n\nVarious styles can be predefined as Structs and set to UI elements.\n\n- **UIStyleToggle**\n- **UIStyleSwitch**\n- **UIStyleCheckBox**\n- **UIStyleRadioButton**\n\n---\n## Usage\n\n### 1. Style Struct\nDefine the StyleStruct in UICompoundButtonStyleLogic:OnBeginPlay.\n\n### 2. UIModel\nUse or modify models under the UIModel\\Base path.\nTo use a ButtonGroup, make sure to configure the appropriate ButtonGroup settings.\nIf you spawn buttons via SpawnService, register them using UICompoundButtonGroup:RegisterButton.\nApply predefined styles using the SetStyle function.\n\n### 3. Style Button\nUse or modify models under the UIModel\\Style path.\nButtonGroup usage is the same as with Base models.\nUse the StyleName property or the SetStyle function to apply predefined styles.\n\n---\n## License\n\nThis project is licensed under the MIT License.\nYou are free to use, modify, and distribute this project.\n\nHowever, the software is provided \"as is\", without warranty of any kind.\nFor more details, please see the LICENSE.(https://opensource.org/licenses/MIT)\n\n---\n## Happy Coding!\n]]",
+      "ModifyTime": "10/22/2026 22:08:10"
+    }
+  }
+}

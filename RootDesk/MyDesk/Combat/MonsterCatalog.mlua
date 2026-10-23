@@ -2,12 +2,14 @@
 script MonsterCatalog extends Component
 
     property string ErrorMessage = ""
+    property boolean IsLoaded = false
 
     @ExecSpace("ServerOnly")
     method void OnInitialize()
         -- Initialize the map-scoped catalog without exposing server diagnostics to clients.
         self._T.profilesById = {}
         self.ErrorMessage = ""
+        self.IsLoaded = false
     end
 
     method boolean IsBlank(any value)
@@ -233,6 +235,7 @@ script MonsterCatalog extends Component
     method boolean Load(string datasetName, table fixedRoster, table allowedModelIds)
         -- Rebuild the catalog only when every row and fixed enemy entry passes validation.
         self.ErrorMessage = ""
+        self.IsLoaded = false
         self._T.profilesById = {}
         self._T.allowedModelIds = allowedModelIds or {}
         local dataset = _DataService:GetTable(datasetName)
@@ -258,6 +261,7 @@ script MonsterCatalog extends Component
             self._T.profilesById[profile.MonsterId] = profile
         end
         if self:ValidateRoster(fixedRoster) == false then return false end
+        self.IsLoaded = true
         log("[M1][MonsterCatalog] loaded and validated rows=" .. tostring(rowCount))
         return true
     end

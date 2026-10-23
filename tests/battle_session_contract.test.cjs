@@ -45,12 +45,13 @@ test("fixed battlefield camera has one client-only CameraComponent owner", () =>
   for (const method of ["OnBeginPlay", "OnUpdate", "OnEndPlay", "TryConfigureCamera", "RestoreCamera"]) {
     assert.match(camera, new RegExp(`@ExecSpace\\("ClientOnly"\\)\\s+method [^\\n]+ ${method}\\(`));
   }
-  assert.match(camera, /property number CameraZoomPercent/);
-  assert.match(camera, /property Vector2 CameraOffset/);
-  assert.match(camera, /originalDeadZone = camera\.DeadZone/);
-  assert.match(camera, /camera\.DeadZone = self\._T\.originalDeadZone/);
-  assert.match(camera, /camera\.CameraOffset = self\.CameraOffset/);
-  assert.match(camera, /camera\.CameraOffset = self\._T\.originalCameraOffset/);
+  assert.match(camera, /property Entity CameraAnchor/);
+  assert.match(camera, /local camera = anchor\.CameraComponent/);
+  assert.match(camera, /self\._T\.previousCamera = previousCamera/);
+  assert.match(camera, /_CameraService:SwitchCameraTo\(camera\)/);
+  assert.match(camera, /_CameraService:SwitchCameraTo\(previousCamera\)/);
+  assert.doesNotMatch(camera, /camera\.(?:ZoomRatio|CameraOffset|DeadZone|Damping)\s*=/,
+    "camera selection must preserve the map's authored native settings");
 });
 
 test("M1 unit model has the RectTile movement and native hit contract", () => {
@@ -89,6 +90,7 @@ test("Issue #7 uses the delivered option template, start button, and result enti
 test("Issue #7 keeps deployment authority on the map session and uses IDs for cards", () => {
   const session = read("RootDesk/MyDesk/Combat/BattleSession.mlua");
   const input = read("RootDesk/MyDesk/Combat/BattleDeploymentInput.mlua");
+  const presentation = read("RootDesk/MyDesk/Combat/BattleUIController.mlua");
   const probe = read("tests/deployment_runtime_probe.lua");
   const uiProbe = read("tests/deployment_ui_runtime_probe.lua");
   assert.match(session, /@Sync property string Phase = "DEPLOYMENT"/);
@@ -96,12 +98,14 @@ test("Issue #7 keeps deployment authority on the map session and uses IDs for ca
   assert.match(session, /@ExecSpace\("Server"\)\s+method void RequestBattlefieldClick\(string monsterId, Vector3 position\)/);
   assert.match(session, /method boolean TryDeployMonster\(string monsterId, Vector3 position\)/);
   assert.match(session, /self:GetMonsterProfile\(monsterId\)/);
-  assert.match(session, /DeploymentMinDistance = 0\.6/);
+  assert.match(session, /DeploymentMinDistance = 0\.3/);
+  assert.match(read("RootDesk/MyDesk/Formations/FormationMapLayout.mlua"), /MinimumSeparation = 0\.3/);
   assert.match(session, /DeploymentMaxUnits = 6/);
   assert.match(session, /method boolean TryStartBattle\(\)/);
   assert.match(session, /method boolean CanStartBattleWithPlayerCount\(integer playerCount\)/);
   assert.match(input, /self\.optionTemplate:Clone\(/);
-  assert.match(input, /portrait\.ImageRUID = DataRef\(standRUID\)/);
+  assert.match(input, /self:ConfigureMonsterPortrait\(portraitEntity, standRUID\)/);
+  assert.match(input, /portrait\.ImageRUID = DataRef\(ruid\)/);
   assert.match(input, /self\.selectedMonsterId = monsterId/);
   assert.match(input, /self\.session:RequestBattlefieldClick\(self\.selectedMonsterId/);
   assert.doesNotMatch(input, /BtnTank|BtnAssault|BtnShooter|RequestSelectUnit/);
@@ -112,8 +116,11 @@ test("Issue #7 keeps deployment authority on the map session and uses IDs for ca
   assert.match(uiProbe, /portrait\.ImageRUID\.DataId == option\[3\]/);
   assert.match(uiProbe, /enabledGlows == 1/);
   assert.match(input, /method void SyncDeploymentControls\(\)/);
-  assert.match(input, /self\.optionContainer:SetEnable\(enabled\)/);
-  assert.match(input, /self\.startButton:SetEnable\(enabled\)/);
+  assert.match(input, /presentation\.ShowDeploymentUI and self\.session\.Phase == "DEPLOYMENT"/);
+  assert.match(input, /local ready = self:IsDeploymentEnabled\(\) and playerAlive > 0/);
+  assert.match(input, /button\.Enable = ready/);
+  assert.match(presentation, /local showDeployment = isvalid\(presentation\) and presentation\.ShowDeploymentUI and phase == "DEPLOYMENT"/);
+  assert.match(presentation, /self:SetEnabled\(self\.deployment, showDeployment\)/);
   assert.match(input, /glow = glowEntity, clickAction = clickAction/);
   assert.match(input, /method void HandleBattlefieldClick\(Vector3 position\)/);
   assert.match(uiProbe, /selectedCard\.clickAction\(\)/);

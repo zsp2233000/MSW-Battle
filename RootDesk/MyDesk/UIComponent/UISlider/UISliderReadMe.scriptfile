@@ -1,0 +1,22 @@
+{
+  "Id": "",
+  "GameId": "",
+  "EntryKey": "scriptfile://21aca172-014a-49eb-a5d0-516b1d1cb7ed",
+  "ContentType": "x-mod/scriptfile",
+  "Content": "",
+  "Usage": 0,
+  "UsePublish": 1,
+  "UseService": 0,
+  "CoreVersion": "26.10.0.0",
+  "StudioVersion": "0.1.0.0",
+  "DynamicLoading": 0,
+  "ContentProto": {
+    "Use": "Json",
+    "Json": {
+      "Name": "UISliderReadMe",
+      "Id": "21aca172-014a-49eb-a5d0-516b1d1cb7ed",
+      "Script": "--[[\n# UISlider\nThis package provides a slider UI component with real-time text display.\nIt includes value adjustment, multiplier support, and precision settings for flexible numeric input.\n\n---\n## Key Features\n\n1. **Slider with Text Display**\n   - Real-time value display in text component\n   - Synchronized slider and text updates\n   - Automatic component detection\n\n2. **Value Processing**\n   - Multiplier support for value scaling\n   - Configurable precision for display\n   - Custom postfix string support\n\n---\n## Core Components\n\n### UISlider\nA slider component with integrated text display.\n\n**Key Properties:**\n- `Slider`: Slider component reference\n- `Text`: Text component for value display\n- `UseMultiplier`: Apply multiplier to slider value\n- `Multiplier`: Multiplier value\n- `RenderPrecision`: Decimal places to display\n- `RenderPostfixStr`: Suffix string for display\n\n---\n## Event System\n\n### SliderValueChangedEvent\nTriggered when the slider value changes.\n\n---\n## Usage\n\n### 1. Basic Slider Usage\n-- Get slider component\nlocal slider = entity.UISlider\n\n-- Get current value\nlocal value = slider:GetValue()\nprint(\"Current value: \" .. value)\n\n### 2. Multiplier Configuration\n-- Enable multiplier\nslider.UseMultiplier = true\nslider.Multiplier = 10\n-- Slider value 5 will display as 50\n\n### 3. Precision and Formatting\n-- Set decimal precision\nslider.RenderPrecision = 2  -- Show 2 decimal places\n\n-- Add suffix\nslider.RenderPostfixStr = \"%\"\n-- Value 0.75 will display as \"75.00%\"\n\n### 4. Programmatic Value Setting\n-- Set slider value\nslider:SetValue(25.5)\n\n-- Get precision value\nlocal precisionValue = slider:GetPrecisionValue(1)  -- Get with 1 decimal place\n\n### 5. Min/Max Value Configuration\n-- Set value range\nslider:SetMinMaxValue(0, 100)\n\n---\n## License\n\nThis project is licensed under the MIT License.\nYou are free to use, modify, and distribute this project.\n\nHowever, the software is provided \"as is\", without warranty of any kind.\nFor more details, please see the LICENSE.(https://opensource.org/licenses/MIT)\n\n---\n## Happy Coding!\n]]",
+      "ModifyTime": "10/22/2026 22:08:10"
+    }
+  }
+}

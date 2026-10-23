@@ -1,0 +1,62 @@
+{
+  "Id": "",
+  "GameId": "",
+  "EntryKey": "model://battleviewavatar",
+  "ContentType": "x-mod/model",
+  "Content": "",
+  "Usage": 0,
+  "UsePublish": 1,
+  "UseService": 0,
+  "CoreVersion": "26.10.0.0",
+  "StudioVersion": "0.1.0.0",
+  "DynamicLoading": 0,
+  "ContentProto": {
+    "Use": "Json",
+    "Json": {
+      "Version": 1,
+      "Name": "BattleViewAvatar",
+      "BaseModelId": null,
+      "Id": "battleviewavatar",
+      "Components": [
+        "MOD.Core.TransformComponent",
+        "MOD.Core.AvatarRendererComponent",
+        "MOD.Core.CostumeManagerComponent",
+        "MOD.Core.AvatarBodyActionSelectorComponent",
+        "MOD.Core.AvatarFaceActionSelectorComponent",
+        "MOD.Core.KinematicbodyComponent"
+      ],
+      "Properties": [],
+      "Values": [
+        {
+          "TargetType": "MOD.Core.AvatarRendererComponent",
+          "Name": "SortingLayer",
+          "ValueType": {
+            "$type": "MODNativeType",
+            "type": "System.String, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089"
+          },
+          "Value": "Default"
+        },
+        {
+          "TargetType": "MOD.Core.AvatarRendererComponent",
+          "Name": "OrderInLayer",
+          "ValueType": {
+            "$type": "MODNativeType",
+            "type": "System.Int32, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089"
+          },
+          "Value": 20
+        },
+        {
+          "TargetType": "MOD.Core.AvatarRendererComponent",
+          "Name": "IgnoreMapLayerCheck",
+          "ValueType": {
+            "$type": "MODNativeType",
+            "type": "System.Boolean, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089"
+          },
+          "Value": true
+        }
+      ],
+      "EventLinks": [],
+      "Children": []
+    }
+  }
+}

@@ -1,0 +1,53 @@
+@Logic
+script FormationMapLayout extends Logic
+
+    property string ReferenceMapName = "map01"
+    property number MinimumSeparation = 0.3
+
+    method any ReferenceTiles()
+        -- Use the authored reference terrain as the shared formation coordinate system.
+        local map = _EntityService:GetEntityByPath("/maps/" .. self.ReferenceMapName)
+        if not isvalid(map) then map = _EntityService:GetEntityByPath("/maps/matchprobe") end
+        if not isvalid(map) then return nil end
+        local entity = map:GetChildByName("RectTileMap", true)
+        if not isvalid(entity) then return nil end
+        return entity.RectTileMapComponent
+    end
+
+    method any Bounds()
+        -- The combat rectangle excludes outer walls and the spectator area on every map.
+        return { minX = -15, maxX = 15, minY = -8, maxY = 8 }
+    end
+
+    method boolean Contains(number x, number y)
+        -- Keep continuous formation positions within the standard map footprint.
+        local bounds = self:Bounds()
+        return bounds ~= nil and x >= bounds.minX and x < bounds.maxX and y >= bounds.minY and y < bounds.maxY
+    end
+
+    method boolean IsWalkable(number x, number y)
+        -- Reject walls and missing terrain while preserving the submitted fractional coordinates.
+        if not self:Contains(x, y) then return false end
+        local tiles = self:ReferenceTiles()
+        if not isvalid(tiles) then return false end
+        local tile = tiles:GetTile(tiles:ToCellPosition(Vector3(x, y, 0)))
+        return tile ~= nil and not tile.IsCollidable
+    end
+
+    method boolean CanDeploy(number x, number y)
+        -- Validate both sides of the battlefield's horizontal center at x=0.5.
+        return _FormationSchema:IsFinite(x) and _FormationSchema:IsFinite(y) and x < 0.5
+            and self:IsWalkable(x, y) and self:IsWalkable(self:MirrorX(x), y)
+    end
+
+    method number MirrorX(number x)
+        -- Share the same x=0.5 reflection for admission, validation and client presentation.
+        return 1 - x
+    end
+
+    method any BattlePosition(number x, number y, boolean away)
+        -- Preserve exact saved coordinates and reflect the opponent about x=0.5.
+        if not self:CanDeploy(x, y) then return nil end
+        return Vector3(away and self:MirrorX(x) or x, y, 0)
+    end
+end

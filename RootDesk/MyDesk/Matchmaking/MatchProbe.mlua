@@ -1,0 +1,931 @@
+@Logic
+script MatchProbe extends Logic
+
+    property boolean Enabled = true
+    property string TestProfileA = ""
+    property string TestProfileB = ""
+    property string LeaderboardId = ""
+    property string QueueName = "battle-centered-v2"
+    property string StorageKey = "BattleTransferV2"
+    property number SaveDelaySeconds = 0
+    property integer TransferLifetimeSeconds = 900
+
+    @ExecSpace("ServerOnly")
+    method void OnBeginPlay()
+        -- Each room owns its own coordinator; native matchmaking supplies cross-instance identity.
+        self._T.records = {}
+        self._T.busy = {}
+        self._T.rooms = {}
+        self._T.localQueue = {}
+        self._T.localMatches = {}
+        self._T.pendingRecover = {}
+        self._T.recoveryTimers = {}
+        self._T.notifyTimers = {}
+        self._T.restoredAttempts = {}
+        self._T.queueTimers = {}
+        self._T.presentationSequence = {}
+        self._T.queueCommands = {}
+        self._T.offline = {}
+        self._T.failures = {}
+        self._T.arrivalTimers = {}
+        self._T.progressTimers = {}
+        self._T.closedMatches = {}
+        self._T.ended = false
+        log("[VRF][MatchProbe] ready enabled=" .. tostring(self.Enabled) .. " room=" .. _RoomService.RoomKey)
+    end
+
+    @ExecSpace("ServerOnly")
+    method any Player(string userId)
+        -- Derive the connected player on the server and enforce optional published test-account restrictions.
+        if not self.Enabled or self._T.ended or self._T.offline[userId] then return nil end
+        if not Environment:IsMakerPlay() and not Environment:IsPublishedPlay() then return nil end
+        local player = _UserService:GetUserEntityByUserId(userId)
+        if not isvalid(player) then return nil end
+        local profile = player.PlayerComponent.ProfileCode
+        if not Environment:IsMakerPlay() and (self.TestProfileA ~= "" or self.TestProfileB ~= "") and profile ~= self.TestProfileA and profile ~= self.TestProfileB then return nil end
+        return player
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Report(string userId, string message)
+        -- Observations contain service codes and public location identifiers, never capsule contents.
+        log("[VRF][MatchProbe] " .. message)
+        if self:Player(userId) == nil then return end
+        local ticket = self._T.records[userId]
+        local attempt = ticket ~= nil and ticket.data.attempt or ""
+        if string.find(message, "FAILED", 1, true) or string.find(message, "ok=false", 1, true) then
+            self._T.failures[userId] = { attempt = attempt, message = message }
+        elseif string.find(message, "ok=true", 1, true) or string.sub(message, 1, 8) == "RETURNED" or message == "CANCELLED" then
+            self._T.failures[userId] = nil
+        end
+        self:Receive(message, userId)
+        self:PublishState(userId, message)
+    end
+
+    @ExecSpace("Client")
+    method void Receive(string message)
+        -- Reuse the existing toast; F8 provides repeatable status without exposing private payloads.
+        if message == "NEED_LOADED_VALID_ACTIVE_FORMATION_AND_NO_PENDING_SAVE" then
+            _UIToast:ShowMessage("請先儲存有效編隊並設為出戰，等待保存完成")
+        elseif message == "MATCHMAKING_NOT_CONFIGURED" then
+            _UIToast:ShowMessage("線上配對服務尚未設定")
+        end
+        log("[VRF][MatchProbeUI] status received")
+    end
+
+    @ExecSpace("ServerOnly")
+    method void PublishState(string userId, string message)
+        -- Publish private presentation state without exposing capsule contents or accepting client identities.
+        if self:Player(userId) == nil then return end
+        local ticket = self._T.records[userId]
+        local state = ticket ~= nil and ticket.data.state or "IDLE"
+        local started = ticket ~= nil and ticket.data.started or 0
+        local inMatchRoom = ticket ~= nil and state == "IN_ROOM" and _RoomService:IsInstanceRoom() and _RoomService.RoomKey == ticket.data.matchKey
+        local count = inMatchRoom and #_UserService.UserEntities.Values or 0
+        if state == "IN_ROOM" and not inMatchRoom then state = "ROOM_MISMATCH" end
+        if _RoomService:IsInstanceRoom() and not inMatchRoom and state ~= "RETURNING" then state = "ENTRY_FAILED" end
+        if inMatchRoom then
+            local map = _EntityService:GetEntityByPath("/maps/matchprobe")
+            local battle = isvalid(map) and map:GetComponent("script.BattleSession") or nil
+            local flow = isvalid(map) and map:GetFirstChildComponentByTypeName("script.MatchedBattle", true) or nil
+            if isvalid(flow) and flow.AdmissionFailed then
+                state = "ENTRY_FAILED"
+            elseif isvalid(battle) then
+                state = battle.Phase
+                if battle.MatchKey ~= "" and (battle.MatchKey ~= ticket.data.matchKey or (ticket.data.profile ~= battle.HomeProfile and ticket.data.profile ~= battle.AwayProfile)) then state = "ENTRY_FAILED" end
+                if state == "RESULT" then state = "RESULT_" .. battle:ResultForProfile(ticket.data.profile) end
+                if state == "CONFIG_ERROR" then state = "ENTRY_FAILED" end
+            end
+        end
+        local summary = ticket ~= nil and ticket.data.summary or ""
+        local attempt = ticket ~= nil and ticket.data.attempt or ""
+        local failure = self._T.failures[userId]
+        if failure ~= nil and failure.attempt == attempt and state ~= "IDLE" and state ~= "BATTLE" and string.sub(state, 1, 7) ~= "RESULT_" then
+            message = failure.message
+        end
+        self._T.presentationSequence[userId] = (self._T.presentationSequence[userId] or 0) + 1
+        local notice = ticket ~= nil and ticket.data.transfer ~= nil and ticket.data.transfer.autoSaveMessage or ""
+        self:ReceiveState(state, message, started, count, _RoomService.RoomKey, self._T.busy[userId] == true, summary, attempt, _WorldInstanceService.WorldInstanceId .. ":" .. _RoomService.RoomKey, self._T.presentationSequence[userId], notice, userId)
+    end
+
+    @ExecSpace("Client")
+    method void ReceiveState(string state, string message, number started, integer count, string sourceRoom, boolean busy, string summary, string attempt, string sequenceKey, integer sequence, string autoSaveNotice)
+        -- Deliver state and in-flight ownership to the visible button controller.
+        if sourceRoom ~= _RoomService.RoomKey then return end
+        local player = _UserService.LocalPlayer
+        if isvalid(player) and (player.CurrentMapName == "matchprobe") ~= (sourceRoom ~= "__main__") then return end
+        _MatchProbeInput:Observe(state, message, started, count, busy, summary, attempt, sequenceKey, sequence, autoSaveNotice)
+    end
+
+    @ExecSpace("ServerOnly")
+    method any ReadTicket(string profile)
+        -- Read only on explicit commands or a map transition, never in an update storage loop.
+        local code, raw = _DataStorageService:GetUserDataStorage(profile):GetAndWait(self.StorageKey)
+        if code == 1000002 or (code == 0 and raw == nil) then return { raw = "", data = nil } end
+        if code ~= 0 then return nil end
+        local ok, data = pcall(function() return _HttpService:JSONDecode(raw) end)
+        if not ok or type(data) ~= "table" or data.schema ~= 1 or data.profile ~= profile then return nil end
+        if type(data.state) ~= "string" or type(data.attempt) ~= "string" or type(data.started) ~= "number" or type(data.expires) ~= "number" then return nil end
+        if type(data.source) ~= "string" or type(data.matchKey) ~= "string" then return nil end
+        if data.adapter ~= nil and data.adapter ~= "local" and data.adapter ~= "native" then return nil end
+        if data.state ~= "RETURNED" and data.state ~= "CANCELLED" then
+            local transfer = data.transfer
+            if type(transfer) ~= "table" or type(transfer.saved) ~= "string" or type(transfer.drafts) ~= "string" or type(transfer.fixed) ~= "string" then return nil end
+            if transfer.coordinateSchema ~= 2 then return nil end
+            if type(transfer.confirmedRaw) ~= "string" or type(transfer.editSlot) ~= "number" then return nil end
+        end
+        return { raw = raw, data = data }
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean Store(table record)
+        -- Guard creation and compare subsequent bytes, preventing late callbacks from replacing a new attempt.
+        local raw = _HttpService:JSONEncode(record.data)
+        -- Five full drafts plus confirmation metadata fit below native UpdateAsync's 50 KB limit.
+        if #raw > 48000 then return false end
+        local done, result = false, -1
+        _FormationStorage:Write(record.data.profile, self.StorageKey, record.raw, raw, function(code)
+            result = code
+            done = true
+        end)
+        while not done do wait(0.05) end
+        if result ~= 0 then return false end
+        record.raw = raw
+        return true
+    end
+
+    @ExecSpace("ServerOnly")
+    method any ParseExtras(string extras)
+        -- Treat native extras as metadata only and validate every field before using it as an identifier.
+        local ok, value = pcall(function() return _HttpService:JSONDecode(extras) end)
+        if not ok or type(value) ~= "table" or value.schema ~= 1 then return nil end
+        if type(value.attempt) ~= "string" or #value.attempt ~= 32 or not string.match(value.attempt, "^%x+$") then return nil end
+        if type(value.source) ~= "string" or value.source == "" then return nil end
+        return value
+    end
+
+    @ExecSpace("ServerOnly")
+    method any Match(string profile)
+        -- Resolve server-owned participants and their attempt generation from the selected adapter.
+        if Environment:IsMakerPlay() then return self._T.localMatches[profile] end
+        local code, users = _MatchmakingService:GetMatchUserInfosAndWait(profile)
+        if code ~= MatchmakingResultCode.Ok or users == nil or #users ~= 2 then return nil end
+        local home, away = users[1], users[2]
+        if home.ProfileCode == away.ProfileCode or (profile ~= home.ProfileCode and profile ~= away.ProfileCode) then return nil end
+        local h, a = self:ParseExtras(home.Extras), self:ParseExtras(away.Extras)
+        if h == nil or a == nil then return nil end
+        return { key = "m30-" .. h.attempt .. "-" .. a.attempt, home = home.ProfileCode, away = away.ProfileCode, homeAttempt = h.attempt, awayAttempt = a.attempt, homeSource = h.source, awaySource = a.source, differentSources = h.source ~= a.source }
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean Belongs(table data, table matched)
+        -- A stale successful notification cannot authorize another attempt or a cancelled ticket.
+        local requestId = data.requestId or data.attempt
+        return (data.profile == matched.home and requestId == matched.homeAttempt) or (data.profile == matched.away and requestId == matched.awayAttempt)
+    end
+
+    @ExecSpace("Server")
+    method void RequestQueue(string commandId)
+        -- Freeze the valid saved active formation; the test never supplies client-authored opponents or stats.
+        if #commandId ~= 32 or not string.match(commandId, "^%x+$") then return end
+        local commands = self._T.queueCommands[senderUserId] or {}
+        if commands[commandId] then self:PublishState(senderUserId, "DUPLICATE_START") return end
+        commands[commandId] = true
+        self._T.queueCommands[senderUserId] = commands
+        self:QueueForUser(senderUserId)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void QueueForUser(string userId)
+        -- Share the authenticated entry path with server-driven Maker verification.
+        local player = self:Player(userId)
+        if player == nil then self:Report(userId, "DISABLED_OR_NOT_PUBLISHED") return end
+        if player.CurrentMapName ~= "formationlobby" and player.CurrentMapName ~= "formationsim" then return end
+        if not Environment:IsMakerPlay() and self.LeaderboardId == "" then self:Report(userId, "MATCHMAKING_NOT_CONFIGURED") return end
+        if _RoomService:IsInstanceRoom() or self._T.busy[userId] or self._T.records[userId] ~= nil then return end
+        self._T.busy[userId] = true
+        local profile = player.PlayerComponent.ProfileCode
+        local ticket = self:ReadTicket(profile)
+        local transfer = _FormationService:ExportTransfer(userId)
+        if ticket == nil or transfer == nil then
+            self._T.busy[userId] = nil
+            self:Report(userId, "NEED_LOADED_VALID_ACTIVE_FORMATION_AND_NO_PENDING_SAVE")
+            return
+        end
+        if ticket.data ~= nil and ticket.data.state ~= "RETURNED" and ticket.data.state ~= "CANCELLED" then
+            self._T.busy[userId] = nil
+            self:Recover(userId)
+            self:Report(userId, "EXISTING_TICKET_USE_STATUS_OR_CANCEL")
+            return
+        end
+        local fixed = _HttpService:JSONDecode(transfer.fixed)
+        local saved = _HttpService:JSONDecode(transfer.saved)
+        local slot = saved.slots[tostring(saved.activeSlot)]
+        local summary = "第 " .. tostring(saved.activeSlot) .. " 組 · 版本 " .. tostring(slot.revision) .. " · " .. tostring(#fixed) .. " / 6"
+        ticket.data = { schema = 1, profile = profile, attempt = _UtilLogic:NewGuid(), requestId = _UtilLogic:NewGuid(), summary = summary, source = _WorldInstanceService.WorldInstanceId, adapter = Environment:IsMakerPlay() and "local" or "native", state = "QUEUED", transfer = transfer, started = DateTime.UtcNow.Elapsed, expires = 0, matchKey = "" }
+        self._T.records[userId] = ticket
+        if not self:Store(ticket) then
+            self._T.records[userId] = nil
+            self._T.busy[userId] = nil
+            self:Report(userId, "RESERVATION_SAVE_FAILED")
+            return
+        end
+        if self._T.records[userId] ~= ticket or self:Player(userId) == nil or ticket.data.state ~= "QUEUED" then self._T.busy[userId] = nil return end
+        self._T.busy[userId] = nil
+        if Environment:IsMakerPlay() then
+            table.insert(self._T.localQueue, userId)
+            self:Report(userId, "QUEUED_LOCAL")
+            self:TryLocalMatch()
+            return
+        end
+        self:SubmitQueue(userId, ticket)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void SubmitQueue(string userId, table ticket)
+        -- Own one native registration until it completes; map changes never submit a second request.
+        if self._T.records[userId] ~= ticket or ticket.data.state ~= "QUEUED" then return end
+        if Environment:IsMakerPlay() then
+            self:Report(userId, "QUEUED_LOCAL")
+            self:TryLocalMatch()
+            return
+        end
+        local requestId = ticket.data.requestId
+        local extras = _HttpService:JSONEncode({ schema = 1, attempt = requestId, source = ticket.data.source })
+        ticket.submitting = true
+        self:Report(userId, "SUBMITTING")
+        local code = _MatchmakingService:RequestMatchingAndWait(self.LeaderboardId, self.QueueName, ticket.data.profile, extras, function(info)
+            local result = info ~= nil and tostring(info.ResultCode) or "MISSING"
+            self:QueueResult(userId, ticket, requestId, result)
+        end)
+        ticket.submitting = false
+        if self._T.records[userId] ~= ticket or ticket.data.requestId ~= requestId or ticket.data.state ~= "QUEUED" then return end
+        if code ~= MatchmakingResultCode.Ok then
+            self:QueueResult(userId, ticket, requestId, tostring(code))
+        else
+            self:Report(userId, "QUEUED")
+        end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void QueueResult(string userId, table ticket, string requestId, string result)
+        -- Ignore stale generations and duplicate completion; expiry renews the same frozen game attempt.
+        if self._T.records[userId] ~= ticket or ticket.data.requestId ~= requestId or ticket.data.state ~= "QUEUED" then return end
+        if result == tostring(MatchmakingResultCode.Ok) or result == tostring(MatchmakingResultCode.AlreadyMatched) then
+            self:Matched(userId, ticket)
+        elseif result == tostring(MatchmakingResultCode.MatchingExpired) or result == tostring(MatchmakingResultCode.NotMatched)
+            or result == tostring(MatchmakingResultCode.NotMatching) or result == tostring(MatchmakingResultCode.RequestNotFound) then
+            ticket.data.state = "RENEWING"
+            self:Report(userId, "QUEUE_RENEWING")
+            self._T.queueTimers[userId] = _TimerService:SetTimerOnce(function()
+                if self._T.records[userId] ~= ticket or ticket.data.state ~= "RENEWING" then return end
+                while ticket.submitting or self._T.busy[userId] do
+                    wait(0.1)
+                    if self._T.records[userId] ~= ticket or ticket.data.state ~= "RENEWING" then return end
+                end
+                self._T.busy[userId] = true
+                self:PublishState(userId, "QUEUE_RENEWING")
+                ticket.data.requestId = _UtilLogic:NewGuid()
+                local stored = self:Store(ticket)
+                self._T.busy[userId] = nil
+                if not stored then ticket.data.state = "QUEUE_ERROR" self:Report(userId, "QUEUE_RENEW_SAVE_FAILED") return end
+                ticket.data.state = "QUEUED"
+                log("[VRF][Queue] renewed; original clock and fixed formation retained")
+                self:SubmitQueue(userId, ticket)
+            end, 1)
+        else
+            ticket.data.state = "QUEUE_ERROR"
+            self:Report(userId, "QUEUE_SERVICE_FAILED code=" .. result)
+        end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void TryLocalMatch()
+        -- Match two connected queued Maker players through a real FIFO, never a fabricated native callback.
+        if not Environment:IsMakerPlay() then return end
+        local available = {}
+        local seen = {}
+        for _, userId in ipairs(self._T.localQueue) do
+            local ticket = self._T.records[userId]
+            if not seen[userId] and ticket ~= nil and ticket.data.state == "QUEUED" and self:Player(userId) ~= nil then table.insert(available, userId) seen[userId] = true end
+        end
+        self._T.localQueue = available
+        if #available < 2 then return end
+        local firstId = table.remove(self._T.localQueue, 1)
+        local secondId = table.remove(self._T.localQueue, 1)
+        local first, second = self._T.records[firstId], self._T.records[secondId]
+        if first.data.profile == second.data.profile then
+            table.insert(self._T.localQueue, firstId)
+            second.data.state = "CANCELLED"
+            second.data.transfer = nil
+            if self:Store(second) then self._T.records[secondId] = nil end
+            self:Report(secondId, "DUPLICATE_PROFILE")
+            return
+        end
+        local matched = { key = "local-" .. _UtilLogic:NewGuid(), home = first.data.profile, away = second.data.profile, homeAttempt = first.data.requestId or first.data.attempt, awayAttempt = second.data.requestId or second.data.attempt, homeSource = first.data.source, awaySource = second.data.source, differentSources = false }
+        self._T.localMatches[first.data.profile] = matched
+        self._T.localMatches[second.data.profile] = matched
+        self:Matched(firstId, first)
+        if self._T.records[secondId] == second and second.data.state == "QUEUED" then self:Matched(secondId, second) end
+        self:AdvancePending()
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Matched(string userId, table ticket)
+        -- Confirm the editor save before sealing the handoff; retain the queue-time roster and latest drafts.
+        if self._T.records[userId] ~= ticket or ticket.data.state ~= "QUEUED" then return end
+        ticket.data.state = "SAVING"
+        self:PublishState(userId, "MATCHED")
+        local matched = self:Match(ticket.data.profile)
+        if self._T.records[userId] ~= ticket or ticket.data.state ~= "SAVING" then return end
+        if matched == nil or not self:Belongs(ticket.data, matched) then ticket.data.state = "QUEUE_ERROR" self:Report(userId, "QUEUE_RESULT_INVALID") return end
+        if self.SaveDelaySeconds > 0 then wait(math.min(120, self.SaveDelaySeconds)) end
+        if ticket.data.state ~= "SAVING" then return end
+        local autoSaveMessage = _FormationService:AutoSaveForMatch(userId, function()
+            return self._T.records[userId] == ticket and ticket.data.state == "SAVING"
+        end)
+        if self._T.records[userId] ~= ticket or ticket.data.state ~= "SAVING" then return end
+        local latest = _FormationService:SealTransfer(userId)
+        local remaining = 200
+        while latest == nil and remaining > 0 and ticket.data.state == "SAVING" do
+            wait(0.1)
+            if ticket.data.state ~= "SAVING" then return end
+            remaining = remaining - 1
+            latest = _FormationService:SealTransfer(userId)
+        end
+        if ticket.data.state ~= "SAVING" then return end
+        if latest == nil then
+            ticket.data.state = "QUEUE_ERROR"
+            self:Report(userId, "CAPTURE_NOT_READY; cancel and retry")
+            return
+        end
+        latest.fixed = ticket.data.transfer.fixed
+        latest.autoSaveMessage = autoSaveMessage
+        ticket.data.transfer = latest
+        ticket.data.matchKey = matched.key
+        ticket.data.match = matched
+        ticket.data.expires = DateTime.UtcNow.Elapsed + self.TransferLifetimeSeconds * 1000
+        -- Cancellation stops at this explicit commit boundary, before the first yielding write.
+        self._T.busy[userId] = true
+        ticket.data.state = "COMMITTING"
+        self:PublishState(userId, "COMMITTING")
+        if not self:Store(ticket) then self._T.busy[userId] = nil self:Report(userId, "HANDOFF_SAVE_FAILED") return end
+        if self._T.records[userId] ~= ticket or self:Player(userId) == nil then self._T.busy[userId] = nil return end
+        ticket.data.state = "TRANSFER"
+        if not self:Store(ticket) then self._T.busy[userId] = nil self:Report(userId, "HANDOFF_SEAL_FAILED") return end
+        self._T.busy[userId] = nil
+        if self._T.records[userId] ~= ticket or self:Player(userId) == nil then return end
+        self:Report(userId, "SEALED match=" .. matched.key .. " differentSources=" .. tostring(matched.differentSources) .. " bytes=" .. tostring(#ticket.raw))
+        self:NotifyReady(matched)
+        self:Recover(userId)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void NotifyReady(table matched)
+        -- Wake both source coordinators once; readiness events are hints and admission revalidates stored authority.
+        if Environment:IsMakerPlay() then return end
+        self:SendReady(matched.key, matched.homeSource, 0)
+        if matched.awaySource ~= matched.homeSource then self:SendReady(matched.key, matched.awaySource, 0) end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void SendReady(string matchKey, string destination, integer attempt)
+        -- Retry failed native event delivery at most three times; the visible action can retry after that.
+        if self._T.ended or self._T.closedMatches[matchKey] then return end
+        local event = MatchTransferReadyEvent()
+        event.MatchKey = matchKey
+        _WorldInstanceService:RequestSendEventToWorldInstanceAsync(event, destination, function(code)
+            if self._T.ended or self._T.closedMatches[matchKey] then return end
+            if code == SendEventRequestResultCode.OK then return end
+            if attempt < 2 then
+                local timer = _TimerService:SetTimerOnce(function() self:SendReady(matchKey, destination, attempt + 1) end, 1 + attempt)
+                table.insert(self._T.notifyTimers, timer)
+            else
+                for userId, ticket in pairs(self._T.records) do
+                    if ticket.data.matchKey == matchKey and ticket.data.state == "TRANSFER" then self:Report(userId, "READINESS_FAILED") end
+                end
+            end
+        end)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void AdvancePending()
+        -- Advance connected participants on readiness and arrival, without recurring storage polling.
+        if _RoomService:IsInstanceRoom() then
+            for _, user in ipairs(_UserService.UserEntities.Values) do self:PublishState(user.PlayerComponent.UserId, "ARRIVED") end
+            return
+        end
+        local ids = {}
+        for _, user in ipairs(_UserService.UserEntities.Values) do table.insert(ids, user.PlayerComponent.UserId) end
+        for _, userId in ipairs(ids) do self:Recover(userId) end
+    end
+
+    @ExecSpace("ServerOnly")
+    @EventSender("Service", "WorldInstanceService")
+    handler HandleMatchTransferReadyEvent(MatchTransferReadyEvent event)
+        -- Only an active matching ticket can turn an external readiness hint into a recovery read.
+        for _, ticket in pairs(self._T.records) do
+            if ticket.data.matchKey == event.MatchKey and ticket.data.state == "TRANSFER" then self:AdvancePending() return end
+        end
+    end
+
+    @ExecSpace("ServerOnly")
+    @EventSender("Service", "UserService")
+    handler HandleUserEnterEvent(UserEnterEvent event)
+        -- Native world and room arrivals automatically resume admission or restore the returning session.
+        self._T.offline[event.UserId] = nil
+        local previous = self._T.arrivalTimers[event.UserId]
+        if previous ~= nil then _TimerService:ClearTimer(previous) end
+        self._T.arrivalTimers[event.UserId] = _TimerService:SetTimerOnce(function()
+            self._T.arrivalTimers[event.UserId] = nil
+            if self._T.ended or self:Player(event.UserId) == nil then return end
+            self:Recover(event.UserId)
+            self:AdvancePending()
+        end, 0.5)
+    end
+
+    @ExecSpace("Server")
+    method void RequestCancel(string expectedAttempt)
+        -- Invalidate the local callback before yielding to native cancellation or storage.
+        local ticket = self._T.records[senderUserId]
+        if ticket == nil or ticket.data.attempt ~= expectedAttempt then return end
+        self:CancelForUser(senderUserId)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void CancelForUser(string userId)
+        -- Cancel the actual selected adapter while preserving the common attempt and tombstone guards.
+        local player = self:Player(userId)
+        if player == nil or self._T.busy[userId] then return end
+        local ticket = self._T.records[userId]
+        if ticket == nil then
+            self._T.busy[userId] = true
+            ticket = self:ReadTicket(player.PlayerComponent.ProfileCode)
+            self._T.busy[userId] = nil
+        end
+        if ticket == nil or ticket.data == nil then return end
+        local state = ticket.data.state
+        if state ~= "QUEUED" and state ~= "RENEWING" and state ~= "QUEUE_ERROR" and state ~= "SAVING" and state ~= "CANCELLED" then self:Report(userId, "COMMITTED_USE_RETURN_OR_STATUS") return end
+        ticket.data.state = "CANCELLED"
+        ticket.data.transfer = nil
+        self._T.busy[userId] = true
+        self:PublishState(userId, "CANCELLING")
+        while ticket.submitting do wait(0.1) end
+        local code = MatchmakingResultCode.Ok
+        if not Environment:IsMakerPlay() then code = _MatchmakingService:CancelMatchingAndWait(ticket.data.profile) end
+        local stored = self:Store(ticket)
+        self._T.busy[userId] = nil
+        if stored and (code == MatchmakingResultCode.Ok or code == MatchmakingResultCode.NotMatching or code == MatchmakingResultCode.AlreadyMatched or code == MatchmakingResultCode.RequestNotFound or code == MatchmakingResultCode.MatchingExpired) then self._T.records[userId] = nil end
+        self:Report(userId, "CANCEL code=" .. tostring(code) .. " tombstone=" .. tostring(stored))
+        _FormationService:ReleaseTransfer(userId)
+        self:PublishState(userId, "CANCELLED")
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Recover(string userId)
+        -- Resolve server-persisted tickets after native warp and after entering a room.
+        local player = self:Player(userId)
+        if player == nil then return end
+        if self._T.busy[userId] then self._T.pendingRecover[userId] = true return end
+        local current = self._T.records[userId]
+        if current ~= nil and (current.data.state == "QUEUED" or current.data.state == "SAVING" or current.data.state == "RENEWING" or current.data.state == "QUEUE_ERROR") then
+            local localAdapter = Environment:IsMakerPlay() and (current.data.adapter == "local" or current.data.adapter == nil)
+            if not localAdapter then return end
+            local activeLocalTicket = false
+            if current.data.state == "QUEUED" then
+                for _, queuedUserId in ipairs(self._T.localQueue or {}) do
+                    if queuedUserId == userId then activeLocalTicket = true break end
+                end
+            else
+                activeLocalTicket = self._T.localMatches[current.data.profile] ~= nil
+            end
+            if activeLocalTicket then return end
+            -- A local ticket without its FIFO/match entry is stale; reload storage and retry cleanup.
+        end
+        self._T.busy[userId] = true
+        local ticket = self:ReadTicket(player.PlayerComponent.ProfileCode)
+        if ticket ~= nil and ticket.data ~= nil then
+            local data = ticket.data
+            if data.state == "CANCELLED" or data.state == "RETURNED" then
+                self._T.records[userId] = nil
+                self._T.busy[userId] = nil
+                self._T.pendingRecover[userId] = nil
+                self:PublishState(userId, data.state)
+                return
+            end
+            self._T.records[userId] = ticket
+            if not Environment:IsMakerPlay() and (data.state == "QUEUED" or data.state == "SAVING" or data.state == "RENEWING" or data.state == "QUEUE_ERROR") then
+                -- A restored reservation has no live callback owner; never present it as a healthy queue.
+                data.state = "QUEUE_ERROR"
+                self:Report(userId, "QUEUE_OWNER_LOST; cancel before retry")
+            elseif Environment:IsMakerPlay() and (data.adapter == "local" or data.adapter == nil) and (data.state == "QUEUED" or data.state == "SAVING" or data.state == "RENEWING" or data.state == "QUEUE_ERROR") then
+                -- A Maker Play restart discards its local FIFO, so stale queue reservations cannot resume.
+                local staleState = data.state
+                local staleTransfer = data.transfer
+                data.state = "CANCELLED"
+                data.transfer = nil
+                if self:Store(ticket) then
+                    self._T.records[userId] = nil
+                    _FormationService:ReleaseTransfer(userId)
+                    log("[VRF][MatchProbe] stale local queue cancelled=true")
+                    self:Report(userId, "CANCELLED")
+                else
+                    data.state = staleState
+                    data.transfer = staleTransfer
+                    _FormationService:ReleaseTransfer(userId)
+                    self:Report(userId, "STALE_QUEUE_CLEANUP_FAILED")
+                end
+            elseif Environment:IsMakerPlay() and self._T.localMatches[data.profile] == nil and (data.adapter == "local" or string.sub(data.matchKey, 1, 6) == "local-") and (data.state == "COMMITTING" or data.state == "TRANSFER") then
+                -- Restore a local match only after its Maker session has lost the in-memory match entry.
+                local staleState = data.state
+                data.state = "RETURNING"
+                if self:Store(ticket) then
+                    self:Report(userId, "STALE_MATCH_RECOVERY")
+                    self:RestoreReturning(userId, ticket)
+                else
+                    data.state = staleState
+                    self:Report(userId, "STALE_MATCH_RECOVERY_SAVE_FAILED")
+                end
+            elseif (data.state == "TRANSFER" or data.state == "COMMITTING") and data.expires <= DateTime.UtcNow.Elapsed and not _RoomService:IsInstanceRoom() then
+                local previous = data.state
+                data.state = "RETURNING"
+                if self:Store(ticket) then
+                    self:Report(userId, "TRANSFER_EXPIRED")
+                    self:RestoreReturning(userId, ticket)
+                else
+                    data.state = previous
+                    self:Report(userId, "RETURN_SAVE_FAILED")
+                end
+            elseif data.state == "TRANSFER" and data.expires > DateTime.UtcNow.Elapsed and not _RoomService:IsInstanceRoom() then
+                local matched = self:Match(data.profile)
+                if matched ~= nil and self:Belongs(data, matched) and data.matchKey == matched.key then
+                    self:Rendezvous(userId, ticket, matched)
+                end
+            elseif data.state == "IN_ROOM" and _RoomService.RoomKey == data.matchKey then
+                -- Retain durable authority for battle admission and later lobby restoration.
+                local count = #_UserService.UserEntities.Values
+                self:Report(userId, "ARRIVED match=" .. data.matchKey .. " users=" .. tostring(count))
+            elseif data.state == "IN_ROOM" and not _RoomService:IsInstanceRoom() then
+                -- A prior Maker session or room exit left a durable ticket behind; restore it in the lobby.
+                data.state = "RETURNING"
+                if self:Store(ticket) then
+                    self:Report(userId, "STALE_ROOM_RECOVERY")
+                    self:RestoreReturning(userId, ticket)
+                else
+                    data.state = "IN_ROOM"
+                    self:Report(userId, "STALE_ROOM_RECOVERY_SAVE_FAILED")
+                end
+            elseif data.state == "IN_ROOM" then
+                -- A visible retry can send a stale room ticket back to a safe lobby before restoring it.
+                self:Report(userId, "ROOM_MISMATCH")
+            elseif data.state == "RETURNING" and not _RoomService:IsInstanceRoom() then
+                self:RestoreReturning(userId, ticket)
+            end
+        end
+        self._T.busy[userId] = nil
+        self:PublishState(userId, "STATUS")
+        if self._T.pendingRecover[userId] then
+            self._T.pendingRecover[userId] = nil
+            self._T.recoveryTimers[userId] = _TimerService:SetTimerOnce(function() self:Recover(userId) end, 0.1)
+        end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void RestoreReturning(string userId, table ticket)
+        -- Restore from cached authority with bounded retries while catalog or prior saves become ready.
+        if self._T.ended or self._T.records[userId] ~= ticket or self:Player(userId) == nil or ticket.data.state ~= "RETURNING" then return end
+        local transfer = ticket.data.transfer
+        if self._T.restoredAttempts[ticket.data.attempt] or _FormationService:ImportTransfer(userId, transfer) then
+            self._T.restoredAttempts[ticket.data.attempt] = true
+            ticket.data.state = "RETURNED"
+            ticket.data.transfer = nil
+            local stored = self:Store(ticket)
+            if self._T.records[userId] ~= ticket or self:Player(userId) == nil then return end
+            if stored then
+                self._T.records[userId] = nil
+                self._T.localMatches[ticket.data.profile] = nil
+                _FormationService:ReleaseTransfer(userId)
+                self:Report(userId, "RETURNED restored=true cleanup=true")
+                return
+            end
+            ticket.data.state = "RETURNING"
+            ticket.data.transfer = transfer
+        end
+        ticket.restoreAttempts = (ticket.restoreAttempts or 0) + 1
+        if ticket.restoreAttempts <= 10 then
+            self._T.recoveryTimers[userId] = _TimerService:SetTimerOnce(function()
+                if self._T.records[userId] ~= ticket or self:Player(userId) == nil then return end
+                if self._T.busy[userId] then self._T.pendingRecover[userId] = true return end
+                self._T.busy[userId] = true
+                self:RestoreReturning(userId, ticket)
+                self._T.busy[userId] = nil
+                self:PublishState(userId, "RESTORE_PENDING")
+            end, 1)
+        else
+            self:Report(userId, "RESTORE_RETRY_REQUIRED")
+        end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Rendezvous(string userId, table ticket, table matched)
+        -- Both durable capsules must be ready before any native warp can remove either source session.
+        if self:Player(userId) == nil or self._T.records[userId] ~= ticket or ticket.data.state ~= "TRANSFER" or self._T.closedMatches[matched.key] then return end
+        local otherProfile = ticket.data.profile == matched.home and matched.away or matched.home
+        local peer = self:ReadTicket(otherProfile)
+        if peer == nil or peer.data == nil or not self:Belongs(peer.data, matched) or peer.data.matchKey ~= matched.key then return end
+        if (peer.data.state ~= "TRANSFER" and peer.data.state ~= "IN_ROOM") or peer.data.expires <= DateTime.UtcNow.Elapsed then return end
+        local peerHere = false
+        for _, user in ipairs(_UserService.UserEntities.Values) do
+            if isvalid(user) and user.PlayerComponent.ProfileCode == otherProfile then peerHere = true end
+        end
+        if peerHere or self._T.rooms[matched.key] ~= nil then
+            self:Admit(userId, ticket, matched)
+        elseif ticket.data.profile == matched.home then
+            -- Persist the one-shot marker before dispatch; status never retries an ambiguous native warp.
+            if ticket.data.warpIssued then self:Report(userId, "WARP_ALREADY_ISSUED_WAIT_OR_RETURN") return end
+            ticket.data.warpIssued = true
+            if not self:Store(ticket) then return end
+            local code = _MatchmakingService:WarpMatchUser(ticket.data.profile)
+            self:Report(userId, "WARP code=" .. tostring(code) .. " match=" .. matched.key)
+            local timer = 0
+            timer = _TimerService:SetTimerOnce(function()
+                self._T.progressTimers[timer] = nil
+                if not self._T.ended then self:AdvancePending() end
+            end, 1)
+            self._T.progressTimers[timer] = true
+        else
+            self:Report(userId, "WAIT_HOME_STATUS; both capsules ready")
+        end
+    end
+
+    @ExecSpace("ServerOnly")
+    @EventSender("Service", "UserService")
+    handler HandleUserLeaveEvent(UserLeaveEvent event)
+        -- Stop outstanding source callbacks on disconnect, preserving committed transfer capsules.
+        self:Depart(event.UserId)
+    end
+
+    @ExecSpace("ServerOnly")
+    @EventSender("Service", "UserService")
+    handler HandleUserDisconnectEvent(UserDisconnectEvent event)
+        -- Retained disconnected entities must never count as online matchmaking participants.
+        self:Depart(event.UserId)
+    end
+
+    @ExecSpace("ServerOnly")
+    @EventSender("Service", "UserService")
+    handler HandleUserReconnectEvent(UserReconnectEvent event)
+        -- Native reconnect only restores availability; it does not re-admit an old match.
+        self._T.offline[event.UserId] = nil
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Depart(string userId)
+        -- Invalidate callbacks before yielding; combat actors remain owned by BattleSession.
+        self._T.offline[userId] = true
+        for _, timers in ipairs({ self._T.arrivalTimers, self._T.recoveryTimers, self._T.queueTimers }) do
+            if timers[userId] ~= nil then _TimerService:ClearTimer(timers[userId]) timers[userId] = nil end
+        end
+        self._T.pendingRecover[userId] = nil
+        self._T.failures[userId] = nil
+        for index = #self._T.localQueue, 1, -1 do
+            if self._T.localQueue[index] == userId then table.remove(self._T.localQueue, index) end
+        end
+        self._T.queueCommands[userId] = nil
+        local ticket = self._T.records[userId]
+        if ticket == nil then return end
+        if ticket.data.state == "QUEUED" or ticket.data.state == "SAVING" or ticket.data.state == "RENEWING" or ticket.data.state == "QUEUE_ERROR" then
+            ticket.data.state = "CANCELLED"
+            ticket.data.transfer = nil
+            local code = MatchmakingResultCode.Ok
+            if not Environment:IsMakerPlay() then code = _MatchmakingService:CancelMatchingAndWait(ticket.data.profile) end
+            local stored = self:Store(ticket)
+            log("[VRF][MatchProbe] leave cancel=" .. tostring(code) .. " tombstone=" .. tostring(stored))
+        end
+        if self._T.records[userId] == ticket then self._T.records[userId] = nil end
+        log("[VRF][MatchDisconnect] match=" .. ticket.data.matchKey .. " combatPreserved=true online=false")
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Admit(string userId, table ticket, table matched)
+        -- Serialize room creation per match; move only the native-authorized connected participant.
+        if self._T.closedMatches[matched.key] or self:Player(userId) == nil or self._T.records[userId] ~= ticket or ticket.data.state ~= "TRANSFER" or ticket.data.matchKey ~= matched.key or not self:Belongs(ticket.data, matched) or ticket.data.expires <= DateTime.UtcNow.Elapsed then return end
+        local slot = self._T.rooms[matched.key]
+        if slot == nil then
+            slot = { creating = true, room = nil }
+            self._T.rooms[matched.key] = slot
+            slot.room = _RoomService:CreateInstanceRoom(matched.key, { "matchprobe" }, 120)
+            slot.creating = false
+        end
+        while slot.creating do wait(0.05) end
+        if slot.room == nil or not slot.room:IsValid() then
+            self._T.closedMatches[matched.key] = true
+            self._T.rooms[matched.key] = nil
+            self:Report(userId, "ROOM_CREATE_FAILED")
+            return
+        end
+        if self:Player(userId) == nil or self._T.records[userId] ~= ticket or ticket.data.state ~= "TRANSFER" then return end
+        ticket.data.state = "IN_ROOM"
+        if not self:Store(ticket) then self:Report(userId, "ADMISSION_SAVE_FAILED") return end
+        if self:Player(userId) == nil or self._T.records[userId] ~= ticket then return end
+        local moved = self:MoveToMatch(slot.room, userId)
+        log("[VRF][MatchTransfer] match=" .. matched.key .. " entry=" .. tostring(moved))
+        if self._T.records[userId] ~= ticket then return end
+        if not moved then
+            ticket.data.state = "TRANSFER"
+            self:Store(ticket)
+        end
+        self:Report(userId, "ROOM_MOVE ok=" .. tostring(moved))
+    end
+
+    @ExecSpace("Server")
+    method void RequestStatus()
+        -- Map transitions and visible recovery actions resume work without ongoing storage polling.
+        local userId = senderUserId
+        local player = self:Player(userId)
+        if player == nil then self:Report(userId, "DISABLED_OR_NOT_PUBLISHED") return end
+        self:Recover(userId)
+        local ticket = self._T.records[userId]
+        if ticket ~= nil and ticket.data.state == "TRANSFER" then
+            local matched = self:Match(ticket.data.profile)
+            if matched ~= nil then self:NotifyReady(matched) end
+        end
+        local state = ticket ~= nil and ticket.data.state or "IDLE"
+        local elapsed = ticket ~= nil and math.floor((DateTime.UtcNow.Elapsed - ticket.data.started) / 1000) or 0
+        self:Report(userId, state .. " elapsed=" .. tostring(elapsed) .. " instance=" .. _WorldInstanceService.WorldInstanceId .. " room=" .. _RoomService.RoomKey)
+    end
+
+    @ExecSpace("Server")
+    method void RequestReturn(string expectedAttempt)
+        -- Exit only the caller's authorized room and retain a retryable capsule until restore is confirmed.
+        local ticket = self._T.records[senderUserId]
+        if ticket ~= nil and ticket.data.attempt ~= expectedAttempt then return end
+        self:ReturnForUser(senderUserId)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void ConfigureMakerTransferFaults(integer entryFailures, integer returnFailures)
+        -- Fail only the native movement boundary, keeping admission, tickets and restore real.
+        if not Environment:IsMakerPlay() then return end
+        self._T.entryFailures = math.max(0, entryFailures)
+        self._T.returnFailures = math.max(0, returnFailures)
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean MoveToMatch(any room, string userId)
+        -- Preserve native admission while allowing a bounded Maker movement failure.
+        if Environment:IsMakerPlay() and (self._T.entryFailures or 0) > 0 then
+            self._T.entryFailures = self._T.entryFailures - 1
+            return false
+        end
+        return room:MoveUser(userId, "matchprobe")
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean MoveToLobby(string userId)
+        -- Preserve the return capsule until native movement and restoration both succeed.
+        if Environment:IsMakerPlay() and (self._T.returnFailures or 0) > 0 then
+            self._T.returnFailures = self._T.returnFailures - 1
+            return false
+        end
+        return _RoomService:MoveUserToStaticRoom(userId, "formationlobby")
+    end
+
+    @ExecSpace("ServerOnly")
+    method void ReturnForUser(string userId)
+        -- Return is shared by the visible button and authenticated server recovery.
+        local player = self:Player(userId)
+        if player == nil or self._T.busy[userId] then return end
+        self._T.failures[userId] = nil
+        local ticket = self._T.records[userId]
+        if _RoomService:IsInstanceRoom() then
+            local map = _EntityService:GetEntityByPath("/maps/matchprobe")
+            local battle = isvalid(map) and map:GetComponent("script.BattleSession") or nil
+            local profile = player.PlayerComponent.ProfileCode
+            if isvalid(battle) and battle:IsBattleActive() and (profile == battle.HomeProfile or profile == battle.AwayProfile) then self:Report(userId, "BATTLE_IN_PROGRESS") return end
+            if ticket == nil or ticket.data.state == "CANCELLED" or ticket.data.state == "RETURNED" then
+                local moved = self:MoveToLobby(userId)
+                self:Report(userId, "RETURN_MOVE ok=" .. tostring(moved))
+                return
+            end
+        end
+        if ticket == nil then return end
+        if not _RoomService:IsInstanceRoom() then
+            if ticket.data.state == "RETURNING" then self:Recover(userId) return end
+            if ticket.data.state == "COMMITTING" then
+                self:Recover(userId)
+                ticket = self._T.records[userId]
+                if ticket == nil then return end
+            end
+            if ticket.data.state ~= "TRANSFER" and ticket.data.state ~= "COMMITTING" and ticket.data.state ~= "RETURNING" and ticket.data.state ~= "IN_ROOM" then return end
+            self._T.busy[userId] = true
+            ticket.data.state = "RETURNING"
+            local stored = self:Store(ticket)
+            self._T.busy[userId] = nil
+            if stored then self:Recover(userId) end
+            self:Report(userId, "ABORT_TRANSFER stored=" .. tostring(stored))
+            return
+        end
+        if ticket.data.state == "RETURNING" then
+            -- A prior move may have failed after RETURNING was durably stored; keep the visible retry usable.
+            self._T.busy[userId] = true
+            local moved = self:MoveToLobby(userId)
+            self._T.busy[userId] = nil
+            self:Report(userId, "RETURN_RETRY_MOVE ok=" .. tostring(moved))
+            return
+        end
+        if ticket.data.state == "IN_ROOM" and _RoomService.RoomKey ~= ticket.data.matchKey then
+            self._T.busy[userId] = true
+            ticket.data.state = "RETURNING"
+            self:PublishState(userId, "ROOM_MISMATCH")
+            if not self:Store(ticket) then
+                ticket.data.state = "IN_ROOM"
+                self._T.busy[userId] = nil
+                self:Report(userId, "ROOM_MISMATCH_SAVE_FAILED")
+                return
+            end
+            local moved = self:MoveToLobby(userId)
+            self._T.busy[userId] = nil
+            if not moved then
+                self:Report(userId, "ROOM_MISMATCH_RETURN_FAILED")
+            else
+                self:Report(userId, "ROOM_MISMATCH_RETURNING")
+            end
+            return
+        end
+        if ticket.data.state ~= "IN_ROOM" or _RoomService.RoomKey ~= ticket.data.matchKey then return end
+        self._T.busy[userId] = true
+        ticket.data.state = "RETURNING"
+        self:PublishState(userId, "RETURNING")
+        if not self:Store(ticket) then
+            ticket.data.state = "IN_ROOM"
+            self._T.busy[userId] = nil
+            self:Report(userId, "RETURN_SAVE_FAILED")
+            return
+        end
+        local moved = self:MoveToLobby(userId)
+        self._T.busy[userId] = nil
+        self:Report(userId, "RETURN_MOVE ok=" .. tostring(moved))
+    end
+
+    @ExecSpace("ServerOnly")
+    @EventSender("Service", "RoomService")
+    handler HandleRoomEndEvent(RoomEndEvent event)
+        -- Discard stale room handles; the engine reclaims an instance room after its last user leaves.
+        for key, slot in pairs(self._T.rooms) do
+            if not slot.creating and (slot.room == nil or not slot.room:IsValid()) then self._T.closedMatches[key] = true self._T.rooms[key] = nil end
+        end
+    end
+
+    @ExecSpace("ServerOnly")
+    method any RoomBattleAdmission()
+        -- Read cached server-loaded capsules only; room updates never poll persistent storage.
+        if not _RoomService:IsInstanceRoom() then return nil end
+        local byProfile = {}
+        for _, player in ipairs(_UserService.UserEntities.Values) do
+            if isvalid(player) and player.CurrentMapName == "matchprobe" then
+                local userId = player.PlayerComponent.UserId
+                local ticket = self._T.records[userId]
+                if ticket == nil or self._T.busy[userId] or self:Player(userId) == nil then return nil end
+                local data = ticket.data
+                if data.state ~= "IN_ROOM" or data.matchKey ~= _RoomService.RoomKey
+                    or data.profile ~= player.PlayerComponent.ProfileCode or data.expires <= DateTime.UtcNow.Elapsed then return nil end
+                byProfile[data.profile] = { userId = userId, data = data }
+            end
+        end
+        local home, away = nil, nil
+        for _, entry in pairs(byProfile) do
+            local matched = entry.data.match
+            if type(matched) ~= "table" or matched.key ~= _RoomService.RoomKey
+                or type(matched.home) ~= "string" or type(matched.away) ~= "string" or matched.home == matched.away
+                or not self:Belongs(entry.data, matched) then return nil end
+            home, away = byProfile[matched.home], byProfile[matched.away]
+            if home == nil or away == nil then return nil end
+            local peer = away.data.match
+            local first = home.data.match
+            if type(peer) ~= "table" or type(first) ~= "table" then return nil end
+            for _, key in ipairs({ "key", "home", "away", "homeAttempt", "awayAttempt" }) do
+                if first[key] ~= matched[key] or peer[key] ~= matched[key] then return nil end
+            end
+            if not self:Belongs(home.data, matched) or not self:Belongs(away.data, matched) then return nil end
+        end
+        if home == nil or away == nil then return nil end
+        local ok, homeUnits, awayUnits = pcall(function()
+            return _HttpService:JSONDecode(home.data.transfer.fixed), _HttpService:JSONDecode(away.data.transfer.fixed)
+        end)
+        if not ok or type(homeUnits) ~= "table" or type(awayUnits) ~= "table" then return nil end
+        return { key = _RoomService.RoomKey, home = home.data.profile, away = away.data.profile, homeUnits = homeUnits, awayUnits = awayUnits }
+    end
+
+    @ExecSpace("ServerOnly")
+    method void OnEndPlay()
+        -- Retry timers belong to this room coordinator and cannot survive its teardown.
+        self._T.ended = true
+        for _, timer in pairs(self._T.arrivalTimers or {}) do _TimerService:ClearTimer(timer) end
+        for _, timer in pairs(self._T.recoveryTimers or {}) do _TimerService:ClearTimer(timer) end
+        for _, timer in ipairs(self._T.notifyTimers or {}) do _TimerService:ClearTimer(timer) end
+        for _, timer in pairs(self._T.queueTimers or {}) do _TimerService:ClearTimer(timer) end
+        for timer, _ in pairs(self._T.progressTimers or {}) do _TimerService:ClearTimer(timer) end
+        log("[VRF][MatchCleanup] room=" .. _RoomService.RoomKey .. " timers=0")
+    end
+end
