@@ -1,7 +1,7 @@
 {
   "Id": "",
   "GameId": "",
-  "EntryKey": "map://map01",
+  "EntryKey": "map://template",
   "ContentType": "x-mod/map",
   "Content": "",
   "Usage": 0,
@@ -15,12 +15,12 @@
     "Entities": [
       {
         "id": "accb9a32-d61b-4cb1-b6eb-71b3a30958db",
-        "path": "/maps/map01",
+        "path": "/maps/template",
         "componentNames": "MOD.Core.MapComponent,MOD.Core.FootholdComponent,script.BattleSession,script.BattleFixedCamera,script.BattleDeploymentInput,script.BattlePresentation",
         "jsonString": {
-          "name": "map01",
-          "path": "/maps/map01",
-          "nameEditable": false,
+          "name": "template",
+          "path": "/maps/template",
+          "nameEditable": true,
           "enable": true,
           "visible": true,
           "localize": false,
@@ -77,11 +77,11 @@
       },
       {
         "id": "8c870d25-2df1-474a-8850-cdfadf59aa05",
-        "path": "/maps/map01/Background",
+        "path": "/maps/template/Background",
         "componentNames": "MOD.Core.BackgroundComponent",
         "jsonString": {
           "name": "Background",
-          "path": "/maps/map01/Background",
+          "path": "/maps/template/Background",
           "nameEditable": false,
           "enable": true,
           "visible": true,
@@ -109,11 +109,11 @@
       },
       {
         "id": "4a776b57-8d7b-4dc1-8151-f4f164af99d5",
-        "path": "/maps/map01/MapleMapLayer",
+        "path": "/maps/template/MapleMapLayer",
         "componentNames": "MOD.Core.MapLayerComponent",
         "jsonString": {
           "name": "MapleMapLayer",
-          "path": "/maps/map01/MapleMapLayer",
+          "path": "/maps/template/MapleMapLayer",
           "nameEditable": false,
           "enable": true,
           "visible": true,
@@ -145,11 +145,11 @@
       },
       {
         "id": "54ef0b57-9446-4d82-b7bc-de45d5fb743f",
-        "path": "/maps/map01/RectTileMap",
+        "path": "/maps/template/RectTileMap",
         "componentNames": "MOD.Core.TransformComponent,MOD.Core.RectTileMapComponent",
         "jsonString": {
           "name": "RectTileMap",
-          "path": "/maps/map01/RectTileMap",
+          "path": "/maps/template/RectTileMap",
           "nameEditable": false,
           "enable": true,
           "visible": true,
@@ -1878,11 +1878,11 @@
       },
       {
         "id": "32b7570e-081f-4df2-9429-2e5e50078d00",
-        "path": "/maps/map01/M1_EnemyTank",
+        "path": "/maps/template/M1_EnemyTank",
         "componentNames": "MOD.Core.TransformComponent,MOD.Core.SpriteRendererComponent,script.BattlePlacement",
         "jsonString": {
           "name": "M1_EnemyTank",
-          "path": "/maps/map01/M1_EnemyTank",
+          "path": "/maps/template/M1_EnemyTank",
           "nameEditable": true,
           "enable": true,
           "visible": true,
@@ -1958,11 +1958,11 @@
       },
       {
         "id": "4bc721f1-76b5-4c9f-8d29-753ab0dc0248",
-        "path": "/maps/map01/M1_EnemyTank2",
+        "path": "/maps/template/M1_EnemyTank2",
         "componentNames": "MOD.Core.TransformComponent,MOD.Core.SpriteRendererComponent,script.BattlePlacement",
         "jsonString": {
           "name": "M1_EnemyTank2",
-          "path": "/maps/map01/M1_EnemyTank2",
+          "path": "/maps/template/M1_EnemyTank2",
           "nameEditable": true,
           "enable": true,
           "visible": true,
@@ -2038,11 +2038,11 @@
       },
       {
         "id": "da8749d2-6a56-456b-9d47-4d6dd26901b3",
-        "path": "/maps/map01/M1_EnemyAssault",
+        "path": "/maps/template/M1_EnemyAssault",
         "componentNames": "MOD.Core.TransformComponent,MOD.Core.SpriteRendererComponent,script.BattlePlacement",
         "jsonString": {
           "name": "M1_EnemyAssault",
-          "path": "/maps/map01/M1_EnemyAssault",
+          "path": "/maps/template/M1_EnemyAssault",
           "nameEditable": true,
           "enable": true,
           "visible": true,
@@ -2118,11 +2118,11 @@
       },
       {
         "id": "b77cb2f6-ca0e-44c3-84bf-eca86ed93cbe",
-        "path": "/maps/map01/M1_EnemyAssault2",
+        "path": "/maps/template/M1_EnemyAssault2",
         "componentNames": "MOD.Core.TransformComponent,MOD.Core.SpriteRendererComponent,script.BattlePlacement",
         "jsonString": {
           "name": "M1_EnemyAssault2",
-          "path": "/maps/map01/M1_EnemyAssault2",
+          "path": "/maps/template/M1_EnemyAssault2",
           "nameEditable": true,
           "enable": true,
           "visible": true,
@@ -2198,11 +2198,11 @@
       },
       {
         "id": "62de71ae-eff6-476c-9666-9a11ce6f12f8",
-        "path": "/maps/map01/M1_EnemyShooter",
+        "path": "/maps/template/M1_EnemyShooter",
         "componentNames": "MOD.Core.TransformComponent,MOD.Core.SpriteRendererComponent,script.BattlePlacement",
         "jsonString": {
           "name": "M1_EnemyShooter",
-          "path": "/maps/map01/M1_EnemyShooter",
+          "path": "/maps/template/M1_EnemyShooter",
           "nameEditable": true,
           "enable": true,
           "visible": true,
@@ -2278,11 +2278,11 @@
       },
       {
         "id": "fd607c8e-4fa0-4adb-8233-df92183636b7",
-        "path": "/maps/map01/M1_EnemyShooter2",
+        "path": "/maps/template/M1_EnemyShooter2",
         "componentNames": "MOD.Core.TransformComponent,MOD.Core.SpriteRendererComponent,script.BattlePlacement",
         "jsonString": {
           "name": "M1_EnemyShooter2",
-          "path": "/maps/map01/M1_EnemyShooter2",
+          "path": "/maps/template/M1_EnemyShooter2",
           "nameEditable": true,
           "enable": true,
           "visible": true,
@@ -2358,11 +2358,11 @@
       },
       {
         "id": "c365672e-1a52-41e5-bc36-4c0830f8db72",
-        "path": "/maps/map01/BattleCameraAnchor",
+        "path": "/maps/template/BattleCameraAnchor",
         "componentNames": "MOD.Core.TransformComponent,MOD.Core.CameraComponent",
         "jsonString": {
           "name": "BattleCameraAnchor",
-          "path": "/maps/map01/BattleCameraAnchor",
+          "path": "/maps/template/BattleCameraAnchor",
           "nameEditable": true,
           "enable": true,
           "visible": true,
