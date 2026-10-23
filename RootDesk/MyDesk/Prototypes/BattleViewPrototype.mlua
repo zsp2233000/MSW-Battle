@@ -158,8 +158,10 @@ script BattleViewPrototype extends Component
                     nameTag.NameTagRUID = player.NameTagComponent.NameTagRUID
                     nameTag.FontSize = player.NameTagComponent.FontSize
                     nameTag.FontColor = player.NameTagComponent.FontColor
+                    nameTag.Bold = player.NameTagComponent.Bold
+                    nameTag.FontOffset = player.NameTagComponent.FontOffset
+                    nameTag.OffsetY = player.NameTagComponent.OffsetY
                 end
-                nameTag.OffsetY = 1.1
                 record = { entity = avatar }
                 self._T.avatars[index] = record
             end
