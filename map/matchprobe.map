@@ -41,30 +41,31 @@
               "Enable": true
             },
             {
-              "RequireMatchedFormations": true,
-              "EnemyOpeningDelay": 0,
-              "ArenaMinX": -15,
-              "ArenaMaxX": 15,
-              "ArenaMinY": -8,
-              "ArenaMaxY": 8,
               "@type": "script.BattleSession",
+              "Enable": true,
+              "RequireMatchedFormations": true,
+              "EnemyOpeningDelay": 0.0,
+              "ArenaMinX": -15.0,
+              "ArenaMaxX": 15.0,
+              "ArenaMinY": -8.0,
+              "ArenaMaxY": 8.0,
               "CharacterPosition": {
                 "x": -6.5,
                 "y": 9.5
               }
             },
             {
-              "Enable": true,
-              "@type": "script.BattleFixedCamera"
+              "@type": "script.BattleFixedCamera",
+              "Enable": true
             },
             {
+              "@type": "script.BattlePresentation",
               "Enable": true,
-              "ShowDeploymentUI": false,
-              "@type": "script.BattlePresentation"
+              "ShowDeploymentUI": false
             },
             {
-              "Enable": true,
-              "@type": "script.BattleView"
+              "@type": "script.BattleView",
+              "Enable": true
             }
           ],
           "@version": 1
@@ -92,7 +93,7 @@
                 "r": 0.549019635,
                 "g": 0.34117648,
                 "b": 0.164705887,
-                "a": 1
+                "a": 1.0
               },
               "TemplateRUID": "794ad8421e2543d8a6d2c70307637450",
               "Type": 2,
@@ -164,26 +165,31 @@
             {
               "@type": "MOD.Core.TransformComponent",
               "Rotation": {
-                "x": 0,
-                "y": 0,
-                "z": 0
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
               },
               "Position": {
-                "x": 0,
-                "y": 0,
-                "z": 1000
+                "x": 0.0,
+                "y": 0.0,
+                "z": 1000.0
               },
               "QuaternionRotation": {
-                "x": 0,
-                "y": 0,
-                "z": 0,
-                "w": 1
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0,
+                "w": 1.0
               },
-              "ZRotation": 0,
+              "ZRotation": 0.0,
               "Enable": true
             },
             {
               "@type": "MOD.Core.RectTileMapComponent",
+              "GridSize": {
+                "x": 1.0,
+                "y": 1.0
+              },
+              "IsOddGridPosition": false,
               "SortingLayer": "MapLayer0",
               "TileSetRUID": "tileset://ed5bcc5c-3469-4374-8362-9ad26b930bb7",
               "Enable": true,
@@ -1860,12 +1866,7 @@
                   },
                   "tileIndex": 47
                 }
-              ],
-              "GridSize": {
-                "x": 1,
-                "y": 1
-              },
-              "IsOddGridPosition": false
+              ]
             }
           ],
           "@version": 1
@@ -1897,43 +1898,43 @@
             {
               "@type": "MOD.Core.TransformComponent",
               "Rotation": {
-                "x": 0,
-                "y": 0,
-                "z": 0
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
               },
               "Position": {
-                "x": 0,
-                "y": 0,
-                "z": 0
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
               },
               "QuaternionRotation": {
-                "x": 0,
-                "y": 0,
-                "z": 0,
-                "w": 1
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0,
+                "w": 1.0
               },
               "Scale": {
-                "x": 1,
-                "y": 1,
-                "z": 1
+                "x": 1.0,
+                "y": 1.0,
+                "z": 1.0
               },
-              "ZRotation": 0,
+              "ZRotation": 0.0,
               "Enable": true
             },
             {
               "@type": "MOD.Core.CameraComponent",
               "CameraOffset": {
-                "x": 0,
-                "y": 0
+                "x": 0.5,
+                "y": 0.0
               },
               "ConfineCameraArea": false,
               "Damping": {
-                "x": 0,
-                "y": 0
+                "x": 0.0,
+                "y": 0.0
               },
               "DeadZone": {
-                "x": 0,
-                "y": 0
+                "x": 0.0,
+                "y": 0.0
               },
               "IsAllowZoomInOut": false,
               "ScreenOffset": {
@@ -1941,10 +1942,10 @@
                 "y": 0.5
               },
               "SoftZone": {
-                "x": 0,
-                "y": 0
+                "x": 0.0,
+                "y": 0.0
               },
-              "ZoomRatio": 32,
+              "ZoomRatio": 60.0,
               "Enable": true
             }
           ],
@@ -1965,26 +1966,39 @@
           "displayOrder": 4,
           "pathConstraints": "///",
           "revision": 1,
+          "origin": {
+            "type": "Model",
+            "entry_id": "mapempty",
+            "sub_entity_id": null,
+            "root_entity_id": "e56a6f0a-d276-4322-80f3-a06cd185603a",
+            "replaced_model_id": null
+          },
           "modelId": "mapempty",
           "@components": [
             {
               "@type": "MOD.Core.TransformComponent",
+              "Rotation": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              },
               "Position": {
-                "x": 0,
-                "y": 0,
-                "z": 0
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
               },
               "QuaternionRotation": {
-                "x": 0,
-                "y": 0,
-                "z": 0,
-                "w": 1
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0,
+                "w": 1.0
               },
               "Scale": {
-                "x": 1,
-                "y": 1,
-                "z": 1
+                "x": 1.0,
+                "y": 1.0,
+                "z": 1.0
               },
+              "ZRotation": 0.0,
               "Enable": true
             },
             {
@@ -1992,14 +2006,7 @@
               "Enable": true
             }
           ],
-          "@version": 1,
-          "origin": {
-            "type": "Model",
-            "entry_id": "mapempty",
-            "sub_entity_id": null,
-            "root_entity_id": "e56a6f0a-d276-4322-80f3-a06cd185603a",
-            "replaced_model_id": null
-          }
+          "@version": 1
         }
       }
     ]

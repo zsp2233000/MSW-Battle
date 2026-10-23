@@ -35,14 +35,19 @@ script FormationMapLayout extends Logic
     end
 
     method boolean CanDeploy(number x, number y)
-        -- Both continuous centres must be valid: x=-15 reflects onto the excluded x=15 edge.
-        return _FormationSchema:IsFinite(x) and _FormationSchema:IsFinite(y) and x < 0
-            and self:IsWalkable(x, y) and self:IsWalkable(-x, y)
+        -- Validate both sides of the battlefield's horizontal center at x=0.5.
+        return _FormationSchema:IsFinite(x) and _FormationSchema:IsFinite(y) and x < 0.5
+            and self:IsWalkable(x, y) and self:IsWalkable(self:MirrorX(x), y)
+    end
+
+    method number MirrorX(number x)
+        -- Share the same x=0.5 reflection for admission, validation and client presentation.
+        return 1 - x
     end
 
     method any BattlePosition(number x, number y, boolean away)
-        -- Preserve exact saved coordinates and reflect the opponent about the actual world origin.
+        -- Preserve exact saved coordinates and reflect the opponent about x=0.5.
         if not self:CanDeploy(x, y) then return nil end
-        return Vector3(away and -x or x, y, 0)
+        return Vector3(away and self:MirrorX(x) or x, y, 0)
     end
 end

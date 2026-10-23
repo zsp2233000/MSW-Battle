@@ -116,7 +116,8 @@ script BattleView extends Component
         local source = record.source
         local visual = record.visual
         local position = source.TransformComponent.WorldPosition
-        visual.TransformComponent.WorldPosition = Vector3(sign * position.x, position.y, position.z)
+        local displayedX = sign == 1 and position.x or _FormationMapLayout:MirrorX(position.x)
+        visual.TransformComponent.WorldPosition = Vector3(displayedX, position.y, position.z)
         local scale = source.TransformComponent.Scale
         visual.TransformComponent.Scale = Vector3(math.abs(scale.x), math.abs(scale.y), math.abs(scale.z))
         visual.SpriteRendererComponent.FlipX = (scale.x * sign < 0) ~= source.SpriteRendererComponent.FlipX
@@ -171,7 +172,7 @@ script BattleView extends Component
 
     @ExecSpace("ClientOnly")
     method void UpdateAvatars(number sign)
-        -- Place bodyless spectators from the map's display anchor, mirrored about x=0 for this viewer.
+        -- Place bodyless spectators from the map's display anchor, mirrored about x=0.5 for this viewer.
         local session = self.Entity:GetComponent("script.BattleSession")
         if not isvalid(session) then return end
         local anchorX = session.CharacterPosition.x
@@ -221,15 +222,15 @@ script BattleView extends Component
                 record.entity.NameTagComponent.Enable = true
                 record.displayName = displayName
             end
-            -- The local player stays on the left; the opponent is the x=0 mirror.
-            local displayedX = index == (sign == 1 and 1 or 2) and anchorX or -anchorX
+            -- The local player stays on the left; the opponent is the x=0.5 mirror.
+            local displayedX = index == (sign == 1 and 1 or 2) and anchorX or _FormationMapLayout:MirrorX(anchorX)
             -- shortcut: park y is outside zoom 32, so spectators use the visible row above the field
             local displayedY = 7.2
             local body = record.entity.KinematicbodyComponent
             if isvalid(body) then body.Enable = false end
             record.entity.TransformComponent.WorldPosition = Vector3(displayedX, displayedY, 0)
             -- Verified avatar sheets face right when scale.x is negative on the viewer's left.
-            record.entity.TransformComponent.Scale = Vector3(displayedX < 0 and -1 or 1, 1, 1)
+            record.entity.TransformComponent.Scale = Vector3(displayedX < 0.5 and -1 or 1, 1, 1)
         end
         self:HideParticipants()
         if self._T.loggedAvatars ~= true then
