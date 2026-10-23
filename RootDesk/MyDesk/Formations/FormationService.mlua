@@ -8,6 +8,8 @@ script FormationService extends Logic
     @ExecSpace("ServerOnly")
     method void OnBeginPlay()
         -- Session state survives map changes; profile locks survive an owner's disconnect.
+        _DefaultUserEnterLeaveLogic.StartPoint = "/maps/formationlobby"
+        log("[VRF][LobbyEntry] native start=" .. _DefaultUserEnterLeaveLogic.StartPoint)
         self._T.sessions = {}
         self._T.writers = {}
         self._T.saveTimers = {}

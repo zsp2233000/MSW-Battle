@@ -12,6 +12,21 @@ test('personal lobby and simulation are reachable RectTile maps without battle c
   }
 });
 
+test('lobby has no painted terrain or scene background and UI binding does not force travel', () => {
+  const lobby = MapBuilder.read('map/formationlobby.map');
+  assert.ok(lobby.getTiles().every(tile => tile.tileIndex === -1));
+  assert.equal(lobby.find('Background').jsonString.enable, false);
+  const source = fs.readFileSync('RootDesk/MyDesk/Formations/FormationLobby.mlua', 'utf8');
+  const update = source.slice(source.indexOf('method void OnUpdate('), source.indexOf('method void UpdateLobbyPlayer('));
+  assert.doesNotMatch(update, /self:Travel\("formationlobby"\)/);
+  assert.match(update, /_FormationService:RequestOpen\(\)/);
+});
+
+test('native login destination is configured on the server before players spawn', () => {
+  const source = fs.readFileSync('RootDesk/MyDesk/Formations/FormationService.mlua', 'utf8');
+  assert.match(source, /@ExecSpace\("ServerOnly"\)\s+method void OnBeginPlay\(\)[\s\S]*?_DefaultUserEnterLeaveLogic.StartPoint = "\/maps\/formationlobby"/);
+});
+
 test('five formations expose stable selectors in lobby and editor with explicit save and activation', () => {
   const ui = UIBuilder.read('ui/FormationGroup.ui');
   for (const name of ['Lobby/Edit', 'Editor/Save', 'Editor/Activate', 'Retry', 'Editor/Remove']) {

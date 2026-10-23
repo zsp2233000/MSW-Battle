@@ -51,6 +51,7 @@ script FormationLobby extends Logic
     method void OnUpdate(number delta)
         -- Follow actual map transitions without polling storage or resetting login drafts.
         local player = _UserService.LocalPlayer
+        self:UpdateLobbyPlayer(player)
         if not isvalid(player) or not isvalid(self.root) then return end
         self._T.identityElapsed = self._T.identityElapsed + delta
         if player.CurrentMapName == "formationlobby" and self._T.identityElapsed >= 0.5 then
@@ -106,7 +107,6 @@ script FormationLobby extends Logic
                 end)
             end
             _FormationService:RequestOpen()
-            self:Travel("formationlobby")
             log("[VRF][FormationUI] connected lobby and five-slot editor")
         end
         local mapName = player.CurrentMapName
@@ -119,6 +119,34 @@ script FormationLobby extends Logic
             end
             self:Render()
         end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void UpdateLobbyPlayer(Entity player)
+        -- Keep the world avatar alive for identity and travel while the lobby shows only UI.
+        local inLobby = isvalid(player) and player.CurrentMapName == "formationlobby"
+        local previous = self._T.lobbyPlayer
+        if previous ~= player or not inLobby then
+            if isvalid(previous) then
+                previous:SetVisible(self._T.lobbyVisible, false, false)
+                local controller = previous.PlayerControllerComponent
+                if isvalid(controller) then controller.Enable = self._T.lobbyControllerEnabled end
+                log("[VRF][LobbyScene] restored player on exit")
+            end
+            self._T.lobbyPlayer = nil
+        end
+        if not inLobby then return end
+        local controller = player.PlayerControllerComponent
+        if self._T.lobbyPlayer == nil then
+            self._T.lobbyPlayer = player
+            self._T.lobbyVisible = player.Visible
+            self._T.lobbyControllerEnabled = isvalid(controller) and controller.Enable
+            log("[VRF][LobbyScene] UI-only lobby entered")
+        end
+        player:SetVisible(false, false, false)
+        if isvalid(controller) then controller.Enable = false end
+        local movement = player.MovementComponent
+        if isvalid(movement) then movement:Stop() end
     end
 
     @ExecSpace("ClientOnly")
@@ -623,6 +651,7 @@ script FormationLobby extends Logic
     @ExecSpace("ClientOnly")
     method void OnEndPlay()
         -- Release authored and cloned button subscriptions at world session shutdown.
+        self:UpdateLobbyPlayer(nil)
         for _, binding in ipairs(self._T.bindings or {}) do
             if isvalid(binding.entity) then binding.entity:DisconnectEvent(ButtonClickEvent, binding.callback) end
         end

@@ -1,0 +1,30 @@
+-- Run through Maker MCP in the client context with map01 selected as the test start.
+wait(2)
+local player = _UserService.LocalPlayer
+assert(player.CurrentMapName == "map01", "Maker must preserve the selected test start")
+assert(player.Visible, "direct battlefield test must retain the avatar")
+assert(not _FormationLobby:Ui("Lobby").EnabledInHierarchy, "lobby UI outside lobby")
+log("[VRF][LobbyEntryProbe] direct Maker map01 start PASS")
+
+_FormationLobby:Travel("formationlobby")
+wait(2)
+assert(player.CurrentMapName == "formationlobby", "lobby travel")
+assert(not player.Visible and not player.PlayerControllerComponent.Enable, "UI-only lobby")
+assert(_FormationLobby:Ui("Lobby").EnabledInHierarchy, "lobby UI")
+assert(_FormationLobby:Ui("Lobby/Identity/Avatar").VisibleInHierarchy, "UI portrait")
+assert(not player.CurrentMap:GetChildByName("Background").Enable, "scene background")
+log("[VRF][LobbyEntryProbe] lobby UI/portrait/avatar/background PASS")
+
+_FormationLobby:Ui("Lobby/Edit"):SendEvent(ButtonClickEvent())
+wait(2)
+assert(player.CurrentMapName == "formationsim", "edit button travel")
+assert(player.Visible, "avatar visibility restored on exit")
+assert(not player.PlayerControllerComponent.Enable, "simulation retains spectator control")
+assert(_FormationLobby:Ui("Editor").EnabledInHierarchy, "editor UI")
+log("[VRF][LobbyEntryProbe] simulation travel/visibility/control PASS")
+
+_FormationLobby:RequestReturnToLobby()
+wait(2)
+assert(player.CurrentMapName == "formationlobby", "return to lobby")
+assert(not player.Visible and not player.PlayerControllerComponent.Enable, "lobby state restored")
+log("[VRF][LobbyEntryProbe] lobby return PASS")
