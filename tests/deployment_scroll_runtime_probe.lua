@@ -1,6 +1,6 @@
 -- Fresh Maker Play, context=client, formal catalog, no deployed player units.
 -- Drives connected UI events and native layout; does not simulate drag gestures.
-local map = _EntityService:GetEntityByPath("/maps/map01")
+local map = _EntityService:GetEntityByPath("/maps/template")
 local ui = isvalid(map) and map:GetComponent("script.BattleDeploymentInput") or nil
 local originalPreviewCount = nil
 local finished = false
@@ -56,7 +56,7 @@ local function verifyDeployment()
     card.entity:SendEvent(ButtonClickEvent(card.entity))
     ui:HandleBattlefieldClick(Vector3(-4, 0, 0))
     later(function()
-        local entity = _EntityService:GetEntityByPath("/maps/map01/M1_Player_1")
+        local entity = _EntityService:GetEntityByPath("/maps/template/M1_Player_1")
         local unit = isvalid(entity) and entity:GetComponent("script.BattleUnit") or nil
         expect(ui.session.PlayerAlive == 1 and isvalid(unit) and unit.MonsterId == card.monsterId,
             "last test card deploys its original server catalog MonsterId")

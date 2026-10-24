@@ -6,7 +6,7 @@ local function check(condition, message)
     else failures = failures + 1; log_error("[VRF][CatalogValidation][FAIL] " .. message) end
 end
 local ok, detail = pcall(function()
-    local map = _EntityService:GetEntityByPath("/maps/map01")
+    local map = _EntityService:GetEntityByPath("/maps/template")
     local catalog = isvalid(map) and map:GetComponent("script.MonsterCatalog") or nil
     check(isvalid(catalog), "formal catalog is available")
     if not isvalid(catalog) then return end

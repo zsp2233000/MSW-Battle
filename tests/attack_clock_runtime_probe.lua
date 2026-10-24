@@ -1,6 +1,6 @@
 -- Run in a fresh Maker Play test with context=server_main.
 -- Manual time controls custom battle logic; native physics still runs normally.
-local map = _EntityService:GetEntityByPath("/maps/map01")
+local map = _EntityService:GetEntityByPath("/maps/template")
 local session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
 local failures = 0
 
@@ -14,13 +14,13 @@ local function row(monsterId, name, x, y, overrides)
 end
 
 local function unitByName(name)
-    local entity = _EntityService:GetEntityByPath("/maps/map01/" .. name)
+    local entity = _EntityService:GetEntityByPath("/maps/template/" .. name)
     if not isvalid(entity) then return nil, nil end
     return entity, entity:GetComponent("script.BattleUnit")
 end
 
 if not isvalid(session) then
-    check(false, "BattleSession is available on map01")
+    check(false, "BattleSession is available on template")
 elseif session.BeginManualSimulation == nil or session.PrepareBattleForTest == nil then
     check(false, "manual clock and controlled scene APIs are available")
 else

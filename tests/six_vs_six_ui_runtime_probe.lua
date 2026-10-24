@@ -5,7 +5,7 @@ local bindings = {}
 local records = {}
 local observer = 0
 local finished = false
-local map = _EntityService:GetEntityByPath("/maps/map01")
+local map = _EntityService:GetEntityByPath("/maps/template")
 local adapter = isvalid(map) and map:GetComponent("script.BattleDeploymentInput") or nil
 
 local function check(condition, message)
@@ -135,7 +135,7 @@ local function deploy(index)
     check(adapter.selectedMonsterId == roster[index], "card event selects " .. roster[index])
     adapter:HandleBattlefieldClick(positions[index])
     later(function()
-        local entity = _EntityService:GetEntityByPath("/maps/map01/M1_Player_" .. tostring(index))
+        local entity = _EntityService:GetEntityByPath("/maps/template/M1_Player_" .. tostring(index))
         local unit = isvalid(entity) and entity:GetComponent("script.BattleUnit") or nil
         check(adapter.session.PlayerAlive == index and isvalid(unit) and unit.MonsterId == roster[index],
             "UI deployment " .. tostring(index) .. " binds the selected MonsterId")

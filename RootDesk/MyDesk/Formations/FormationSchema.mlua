@@ -30,7 +30,7 @@ script FormationSchema extends Logic
             if not self:IsFinite(entry.x) or not self:IsFinite(entry.y) then return nil end
             if not _FormationMapLayout:CanDeploy(entry.x, entry.y) then return nil end
             for _, other in ipairs(units) do
-                if (entry.x - other.x)^2 + (entry.y - other.y)^2 < _FormationMapLayout.MinimumSeparation^2 then return nil end
+                if _FormationMapLayout:IsTooClose(entry.x, entry.y, other.x, other.y) then return nil end
             end
             table.insert(units, { monsterId = entry.monsterId, x = entry.x, y = entry.y })
         end

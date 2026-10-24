@@ -9,7 +9,7 @@ local function check(condition, message)
 end
 
 local runOk, runDetail = pcall(function()
-map = _EntityService:GetEntityByPath("/maps/map01")
+map = _EntityService:GetEntityByPath("/maps/template")
 session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
 check(isvalid(map) and isvalid(session), "map and BattleSession are available")
 if not isvalid(session) then return end
@@ -152,8 +152,8 @@ manualCase("valid 1v1 scene", function()
         and session.EventHistory == "",
         "scene generation increments once while event history and monotonic serials are preserved")
 
-    local playerEntity = _EntityService:GetEntityByPath("/maps/map01/Issue15_ProfilePlayer")
-    local enemyEntity = _EntityService:GetEntityByPath("/maps/map01/Issue15_ProfileEnemy")
+    local playerEntity = _EntityService:GetEntityByPath("/maps/template/Issue15_ProfilePlayer")
+    local enemyEntity = _EntityService:GetEntityByPath("/maps/template/Issue15_ProfileEnemy")
     local playerUnit = isvalid(playerEntity) and playerEntity:GetComponent("script.BattleUnit") or nil
     local enemyUnit = isvalid(enemyEntity) and enemyEntity:GetComponent("script.BattleUnit") or nil
     check(isvalid(playerUnit) and playerUnit.Faction == "PLAYER" and playerUnit.MonsterId == "monster_warrior"
@@ -216,8 +216,8 @@ manualCase("invalid input preserves the active public state and pending work", f
         { row("monster_warrior", "Issue15_StableEnemy", Vector3(0, 0, 0), quietProfile()) }
     ), "stable baseline scene is prepared")
     check(session:TryStartBattle(), "stable baseline enters battle")
-    local playerEntity = _EntityService:GetEntityByPath("/maps/map01/Issue15_StablePlayer")
-    local enemyEntity = _EntityService:GetEntityByPath("/maps/map01/Issue15_StableEnemy")
+    local playerEntity = _EntityService:GetEntityByPath("/maps/template/Issue15_StablePlayer")
+    local enemyEntity = _EntityService:GetEntityByPath("/maps/template/Issue15_StableEnemy")
     local playerUnit = isvalid(playerEntity) and playerEntity:GetComponent("script.BattleUnit") or nil
     local enemyUnit = isvalid(enemyEntity) and enemyEntity:GetComponent("script.BattleUnit") or nil
     check(isvalid(playerUnit) and isvalid(enemyUnit), "stable baseline units are queryable")
@@ -301,8 +301,8 @@ manualCase("scene switch discards queued old-scene work", function()
         { row("monster_warrior", "Issue15_OldEnemy", Vector3(0, 0, 0), quietProfile()) }
     ), "old scene is prepared")
     check(session:TryStartBattle(), "old scene starts before work is queued")
-    local oldPlayer = _EntityService:GetEntityByPath("/maps/map01/Issue15_OldPlayer")
-    local oldEnemy = _EntityService:GetEntityByPath("/maps/map01/Issue15_OldEnemy")
+    local oldPlayer = _EntityService:GetEntityByPath("/maps/template/Issue15_OldPlayer")
+    local oldEnemy = _EntityService:GetEntityByPath("/maps/template/Issue15_OldEnemy")
     check(isvalid(oldPlayer) and isvalid(oldEnemy), "old scene units are available")
     if not isvalid(oldPlayer) or not isvalid(oldEnemy) then return end
 
@@ -322,13 +322,13 @@ manualCase("scene switch discards queued old-scene work", function()
         and session.InitialPlayerAlive == 0 and session.InitialEnemyAlive == 1
         and session.EventHistory == "" and session.LastEvent == "",
         "scene switch clears history and advances generation without resetting event serial")
-    check(not isvalid(_EntityService:GetEntityByPath("/maps/map01/Issue15_OldPlayer"))
-        and not isvalid(_EntityService:GetEntityByPath("/maps/map01/Issue15_OldEnemy"))
+    check(not isvalid(_EntityService:GetEntityByPath("/maps/template/Issue15_OldPlayer"))
+        and not isvalid(_EntityService:GetEntityByPath("/maps/template/Issue15_OldEnemy"))
         and string.find(session:GetUnitSnapshots(), "Issue15_Old", 1, true) == nil,
         "old roster is destroyed before new unit snapshots are published")
 
-    local newPlayer = _EntityService:GetEntityByPath("/maps/map01/Issue15_NewPlayer")
-    local newEnemy = _EntityService:GetEntityByPath("/maps/map01/Issue15_NewEnemy")
+    local newPlayer = _EntityService:GetEntityByPath("/maps/template/Issue15_NewPlayer")
+    local newEnemy = _EntityService:GetEntityByPath("/maps/template/Issue15_NewEnemy")
     local newPlayerUnit = isvalid(newPlayer) and newPlayer:GetComponent("script.BattleUnit") or nil
     local newEnemyUnit = isvalid(newEnemy) and newEnemy:GetComponent("script.BattleUnit") or nil
     check(isvalid(newPlayerUnit) and isvalid(newEnemyUnit), "new roster can be queried by public entity path")

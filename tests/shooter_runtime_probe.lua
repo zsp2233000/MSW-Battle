@@ -78,7 +78,7 @@ local function hasProjectileEntity()
 end
 
 local runOk, runDetail = pcall(function()
-    map = _EntityService:GetEntityByPath("/maps/map01")
+    map = _EntityService:GetEntityByPath("/maps/template")
     session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
     if not isvalid(map) or not isvalid(session) then
         check(false, "map and BattleSession are available")
@@ -86,8 +86,8 @@ local runOk, runDetail = pcall(function()
     end
     if not prepareScene() then return end
 
-    local shooter = _EntityService:GetEntityByPath("/maps/map01/Issue17_Shooter")
-    local target = _EntityService:GetEntityByPath("/maps/map01/Issue17_ShooterTarget")
+    local shooter = _EntityService:GetEntityByPath("/maps/template/Issue17_Shooter")
+    local target = _EntityService:GetEntityByPath("/maps/template/Issue17_ShooterTarget")
     local actor = isvalid(shooter) and shooter:GetComponent("script.BattleUnit") or nil
     local defender = isvalid(target) and target:GetComponent("script.BattleUnit") or nil
     check(isvalid(actor) and isvalid(defender), "prepared shooter and target components are available")

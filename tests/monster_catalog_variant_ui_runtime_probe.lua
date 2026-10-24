@@ -1,5 +1,5 @@
 -- Fresh Play with the guarded variantStats fixture, context=client.
-local map = _EntityService:GetEntityByPath("/maps/map01")
+local map = _EntityService:GetEntityByPath("/maps/template")
 local ui = isvalid(map) and map:GetComponent("script.BattleDeploymentInput") or nil
 local failures = 0
 local function check(value, message)

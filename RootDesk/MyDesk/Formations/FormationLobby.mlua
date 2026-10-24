@@ -70,7 +70,7 @@ script FormationLobby extends Logic
         if not self._T.bound then
             self._T.bound = true
             self:Bind("Lobby/Edit", function() self:Travel("formationsim") end)
-            self:Bind("Lobby/Legacy", function() self:Travel("map01") end)
+            self:Bind("Lobby/Legacy", function() self:Travel("template") end)
             self:Bind("Editor/Back", function() self:RequestReturnToLobby() end)
             self:Bind("ReturnLobby", function()
                 if self._T.mapName == "formationsim" then

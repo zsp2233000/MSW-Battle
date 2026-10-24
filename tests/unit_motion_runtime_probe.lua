@@ -16,7 +16,7 @@ local function quiet(extra)
     return profile
 end
 local function actor(name)
-    local entity = _EntityService:GetEntityByPath("/maps/map01/" .. name)
+    local entity = _EntityService:GetEntityByPath("/maps/template/" .. name)
     return entity, entity:GetComponent("script.BattleUnit")
 end
 local function place(entity, x, y)
@@ -42,7 +42,7 @@ local function nativeShot(attacker, target)
 end
 
 local ok, detail = pcall(function()
-    local map = _EntityService:GetEntityByPath("/maps/map01")
+    local map = _EntityService:GetEntityByPath("/maps/template")
     session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
     if not isvalid(session) then error("BattleSession unavailable") end
 

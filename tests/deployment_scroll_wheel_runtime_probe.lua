@@ -6,7 +6,7 @@
 -- The native wheel advances 30 UI pixels per delta unit in this Maker version.
 local expectedEvents = 13
 local startAtBottom = false
-local map = _EntityService:GetEntityByPath("/maps/map01")
+local map = _EntityService:GetEntityByPath("/maps/template")
 local ui = isvalid(map) and map:GetComponent("script.BattleDeploymentInput") or nil
 if not isvalid(ui) or not ui.optionsReady or ui.optionsBuilding or #ui.optionCards ~= 18
     or ui.session.Phase ~= "DEPLOYMENT" then

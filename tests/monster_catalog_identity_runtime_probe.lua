@@ -22,7 +22,7 @@ local function sameExceptIdentity(primary, variant)
 end
 
 local runOk, runDetail = pcall(function()
-    local map = _EntityService:GetEntityByPath("/maps/map01")
+    local map = _EntityService:GetEntityByPath("/maps/template")
     local session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
     local catalog = isvalid(map) and map:GetComponent("script.MonsterCatalog") or nil
     check(isvalid(map) and isvalid(session) and isvalid(catalog), "map, BattleSession, and loaded MonsterCatalog are available")
@@ -49,8 +49,8 @@ local runOk, runDetail = pcall(function()
         "original MonsterId deploys through TryDeployMonster")
     check(session:TryDeployMonster("probe_tank_variant", Vector3(-3.4, 1, 0)),
         "same-type variant MonsterId deploys independently through TryDeployMonster")
-    local primaryEntity = _EntityService:GetEntityByPath("/maps/map01/M1_Player_1")
-    local variantEntity = _EntityService:GetEntityByPath("/maps/map01/M1_Player_2")
+    local primaryEntity = _EntityService:GetEntityByPath("/maps/template/M1_Player_1")
+    local variantEntity = _EntityService:GetEntityByPath("/maps/template/M1_Player_2")
     local primaryUnit = isvalid(primaryEntity) and primaryEntity:GetComponent("script.BattleUnit") or nil
     local variantUnit = isvalid(variantEntity) and variantEntity:GetComponent("script.BattleUnit") or nil
     check(isvalid(primaryUnit) and isvalid(variantUnit), "both production deployment entities are queryable")

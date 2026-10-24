@@ -7,7 +7,7 @@ local function check(condition, message)
     else failures = failures + 1; log_error("[VRF][CatalogVariant][FAIL] " .. message) end
 end
 local ok, detail = pcall(function()
-    local map = _EntityService:GetEntityByPath("/maps/map01")
+    local map = _EntityService:GetEntityByPath("/maps/template")
     session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
     check(isvalid(session), "formal session loads the temporary catalog")
     if not isvalid(session) then return end
@@ -26,8 +26,8 @@ local ok, detail = pcall(function()
     check(session:TryDeployMonster("monster_tank", Vector3(-4.4, 1, 0))
         and session:TryDeployMonster("probe_tank_variant", Vector3(-3.4, 1, 0)),
         "both identities deploy through the official command")
-    local primaryUnit = _EntityService:GetEntityByPath("/maps/map01/M1_Player_1"):GetComponent("script.BattleUnit")
-    local variantUnit = _EntityService:GetEntityByPath("/maps/map01/M1_Player_2"):GetComponent("script.BattleUnit")
+    local primaryUnit = _EntityService:GetEntityByPath("/maps/template/M1_Player_1"):GetComponent("script.BattleUnit")
+    local variantUnit = _EntityService:GetEntityByPath("/maps/template/M1_Player_2"):GetComponent("script.BattleUnit")
     check(primaryUnit.MaxHp == 500 and primaryUnit.AttackDamage == 40 and variantUnit.MaxHp == 650
         and variantUnit.AttackDamage == 25 and variantUnit.MoveSpeed == 0.7
         and variantUnit.AttackInterval == 1.3 and variantUnit.AttackRange == 0.8,
@@ -40,9 +40,9 @@ local ok, detail = pcall(function()
         { monsterId = "probe_tank_variant", name = "Variant", position = Vector3(-1, 0.2, 0) },
     }, { { monsterId = "monster_tank", name = "SharedIdEnemy", position = Vector3(-0.5, 0.1, 0) } }),
         "controlled scene uses two player identities and the original ID on the enemy faction")
-    local attacker = _EntityService:GetEntityByPath("/maps/map01/Primary"):GetComponent("script.BattleUnit")
-    local second = _EntityService:GetEntityByPath("/maps/map01/Variant"):GetComponent("script.BattleUnit")
-    local target = _EntityService:GetEntityByPath("/maps/map01/SharedIdEnemy")
+    local attacker = _EntityService:GetEntityByPath("/maps/template/Primary"):GetComponent("script.BattleUnit")
+    local second = _EntityService:GetEntityByPath("/maps/template/Variant"):GetComponent("script.BattleUnit")
+    local target = _EntityService:GetEntityByPath("/maps/template/SharedIdEnemy")
     local defender = target:GetComponent("script.BattleUnit")
     check(session:TryStartBattle(), "controlled variant scene starts")
     attacker:DriveAttack(target, true)

@@ -15,7 +15,7 @@ local function row(id, name, x, y, extra)
     return { monsterId = id, name = name, position = Vector3(x, y, 0), overrides = profile }
 end
 local function actor(name)
-    local entity = _EntityService:GetEntityByPath("/maps/map01/" .. name)
+    local entity = _EntityService:GetEntityByPath("/maps/template/" .. name)
     return entity, entity:GetComponent("script.BattleUnit")
 end
 local function release()
@@ -51,7 +51,7 @@ local function contact(attackerEntity, attacker)
 end
 
 local ok, detail = pcall(function()
-    map = _EntityService:GetEntityByPath("/maps/map01")
+    map = _EntityService:GetEntityByPath("/maps/template")
     session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
     if not isvalid(session) then error("BattleSession unavailable") end
 

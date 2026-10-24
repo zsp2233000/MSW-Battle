@@ -1,10 +1,10 @@
--- Run through Maker MCP in the client context with map01 selected as the test start.
+-- Run through Maker MCP in the client context with template selected as the test start.
 wait(2)
 local player = _UserService.LocalPlayer
-assert(player.CurrentMapName == "map01", "Maker must preserve the selected test start")
+assert(player.CurrentMapName == "template", "Maker must preserve the selected test start")
 assert(player.Visible, "direct battlefield test must retain the avatar")
 assert(not _FormationLobby:Ui("Lobby").EnabledInHierarchy, "lobby UI outside lobby")
-log("[VRF][LobbyEntryProbe] direct Maker map01 start PASS")
+log("[VRF][LobbyEntryProbe] direct Maker template start PASS")
 
 _FormationLobby:Travel("formationlobby")
 wait(2)

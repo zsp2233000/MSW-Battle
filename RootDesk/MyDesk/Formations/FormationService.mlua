@@ -19,7 +19,7 @@ script FormationService extends Logic
     @ExecSpace("ServerOnly")
     method any GetCatalog()
         -- Reuse the formal map catalog without maintaining another monster or ability list.
-        local map = _EntityService:GetEntityByPath("/maps/map01")
+        local map = _EntityService:GetEntityByPath("/maps/template")
         if not isvalid(map) then return nil end
         local catalog = map:GetComponent("MonsterCatalog")
         if not isvalid(catalog) or not catalog.IsLoaded or catalog.ErrorMessage ~= "" then return nil end
@@ -393,7 +393,7 @@ script FormationService extends Logic
     @ExecSpace("Server")
     method void RequestTravel(string destination)
         -- Limit destinations and derive the traveller from the RPC sender, keeping drafts in this session.
-        if destination ~= "formationlobby" and destination ~= "formationsim" and destination ~= "map01" then return end
+        if destination ~= "formationlobby" and destination ~= "formationsim" and destination ~= "template" then return end
         local player = _UserService:GetUserEntityByUserId(senderUserId)
         if not isvalid(player) then return end
         local record = self:GetSession(senderUserId)

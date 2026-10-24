@@ -1,6 +1,6 @@
 -- Run in a fresh Maker Play test with context=server_main.
 -- Observe the production roster; observe a complete natural battle and terminal state.
-local map = _EntityService:GetEntityByPath("/maps/map01")
+local map = _EntityService:GetEntityByPath("/maps/template")
 local session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
 local failures = 0
 

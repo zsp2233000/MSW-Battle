@@ -7,7 +7,7 @@ local function check(condition, message)
 end
 
 local runOk, runDetail = pcall(function()
-    local map = _EntityService:GetEntityByPath("/maps/map01")
+    local map = _EntityService:GetEntityByPath("/maps/template")
     local session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
     local catalog = isvalid(map) and map:GetComponent("script.MonsterCatalog") or nil
     check(isvalid(map) and isvalid(session) and isvalid(catalog), "map, BattleSession, and restored catalog are available")

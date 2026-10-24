@@ -31,7 +31,7 @@ local function rosterEntry(name, x, maxHp, attackDamage, attackRange)
 end
 
 local function getUnit(name)
-    local entity = _EntityService:GetEntityByPath("/maps/map01/" .. name)
+    local entity = _EntityService:GetEntityByPath("/maps/template/" .. name)
     if not isvalid(entity) then return nil, nil end
     return entity, entity:GetComponent("script.BattleUnit")
 end
@@ -156,7 +156,7 @@ local function settleDraw(playerFirst)
 end
 
 local runOk, runDetail = pcall(function()
-    local map = _EntityService:GetEntityByPath("/maps/map01")
+    local map = _EntityService:GetEntityByPath("/maps/template")
     session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
     check(isvalid(map) and isvalid(session), "map and BattleSession are available")
     if not isvalid(map) or not isvalid(session) then return end

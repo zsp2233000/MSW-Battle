@@ -1,6 +1,6 @@
 -- Run in a fresh Maker Play test with context=server_main.
 -- Every case prepares and starts a complete controlled battle before observing the production step.
-local map = _EntityService:GetEntityByPath("/maps/map01")
+local map = _EntityService:GetEntityByPath("/maps/template")
 local session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
 local failures = 0
 local function check(condition, message)
@@ -54,7 +54,7 @@ local function catalogProfile(monsterId)
 end
 
 local function getUnit(name)
-    local entity = _EntityService:GetEntityByPath("/maps/map01/" .. name)
+    local entity = _EntityService:GetEntityByPath("/maps/template/" .. name)
     if not isvalid(entity) then return nil, nil end
     return entity, entity:GetComponent("script.BattleUnit")
 end
@@ -187,13 +187,13 @@ for _, kind in ipairs({ "monster_warrior", "monster_shooter" }) do
     }, function()
         local actor, unit = getUnit(actorName)
         local _, target = getUnit(targetName)
-        unit:DriveAttack(_EntityService:GetEntityByPath("/maps/map01/" .. targetName), true)
+        unit:DriveAttack(_EntityService:GetEntityByPath("/maps/template/" .. targetName), true)
         session:AdvanceForTest(0.05)
         unit:CancelAttack()
         session:AdvanceForTest(0.2)
         check(target.Hp == 220 and target.DamageTakenSerial == 0,
             suffix .. " cancellation removes an unaccepted hit")
-        unit:DriveAttack(_EntityService:GetEntityByPath("/maps/map01/" .. targetName), true)
+        unit:DriveAttack(_EntityService:GetEntityByPath("/maps/template/" .. targetName), true)
         local expectedSerial = kind == "monster_warrior" and 1 or 2
         check(unit.AttackSerial == expectedSerial,
             suffix .. " retains its existing ordinary cancellation cooldown")
@@ -563,7 +563,7 @@ do
         local killerEntity, killer = getUnit(killerName)
         local _, target = getUnit(targetName)
         local _, reserve = getUnit(reserveName)
-        local targetEntity = _EntityService:GetEntityByPath("/maps/map01/" .. targetName)
+        local targetEntity = _EntityService:GetEntityByPath("/maps/template/" .. targetName)
         shooter:DriveAttack(targetEntity, true)
         killer:DriveAttack(targetEntity, true)
         session:AdvanceForTest(0.05)
