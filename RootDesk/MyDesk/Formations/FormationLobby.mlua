@@ -217,6 +217,19 @@ script FormationLobby extends Logic
     end
 
     @ExecSpace("ClientOnly")
+    method string ReturnSaveBlockReason()
+        -- Explain invalid dirty drafts without blocking an empty clean slot from saving other slots.
+        local state = self.Snapshot
+        local slotId = state.editSlot or 1
+        local info = state.slots and state.slots[tostring(slotId)] or nil
+        if info == nil or not info.dirty or state.draftValid == true then return "" end
+        if #(state.draft or {}) == 0 then
+            return "第 " .. tostring(slotId) .. " 組是空編隊，請至少放置一個單位後再儲存。"
+        end
+        return "第 " .. tostring(slotId) .. " 組站位尚未符合規則，請調整後再儲存。"
+    end
+
+    @ExecSpace("ClientOnly")
     method void RequestReturnToLobby()
         -- Ask before leaving whenever any formation slot has a draft not confirmed in storage.
         local state = self.Snapshot
@@ -281,6 +294,13 @@ script FormationLobby extends Logic
         end
         local load = state.loadState or "LOADING"
         if load ~= "READY" and load ~= "NEW" then return end
+        local saveBlockReason = self:ReturnSaveBlockReason()
+        if saveBlockReason ~= "" then
+            self._T.returnConfirm = true
+            self:Render()
+            log("[VRF][FormationExit] save blocked: " .. saveBlockReason)
+            return
+        end
         self._T.returnAfterSave = true
         self._T.returnSaveSlots = dirtySlots
         self._T.returnSaveIndex = 1
@@ -427,7 +447,12 @@ script FormationLobby extends Logic
         self._T.returnSaveTarget = 0
         self._T.returnSaveVersion = -1
         self._T.returnSaveElapsed = 0
-        self:CloseReturnConfirmation()
+        if reason == "draft cannot be saved" then
+            self._T.returnConfirm = true
+            self:Render()
+        else
+            self:CloseReturnConfirmation()
+        end
         if reason ~= "cancelled by player" and reason ~= "arrived in lobby" then
             self:SetText("Status", "儲存未完成，草稿仍保留；請檢查狀態後再試。")
         end
@@ -542,6 +567,7 @@ script FormationLobby extends Logic
         if load == "NEW" then text = "首次使用 / " .. text end
         self:SetText("Status", text .. "    " .. (state.message or "正在讀取個人編隊"))
         local dirtyCount = self:DirtySlotCount(state.slots or {})
+        local saveBlockReason = self:ReturnSaveBlockReason()
         if self._T.returnAfterSave then
             self:SetText("ExitConfirm/Window/Title", "正在儲存配置")
             local progress = "正在準備儲存第 " .. tostring(self._T.returnSaveTarget) .. " 組..."
@@ -553,8 +579,11 @@ script FormationLobby extends Logic
             self:SetText("ExitConfirm/Window/Message", progress .. "\n點擊「繼續編輯」可取消自動返回。")
         else
             self:SetText("ExitConfirm/Window/Title", "要儲存配置嗎？")
-            local confirmMessage = "目前配置有尚未儲存的草稿。"
-            if dirtyCount > 1 then confirmMessage = "有 " .. tostring(dirtyCount) .. " 組配置尚未儲存。" end
+            local confirmMessage = saveBlockReason
+            if confirmMessage == "" then
+                confirmMessage = "目前配置有尚未儲存的草稿。"
+                if dirtyCount > 1 then confirmMessage = "有 " .. tostring(dirtyCount) .. " 組配置尚未儲存。" end
+            end
             if load ~= "READY" and load ~= "NEW" then
                 confirmMessage = confirmMessage .. "\n目前無法確認儲存；可返回並保留本次登入的草稿。"
             else
@@ -605,7 +634,7 @@ script FormationLobby extends Logic
         local returnWithoutSave = self:Ui("ExitConfirm/Window/ReturnWithoutSave")
         local continueEditing = self:Ui("ExitConfirm/Window/ContinueEditing")
         if isvalid(save) then save.ButtonComponent.Enable = writable and not state.pending and state.draftValid == true end
-        if isvalid(saveAndReturn) then saveAndReturn.ButtonComponent.Enable = not self._T.returnAfterSave and writable and not state.pending and dirtyCount > 0 end
+        if isvalid(saveAndReturn) then saveAndReturn.ButtonComponent.Enable = not self._T.returnAfterSave and writable and not state.pending and dirtyCount > 0 and saveBlockReason == "" end
         if isvalid(returnWithoutSave) then returnWithoutSave.ButtonComponent.Enable = not self._T.returnAfterSave end
         if isvalid(continueEditing) then continueEditing.ButtonComponent.Enable = true end
         local slotInfo = state.slots and state.slots[tostring(editSlot)] or nil

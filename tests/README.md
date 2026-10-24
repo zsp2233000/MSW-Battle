@@ -10,6 +10,8 @@ Runtime probes use the Maker server or client runtime, native `AttackComponent` 
 
 `formation_placement_runtime_probe.lua` verifies shared 0.3 spacing, fractional positions, mirroring, existing document encoding, and production deployment in `server_main`; it removes its deployed fixtures afterwards. `centered_terrain_runtime_probe.lua` checks the template, simulation and lobby terrain in the same Play session. The local contract suite compares every map's terrain and coordinate transform with `map/template.map` so inconsistent developer-authored maps fail verification.
 
+`formation_empty_return_runtime_probe.lua` runs in the client context after loading a saved formation, with no storage write pending and all other slots clean. It clears only the draft, drives the connected return buttons, verifies the visible empty-formation reason and batch-return cancellation, then checks returning without saving preserves the stored formation. It restores the draft contents; Stop/Play restores clean draft versions without writing storage.
+
 Five-slot formation probes and their ordered setup, fault injection, login restoration and recorded evidence are in [Issue #29](../docs/Issue-29-Formations.md). The sequence is `formation_slots_runtime_probe.lua` → `formation_slots_delayed_runtime_probe.lua` → `formation_slots_failure_runtime_probe.lua` → Stop/Play → `formation_slots_relogin_runtime_probe.lua`. All run in the client context; configure faults from the server as documented and reset them to `(0,0,0)` afterwards. `formation_slots_save_failure_runtime_probe.lua` separately checks cross-slot save failure. Legacy first-slot probes now pass explicit slot IDs to formation commands.
 
 ## Maker runtime procedure
