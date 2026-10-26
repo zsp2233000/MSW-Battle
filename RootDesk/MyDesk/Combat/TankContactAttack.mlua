@@ -5,9 +5,11 @@ script TankContactAttack extends AttackComponent
 
     @ExecSpace("ServerOnly")
     method void Configure(table profile, Component execution)
-        -- Receive the native contact shape and execution owner.
+        -- Receive the native contact policy and reset each defender's cooldown.
         self.AttackDamage = profile.AttackDamage
         self.ContactSize = Vector2(profile.ContactSizeX, profile.ContactSizeY)
+        self._T.contactCooldownSeconds = profile.ContactCooldownSeconds or 0
+        self._T.contactCooldowns = {}
         self._T.execution = execution
     end
 
@@ -25,23 +27,41 @@ script TankContactAttack extends AttackComponent
         self:AttackFrom(self.ContactSize, Vector2(position.x, position.y), "tank_contact", nil)
     end
 
+    @ExecSpace("ServerOnly")
+    method void AdvanceContactCooldowns(number delta)
+        -- Age each defender independently on the battle simulation clock.
+        if delta <= 0 then return end
+        for defender, remaining in pairs(self._T.contactCooldowns or {}) do
+            if not isvalid(defender) or remaining <= delta then
+                self._T.contactCooldowns[defender] = nil
+            else
+                self._T.contactCooldowns[defender] = remaining - delta
+            end
+        end
+    end
+
     method integer CalcDamage(Entity attacker, Entity defender, string attackInfo)
         -- Supply configured damage through native HitEvent.
         return self.AttackDamage
     end
 
     method boolean IsAttackTarget(Entity defender, string attackInfo)
-        -- Accept opposing live units without a per-target contact cooldown.
+        -- Accept opposing live units only after their individual contact cooldown expires.
         if not isvalid(self._T.execution) or not self._T.execution:IsCurrentAdapter(self) then return false end
         local attackerUnit = self.Entity:GetComponent("script.BattleUnit")
         local defenderUnit = nil
         if isvalid(defender) then defenderUnit = defender:GetComponent("script.BattleUnit") end
         if not isvalid(defenderUnit) or not defenderUnit:IsAlive() or attackerUnit.Faction == defenderUnit.Faction then return false end
+        if (self._T.contactCooldowns or {})[defender] ~= nil then return false end
         return __base:IsAttackTarget(defender, attackInfo)
     end
 
     method void OnAttack(Entity defender)
-        -- Report each successful defender for notification and queued knockback.
+        -- Start this defender's cooldown before another contact query can accept it.
+        if (self._T.contactCooldownSeconds or 0) > 0 then
+            self._T.contactCooldowns = self._T.contactCooldowns or {}
+            self._T.contactCooldowns[defender] = self._T.contactCooldownSeconds
+        end
         if isvalid(self._T.execution) then self._T.execution:OnNativeHit(self, defender) end
     end
 end

@@ -432,10 +432,102 @@ do
 end
 
 do
+    local actorName = "Issue16_PoiseActor"
+    local firstTankName = "Issue16_PoiseTank"
+    local shooterName = "Issue16_PoiseShooter"
+    local lateTankName = "Issue16_PoiseLateTank"
+    local recoveryTankName = "Issue16_PoiseRecoveryTank"
+    if not controlledCase("attack poise through the full animation", {
+        row("monster_tank", firstTankName, 3.4, 1.4, activeProfile(0.18, 2, 40)),
+        row("monster_shooter", shooterName, -1, 0.2, activeProfile(0, 100)),
+        row("monster_tank", lateTankName, 3.4, 1.4, activeProfile(0.18, 2, 40)),
+        row("monster_tank", recoveryTankName, 3.4, 1.4, activeProfile(0.18, 2, 40)),
+    }, {
+        row("monster_warrior", actorName, -0.5, 0, activeProfile(0.18, 100)),
+    }, function()
+        local actorEntity, actor = getUnit(actorName)
+        local firstTankEntity, firstTank = getUnit(firstTankName)
+        local shooterEntity, shooter = getUnit(shooterName)
+        local lateTankEntity, lateTank = getUnit(lateTankName)
+        local recoveryTankEntity, recoveryTank = getUnit(recoveryTankName)
+        consumeEnemyOpeningDelay(actor, firstTankEntity, "attack poise actor")
+        firstTankEntity.KinematicbodyComponent:SetWorldPosition(Vector2(-1, 0))
+        actor.AttackRange = 0.6
+        actor:DriveAttack(firstTankEntity, true)
+        check(actor.AttackSerial == 1 and actor.AttackPoiseActive and actor.AttackAnimationDuration > 0,
+            "accepted attack starts poise for its full animation")
+
+        local startPosition = actorEntity.TransformComponent.WorldPosition
+        firstTank:DriveAttack(nil, false)
+        session:AdvanceForTest(0.02)
+        local afterTankHit = actorEntity.TransformComponent.WorldPosition
+        check(actor.Hp == 180 and actor.DamageTakenSerial == 1,
+            "tank damage still applies during attack poise")
+        check(actor.AttackPoiseActive and actor.CombatState == "ATTACK" and not actor.KnockbackActive
+            and samePosition(startPosition, afterTankHit),
+            "tank knockback and hit reaction do not interrupt an active attack")
+
+        shooter:DriveAttack(actorEntity, true)
+        session:AdvanceForTest(0.02)
+        check(actor.Hp == 150 and actor.DamageTakenSerial == 2 and actor.AttackPoiseActive
+            and actor.CombatState == "ATTACK",
+            "non-tank damage applies without hit-stop during attack poise")
+
+        session:AdvanceForTest(math.max(0, actor.AttackAnimationDuration - 0.08))
+        local beforeLateHit = actorEntity.TransformComponent.WorldPosition
+        lateTankEntity.KinematicbodyComponent:SetWorldPosition(Vector2(-1, 0))
+        lateTank:DriveAttack(nil, false)
+        session:AdvanceForTest(0.02)
+        check(actor.Hp == 110 and actor.DamageTakenSerial == 3 and actor.AttackPoiseActive
+            and not actor.KnockbackActive and samePosition(beforeLateHit, actorEntity.TransformComponent.WorldPosition),
+            "a hit near the end of the attack animation still deals damage without knockback")
+
+        session:AdvanceForTest(0.1)
+        check(not actor.AttackPoiseActive and not actor.KnockbackActive,
+            "attack poise expires after the complete attack animation without deferred knockback")
+        actor.AttackRange = 0
+        recoveryTankEntity.KinematicbodyComponent:SetWorldPosition(Vector2(-1, 0))
+        recoveryTank:DriveAttack(nil, false)
+        session:AdvanceForTest(0.02)
+        check(actor.Hp == 70 and actor.DamageTakenSerial == 4 and actor.KnockbackActive,
+            "a new tank hit after recovery applies normal knockback")
+        check(isvalid(shooterEntity), "the non-tank interruption source remains registered")
+    end) then return end
+end
+
+do
+    local actorName = "Issue16_PoiseLethalActor"
+    local reserveName = "Issue16_PoiseLethalReserve"
+    local tankName = "Issue16_PoiseLethalTank"
+    local enemyReserveName = "Issue16_PoiseLethalEnemyReserve"
+    if not controlledCase("attack poise does not prevent lethal damage", {
+        row("monster_warrior", actorName, -0.5, 0, activeProfile(0.18, 100, nil, 30)),
+        row("monster_warrior", reserveName, 3.4, 1.4, quietProfile()),
+    }, {
+        row("monster_tank", tankName, -1, 0, activeProfile(0.18, 2, 40)),
+        row("monster_tank", enemyReserveName, 3.4, 1.4, quietProfile()),
+    }, function()
+        local actorEntity, actor = getUnit(actorName)
+        local tankEntity, tank = getUnit(tankName)
+        actor.AttackRange = 0.6
+        actor:DriveAttack(tankEntity, true)
+        tank:DriveAttack(nil, false)
+        session:AdvanceForTest(0.02)
+        check(actor.Hp == 0 and actor.IsDead and actor.CombatState == "DEAD"
+            and actor.DamageTakenSerial == 1,
+            "lethal damage kills a unit during attack poise")
+        check(not actor.AttackPoiseActive and not actor.KnockbackActive
+            and contains(session.EventHistory, "DEAD:" .. actorEntity.Name),
+            "death clears attack poise and bypasses knockback")
+        check(session.Phase == "BATTLE", "reserves keep the lethal case inside the active battle")
+    end) then return end
+end
+
+do
     local actorName = "Issue16_HitStopActor"
     local targetName = "Issue16_HitStopTarget"
     local hitterName = "Issue16_HitStopHitter"
-    if not controlledCase("hit stop blocks new intent but advances accepted work", {
+    if not controlledCase("attack poise ignores hit stop but advances accepted work", {
         row("monster_shooter", actorName, -1, 0, activeProfile(0.18, 0.01)),
     }, {
         row("monster_warrior", targetName, -0.5, 0, quietProfile()),
@@ -445,17 +537,18 @@ do
         local targetEntity, target = getUnit(targetName)
         local hitterEntity, hitter = getUnit(hitterName)
         consumeEnemyOpeningDelay(hitter, actorEntity, "hit-stop enemy shooter")
+        actor.AttackRange = 4
         actor:DriveAttack(targetEntity, true)
         hitter:DriveAttack(actorEntity, true)
         session:AdvanceForTest(0.02)
-        check(actor.DamageTakenSerial == 1 and actor.CombatState == "ON_HIT",
-            "opposing native hit starts actor hit stop")
+        check(actor.DamageTakenSerial == 1 and actor.CombatState == "ATTACK" and actor.AttackPoiseActive,
+            "opposing native hit applies damage without interrupting attack poise")
         actor.AttackRange = 4
         session:AdvanceForTest(0.16)
         check(target.Hp == 190 and target.DamageTakenSerial == 1,
             "already pending attack advances through hit stop and applies its HitEvent")
         check(actor.AttackSerial == 1,
-            "hit stop blocks a new automatic attack intent during the accepted strike")
+            "the accepted attack remains singular through its pending strike")
         check(contains(session.EventHistory, "DAMAGE:" .. hitterEntity.Name .. ":" .. actorEntity.Name)
             and contains(session.EventHistory, "DAMAGE:" .. actorEntity.Name .. ":" .. targetEntity.Name),
             "both opposing and outgoing damage events remain observable")
