@@ -1,0 +1,322 @@
+@Logic
+script FormationHandoff extends Logic
+
+    property string StorageKey = "BattleTransferV2"
+
+    @ExecSpace("ServerOnly")
+    method void OnBeginPlay()
+        -- Keep formation payloads private across map changes and discard them with their room.
+        self._T.records = {}
+        self._T.byId = {}
+        self._T.ended = false
+        log("[VRF][Handoff] ready")
+    end
+
+    @ExecSpace("ServerOnly")
+    method table Metadata(table data)
+        -- Expose only matchmaking fields; callers never receive serialized formations or storage bytes.
+        local copy = {}
+        for _, key in ipairs({ "schema", "profile", "attempt", "requestId", "summary", "source", "adapter", "state", "started", "expires", "matchKey", "warpIssued" }) do
+            copy[key] = data[key]
+        end
+        if type(data.match) == "table" then
+            copy.match = {}
+            for key, value in pairs(data.match) do copy.match[key] = value end
+        end
+        return copy
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean ValidEnvelope(any data, string profile)
+        -- Preserve the V2 envelope contract, including old in-progress and terminal records.
+        if type(data) ~= "table" or data.schema ~= 1 or data.profile ~= profile then return false end
+        if type(data.state) ~= "string" or type(data.attempt) ~= "string" or not _FormationSchema:IsFinite(data.started) or not _FormationSchema:IsFinite(data.expires) then return false end
+        if type(data.source) ~= "string" or type(data.matchKey) ~= "string" then return false end
+        if data.adapter ~= nil and data.adapter ~= "local" and data.adapter ~= "native" then return false end
+        if data.state == "RETURNED" or data.state == "CANCELLED" then return true end
+        local transfer = data.transfer
+        return type(transfer) == "table" and transfer.coordinateSchema == 2
+            and type(transfer.saved) == "string" and type(transfer.drafts) == "string" and type(transfer.fixed) == "string"
+            and type(transfer.confirmedRaw) == "string" and _FormationSchema:IsFinite(transfer.editSlot)
+    end
+
+    @ExecSpace("ServerOnly")
+    method any Read(string profile)
+        -- Refresh durable authority on commands and arrivals, never from a frame update.
+        local previous = self._T.records[profile]
+        if self._T.ended or (previous ~= nil and previous.writing ~= nil) then return nil end
+        local epoch = previous ~= nil and previous.epoch or 0
+        local done, code, raw = false, -1, nil
+        _FormationStorage:Read(profile, self.StorageKey, function(result, key, value)
+            code, raw, done = result, value, true
+        end)
+        local remaining = math.max(1, math.min(10, _FormationService.SaveTimeoutSeconds))
+        while not done and remaining > 0 and not self._T.ended do wait(0.05) remaining = remaining - 0.05 end
+        if not done or self._T.ended then return nil end
+        local data = nil
+        if code ~= 1000002 and not (code == 0 and raw == nil) then
+            if code ~= 0 then return nil end
+            local ok, parsed = pcall(function() return _HttpService:JSONDecode(raw) end)
+            if not ok or not self:ValidEnvelope(parsed, profile) then return nil end
+            data = parsed
+        end
+        -- A read started before another operation must not replace its newer in-memory authority.
+        if self._T.records[profile] ~= previous or (previous ~= nil and (previous.writing ~= nil or previous.epoch ~= epoch)) then return nil end
+        if previous ~= nil and previous.raw == (raw or "") then
+            return { id = previous.attempt, profile = profile, epoch = previous.epoch, data = data ~= nil and self:Metadata(data) or nil,
+                notice = data ~= nil and data.transfer ~= nil and data.transfer.autoSaveMessage or "" }
+        end
+        local id = data ~= nil and data.attempt or ""
+        local record = previous or { profile = profile, epoch = 0 }
+        if record.attempt ~= id then
+            if record.attempt ~= nil then self._T.byId[record.attempt] = nil end
+            record.restoredSession = nil
+        end
+        record.attempt = id
+        record.epoch = record.epoch + 1
+        record.raw = raw or ""
+        record.transfer = data ~= nil and data.state ~= "CANCELLED" and data.state ~= "RETURNED" and data.transfer or nil
+        record.metadata = data ~= nil and self:Metadata(data) or nil
+        record.sealed = false
+        self._T.records[profile] = record
+        if id ~= "" then self._T.byId[id] = record end
+        return { id = id, profile = profile, epoch = record.epoch, data = record.metadata ~= nil and self:Metadata(record.metadata) or nil,
+            notice = record.transfer ~= nil and record.transfer.autoSaveMessage or "" }
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean Store(table ticket)
+        -- Compare exact durable bytes and a local generation so stale completions cannot publish a newer attempt.
+        local record = self._T.records[ticket.profile]
+        if self._T.ended or record == nil or record.writing ~= nil or record.epoch ~= ticket.epoch or record.attempt ~= ticket.id then return false end
+        if type(ticket.data) ~= "table" or ticket.data.profile ~= ticket.profile or ticket.data.attempt ~= ticket.id then return false end
+        local data = self:Metadata(ticket.data)
+        data.transfer = record.transfer
+        if not self:ValidEnvelope(data, ticket.profile) then return false end
+        local raw = _HttpService:JSONEncode(data)
+        if #raw > 48000 then return false end
+        local operation = {}
+        record.writing = operation
+        local done, result = false, -1
+        _FormationStorage:Write(ticket.profile, self.StorageKey, record.raw, raw, function(code)
+            result, done = code, true
+        end)
+        local remaining = math.max(1, math.min(10, _FormationService.SaveTimeoutSeconds))
+        while not done and remaining > 0 and not self._T.ended do wait(0.05) remaining = remaining - 0.05 end
+        if record.writing == operation then record.writing = nil end
+        if not done or result ~= 0 or self._T.ended or self._T.records[ticket.profile] ~= record or record.epoch ~= ticket.epoch then
+            log("[VRF][Handoff] write unconfirmed; retained for explicit recovery")
+            return false
+        end
+        record.raw = raw
+        record.metadata = self:Metadata(data)
+        record.epoch = record.epoch + 1
+        ticket.epoch = record.epoch
+        return true
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean Reserve(string forUserId, table ticket)
+        -- Freeze only the confirmed active formation and bind the reservation to the authenticated profile.
+        local session = _FormationService:GetSession(forUserId)
+        local record = self._T.records[ticket.profile]
+        if session == nil or session.profile ~= ticket.profile or record == nil or record.epoch ~= ticket.epoch or record.writing ~= nil then return false end
+        if record.metadata ~= nil and record.metadata.state ~= "RETURNED" and record.metadata.state ~= "CANCELLED" then return false end
+        ticket.failure = "NEED_LOADED_VALID_ACTIVE_FORMATION_AND_NO_PENDING_SAVE"
+        if not session.initialized or session.pending or (session.loadState ~= "READY" and session.loadState ~= "NEW") then return false end
+        local activeSlot = session.saved.slots[tostring(session.saved.activeSlot)]
+        local catalog = _FormationService:GetCatalog()
+        if activeSlot == nil or catalog == nil then return false end
+        local fixed = _FormationSchema:ValidateUnits(activeSlot.units, catalog, false)
+        if fixed == nil or type(ticket.data) ~= "table" or ticket.data.state ~= "QUEUED" or type(ticket.data.attempt) ~= "string" then return false end
+        local transfer = self:Capture(forUserId)
+        if transfer == nil then return false end
+        transfer.fixed = _HttpService:JSONEncode(fixed)
+        local active = session.saved.activeSlot
+        local slot = session.saved.slots[tostring(active)]
+        ticket.data.summary = "第 " .. tostring(active) .. " 組 · 版本 " .. tostring(slot.revision) .. " · " .. tostring(#slot.units) .. " / 6"
+        if record.attempt ~= "" then self._T.byId[record.attempt] = nil end
+        ticket.id = ticket.data.attempt
+        record.attempt = ticket.id
+        record.transfer = transfer
+        record.restoredSession = nil
+        record.sealed = false
+        self._T.byId[ticket.id] = record
+        ticket.failure = "RESERVATION_SAVE_FAILED"
+        local stored = self:Store(ticket)
+        if stored then ticket.failure = nil log("[VRF][Handoff] reserved fixed roster") end
+        return stored
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean Seal(string forUserId, table ticket, any isCurrent)
+        -- Keep the queue-time roster while saving and atomically capturing the latest login drafts.
+        local record = self._T.records[ticket.profile]
+        local current = function()
+            return not self._T.ended and self._T.records[ticket.profile] == record and record ~= nil
+                and record.attempt == ticket.id and record.epoch == ticket.epoch and (isCurrent == nil or isCurrent())
+        end
+        if not current() or record.transfer == nil then return false end
+        if record.sealed then return true end
+        local notice = _FormationService:AutoSaveForMatch(forUserId, current)
+        if not current() then return false end
+        local latest = self:Capture(forUserId)
+        local remaining = 200
+        while latest == nil and remaining > 0 do
+            wait(0.1)
+            if not current() then return false end
+            remaining = remaining - 1
+            latest = self:Capture(forUserId)
+        end
+        if latest == nil or not current() then return false end
+        local session = _FormationService:GetSession(forUserId)
+        if session == nil or session.profile ~= ticket.profile then return false end
+        latest.fixed = record.transfer.fixed
+        latest.autoSaveMessage = notice
+        record.transfer = latest
+        record.sealed = true
+        session.transferLocked = ticket.id
+        ticket.notice = notice
+        log("[VRF][Handoff] sealed latest drafts; queue roster retained")
+        return true
+    end
+
+    @ExecSpace("ServerOnly")
+    method any Roster(string ticketId)
+        -- Return a detached validated roster from cached authority; admission owns participant and room checks.
+        local record = self._T.byId[ticketId]
+        local catalog = _FormationService:GetCatalog()
+        if record == nil or record.transfer == nil or catalog == nil or self._T.ended or record.metadata == nil or record.metadata.attempt ~= ticketId
+            or record.metadata.state == "CANCELLED" or record.metadata.state == "RETURNED" then return nil end
+        local decoded = self:DecodeTransfer(record.transfer, catalog)
+        return decoded ~= nil and decoded.units or nil
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean Restore(string forUserId, string ticketId)
+        -- Apply a login snapshot once; later cleanup retries must preserve new edits in that session.
+        local record = self._T.byId[ticketId]
+        local session = _FormationService:GetSession(forUserId)
+        if record == nil or record.transfer == nil or session == nil or session.profile ~= record.profile or record.metadata == nil or record.metadata.state ~= "RETURNING" then return false end
+        if record.restoredSession == session then return true end
+        if not self:ApplyTransfer(forUserId, record.transfer) then return false end
+        record.restoredSession = session
+        return true
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Release(string forUserId, string ticketId)
+        -- An old cancellation can release only its own source editing lock.
+        _FormationService:ReleaseTransfer(forUserId, ticketId)
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean Close(string forUserId, table ticket, string terminalState)
+        -- Retain the payload on a failed tombstone write and erase it only after durable confirmation.
+        if terminalState ~= "CANCELLED" and terminalState ~= "RETURNED" then return false end
+        local record = self._T.records[ticket.profile]
+        if record == nil or record.attempt ~= ticket.id or record.epoch ~= ticket.epoch or record.writing ~= nil then return false end
+        if record.metadata ~= nil and record.metadata.state == terminalState and record.transfer == nil then
+            ticket.data.state = terminalState
+            self:Release(forUserId, ticket.id)
+            return true
+        end
+        local transfer, previous = record.transfer, ticket.data.state
+        record.transfer = nil
+        ticket.data.state = terminalState
+        local stored = self:Store(ticket)
+        if not stored then record.transfer = transfer ticket.data.state = previous end
+        if stored then
+            self:Release(forUserId, ticket.id)
+            log("[VRF][Handoff] closed=" .. terminalState)
+        end
+        return stored
+    end
+
+    @ExecSpace("ServerOnly")
+    method any Capture(string forUserId)
+        -- Carry retained drafts even after a failed save; a queue owner supplies its already frozen roster.
+        local record = _FormationService:GetSession(forUserId)
+        if record == nil or not record.initialized or record.pending or record.loadState == "LOADING" then return nil end
+        local drafts = {}
+        for index = 1, 5 do
+            local draft = record.drafts[tostring(index)]
+            drafts[tostring(index)] = { units = #draft.units == 0 and "[]" or _HttpService:JSONEncode(draft.units), version = draft.version, savedVersion = draft.savedVersion, saveState = draft.saveState }
+        end
+        local saved = _FormationSchema:EncodeDocument(record.saved)
+        return { coordinateSchema = 2, saved = saved, confirmedRaw = record.raw == saved and "" or record.raw, confirmedMatchesSaved = record.raw == saved,
+            sessionId = record.sessionId, loadState = record.loadState, drafts = _HttpService:JSONEncode(drafts), editSlot = record.editSlot, uncertain = record.uncertain ~= nil, message = record.message }
+    end
+
+
+    @ExecSpace("ServerOnly")
+    method any DecodeTransfer(table transfer, any catalog)
+        -- Validate the whole handoff before admitting a roster or restoring any login state.
+        if transfer.coordinateSchema ~= 2 or type(transfer.saved) ~= "string" or type(transfer.drafts) ~= "string" or type(transfer.fixed) ~= "string" or type(transfer.confirmedRaw) ~= "string" then return nil end
+        if not _FormationSchema:IsFinite(transfer.editSlot) or transfer.editSlot % 1 ~= 0 or transfer.editSlot < 1 or transfer.editSlot > 5 then return nil end
+        if transfer.sessionId ~= nil and (type(transfer.sessionId) ~= "string" or #transfer.sessionId ~= 32 or not string.match(transfer.sessionId, "^%x+$")) then return nil end
+        for _, key in ipairs({ "message", "autoSaveMessage", "loadState" }) do
+            if transfer[key] ~= nil and type(transfer[key]) ~= "string" then return nil end
+        end
+        for _, key in ipairs({ "uncertain", "confirmedMatchesSaved" }) do
+            if transfer[key] ~= nil and type(transfer[key]) ~= "boolean" then return nil end
+        end
+        local ok, doc, drafts, fixed = pcall(function()
+            return _FormationSchema:ValidateDocument(_HttpService:JSONDecode(transfer.saved), catalog), _HttpService:JSONDecode(transfer.drafts), _FormationSchema:ValidateUnits(_HttpService:JSONDecode(transfer.fixed), catalog, false)
+        end)
+        if not ok or doc == nil or fixed == nil or type(drafts) ~= "table" then return nil end
+        local count = 0
+        for key, _ in pairs(drafts) do
+            if key ~= "1" and key ~= "2" and key ~= "3" and key ~= "4" and key ~= "5" then return nil end
+            count = count + 1
+        end
+        if count ~= 5 then return nil end
+        for index = 1, 5 do
+            local draft = drafts[tostring(index)]
+            if type(draft) ~= "table" or type(draft.units) ~= "string" then return nil end
+            local parsed, units = pcall(function() return _HttpService:JSONDecode(draft.units) end)
+            if not parsed or _FormationSchema:ValidateUnits(units, catalog, true) == nil then return nil end
+            draft.units = units
+            if not _FormationSchema:IsFinite(draft.version) or draft.version < 0 or draft.version % 1 ~= 0
+                or not _FormationSchema:IsFinite(draft.savedVersion) or draft.savedVersion < -1 or draft.savedVersion % 1 ~= 0
+                or type(draft.saveState) ~= "string" then return nil end
+        end
+        return { document = doc, drafts = drafts, units = fixed }
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean ApplyTransfer(string forUserId, table transfer)
+        -- Restore server-owned snapshots without persisting drafts or reviving an obsolete read callback.
+        local record = _FormationService:GetSession(forUserId)
+        local catalog = _FormationService:GetCatalog()
+        if record == nil or record.pending or catalog == nil then return false end
+        local decoded = self:DecodeTransfer(transfer, catalog)
+        if decoded == nil then return false end
+        local doc, drafts = decoded.document, decoded.drafts
+        record.saved = doc
+        record.loadEpoch = (record.loadEpoch or 0) + 1
+        record.writeEpoch = (record.writeEpoch or 0) + 1
+        record.transferLocked = false
+        record.raw = transfer.confirmedMatchesSaved and transfer.saved or transfer.confirmedRaw
+        record.sessionId = transfer.sessionId or record.sessionId
+        record.drafts = drafts
+        record.editSlot = transfer.editSlot
+        record.initialized = true
+        record.loadState = transfer.loadState or "READY"
+        record.uncertain = transfer.uncertain and { expected = record.raw } or nil
+        record.message = transfer.autoSaveMessage or transfer.message or "已恢復交接前的預存編隊與未保存草稿"
+        _FormationService:Publish(record)
+        if record.uncertain ~= nil then _FormationService:Load(record) end
+        log("[VRF][MatchProbe] formations restored; drafts remain separate")
+        return true
+    end
+
+
+    @ExecSpace("ServerOnly")
+    method void OnEndPlay()
+        -- Invalidate every pending completion when this room shuts down.
+        self._T.ended = true
+        self._T.records = {}
+        self._T.byId = {}
+    end
+end

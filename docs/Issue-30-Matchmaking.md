@@ -6,12 +6,12 @@
 
 1. 在整備區儲存一組有效編隊並設為出戰。
 2. 按「開始配對」，按鈕切換為「取消配對」，持續顯示已等候秒數。排隊期間仍可編輯草稿。
-3. 找到對手後等待既有保存結束，固定本局編隊並封存最新草稿，雙方自動進入同一隔離對局房間。
-4. 房內顯示玩家人數，按鈕切換為「返回大廳」。返回後自動還原預存編隊與未保存草稿，再次提供「開始配對」。
+3. 找到對手後自動保存目前編輯組並封存最新草稿，雙方使用開始配對時固定的本局編隊進入同一隔離對局房間。
+4. 房內直接進入自動戰鬥，結束後可返回大廳。返回後自動還原預存編隊與未保存草稿，再次提供「開始配對」。
 
 **不再使用 F6／F7／F8／F9，也不需要手動按狀態鍵推進入場。** 狀態持續顯示在面板；原生日誌保留診斷資訊。
 
-目前範圍是配對、隔離入場與返回，沒有在 `matchprobe` 房內啟動戰鬥核心。
+`matchprobe` 已接上戰鬥核心與結果呈現；本局編隊交接的責任及最新驗證見[交接驗證紀錄](Formation-Handoff-Verification.md)。
 
 ## Maker 測試同 WorldInstance 配對
 
@@ -19,7 +19,7 @@
 2. 用 Maker Play 視窗的「新增虛擬玩家」開第二個客戶端；也可在 Maker Command Console 執行 `add_virtual_player`，不要指定 user_id，讓 Maker 配發身分。
 3. 兩個視窗各自建立並保存有效出戰編隊，然後各按一次「開始配對」。
 4. 第一人應留在排隊狀態，第二人入列後雙方自動進入同一房間。
-5. 雙方應看到「玩家 2 / 2」與「返回大廳」，返回後仍可編輯原來草稿、再次配對。
+5. 雙方應進入同一戰場並看到自動戰鬥，結果出現後可返回大廳，繼續編輯原來草稿、再次配對。
 6. 另測只有一人排隊後取消，等待時間停止，之後可重新加入；連按按鈕不應重複入列或建立房間。
 
 Maker 使用伺服器 FIFO 佇列，參與者是真正連線的玩家／Maker 虛擬玩家；它沒有偽造原生配對 callback，也沒有使用真人世界的 leaderboard。虛擬玩家同樣必須有有效出戰編隊，不會自動複製其他玩家能力或繞過資格。兩個客戶端都能透過相同的可見按鈕操作。
@@ -36,7 +36,7 @@ Maker Play 重開後，本機 FIFO 會消失：舊的 `QUEUED`／`SAVING` 票據
 | --- | --- |
 | Enabled | 預設 true；false 可關閉配對 |
 | LeaderboardId | 公開發布環境必填；Maker 本機配對不需要 |
-| QueueName | 預設 issue30-controlled-v1，須在各 instance 一致 |
+| QueueName | 預設 battle-centered-v2，須在各 instance 一致 |
 | TestProfileA / TestProfileB | 預設空白。皆空白時允許符合編隊資格的玩家；填入時限制發布測試帳號 |
 | SaveDelaySeconds | 預設 0，可在受控測試中以 5／30／120 秒觀察成功後延遲封存的原生限制 |
 | TransferLifetimeSeconds | 預設 900，是應用程式的入場期限，不能當成原生排隊或結果期限 |
@@ -45,15 +45,17 @@ Maker Play 重開後，本機 FIFO 會消失：舊的 `QUEUED`／`SAVING` 票據
 
 ## 共用的交接流程
 
-- 加入佇列時以 FormationService.ExportTransfer 驗證已保存且啟用的有效出戰編隊，固定本局編隊。
-- 配對成立後，SealTransfer 等待既有保存完成，原子封存五組草稿、保存版本、編輯組及確認保存 bytes，並鎖定後續編輯，避免最後修改遺失。
-- 使用每個 ProfileCode 專屬的 UserDataStorage key `Issue30TransferV1` 交接。探針的 capsule 上限為 16,000 UTF-8 bytes；這是應用限制，不能當成原生 extras 容量證據。
+- 加入佇列時由 FormationHandoff.Reserve 驗證已保存且啟用的有效出戰編隊，固定本局編隊；MatchProbe 只保留票券識別與配對中繼資料。
+- 配對成立後由 FormationHandoff.Seal 自動保存目前編輯組、等待既有保存完成，再原子封存五組草稿、保存版本、編輯組及確認保存 bytes。編輯鎖綁定該票券，舊取消不能解除新對局的鎖。
+- 草稿保存失敗或逾時仍保留草稿並使用原本局編隊；交接本身未取得持久確認時不傳送。交接讀寫有等待上限，舊寫入仍受原始 bytes 比對保護。
+- 使用每個 ProfileCode 專屬的 UserDataStorage key `BattleTransferV2`、coordinateSchema=2 交接，維持既有 V2 格式及首次建立保護。交接上限為 48,000 UTF-8 bytes；這是應用限制，不能當成原生 extras 容量證據。
+- 房間參與者與配對身分由 MatchProbe 驗證；MatchedBattle 再透過 FormationHandoff.Roster 取得已驗證的本局編隊，該讀取只使用快取，不輪詢 DataStorage。
 - 發布環境由 GetMatchUserInfosAndWait 驗證 Home／Away。伺服器 attempt GUID 與來源 WorldInstanceId 放在 native extras，參與者與目的房間都由伺服器驗證。
 - 雙方 capsule 確認保存後，MatchTransferReadyEvent 喚醒來源協調器。接收端仍重新驗證原生配對與持久票據；事件內容本身不構成入場授權。
 - Home 端持久化一次性 warpIssued 後呼叫 WarpMatchUser。同 instance 已集合的玩家可直接建立房間；跨 instance 先集合，再建立同一 match key 的 InstanceRoom。
 - 到達事件自動推進剩餘入場與返回還原，沒有每幀或持續計時器輪詢 DataStorage。
 - 就緒通知若傳送失敗，最多重試三次；繁忙期間收到的就緒提示會保留並在當次處理完成後推進。失敗後面板提供可見的重試入場操作。
-- 返回時若目錄或先前保存尚未就緒，以快取 capsule 最多重試十次，之後提供「重試返回」。一旦還原成功，清理票據的重試不會再次匯入舊草稿，也不會覆蓋返回後的新編輯。
+- 返回時若目錄或先前保存尚未就緒，以快取 capsule 最多重試十次，之後提供「重試返回」。FormationHandoff.Restore 對同一登入只還原一次；Close 確認清理前保留 payload，重試不會覆蓋返回後的新編輯。
 - 返回到**目的 WorldInstance 的整備區**，不保證返回原始來源 instance。還原後刪除 capsule 的編隊／草稿 payload，保留終止墓碑防止舊回覆重用。
 - 玩家移到另一個 Room 後，來源 Room 不再向已離開的玩家送 UI RPC；目的 Room 重新發佈其狀態。
 - 引擎回收空 InstanceRoom，RoomEnd 清掉失效本地 handle。

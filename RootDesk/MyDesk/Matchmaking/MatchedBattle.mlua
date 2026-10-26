@@ -30,7 +30,9 @@ script MatchedBattle extends Component
         if not self._T.started and not self.AdmissionFailed then
             local admission = _MatchProbe:RoomBattleAdmission()
             if admission ~= nil and battle.Phase == "WAITING" then
-                self._T.started = battle:InitializeMatchedBattle(admission.key, admission.home, admission.away, admission.homeUnits, admission.awayUnits)
+                local homeUnits = _FormationHandoff:Roster(admission.homeTicket)
+                local awayUnits = _FormationHandoff:Roster(admission.awayTicket)
+                self._T.started = homeUnits ~= nil and awayUnits ~= nil and battle:InitializeMatchedBattle(admission.key, admission.home, admission.away, homeUnits, awayUnits)
                 if not self._T.started then self.AdmissionFailed = true end
             elseif battle.Phase == "CONFIG_ERROR" or self._T.elapsed >= self.AdmissionTimeoutSeconds then
                 self.AdmissionFailed = true

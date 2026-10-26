@@ -31,7 +31,6 @@ script BattleSession extends Component
     property number ArenaMaxX = 15
     property number ArenaMinY = -8
     property number ArenaMaxY = 8
-    property number DeploymentMinDistance = 0.3
     property number DeploymentRemoveRadius = 0.5
     property integer DeploymentMaxUnits = 6
     property Vector2 CharacterPosition = Vector2(-6.5, 9.5)
@@ -529,7 +528,10 @@ script BattleSession extends Component
         local count = _FormationSchema:ArrayCount(units, 6)
         if count < 1 then return nil end
         local tiles = self:GetRectTileMapComponent()
-        if not isvalid(tiles) then return nil end
+        if not isvalid(tiles) then
+            self:FailConfiguration("RectTileMap unavailable for matched formations")
+            return nil
+        end
         local prepared = {}
         for _, entry in ipairs(units) do
             if type(entry) ~= "table" then return nil end
@@ -540,10 +542,12 @@ script BattleSession extends Component
             local profile = self:GetMonsterProfile(entry.monsterId)
             local position = _FormationMapLayout:BattlePosition(entry.x, entry.y, away)
             if profile == nil or position == nil then return nil end
-            local tile = tiles:GetTile(tiles:ToCellPosition(position))
-            if tile == nil or tile.IsCollidable then return nil end
+            if not _FormationMapLayout:IsWalkableOn(tiles, position.x, position.y) then
+                self:FailConfiguration("matched formation terrain differs from template")
+                return nil
+            end
             for _, other in ipairs(prepared) do
-                if self:IsDeploymentTooClose(position, other.position) then return nil end
+                if _FormationMapLayout:IsTooClose(position.x, position.y, other.position.x, other.position.y) then return nil end
             end
             table.insert(prepared, { profile = profile, position = position })
         end
@@ -647,16 +651,16 @@ script BattleSession extends Component
                 return nil
             end
             local position = entry.position
-            if position == nil or position.x ~= position.x or position.y ~= position.y or position.x < self.ArenaMinX or position.x > self.ArenaMaxX or position.y < self.ArenaMinY or position.y > self.ArenaMaxY then
+            if position == nil or not _FormationMapLayout:Contains(position.x, position.y) then
                 self:FailConfiguration("battle placement outside arena: " .. sourceName)
                 return nil
             end
-            if self:IsRectTilePositionBlocked(tileMap, position) then
+            if not _FormationMapLayout:IsWalkableOn(tileMap, position.x, position.y) then
                 self:FailConfiguration("battle placement on blocked tile: " .. sourceName)
                 return nil
             end
             for _, prior in ipairs(roster) do
-                if self:IsDeploymentTooClose(position, prior.position) then
+                if _FormationMapLayout:IsTooClose(position.x, position.y, prior.position.x, prior.position.y) then
                     self:FailConfiguration("battle placements too close: " .. prior.name .. " and " .. sourceName)
                     return nil
                 end
@@ -674,15 +678,6 @@ script BattleSession extends Component
         end
         log("[M1][BattleSession] battle placements validated: player=" .. tostring(playerCount) .. " enemy=" .. tostring(enemyCount))
         return roster
-    end
-
-    method boolean IsDeploymentTooClose(Vector3 position, Vector3 otherPosition)
-        -- Apply the same minimum center distance to map placements and manual deployment.
-        local dx = position.x - otherPosition.x
-        local dy = position.y - otherPosition.y
-        local minimumSquared = self.DeploymentMinDistance * self.DeploymentMinDistance
-        -- Vector3 stores positions as float32; 0.6 can round slightly below the boundary.
-        return dx * dx + dy * dy + 0.000001 < minimumSquared
     end
 
     @ExecSpace("Server")
@@ -768,16 +763,15 @@ script BattleSession extends Component
         if profile == nil or self.PlayerAlive >= self.DeploymentMaxUnits then return false end
         if not _FormationMapLayout:CanDeploy(position.x, position.y) then return false end
         local tileMap = self:GetRectTileMapComponent()
-        if not isvalid(tileMap) or self:IsRectTilePositionBlocked(tileMap, position) then
-            log("[VRF] deployment rejected at collidable or unavailable tile")
-            return false
+        if not _FormationMapLayout:IsWalkableOn(tileMap, position.x, position.y) then
+            return self:FailConfiguration("deployment terrain differs from template")
         end
         for _, record in ipairs(self._T.units) do
             if isvalid(record.entity) then
                 local transform = record.entity:GetComponent("TransformComponent")
                 if isvalid(transform) then
                     local current = transform.WorldPosition
-                    if self:IsDeploymentTooClose(position, current) then return false end
+                    if _FormationMapLayout:IsTooClose(position.x, position.y, current.x, current.y) then return false end
                 end
             end
         end

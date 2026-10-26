@@ -15,7 +15,7 @@ local function row(monsterId, name, position, overrides)
 end
 
 local function getEntity(name)
-    return _EntityService:GetEntityByPath("/maps/map01/" .. name)
+    return _EntityService:GetEntityByPath("/maps/template/" .. name)
 end
 
 local function getUnit(entity)
@@ -143,7 +143,7 @@ local function runTerminalScenario(label, playerRow, enemyRow, expectedResult)
 end
 
 local runOk, runDetail = pcall(function()
-    map = _EntityService:GetEntityByPath("/maps/map01")
+    map = _EntityService:GetEntityByPath("/maps/template")
     session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
     if not isvalid(map) or not isvalid(session) then
         check(false, "map and BattleSession are available")

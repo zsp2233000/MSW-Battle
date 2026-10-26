@@ -1,11 +1,11 @@
 @Logic
 script FormationMapLayout extends Logic
 
-    property string ReferenceMapName = "map01"
+    property string ReferenceMapName = "template"
     property number MinimumSeparation = 0.3
 
     method any ReferenceTiles()
-        -- Use the authored reference terrain as the shared formation coordinate system.
+        -- Instance rooms use their template-verified battlefield when the static template is unavailable.
         local map = _EntityService:GetEntityByPath("/maps/" .. self.ReferenceMapName)
         if not isvalid(map) then map = _EntityService:GetEntityByPath("/maps/matchprobe") end
         if not isvalid(map) then return nil end
@@ -22,22 +22,32 @@ script FormationMapLayout extends Logic
     method boolean Contains(number x, number y)
         -- Keep continuous formation positions within the standard map footprint.
         local bounds = self:Bounds()
-        return bounds ~= nil and x >= bounds.minX and x < bounds.maxX and y >= bounds.minY and y < bounds.maxY
+        return type(x) == "number" and type(y) == "number" and bounds ~= nil
+            and x >= bounds.minX and x < bounds.maxX and y >= bounds.minY and y < bounds.maxY
     end
 
     method boolean IsWalkable(number x, number y)
-        -- Reject walls and missing terrain while preserving the submitted fractional coordinates.
-        if not self:Contains(x, y) then return false end
-        local tiles = self:ReferenceTiles()
-        if not isvalid(tiles) then return false end
+        -- Validate saved positions against the common template coordinate system.
+        return self:IsWalkableOn(self:ReferenceTiles(), x, y)
+    end
+
+    method boolean IsWalkableOn(any tiles, number x, number y)
+        -- Reject walls and missing terrain without snapping the submitted fractional coordinates.
+        if not self:Contains(x, y) or not isvalid(tiles) then return false end
         local tile = tiles:GetTile(tiles:ToCellPosition(Vector3(x, y, 0)))
         return tile ~= nil and not tile.IsCollidable
     end
 
     method boolean CanDeploy(number x, number y)
         -- Validate both sides of the battlefield's horizontal center at x=0.5.
-        return _FormationSchema:IsFinite(x) and _FormationSchema:IsFinite(y) and x < 0.5
+        return self:Contains(x, y) and x < 0.5
             and self:IsWalkable(x, y) and self:IsWalkable(self:MirrorX(x), y)
+    end
+
+    method boolean IsTooClose(number x, number y, number otherX, number otherY)
+        -- Allow the minimum distance despite Vector3 float32 rounding in the battlefield.
+        local dx, dy = x - otherX, y - otherY
+        return dx * dx + dy * dy + 0.000001 < self.MinimumSeparation * self.MinimumSeparation
     end
 
     method number MirrorX(number x)

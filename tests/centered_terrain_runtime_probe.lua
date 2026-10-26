@@ -1,6 +1,6 @@
 -- Server: run once in server_main and once in a live matched server_instance_* before returning.
 local ok, detail = pcall(function()
-    local names = _RoomService:IsInstanceRoom() and {'matchprobe'} or {'map01', 'formationsim'}
+    local names = _RoomService:IsInstanceRoom() and {'matchprobe'} or {'template', 'formationsim', 'formationlobby'}
     for _, name in ipairs(names) do
         local tiles = _EntityService:GetEntityByPath('/maps/' .. name .. '/RectTileMap').RectTileMapComponent
         assert(tiles.GridSize == Vector2(1,1) and not tiles.IsOddGridPosition, 'native unit grid')

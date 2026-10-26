@@ -13,7 +13,7 @@ local function check(condition, message)
 end
 
 local runOk, runDetail = pcall(function()
-map = _EntityService:GetEntityByPath("/maps/map01")
+map = _EntityService:GetEntityByPath("/maps/template")
 session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
 check(isvalid(map) and isvalid(session), "map and BattleSession are available")
 if not isvalid(session) then return end
@@ -42,7 +42,7 @@ check(profileAfterMutation.MonsterName == originalName and profileAfterMutation.
 check(profileAfterMutation.StandAnimationRUID == originalStandAnimation,
     "profile copies retain the catalog animation resource value")
 check(session:TryDeployMonster("monster_tank", Vector3(-5, 1, 0)), "inclusive top-left boundary accepts first unit")
-local first = _EntityService:GetEntityByPath("/maps/map01/M1_Player_1")
+local first = _EntityService:GetEntityByPath("/maps/template/M1_Player_1")
 local firstUnit = isvalid(first) and first:GetComponent("script.BattleUnit") or nil
 check(isvalid(firstUnit) and firstUnit.MonsterId == "monster_tank" and firstUnit.MonsterName == originalName
     and firstUnit.MaxHp == originalMaxHp and firstUnit.AttackDamage == originalAttackDamage,

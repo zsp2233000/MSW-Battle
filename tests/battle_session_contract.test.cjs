@@ -21,9 +21,9 @@ function readCsvRows(relativePath) {
 }
 
 test("M1 map keeps RectTile and exposes the fixed battle session camera", () => {
-  const map = MapBuilder.read(path.join(root, "map/map01.map"));
+  const map = MapBuilder.read(path.join(root, "map/template.map"));
   assert.equal(map.getMapInfo().TileMapMode, 1);
-  const rootEntity = map.listEntities().find((entity) => entity.path === "/maps/map01");
+  const rootEntity = map.listEntities().find((entity) => entity.path === "/maps/template");
   assert.ok(rootEntity);
   assert.match(rootEntity.componentNames, /script\.BattleSession/);
   assert.match(rootEntity.componentNames, /script\.BattleFixedCamera/);
@@ -98,8 +98,6 @@ test("Issue #7 keeps deployment authority on the map session and uses IDs for ca
   assert.match(session, /@ExecSpace\("Server"\)\s+method void RequestBattlefieldClick\(string monsterId, Vector3 position\)/);
   assert.match(session, /method boolean TryDeployMonster\(string monsterId, Vector3 position\)/);
   assert.match(session, /self:GetMonsterProfile\(monsterId\)/);
-  assert.match(session, /DeploymentMinDistance = 0\.3/);
-  assert.match(read("RootDesk/MyDesk/Formations/FormationMapLayout.mlua"), /MinimumSeparation = 0\.3/);
   assert.match(session, /DeploymentMaxUnits = 6/);
   assert.match(session, /method boolean TryStartBattle\(\)/);
   assert.match(session, /method boolean CanStartBattleWithPlayerCount\(integer playerCount\)/);
@@ -351,7 +349,7 @@ test("Issue #17 combat probes use controlled rosters and natural native outcomes
     assert.match(probe, /local runOk, runDetail = pcall\(function\(\)/,
       `${probePath} must capture whole-script errors`);
     assert.ok(probe.indexOf("local runOk, runDetail = pcall(function()") <
-      probe.indexOf('_EntityService:GetEntityByPath("/maps/map01")'),
+      probe.indexOf('_EntityService:GetEntityByPath("/maps/template")'),
     `${probePath} must capture map/session setup errors too`);
   }
 
@@ -378,7 +376,7 @@ test("Issue #17 combat probes use controlled rosters and natural native outcomes
     "formal 6v6 probe must retain registered map units and natural settlement");
   assert.match(sixVsSixProbe, /InitialPlayerAlive == 6 and session\.InitialEnemyAlive == 6/);
   assert.ok(sixVsSixProbe.indexOf("local runOk, runDetail = pcall(function()") <
-    sixVsSixProbe.indexOf('_EntityService:GetEntityByPath("/maps/map01")'),
+    sixVsSixProbe.indexOf('_EntityService:GetEntityByPath("/maps/template")'),
   "formal 6v6 probe must capture map/session setup errors");
 });
 
@@ -722,7 +720,7 @@ test("Issue #19 server runtime probes do not bypass BattleSession settlement sta
     assert.match(probe, /local runOk, runDetail = pcall\(function\(\)/,
       `${probePath} must capture setup and execution exceptions`);
     assert.ok(probe.indexOf("local runOk, runDetail = pcall(function()")
-      < probe.indexOf('_EntityService:GetEntityByPath("/maps/map01")'),
+      < probe.indexOf('_EntityService:GetEntityByPath("/maps/template")'),
     `${probePath} must protect the missing-map/session path too`);
     assert.match(probe, new RegExp(`\\[M1\\]\\[${tag}\\] FAILURES=`),
       `${probePath} must emit a terminal failure marker after exceptions`);

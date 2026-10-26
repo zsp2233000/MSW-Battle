@@ -83,7 +83,7 @@ local function prepareScene()
 end
 
 local runOk, runDetail = pcall(function()
-    map = _EntityService:GetEntityByPath("/maps/map01")
+    map = _EntityService:GetEntityByPath("/maps/template")
     session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
     if not isvalid(map) or not isvalid(session) then
         check(false, "map and BattleSession are available")
@@ -91,9 +91,9 @@ local runOk, runDetail = pcall(function()
     end
     if not prepareScene() then return end
 
-    local tank = _EntityService:GetEntityByPath("/maps/map01/Issue17_Tank")
-    local first = _EntityService:GetEntityByPath("/maps/map01/Issue17_TankTargetA")
-    local second = _EntityService:GetEntityByPath("/maps/map01/Issue17_TankTargetB")
+    local tank = _EntityService:GetEntityByPath("/maps/template/Issue17_Tank")
+    local first = _EntityService:GetEntityByPath("/maps/template/Issue17_TankTargetA")
+    local second = _EntityService:GetEntityByPath("/maps/template/Issue17_TankTargetB")
     local tankUnit = isvalid(tank) and tank:GetComponent("script.BattleUnit") or nil
     local firstUnit = isvalid(first) and first:GetComponent("script.BattleUnit") or nil
     local secondUnit = isvalid(second) and second:GetComponent("script.BattleUnit") or nil

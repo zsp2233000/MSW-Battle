@@ -12,9 +12,8 @@ test('personal lobby and simulation are reachable RectTile maps without battle c
   }
 });
 
-test('lobby has no painted terrain or scene background and UI binding does not force travel', () => {
+test('lobby hides its scene background and UI binding does not force travel', () => {
   const lobby = MapBuilder.read('map/formationlobby.map');
-  assert.ok(lobby.getTiles().every(tile => tile.tileIndex === -1));
   assert.equal(lobby.find('Background').jsonString.enable, false);
   const source = fs.readFileSync('RootDesk/MyDesk/Formations/FormationLobby.mlua', 'utf8');
   const update = source.slice(source.indexOf('method void OnUpdate('), source.indexOf('method void UpdateLobbyPlayer('));
@@ -44,12 +43,29 @@ test('five formations expose stable selectors in lobby and editor with explicit 
   assert.ok(dock.size[1] <= 350, 'editor controls leave the terrain visible');
 });
 
-test('simulation and matched battlefield share the current POC terrain and camera', () => {
-  const reference = MapBuilder.read('map/map01.map');
+test('every map preserves the template formation terrain and coordinate system', () => {
+  const reference = MapBuilder.read('map/template.map');
+  const terrain = map => {
+    const component = map.component('RectTileMap', 'MOD.Core.RectTileMapComponent');
+    return {
+      ...component,
+      tileMap: [...map.getTiles()].sort((a, b) => a.position.x - b.position.x || a.position.y - b.position.y),
+    };
+  };
+  for (const file of fs.readdirSync('map').filter(name => name.endsWith('.map'))) {
+    const map = MapBuilder.read(`map/${file}`);
+    assert.equal(map.getTileMapMode(), reference.getTileMapMode(), file);
+    assert.deepEqual(terrain(map), terrain(reference), `${file}: formation terrain differs from template`);
+    assert.deepEqual(map.component('RectTileMap', 'MOD.Core.TransformComponent'),
+      reference.component('RectTileMap', 'MOD.Core.TransformComponent'), `${file}: tile coordinate transform differs from template`);
+  }
+});
+
+test('simulation and matched battlefield share the template camera and symmetric walkable area', () => {
+  const reference = MapBuilder.read('map/template.map');
   for (const name of ['formationsim', 'matchprobe']) {
     const map = MapBuilder.read(`map/${name}.map`);
     assert.equal(map.getTileMapMode(), 1);
-    assert.deepEqual(map.component('RectTileMap', 'MOD.Core.RectTileMapComponent'), reference.component('RectTileMap', 'MOD.Core.RectTileMapComponent'));
     for (const component of ['MOD.Core.TransformComponent', 'MOD.Core.CameraComponent']) {
       const expected = reference.component('BattleCameraAnchor', component);
       assert.deepEqual(map.component('BattleCameraAnchor', component), expected);

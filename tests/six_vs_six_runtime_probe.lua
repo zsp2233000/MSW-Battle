@@ -20,7 +20,7 @@ local function releaseClockAndCheck()
 end
 
 local runOk, runDetail = pcall(function()
-    map = _EntityService:GetEntityByPath("/maps/map01")
+    map = _EntityService:GetEntityByPath("/maps/template")
     session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
     if not isvalid(map) or not isvalid(session) then
         check(false, "map and BattleSession are available")

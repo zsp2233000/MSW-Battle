@@ -1,6 +1,6 @@
 -- Run in Maker Play with context=client after the server catalog creates cards.
 -- Drives the same callbacks connected to card, battlefield, and start-button input.
-local map = _EntityService:GetEntityByPath("/maps/map01")
+local map = _EntityService:GetEntityByPath("/maps/template")
 local adapter = isvalid(map) and map:GetComponent("script.BattleDeploymentInput") or nil
 if not isvalid(adapter) then
     log_error("[M1][DeploymentUIProbe][FAIL] input adapter unavailable")

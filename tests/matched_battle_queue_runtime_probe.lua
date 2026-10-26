@@ -1,10 +1,14 @@
 -- Maker server_main, with two connected players. Uses the same server commands as the real RPCs.
 local ok, detail = pcall(function()
     local users = _UserService.UserEntities.Values
+    local dedicated = {}
+    for _, user in ipairs(users) do
+        if user.PlayerComponent.ProfileCode == 'hf2601' or user.PlayerComponent.ProfileCode == 'hf2602' then table.insert(dedicated, user) end
+    end
+    if #dedicated == 2 then users = dedicated end
     assert(#users == 2, "requires two connected Maker players")
     local first, second = users[1], users[2]
     local firstId, secondId = first.PlayerComponent.UserId, second.PlayerComponent.UserId
-    local firstProfile, secondProfile = first.PlayerComponent.ProfileCode, second.PlayerComponent.ProfileCode
     for _, userId in ipairs({firstId, secondId}) do
         local record = _FormationService:GetSession(userId)
         if not record.initialized then _FormationService:Load(record) end
@@ -35,15 +39,19 @@ local ok, detail = pcall(function()
     _MatchProbe:QueueForUser(firstId)
     -- Change and save the active formation AFTER queuing. This must affect only a future match.
     setup(firstId, one)
-    local nextMatch = _HttpService:JSONDecode(_FormationService:ExportTransfer(firstId).fixed)
+    local nextSession = _FormationService:GetSession(firstId)
+    local nextMatch = nextSession.saved.slots[tostring(nextSession.saved.activeSlot)].units
     assert(#nextMatch == 1, "later saved formation has one unit")
     local expected = {}
     for _, userId in ipairs({firstId, secondId}) do
-        expected[userId] = _FormationService:ExportTransfer(userId)
+        local session = _FormationService:GetSession(userId)
+        local drafts = {}
+        for index = 1, 5 do drafts[tostring(index)] = _FormationSchema:CopyUnits(session.drafts[tostring(index)].units) end
+        expected[userId] = { saved = _FormationSchema:CopyDocument(session.saved), editSlot = session.editSlot, drafts = drafts, player = _UserService:GetUserEntityByUserId(userId) }
     end
     log("[VRF][MatchedQueue] queued six; later confirmed save one; cancel/requeue passed")
     _MatchProbe:QueueForUser(secondId)
-    log("[VRF][MatchedQueue] PASS firstProfile=" .. firstProfile .. " secondProfile=" .. secondProfile)
+    log("[VRF][MatchedQueue] PASS participants=2")
     -- Keep detached expectations in this coroutine while the room probe drives battle and return.
     wait(0.2)
     for _, userId in ipairs({firstId, secondId}) do
@@ -51,14 +59,18 @@ local ok, detail = pcall(function()
         for attempt = 1, 900 do
             local player = _UserService:GetUserEntityByUserId(userId)
             if isvalid(player) and player.CurrentMapName == "formationlobby" then
-                restored = _FormationService:ExportTransfer(userId)
-                if restored ~= nil then break end
+                restored = _FormationService:GetSession(userId)
+                if restored ~= nil and restored.initialized then break end
             end
             wait(0.1)
         end
-        assert(restored ~= nil, "returned formation data available")
-        local before = _HttpService:JSONDecode(expected[userId].saved)
-        local after = _HttpService:JSONDecode(restored.saved)
+        assert(restored ~= nil and restored.initialized, "returned formation data available")
+        local restoredSessionId = restored.sessionId
+        _FormationService:HandleEntityDestroyEvent(EntityDestroyEvent(expected[userId].player))
+        local afterOldDestroy = _FormationService:GetSession(userId)
+        assert(afterOldDestroy ~= nil and afterOldDestroy.initialized and afterOldDestroy.sessionId == restoredSessionId, "old entity destruction cannot remove the returned session")
+        local before = expected[userId].saved
+        local after = restored.saved
         assert(before.activeSlot == after.activeSlot and before.revision == after.revision, "active selection and save revision retained")
         for index = 1, 5 do
             local key = tostring(index)
@@ -66,11 +78,11 @@ local ok, detail = pcall(function()
             assert(_FormationSchema:SameUnits(before.slots[key].units, after.slots[key].units), "all five saved formations retained")
         end
         assert(restored.editSlot == expected[userId].editSlot, "editor selection retained")
-        local beforeDrafts = _HttpService:JSONDecode(expected[userId].drafts)
-        local afterDrafts = _HttpService:JSONDecode(restored.drafts)
+        local beforeDrafts = expected[userId].drafts
+        local afterDrafts = restored.drafts
         for index = 1, 5 do
             local key = tostring(index)
-            assert(_FormationSchema:SameUnits(_HttpService:JSONDecode(beforeDrafts[key].units), _HttpService:JSONDecode(afterDrafts[key].units)), "all five login drafts retained")
+            assert(_FormationSchema:SameUnits(beforeDrafts[key], afterDrafts[key].units), "all five login drafts retained")
         end
     end
     log("[VRF][MatchedPreservation] PASS five saved slots, active selection, draft contents and editor selection")
