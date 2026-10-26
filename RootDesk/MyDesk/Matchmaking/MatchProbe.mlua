@@ -6,7 +6,6 @@ script MatchProbe extends Logic
     property string TestProfileB = ""
     property string LeaderboardId = ""
     property string QueueName = "battle-centered-v2"
-    property string StorageKey = "BattleTransferV2"
     property number SaveDelaySeconds = 0
     property integer TransferLifetimeSeconds = 900
 
@@ -21,7 +20,6 @@ script MatchProbe extends Logic
         self._T.pendingRecover = {}
         self._T.recoveryTimers = {}
         self._T.notifyTimers = {}
-        self._T.restoredAttempts = {}
         self._T.queueTimers = {}
         self._T.presentationSequence = {}
         self._T.queueCommands = {}
@@ -104,7 +102,7 @@ script MatchProbe extends Logic
             message = failure.message
         end
         self._T.presentationSequence[userId] = (self._T.presentationSequence[userId] or 0) + 1
-        local notice = ticket ~= nil and ticket.data.transfer ~= nil and ticket.data.transfer.autoSaveMessage or ""
+        local notice = ticket ~= nil and ticket.notice or ""
         self:ReceiveState(state, message, started, count, _RoomService.RoomKey, self._T.busy[userId] == true, summary, attempt, _WorldInstanceService.WorldInstanceId .. ":" .. _RoomService.RoomKey, self._T.presentationSequence[userId], notice, userId)
     end
 
@@ -115,43 +113,6 @@ script MatchProbe extends Logic
         local player = _UserService.LocalPlayer
         if isvalid(player) and (player.CurrentMapName == "matchprobe") ~= (sourceRoom ~= "__main__") then return end
         _MatchProbeInput:Observe(state, message, started, count, busy, summary, attempt, sequenceKey, sequence, autoSaveNotice)
-    end
-
-    @ExecSpace("ServerOnly")
-    method any ReadTicket(string profile)
-        -- Read only on explicit commands or a map transition, never in an update storage loop.
-        local code, raw = _DataStorageService:GetUserDataStorage(profile):GetAndWait(self.StorageKey)
-        if code == 1000002 or (code == 0 and raw == nil) then return { raw = "", data = nil } end
-        if code ~= 0 then return nil end
-        local ok, data = pcall(function() return _HttpService:JSONDecode(raw) end)
-        if not ok or type(data) ~= "table" or data.schema ~= 1 or data.profile ~= profile then return nil end
-        if type(data.state) ~= "string" or type(data.attempt) ~= "string" or type(data.started) ~= "number" or type(data.expires) ~= "number" then return nil end
-        if type(data.source) ~= "string" or type(data.matchKey) ~= "string" then return nil end
-        if data.adapter ~= nil and data.adapter ~= "local" and data.adapter ~= "native" then return nil end
-        if data.state ~= "RETURNED" and data.state ~= "CANCELLED" then
-            local transfer = data.transfer
-            if type(transfer) ~= "table" or type(transfer.saved) ~= "string" or type(transfer.drafts) ~= "string" or type(transfer.fixed) ~= "string" then return nil end
-            if transfer.coordinateSchema ~= 2 then return nil end
-            if type(transfer.confirmedRaw) ~= "string" or type(transfer.editSlot) ~= "number" then return nil end
-        end
-        return { raw = raw, data = data }
-    end
-
-    @ExecSpace("ServerOnly")
-    method boolean Store(table record)
-        -- Guard creation and compare subsequent bytes, preventing late callbacks from replacing a new attempt.
-        local raw = _HttpService:JSONEncode(record.data)
-        -- Five full drafts plus confirmation metadata fit below native UpdateAsync's 50 KB limit.
-        if #raw > 48000 then return false end
-        local done, result = false, -1
-        _FormationStorage:Write(record.data.profile, self.StorageKey, record.raw, raw, function(code)
-            result = code
-            done = true
-        end)
-        while not done do wait(0.05) end
-        if result ~= 0 then return false end
-        record.raw = raw
-        return true
     end
 
     @ExecSpace("ServerOnly")
@@ -205,9 +166,8 @@ script MatchProbe extends Logic
         if _RoomService:IsInstanceRoom() or self._T.busy[userId] or self._T.records[userId] ~= nil then return end
         self._T.busy[userId] = true
         local profile = player.PlayerComponent.ProfileCode
-        local ticket = self:ReadTicket(profile)
-        local transfer = _FormationService:ExportTransfer(userId)
-        if ticket == nil or transfer == nil then
+        local ticket = _FormationHandoff:Read(profile)
+        if ticket == nil then
             self._T.busy[userId] = nil
             self:Report(userId, "NEED_LOADED_VALID_ACTIVE_FORMATION_AND_NO_PENDING_SAVE")
             return
@@ -218,16 +178,12 @@ script MatchProbe extends Logic
             self:Report(userId, "EXISTING_TICKET_USE_STATUS_OR_CANCEL")
             return
         end
-        local fixed = _HttpService:JSONDecode(transfer.fixed)
-        local saved = _HttpService:JSONDecode(transfer.saved)
-        local slot = saved.slots[tostring(saved.activeSlot)]
-        local summary = "第 " .. tostring(saved.activeSlot) .. " 組 · 版本 " .. tostring(slot.revision) .. " · " .. tostring(#fixed) .. " / 6"
-        ticket.data = { schema = 1, profile = profile, attempt = _UtilLogic:NewGuid(), requestId = _UtilLogic:NewGuid(), summary = summary, source = _WorldInstanceService.WorldInstanceId, adapter = Environment:IsMakerPlay() and "local" or "native", state = "QUEUED", transfer = transfer, started = DateTime.UtcNow.Elapsed, expires = 0, matchKey = "" }
+        ticket.data = { schema = 1, profile = profile, attempt = _UtilLogic:NewGuid(), requestId = _UtilLogic:NewGuid(), source = _WorldInstanceService.WorldInstanceId, adapter = Environment:IsMakerPlay() and "local" or "native", state = "QUEUED", started = DateTime.UtcNow.Elapsed, expires = 0, matchKey = "" }
         self._T.records[userId] = ticket
-        if not self:Store(ticket) then
+        if not _FormationHandoff:Reserve(userId, ticket) then
             self._T.records[userId] = nil
             self._T.busy[userId] = nil
-            self:Report(userId, "RESERVATION_SAVE_FAILED")
+            self:Report(userId, ticket.failure or "RESERVATION_SAVE_FAILED")
             return
         end
         if self._T.records[userId] ~= ticket or self:Player(userId) == nil or ticket.data.state ~= "QUEUED" then self._T.busy[userId] = nil return end
@@ -286,7 +242,7 @@ script MatchProbe extends Logic
                 self._T.busy[userId] = true
                 self:PublishState(userId, "QUEUE_RENEWING")
                 ticket.data.requestId = _UtilLogic:NewGuid()
-                local stored = self:Store(ticket)
+                local stored = _FormationHandoff:Store(ticket)
                 self._T.busy[userId] = nil
                 if not stored then ticket.data.state = "QUEUE_ERROR" self:Report(userId, "QUEUE_RENEW_SAVE_FAILED") return end
                 ticket.data.state = "QUEUED"
@@ -317,8 +273,7 @@ script MatchProbe extends Logic
         if first.data.profile == second.data.profile then
             table.insert(self._T.localQueue, firstId)
             second.data.state = "CANCELLED"
-            second.data.transfer = nil
-            if self:Store(second) then self._T.records[secondId] = nil end
+            if _FormationHandoff:Close(secondId, second, "CANCELLED") then self._T.records[secondId] = nil end
             self:Report(secondId, "DUPLICATE_PROFILE")
             return
         end
@@ -341,27 +296,15 @@ script MatchProbe extends Logic
         if matched == nil or not self:Belongs(ticket.data, matched) then ticket.data.state = "QUEUE_ERROR" self:Report(userId, "QUEUE_RESULT_INVALID") return end
         if self.SaveDelaySeconds > 0 then wait(math.min(120, self.SaveDelaySeconds)) end
         if ticket.data.state ~= "SAVING" then return end
-        local autoSaveMessage = _FormationService:AutoSaveForMatch(userId, function()
-            return self._T.records[userId] == ticket and ticket.data.state == "SAVING"
+        local sealed = _FormationHandoff:Seal(userId, ticket, function()
+            return self._T.records[userId] == ticket and ticket.data.state == "SAVING" and self:Player(userId) ~= nil
         end)
         if self._T.records[userId] ~= ticket or ticket.data.state ~= "SAVING" then return end
-        local latest = _FormationService:SealTransfer(userId)
-        local remaining = 200
-        while latest == nil and remaining > 0 and ticket.data.state == "SAVING" do
-            wait(0.1)
-            if ticket.data.state ~= "SAVING" then return end
-            remaining = remaining - 1
-            latest = _FormationService:SealTransfer(userId)
-        end
-        if ticket.data.state ~= "SAVING" then return end
-        if latest == nil then
+        if not sealed then
             ticket.data.state = "QUEUE_ERROR"
             self:Report(userId, "CAPTURE_NOT_READY; cancel and retry")
             return
         end
-        latest.fixed = ticket.data.transfer.fixed
-        latest.autoSaveMessage = autoSaveMessage
-        ticket.data.transfer = latest
         ticket.data.matchKey = matched.key
         ticket.data.match = matched
         ticket.data.expires = DateTime.UtcNow.Elapsed + self.TransferLifetimeSeconds * 1000
@@ -369,13 +312,13 @@ script MatchProbe extends Logic
         self._T.busy[userId] = true
         ticket.data.state = "COMMITTING"
         self:PublishState(userId, "COMMITTING")
-        if not self:Store(ticket) then self._T.busy[userId] = nil self:Report(userId, "HANDOFF_SAVE_FAILED") return end
+        if not _FormationHandoff:Store(ticket) then self._T.busy[userId] = nil self:Report(userId, "HANDOFF_SAVE_FAILED") return end
         if self._T.records[userId] ~= ticket or self:Player(userId) == nil then self._T.busy[userId] = nil return end
         ticket.data.state = "TRANSFER"
-        if not self:Store(ticket) then self._T.busy[userId] = nil self:Report(userId, "HANDOFF_SEAL_FAILED") return end
+        if not _FormationHandoff:Store(ticket) then self._T.busy[userId] = nil self:Report(userId, "HANDOFF_SEAL_FAILED") return end
         self._T.busy[userId] = nil
         if self._T.records[userId] ~= ticket or self:Player(userId) == nil then return end
-        self:Report(userId, "SEALED match=" .. matched.key .. " differentSources=" .. tostring(matched.differentSources) .. " bytes=" .. tostring(#ticket.raw))
+        self:Report(userId, "SEALED match=" .. matched.key .. " differentSources=" .. tostring(matched.differentSources))
         self:NotifyReady(matched)
         self:Recover(userId)
     end
@@ -460,24 +403,23 @@ script MatchProbe extends Logic
         local ticket = self._T.records[userId]
         if ticket == nil then
             self._T.busy[userId] = true
-            ticket = self:ReadTicket(player.PlayerComponent.ProfileCode)
+            ticket = _FormationHandoff:Read(player.PlayerComponent.ProfileCode)
             self._T.busy[userId] = nil
         end
         if ticket == nil or ticket.data == nil then return end
         local state = ticket.data.state
         if state ~= "QUEUED" and state ~= "RENEWING" and state ~= "QUEUE_ERROR" and state ~= "SAVING" and state ~= "CANCELLED" then self:Report(userId, "COMMITTED_USE_RETURN_OR_STATUS") return end
         ticket.data.state = "CANCELLED"
-        ticket.data.transfer = nil
         self._T.busy[userId] = true
         self:PublishState(userId, "CANCELLING")
         while ticket.submitting do wait(0.1) end
         local code = MatchmakingResultCode.Ok
         if not Environment:IsMakerPlay() then code = _MatchmakingService:CancelMatchingAndWait(ticket.data.profile) end
-        local stored = self:Store(ticket)
+        local stored = _FormationHandoff:Close(userId, ticket, "CANCELLED")
         self._T.busy[userId] = nil
         if stored and (code == MatchmakingResultCode.Ok or code == MatchmakingResultCode.NotMatching or code == MatchmakingResultCode.AlreadyMatched or code == MatchmakingResultCode.RequestNotFound or code == MatchmakingResultCode.MatchingExpired) then self._T.records[userId] = nil end
         self:Report(userId, "CANCEL code=" .. tostring(code) .. " tombstone=" .. tostring(stored))
-        _FormationService:ReleaseTransfer(userId)
+        _FormationHandoff:Release(userId, ticket.id)
         self:PublishState(userId, "CANCELLED")
     end
 
@@ -503,10 +445,11 @@ script MatchProbe extends Logic
             -- A local ticket without its FIFO/match entry is stale; reload storage and retry cleanup.
         end
         self._T.busy[userId] = true
-        local ticket = self:ReadTicket(player.PlayerComponent.ProfileCode)
+        local ticket = _FormationHandoff:Read(player.PlayerComponent.ProfileCode)
         if ticket ~= nil and ticket.data ~= nil then
             local data = ticket.data
             if data.state == "CANCELLED" or data.state == "RETURNED" then
+                _FormationHandoff:Release(userId, ticket.id)
                 self._T.records[userId] = nil
                 self._T.busy[userId] = nil
                 self._T.pendingRecover[userId] = nil
@@ -521,25 +464,22 @@ script MatchProbe extends Logic
             elseif Environment:IsMakerPlay() and (data.adapter == "local" or data.adapter == nil) and (data.state == "QUEUED" or data.state == "SAVING" or data.state == "RENEWING" or data.state == "QUEUE_ERROR") then
                 -- A Maker Play restart discards its local FIFO, so stale queue reservations cannot resume.
                 local staleState = data.state
-                local staleTransfer = data.transfer
                 data.state = "CANCELLED"
-                data.transfer = nil
-                if self:Store(ticket) then
+                if _FormationHandoff:Close(userId, ticket, "CANCELLED") then
                     self._T.records[userId] = nil
-                    _FormationService:ReleaseTransfer(userId)
+                    _FormationHandoff:Release(userId, ticket.id)
                     log("[VRF][MatchProbe] stale local queue cancelled=true")
                     self:Report(userId, "CANCELLED")
                 else
                     data.state = staleState
-                    data.transfer = staleTransfer
-                    _FormationService:ReleaseTransfer(userId)
+                    _FormationHandoff:Release(userId, ticket.id)
                     self:Report(userId, "STALE_QUEUE_CLEANUP_FAILED")
                 end
             elseif Environment:IsMakerPlay() and self._T.localMatches[data.profile] == nil and (data.adapter == "local" or string.sub(data.matchKey, 1, 6) == "local-") and (data.state == "COMMITTING" or data.state == "TRANSFER") then
                 -- Restore a local match only after its Maker session has lost the in-memory match entry.
                 local staleState = data.state
                 data.state = "RETURNING"
-                if self:Store(ticket) then
+                if _FormationHandoff:Store(ticket) then
                     self:Report(userId, "STALE_MATCH_RECOVERY")
                     self:RestoreReturning(userId, ticket)
                 else
@@ -549,7 +489,7 @@ script MatchProbe extends Logic
             elseif (data.state == "TRANSFER" or data.state == "COMMITTING") and data.expires <= DateTime.UtcNow.Elapsed and not _RoomService:IsInstanceRoom() then
                 local previous = data.state
                 data.state = "RETURNING"
-                if self:Store(ticket) then
+                if _FormationHandoff:Store(ticket) then
                     self:Report(userId, "TRANSFER_EXPIRED")
                     self:RestoreReturning(userId, ticket)
                 else
@@ -568,7 +508,7 @@ script MatchProbe extends Logic
             elseif data.state == "IN_ROOM" and not _RoomService:IsInstanceRoom() then
                 -- A prior Maker session or room exit left a durable ticket behind; restore it in the lobby.
                 data.state = "RETURNING"
-                if self:Store(ticket) then
+                if _FormationHandoff:Store(ticket) then
                     self:Report(userId, "STALE_ROOM_RECOVERY")
                     self:RestoreReturning(userId, ticket)
                 else
@@ -594,22 +534,15 @@ script MatchProbe extends Logic
     method void RestoreReturning(string userId, table ticket)
         -- Restore from cached authority with bounded retries while catalog or prior saves become ready.
         if self._T.ended or self._T.records[userId] ~= ticket or self:Player(userId) == nil or ticket.data.state ~= "RETURNING" then return end
-        local transfer = ticket.data.transfer
-        if self._T.restoredAttempts[ticket.data.attempt] or _FormationService:ImportTransfer(userId, transfer) then
-            self._T.restoredAttempts[ticket.data.attempt] = true
-            ticket.data.state = "RETURNED"
-            ticket.data.transfer = nil
-            local stored = self:Store(ticket)
+        if _FormationHandoff:Restore(userId, ticket.id) then
+            local stored = _FormationHandoff:Close(userId, ticket, "RETURNED")
             if self._T.records[userId] ~= ticket or self:Player(userId) == nil then return end
             if stored then
                 self._T.records[userId] = nil
                 self._T.localMatches[ticket.data.profile] = nil
-                _FormationService:ReleaseTransfer(userId)
                 self:Report(userId, "RETURNED restored=true cleanup=true")
                 return
             end
-            ticket.data.state = "RETURNING"
-            ticket.data.transfer = transfer
         end
         ticket.restoreAttempts = (ticket.restoreAttempts or 0) + 1
         if ticket.restoreAttempts <= 10 then
@@ -631,7 +564,7 @@ script MatchProbe extends Logic
         -- Both durable capsules must be ready before any native warp can remove either source session.
         if self:Player(userId) == nil or self._T.records[userId] ~= ticket or ticket.data.state ~= "TRANSFER" or self._T.closedMatches[matched.key] then return end
         local otherProfile = ticket.data.profile == matched.home and matched.away or matched.home
-        local peer = self:ReadTicket(otherProfile)
+        local peer = _FormationHandoff:Read(otherProfile)
         if peer == nil or peer.data == nil or not self:Belongs(peer.data, matched) or peer.data.matchKey ~= matched.key then return end
         if (peer.data.state ~= "TRANSFER" and peer.data.state ~= "IN_ROOM") or peer.data.expires <= DateTime.UtcNow.Elapsed then return end
         local peerHere = false
@@ -644,7 +577,7 @@ script MatchProbe extends Logic
             -- Persist the one-shot marker before dispatch; status never retries an ambiguous native warp.
             if ticket.data.warpIssued then self:Report(userId, "WARP_ALREADY_ISSUED_WAIT_OR_RETURN") return end
             ticket.data.warpIssued = true
-            if not self:Store(ticket) then return end
+            if not _FormationHandoff:Store(ticket) then return end
             local code = _MatchmakingService:WarpMatchUser(ticket.data.profile)
             self:Report(userId, "WARP code=" .. tostring(code) .. " match=" .. matched.key)
             local timer = 0
@@ -696,10 +629,9 @@ script MatchProbe extends Logic
         if ticket == nil then return end
         if ticket.data.state == "QUEUED" or ticket.data.state == "SAVING" or ticket.data.state == "RENEWING" or ticket.data.state == "QUEUE_ERROR" then
             ticket.data.state = "CANCELLED"
-            ticket.data.transfer = nil
             local code = MatchmakingResultCode.Ok
             if not Environment:IsMakerPlay() then code = _MatchmakingService:CancelMatchingAndWait(ticket.data.profile) end
-            local stored = self:Store(ticket)
+            local stored = _FormationHandoff:Close(userId, ticket, "CANCELLED")
             log("[VRF][MatchProbe] leave cancel=" .. tostring(code) .. " tombstone=" .. tostring(stored))
         end
         if self._T.records[userId] == ticket then self._T.records[userId] = nil end
@@ -726,14 +658,14 @@ script MatchProbe extends Logic
         end
         if self:Player(userId) == nil or self._T.records[userId] ~= ticket or ticket.data.state ~= "TRANSFER" then return end
         ticket.data.state = "IN_ROOM"
-        if not self:Store(ticket) then self:Report(userId, "ADMISSION_SAVE_FAILED") return end
+        if not _FormationHandoff:Store(ticket) then self:Report(userId, "ADMISSION_SAVE_FAILED") return end
         if self:Player(userId) == nil or self._T.records[userId] ~= ticket then return end
         local moved = self:MoveToMatch(slot.room, userId)
         log("[VRF][MatchTransfer] match=" .. matched.key .. " entry=" .. tostring(moved))
         if self._T.records[userId] ~= ticket then return end
         if not moved then
             ticket.data.state = "TRANSFER"
-            self:Store(ticket)
+            _FormationHandoff:Store(ticket)
         end
         self:Report(userId, "ROOM_MOVE ok=" .. tostring(moved))
     end
@@ -820,7 +752,7 @@ script MatchProbe extends Logic
             if ticket.data.state ~= "TRANSFER" and ticket.data.state ~= "COMMITTING" and ticket.data.state ~= "RETURNING" and ticket.data.state ~= "IN_ROOM" then return end
             self._T.busy[userId] = true
             ticket.data.state = "RETURNING"
-            local stored = self:Store(ticket)
+            local stored = _FormationHandoff:Store(ticket)
             self._T.busy[userId] = nil
             if stored then self:Recover(userId) end
             self:Report(userId, "ABORT_TRANSFER stored=" .. tostring(stored))
@@ -838,7 +770,7 @@ script MatchProbe extends Logic
             self._T.busy[userId] = true
             ticket.data.state = "RETURNING"
             self:PublishState(userId, "ROOM_MISMATCH")
-            if not self:Store(ticket) then
+            if not _FormationHandoff:Store(ticket) then
                 ticket.data.state = "IN_ROOM"
                 self._T.busy[userId] = nil
                 self:Report(userId, "ROOM_MISMATCH_SAVE_FAILED")
@@ -857,7 +789,7 @@ script MatchProbe extends Logic
         self._T.busy[userId] = true
         ticket.data.state = "RETURNING"
         self:PublishState(userId, "RETURNING")
-        if not self:Store(ticket) then
+        if not _FormationHandoff:Store(ticket) then
             ticket.data.state = "IN_ROOM"
             self._T.busy[userId] = nil
             self:Report(userId, "RETURN_SAVE_FAILED")
@@ -910,11 +842,7 @@ script MatchProbe extends Logic
             if not self:Belongs(home.data, matched) or not self:Belongs(away.data, matched) then return nil end
         end
         if home == nil or away == nil then return nil end
-        local ok, homeUnits, awayUnits = pcall(function()
-            return _HttpService:JSONDecode(home.data.transfer.fixed), _HttpService:JSONDecode(away.data.transfer.fixed)
-        end)
-        if not ok or type(homeUnits) ~= "table" or type(awayUnits) ~= "table" then return nil end
-        return { key = _RoomService.RoomKey, home = home.data.profile, away = away.data.profile, homeUnits = homeUnits, awayUnits = awayUnits }
+        return { key = _RoomService.RoomKey, home = home.data.profile, away = away.data.profile, homeTicket = home.data.attempt, awayTicket = away.data.attempt }
     end
 
     @ExecSpace("ServerOnly")

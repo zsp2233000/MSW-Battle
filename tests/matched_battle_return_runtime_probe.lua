@@ -1,18 +1,27 @@
 -- Run in server_main after both participants return. Queues and cancels each independently.
 local ok, detail = pcall(function()
-    for attempt = 1, 200 do if #_UserService.UserEntities.Values == 2 then break end wait(0.1) end
-    assert(#_UserService.UserEntities.Values == 2, "both players returned")
-    for _, user in ipairs(_UserService.UserEntities.Values) do
+    local users = {}
+    for attempt = 1, 200 do
+        users = {}
+        for _, user in ipairs(_UserService.UserEntities.Values) do
+            if user.PlayerComponent.ProfileCode == 'hf2601' or user.PlayerComponent.ProfileCode == 'hf2602' then table.insert(users, user) end
+        end
+        if #users == 2 then break end
+        wait(0.1)
+    end
+    if #users == 0 then users = _UserService.UserEntities.Values end
+    assert(#users == 2, "both players returned")
+    for _, user in ipairs(users) do
         assert(user.CurrentMapName == "formationlobby", "returned to the lobby")
         local userId = user.PlayerComponent.UserId
-        local transfer
+        local session
         for attempt = 1, 200 do
-            transfer = _FormationService:ExportTransfer(userId)
-            if transfer ~= nil then break end
+            session = _FormationService:GetSession(userId)
+            if session ~= nil and session.initialized then break end
             wait(0.1)
         end
-        assert(transfer ~= nil, "saved active formation restored")
-        assert(#_HttpService:JSONDecode(transfer.fixed) == 1, "latest confirmed save preserved")
+        assert(session ~= nil and session.initialized, "saved active formation restored")
+        assert(#session.saved.slots[tostring(session.saved.activeSlot)].units == 1, "latest confirmed save preserved")
         _MatchProbe:QueueForUser(userId)
         _MatchProbe:CancelForUser(userId)
     end
