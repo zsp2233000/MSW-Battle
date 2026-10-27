@@ -5,10 +5,96 @@ script BattleHPBar extends Component
 	property number FillWidthRatio = 0.90625
 
 	@ExecSpace("ClientOnly")
+	method void ClearScreenBar()
+		-- Restore source children when leaving the POC presentation path.
+		if isvalid(self._T.screenBar) then self._T.screenBar:Destroy() end
+		self._T.screenBar = nil
+		self._T.screenRatio = nil
+		self._T.screenOwn = nil
+		for _, record in ipairs(self._T.hiddenBarChildren or {}) do
+			if isvalid(record.entity) then record.entity:SetVisible(record.visible, false, false) end
+		end
+		self._T.hiddenBarChildren = nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean UpdateScreenBar(any unit, Entity display, boolean own)
+		-- Follow the supplied display entity using the source unit's synchronized health.
+		local player = _UserService.LocalPlayer
+		if not isvalid(player) or not isvalid(display) or player.CurrentMap ~= display.CurrentMap then
+			self:ClearScreenBar()
+			return false
+		end
+		if unit.Faction ~= "PLAYER" and unit.Faction ~= "ENEMY" then return false end
+		local top = _BattleUIController:GetHealthBarTop(unit.StandAnimationRUID)
+		if top == nil then
+			if isvalid(self._T.screenBar) then self:ClearScreenBar() end
+			return false
+		end
+		local bar = self._T.screenBar
+		if not isvalid(bar) then
+			if self._T.hiddenBarChildren ~= nil then self:ClearScreenBar() end
+			local template = _EntityService:GetEntityByPath("/ui/BattleGroup/HealthBars/HPTemplate")
+			if not isvalid(template) then return false end
+			bar = template:Clone("HP_" .. self.Entity.Name)
+			if not isvalid(bar) then return false end
+			bar:SetEnable(true)
+			bar:AddComponent("script.UIResizableProgressBar")
+			self._T.screenBar = bar
+		end
+		_BattleUIController:TrackHealthBar(self.Entity, display, bar)
+		local progress = bar:GetComponent("script.UIResizableProgressBar")
+		local fill = bar:GetChildByName("Img_Value")
+		if not isvalid(progress) or not isvalid(fill) then bar:SetEnable(false); return false end
+		if not progress.IsInitialized and not progress:Init() then bar:SetEnable(false); return false end
+		if self._T.hiddenBarChildren == nil then
+			self._T.hiddenBarChildren = {}
+			for _, childName in ipairs({ "HPBarBackground", "HPBarFill" }) do
+				local child = self.Entity:GetChildByName(childName)
+				if isvalid(child) then
+					table.insert(self._T.hiddenBarChildren, { entity = child, visible = child.Visible })
+					child:SetVisible(false, false, false)
+				end
+			end
+			log("[VRF][BattleHPBar] SCREEN_CREATE " .. self.Entity.Name)
+		end
+		progress.MaxValue = 1
+		local ratio = 0
+		if unit.MaxHp > 0 then ratio = math.max(0, math.min(1, unit.Hp / unit.MaxHp)) end
+		if self._T.screenRatio ~= ratio then
+			fill:SetEnable(ratio > 0)
+			progress:SetValue(ratio)
+			self._T.screenRatio = ratio
+			log("[VRF][BattleHPBar] SCREEN_HP " .. self.Entity.Name .. " ratio=" .. tostring(ratio))
+		end
+		if self._T.screenOwn ~= own then
+			if own then fill.SpriteGUIRendererComponent.Color = Color(0.1, 1, 0.1, 1)
+			else fill.SpriteGUIRendererComponent.Color = Color(1, 0.1, 0.1, 1) end
+			self._T.screenOwn = own
+		end
+		local transform = display.TransformComponent
+		local position = transform:ToWorldPoint(Vector3(0, top, 0))
+		local screen = _UILogic:WorldToScreenPosition(Vector2(position.x, position.y + 0.15))
+		local pixel = Vector2(math.floor(screen.x + 0.5), math.floor(screen.y + 0.5))
+		bar.UITransformComponent.anchoredPosition = _UILogic:ScreenToUIPosition(pixel)
+		local visible = display.EnabledInHierarchy and display.VisibleInHierarchy
+		if bar.Enable ~= visible then bar:SetEnable(visible) end
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
 	method void OnUpdate(number delta)
 		-- Resolve dynamic children once, then follow the owning unit's synced health.
 		if not isvalid(self._T.battleUnit) then
 			self._T.battleUnit = self.Entity:GetComponent("script.BattleUnit")
+		end
+		local unit = self._T.battleUnit
+		local map = self.Entity.CurrentMap
+		local session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
+		if isvalid(unit) and isvalid(session) and not session.RequireMatchedFormations then
+			if self:UpdateScreenBar(unit, self.Entity, unit.Faction == "PLAYER") then return end
+		else
+			self:ClearScreenBar()
 		end
 		if not isvalid(self._T.fillTransform) then
 			local fillEntity = self.Entity:GetChildByName("HPBarFill")
@@ -72,5 +158,11 @@ script BattleHPBar extends Component
 		self._T.lastFacingSign = facingSign
 		log("[VRF][BattleHPBar] FILL " .. self.Entity.Name .. ", hp=" .. tostring(battleUnit.Hp)
 			.. "/" .. tostring(battleUnit.MaxHp) .. ", ratio=" .. tostring(ratio))
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		-- Destroy the client-only bar with its actor.
+		self:ClearScreenBar()
 	end
 end

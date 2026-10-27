@@ -15,9 +15,75 @@ script BattleUIController extends Logic
     method void OnBeginPlay()
         -- One client owner presents whichever battle map the local player currently occupies.
         self._T.hudKey = ""
+        self._T.healthGeometry = {}
+        self._T.healthBars = {}
         self:SetEnabled(self.root, false)
         self:SetEnabled(self.configErrorGroup, false)
         log("[VRF][BattlePresentation] UI controller ready")
+    end
+
+    @ExecSpace("ClientOnly")
+    method any GetHealthBarTop(string ruid)
+        -- Load each standing resource once, and retry incomplete resources without blocking each frame.
+        if ruid == nil or ruid == "" then return nil end
+        local cache = self._T.healthGeometry
+        if cache == nil then return nil end
+        local entry = cache[ruid]
+        if entry == nil then entry = {}; cache[ruid] = entry end
+        if entry.top ~= nil then return entry.top end
+        local now = _UtilLogic.ElapsedSeconds
+        if entry.pending and now - entry.attempt < 5 then return nil end
+        if not entry.pending and entry.attempt ~= nil and now - entry.attempt < 1 then return nil end
+        entry.pending = true
+        entry.attempt = now
+        _ResourceService:PreloadAsync({ ruid }, function()
+            local ok, top = pcall(function()
+                local maximum = nil
+                local function include(sprite)
+                    if isvalid(sprite) and sprite.IsLoadComplete ~= true then
+                        sprite = _ResourceService:LoadSpriteAndWait(sprite.RUID)
+                    end
+                    if not isvalid(sprite) or sprite.IsLoadComplete ~= true or sprite.PixelPerUnit <= 0 then return false end
+                    local edge = (sprite.Height - sprite.PivotPixel.y) / sprite.PixelPerUnit
+                    if maximum == nil or edge > maximum then maximum = edge end
+                    return true
+                end
+                local resourceType = _ResourceService:GetTypeAndWait(ruid)
+                if resourceType == ResourceType.AnimationClip then
+                    local clip = _ResourceService:LoadAnimationClipAndWait(ruid)
+                    if not isvalid(clip) or clip.IsLoadComplete ~= true then return nil end
+                    for _, frame in ipairs(clip.Frames:ToTable()) do
+                        if not include(frame.FrameSprite) then return nil end
+                    end
+                elseif resourceType == ResourceType.Sprite then
+                    if not include(_ResourceService:LoadSpriteAndWait(ruid)) then return nil end
+                end
+                return maximum
+            end)
+            entry.pending = false
+            if ok and top ~= nil then
+                entry.top = top
+                log("[VRF][BattleHPBar] GEOMETRY ruid=" .. ruid .. " top=" .. tostring(top))
+            elseif not entry.loggedFailure then
+                entry.loggedFailure = true
+                log("[VRF][BattleHPBar] GEOMETRY_WAIT ruid=" .. ruid .. " detail=" .. tostring(top))
+            end
+        end)
+        return nil
+    end
+
+    @ExecSpace("ClientOnly")
+    method void TrackHealthBar(Entity source, Entity display, Entity bar)
+        -- Keep disabled or removed actors from leaving screen-space remnants.
+        local bars = self._T.healthBars
+        if bars == nil then return end
+        local record = bars[source.Id]
+        if record == nil then
+            bars[source.Id] = { source = source, display = display, bar = bar }
+        else
+            record.display = display
+            record.bar = bar
+        end
     end
 
     @ExecSpace("ClientOnly")
@@ -39,6 +105,14 @@ script BattleUIController extends Logic
         -- Follow current-map synchronization, map policy and the local player's battle side.
         local player = _UserService.LocalPlayer
         local map = isvalid(player) and player.CurrentMap or nil
+        for id, record in pairs(self._T.healthBars or {}) do
+            if not isvalid(record.source) or not isvalid(record.display) or not isvalid(record.bar) or record.display.CurrentMap ~= map then
+                if isvalid(record.bar) then record.bar:Destroy() end
+                self._T.healthBars[id] = nil
+            elseif not record.display.EnabledInHierarchy or not record.display.VisibleInHierarchy then
+                record.bar:SetEnable(false)
+            end
+        end
         local session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
         local presentation = isvalid(map) and map:GetComponent("script.BattlePresentation") or nil
         local active = isvalid(session)
@@ -95,6 +169,10 @@ script BattleUIController extends Logic
         -- Release shared presentation when this client session ends.
         self:SetEnabled(self.root, false)
         self:SetEnabled(self.configErrorGroup, false)
+        for _, record in pairs(self._T.healthBars or {}) do
+            if isvalid(record.bar) then record.bar:Destroy() end
+        end
+        self._T.healthBars = {}
         self._T.hudKey = ""
     end
 end
