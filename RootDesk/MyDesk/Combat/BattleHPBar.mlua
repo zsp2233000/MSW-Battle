@@ -19,6 +19,15 @@ script BattleHPBar extends Component
 				self._T.lastFacingSign = nil
 			end
 		end
+		if not isvalid(self._T.backgroundTransform) then
+			local background = self.Entity:GetChildByName("HPBarBackground")
+			if isvalid(background) then
+				self._T.backgroundTransform = background.TransformComponent
+				self._T.backgroundScaleX = background.TransformComponent.Scale.x
+				self._T.backgroundStartX = background.TransformComponent.Position.x
+				self._T.lastFacingSign = nil
+			end
+		end
 		local battleUnit = self._T.battleUnit
 		local fillTransform = self._T.fillTransform
 		if not isvalid(battleUnit) or not isvalid(fillTransform) then return end
@@ -49,9 +58,19 @@ script BattleHPBar extends Component
 		-- Anchor the left edge so damage drains the visible fill from right to left.
 		fillPosition.x = (self._T.fillStartX - self.BarWidth * self.FillWidthRatio * (1 - ratio) * 0.5) * facingSign
 		fillTransform.Position = fillPosition
+		-- Keep the frame in the same unmirrored space as its fill.
+		local backgroundTransform = self._T.backgroundTransform
+		if isvalid(backgroundTransform) then
+			local backgroundScale = backgroundTransform.Scale
+			backgroundScale.x = self._T.backgroundScaleX * facingSign
+			backgroundTransform.Scale = backgroundScale
+			local backgroundPosition = backgroundTransform.Position
+			backgroundPosition.x = self._T.backgroundStartX * facingSign
+			backgroundTransform.Position = backgroundPosition
+		end
 		self._T.lastRatio = ratio
 		self._T.lastFacingSign = facingSign
-		log("[M1][BattleHPBar] FILL " .. self.Entity.Name .. ", hp=" .. tostring(battleUnit.Hp)
+		log("[VRF][BattleHPBar] FILL " .. self.Entity.Name .. ", hp=" .. tostring(battleUnit.Hp)
 			.. "/" .. tostring(battleUnit.MaxHp) .. ", ratio=" .. tostring(ratio))
 	end
 end
