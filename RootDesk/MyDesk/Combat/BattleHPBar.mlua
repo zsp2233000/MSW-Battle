@@ -74,12 +74,26 @@ script BattleHPBar extends Component
 		if self._T.screenRatio ~= ratio then
 			fill:SetEnable(ratio > 0)
 			progress:SetValue(ratio)
+			for _, band in ipairs({ { "Shade", 3 }, { "Glow", 3 }, { "Highlight", 1.5 } }) do
+				local entity = fill:GetChildByName(band[1])
+				if isvalid(entity) and isvalid(entity.UITransformComponent) then
+					entity.UITransformComponent.RectSize = Vector2(progress.OriginalWidth * ratio, band[2])
+				end
+			end
 			self._T.screenRatio = ratio
 			log("[VRF][BattleHPBar] SCREEN_HP " .. self.Entity.Name .. " ratio=" .. tostring(ratio))
 		end
 		if self._T.screenOwn ~= own then
 			if own then fill.SpriteGUIRendererComponent.Color = Color(0.1, 1, 0.1, 1)
 			else fill.SpriteGUIRendererComponent.Color = Color(1, 0.1, 0.1, 1) end
+			local glow = fill:GetChildByName("Glow")
+			local highlight = fill:GetChildByName("Highlight")
+			if isvalid(glow) and isvalid(glow.SpriteGUIRendererComponent) then
+				glow.SpriteGUIRendererComponent.Color = own and Color(0.04, 0.9, 0.04, 1) or Color(0.9, 0.04, 0.04, 1)
+			end
+			if isvalid(highlight) and isvalid(highlight.SpriteGUIRendererComponent) then
+				highlight.SpriteGUIRendererComponent.Color = own and Color(0.3, 1, 0.3, 1) or Color(1, 0.3, 0.3, 1)
+			end
 			self._T.screenOwn = own
 		end
 		local transform = display.TransformComponent
