@@ -397,7 +397,24 @@
               "MOD.Core.TransformComponent",
               "MOD.Core.PixelRendererComponent"
             ],
-            "Properties": [],
+            "Properties": [
+              {
+                "Type": {
+                  "$type": "MODNativeType",
+                  "type": "MOD.Core.MODVector3, MOD.Core, Version=26.10.0.0, Culture=neutral, PublicKeyToken=null"
+                },
+                "Name": "HealthBarScale",
+                "DisplayName": "Health Bar Scale",
+                "ShowInInspector": true,
+                "Link": {
+                  "Target": {
+                    "$type": "MODNativeType",
+                    "type": "MOD.Core.TransformComponent, MOD.Core, Version=26.10.0.0, Culture=neutral, PublicKeyToken=null"
+                  },
+                  "Property": "Scale"
+                }
+              }
+            ],
             "Values": [
               {
                 "TargetType": "MOD.Core.MODEntity",
