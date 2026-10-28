@@ -2,6 +2,27 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const test = require("node:test");
 const { MapBuilder } = require("../.agents/skills/msw-general/scripts/map/msw_map_builder.cjs");
+const { ModelBuilder } = require("../.agents/skills/msw-general/scripts/model/msw_model_builder.cjs");
+const { UIBuilder } = require("../.agents/skills/msw-ui-system/scripts/msw_ui_builder.cjs");
+
+test("battle health bars are authored under the unit without a screen UI template", () => {
+  const model = ModelBuilder.read("RootDesk/MyDesk/Models/Monsters/BattleUnit.model");
+  assert.deepEqual(model.validate(), []);
+  const anchor = model.getChild("HPAnchor");
+  const bar = model.getChild("HealthBar");
+  assert.equal(bar.ParentId, anchor.Id);
+  assert.ok(bar.Model.Components.includes("MOD.Core.PixelRendererComponent"));
+  for (const child of model.listChildren()) {
+    assert.ok(child.Model.Components.every((type) => [
+      "MOD.Core.TransformComponent", "MOD.Core.PixelRendererComponent", "MOD.Core.SpriteRendererComponent",
+    ].includes(type)), `${child.Name} must not fight or intercept input`);
+  }
+  const ui = UIBuilder.read("ui/BattleGroup.ui");
+  assert.equal(ui.find("HealthBars"), null);
+  assert.ok(ui.find("BattleHud"));
+  assert.ok(ui.find("DeploymentPanel"));
+  assert.ok(ui.find("BattleResultPanel"));
+});
 
 test("matched battlefield owns the formal viewer presentation", () => {
   const map = MapBuilder.read("map/matchprobe.map");

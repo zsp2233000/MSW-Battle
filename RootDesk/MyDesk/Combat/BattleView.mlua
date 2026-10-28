@@ -109,7 +109,7 @@ script BattleView extends Component
         local scale = source.TransformComponent.Scale
         visual.TransformComponent.Scale = Vector3(math.abs(scale.x), math.abs(scale.y), math.abs(scale.z))
         visual.SpriteRendererComponent.FlipX = (scale.x * sign < 0) ~= source.SpriteRendererComponent.FlipX
-        visual:SetVisible(source.Visible, false, false)
+        visual:SetVisible(source.EnabledInHierarchy and source.VisibleInHierarchy, false, false)
         local clip = source.SpriteRendererComponent.SpriteRUID
         if record.clip ~= clip or record.attack ~= unit.AttackSerial or record.damage ~= unit.DamageTakenSerial then
             if visual.SpriteRendererComponent.SpriteRUID == clip and record.clip == clip then

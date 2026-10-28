@@ -16,7 +16,6 @@ script BattleUIController extends Logic
         -- One client owner presents whichever battle map the local player currently occupies.
         self._T.hudKey = ""
         self._T.healthGeometry = {}
-        self._T.healthBars = {}
         self:SetEnabled(self.root, false)
         self:SetEnabled(self.configErrorGroup, false)
         log("[VRF][BattlePresentation] UI controller ready")
@@ -80,20 +79,6 @@ script BattleUIController extends Logic
     end
 
     @ExecSpace("ClientOnly")
-    method void TrackHealthBar(Entity source, Entity display, Entity bar)
-        -- Keep disabled or removed actors from leaving screen-space remnants.
-        local bars = self._T.healthBars
-        if bars == nil then return end
-        local record = bars[source.Id]
-        if record == nil then
-            bars[source.Id] = { source = source, display = display, bar = bar }
-        else
-            record.display = display
-            record.bar = bar
-        end
-    end
-
-    @ExecSpace("ClientOnly")
     method void SetEnabled(Entity entity, boolean enabled)
         -- Avoid redundant hierarchy changes while owning all shared panel visibility.
         if isvalid(entity) and entity.Enable ~= enabled then entity:SetEnable(enabled) end
@@ -112,14 +97,6 @@ script BattleUIController extends Logic
         -- Follow current-map synchronization, map policy and the local player's battle side.
         local player = _UserService.LocalPlayer
         local map = isvalid(player) and player.CurrentMap or nil
-        for id, record in pairs(self._T.healthBars or {}) do
-            if not isvalid(record.source) or not isvalid(record.display) or not isvalid(record.bar) or record.display.CurrentMap ~= map then
-                if isvalid(record.bar) then record.bar:Destroy() end
-                self._T.healthBars[id] = nil
-            elseif not record.display.EnabledInHierarchy or not record.display.VisibleInHierarchy then
-                record.bar:SetEnable(false)
-            end
-        end
         local session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
         local presentation = isvalid(map) and map:GetComponent("script.BattlePresentation") or nil
         local active = isvalid(session)
@@ -176,10 +153,6 @@ script BattleUIController extends Logic
         -- Release shared presentation when this client session ends.
         self:SetEnabled(self.root, false)
         self:SetEnabled(self.configErrorGroup, false)
-        for _, record in pairs(self._T.healthBars or {}) do
-            if isvalid(record.bar) then record.bar:Destroy() end
-        end
-        self._T.healthBars = {}
         self._T.hudKey = ""
     end
 end

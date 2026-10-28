@@ -8,52 +8,62 @@ script BattleHPBar extends Component
 
 	@ExecSpace("ClientOnly")
 	method void HideWorldBar()
-		-- Hide the authored hierarchy; its lifetime belongs to the actor.
+		-- The actor owns its authored hierarchy; mirrored displays own only a local copy.
+		if self._T.worldDisplay ~= nil and self._T.worldDisplay ~= self.Entity and isvalid(self._T.worldAnchor) then
+			self._T.worldAnchor:Destroy()
+		end
 		local anchor = self.Entity:GetChildByName("HPAnchor")
 		if isvalid(anchor) then anchor:SetVisible(false, false, false) end
+		self._T.worldDisplay = nil
 		self._T.worldAnchor = nil
 		self._T.worldBar = nil
 		self._T.worldRatio = nil
 	end
 
 	@ExecSpace("ClientOnly")
-	method void UpdateWorldBar(any unit)
+	method void UpdateWorldBar(any unit, Entity display, boolean own)
 		-- Keep authored model scale independent of the actor's scale and facing.
 		local player = _UserService.LocalPlayer
-		if not isvalid(player) or player.CurrentMap ~= self.Entity.CurrentMap then
+		if not isvalid(player) or not isvalid(display) or player.CurrentMap ~= display.CurrentMap then
 			self:HideWorldBar()
 			return
 		end
 		local geometry = _BattleUIController:GetHealthBarGeometry(unit.StandAnimationRUID)
-		local scale = self.Entity.TransformComponent.Scale
+		local scale = display.TransformComponent.Scale
 		if geometry == nil or scale.x == 0 or scale.y == 0 then
 			self:HideWorldBar()
 			return
 		end
+		if self._T.worldDisplay ~= display then self:HideWorldBar() end
 		local anchor = self._T.worldAnchor
 		local bar = self._T.worldBar
 		if not isvalid(anchor) or not isvalid(bar) then
+			self:HideWorldBar()
 			anchor = self.Entity:GetChildByName("HPAnchor")
 			if not isvalid(anchor) then return end
+			if display ~= self.Entity then
+				anchor = _SpawnService:SpawnByEntity(anchor, "HPAnchor", Vector3(0, 0, 0), display, true)
+				if not isvalid(anchor) then return end
+			end
+			self._T.worldAnchor = anchor
+			self._T.worldDisplay = display
 			bar = anchor:GetChildByName("HealthBar")
-			if not isvalid(bar) then return end
+			if not isvalid(bar) then self:HideWorldBar(); return end
 			local preview = bar:GetChildByName("EditorPreview")
 			if isvalid(preview) then preview:SetVisible(false, false, false) end
-			self._T.worldAnchor = anchor
 			self._T.worldBar = bar
 			self._T.worldRatio = nil
-			log("[VRF][BattleHPBar] WORLD_BIND " .. self.Entity.Name)
+			log("[VRF][BattleHPBar] WORLD_BIND " .. self.Entity.Name .. " display=" .. display.Name)
 		end
 		local center = geometry.centerX
-		if self.Entity.SpriteRendererComponent.FlipX then center = -center end
+		if display.SpriteRendererComponent.FlipX then center = -center end
 		anchor.TransformComponent.Position = Vector3(center, geometry.top + 0.15 / math.abs(scale.y), 0)
 		anchor.TransformComponent.Scale = Vector3(1 / scale.x, 1 / scale.y, 1)
-		anchor:SetVisible(true, false, false)
+		anchor:SetVisible(display.EnabledInHierarchy and display.VisibleInHierarchy, false, false)
 		local pixel = bar.PixelRendererComponent
 		if not isvalid(pixel) then return end
 		local ratio = 0
 		if unit.MaxHp > 0 then ratio = math.max(0, math.min(1, unit.Hp / unit.MaxHp)) end
-		local own = unit.Faction == "PLAYER"
 		if self._T.worldRatio == ratio and self._T.worldOwn == own then return end
 		-- shortcut: 60x10 redraws only on HP/side changes; profile before increasing unit counts.
 		local colors = {}
@@ -79,91 +89,7 @@ script BattleHPBar extends Component
 		pixel:ResetWithColors(60, 10, colors)
 		self._T.worldRatio = ratio
 		self._T.worldOwn = own
-		log("[VRF][BattleHPBar] WORLD_HP " .. self.Entity.Name .. " ratio=" .. tostring(ratio))
-	end
-
-	@ExecSpace("ClientOnly")
-	method void DestroyScreenBar()
-		-- Remove only the screen-space presentation.
-		if isvalid(self._T.screenBar) then self._T.screenBar:Destroy() end
-		self._T.screenBar = nil
-		self._T.screenRatio = nil
-		self._T.screenOwn = nil
-	end
-
-	@ExecSpace("ClientOnly")
-	method boolean UpdateScreenBar(any unit, Entity display, boolean own)
-		-- Follow the supplied display entity using the source unit's synchronized health.
-		local player = _UserService.LocalPlayer
-		if not isvalid(player) or not isvalid(display) or player.CurrentMap ~= display.CurrentMap then
-			self:DestroyScreenBar()
-			return false
-		end
-		if unit.Faction ~= "PLAYER" and unit.Faction ~= "ENEMY" then
-			self:DestroyScreenBar()
-			return false
-		end
-		local geometry = _BattleUIController:GetHealthBarGeometry(unit.StandAnimationRUID)
-		if geometry == nil then
-			if isvalid(self._T.screenBar) then self:DestroyScreenBar() end
-			return false
-		end
-		local bar = self._T.screenBar
-		if not isvalid(bar) then
-			local template = _EntityService:GetEntityByPath("/ui/BattleGroup/HealthBars/HPTemplate")
-			if not isvalid(template) then return false end
-			bar = template:Clone("HP_" .. self.Entity.Name)
-			if not isvalid(bar) then return false end
-			bar:SetEnable(true)
-			bar:AddComponent("script.UIResizableProgressBar")
-			self._T.screenBar = bar
-			log("[VRF][BattleHPBar] SCREEN_CREATE " .. self.Entity.Name)
-		end
-		_BattleUIController:TrackHealthBar(self.Entity, display, bar)
-		local progress = bar:GetComponent("script.UIResizableProgressBar")
-		local fill = bar:GetChildByName("Img_Value")
-		if not isvalid(progress) or not isvalid(fill) then bar:SetEnable(false); return false end
-		if not progress.IsInitialized and not progress:Init() then bar:SetEnable(false); return false end
-		progress.MaxValue = 1
-		local ratio = 0
-		if unit.MaxHp > 0 then ratio = math.max(0, math.min(1, unit.Hp / unit.MaxHp)) end
-		if self._T.screenRatio ~= ratio then
-			fill:SetEnable(ratio > 0)
-			progress:SetValue(ratio)
-			for _, band in ipairs({ { "Shade", 3 }, { "Glow", 3 }, { "Highlight", 1.5 } }) do
-				local entity = fill:GetChildByName(band[1])
-				if isvalid(entity) and isvalid(entity.UITransformComponent) then
-					entity.UITransformComponent.RectSize = Vector2(progress.OriginalWidth * ratio, band[2])
-				end
-			end
-			self._T.screenRatio = ratio
-			log("[VRF][BattleHPBar] SCREEN_HP " .. self.Entity.Name .. " ratio=" .. tostring(ratio))
-		end
-		if self._T.screenOwn ~= own then
-			if own then fill.SpriteGUIRendererComponent.Color = Color(0.1, 1, 0.1, 1)
-			else fill.SpriteGUIRendererComponent.Color = Color(1, 0.1, 0.1, 1) end
-			local glow = fill:GetChildByName("Glow")
-			local highlight = fill:GetChildByName("Highlight")
-			if isvalid(glow) and isvalid(glow.SpriteGUIRendererComponent) then
-				glow.SpriteGUIRendererComponent.Color = own and Color(0.04, 0.9, 0.04, 1) or Color(0.9, 0.04, 0.04, 1)
-			end
-			if isvalid(highlight) and isvalid(highlight.SpriteGUIRendererComponent) then
-				highlight.SpriteGUIRendererComponent.Color = own and Color(0.3, 1, 0.3, 1) or Color(1, 0.3, 0.3, 1)
-			end
-			self._T.screenOwn = own
-			log("[VRF][BattleHPBar] SCREEN_SIDE " .. self.Entity.Name .. " display=" .. display.Name .. " own=" .. tostring(own))
-		end
-		local transform = display.TransformComponent
-		local centerX = geometry.centerX
-		local sprite = display.SpriteRendererComponent
-		if isvalid(sprite) and sprite.FlipX then centerX = -centerX end
-		local position = transform:ToWorldPoint(Vector3(centerX, geometry.top, 0))
-		local screen = _UILogic:WorldToScreenPosition(Vector2(position.x, position.y + 0.15))
-		local pixel = Vector2(math.floor(screen.x + 0.5), math.floor(screen.y + 0.5))
-		bar.UITransformComponent.anchoredPosition = _UILogic:ScreenToUIPosition(pixel)
-		local visible = display.EnabledInHierarchy and display.VisibleInHierarchy
-		if bar.Enable ~= visible then bar:SetEnable(visible) end
-		return true
+		log("[VRF][BattleHPBar] WORLD_HP " .. self.Entity.Name .. " ratio=" .. tostring(ratio) .. " own=" .. tostring(own))
 	end
 
 	@ExecSpace("ClientOnly")
@@ -175,31 +101,29 @@ script BattleHPBar extends Component
 		local unit = self._T.battleUnit
 		local map = self.Entity.CurrentMap
 		local session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
-		if isvalid(session) and session.RequireMatchedFormations then
+		if not isvalid(session) or not isvalid(unit) or (unit.Faction ~= "PLAYER" and unit.Faction ~= "ENEMY") then
 			self:HideWorldBar()
+			return
+		end
+		if session.RequireMatchedFormations then
+			local original = self.Entity:GetChildByName("HPAnchor")
+			if isvalid(original) then original:SetVisible(false, false, false) end
 			local view = map:GetComponent("script.BattleView")
 			local mine = isvalid(view) and view:GetLocalFaction() or ""
 			local display = mine ~= "" and view:GetVisual(self.Entity) or nil
-			if isvalid(unit) and isvalid(display) then
-				self:UpdateScreenBar(unit, display, unit.Faction == mine)
+			if isvalid(display) then
+				self:UpdateWorldBar(unit, display, unit.Faction == mine)
 			else
-				self:DestroyScreenBar()
+				self:HideWorldBar()
 			end
 			return
 		end
-		if isvalid(session) and isvalid(unit) then
-			self:DestroyScreenBar()
-			self:UpdateWorldBar(unit)
-		else
-			self:DestroyScreenBar()
-			self:HideWorldBar()
-		end
+		self:UpdateWorldBar(unit, self.Entity, unit.Faction == "PLAYER")
 	end
 
 	@ExecSpace("ClientOnly")
 	method void OnEndPlay()
-		-- Release screen UI and hide the actor-owned world bar.
-		self:DestroyScreenBar()
+		-- Release the local copy and hide the actor-owned world bar.
 		self:HideWorldBar()
 	end
 end

@@ -25,34 +25,51 @@ local ok, detail = pcall(function()
         assert(difference < 0.35, "position diverged " .. source.Name)
         assert(not isvalid(visual.KinematicbodyComponent) and not isvalid(visual.TriggerComponent), "visual has combat components")
         assert(source.SpriteRendererComponent.Color.a == 0, "original sprite still visible")
-        local bar = _EntityService:GetEntityByPath("/ui/BattleGroup/HealthBars/HP_" .. source.Name)
-        assert(isvalid(bar), "screen hp bar missing " .. source.Name)
-        local fill = bar:GetChildByName("Img_Value")
-        assert(isvalid(fill), "screen hp fill missing " .. source.Name)
-        local fillRenderer = fill.SpriteGUIRendererComponent
-        local fillTransform = fill.UITransformComponent
-        assert(isvalid(fillRenderer) and isvalid(fillTransform), "screen hp fill components missing " .. source.Name)
-        local color = fillRenderer.Color
+        local anchor = visual:GetChildByName("HPAnchor")
+        assert(isvalid(anchor) and anchor.Parent == visual, "world hp anchor missing " .. source.Name)
+        local bar = anchor:GetChildByName("HealthBar")
+        assert(isvalid(bar) and bar.Parent == anchor, "world hp bar missing " .. source.Name)
+        local pixel = bar.PixelRendererComponent
+        assert(isvalid(pixel) and pixel.Width == 60 and pixel.Height == 10, "world hp pixels missing " .. source.Name)
+        assert(not isvalid(bar.UITransformComponent), "world hp has UI transform")
+        local original = source:GetChildByName("HPAnchor")
+        assert(isvalid(original) and not original.Visible, "source hp still visible " .. source.Name)
+        local authored = original:GetChildByName("HealthBar")
+        assert(isvalid(authored), "authored hp bar missing")
+        local expectedScale = authored.TransformComponent.Scale
+        local actualScale = bar.TransformComponent.Scale
+        assert(actualScale.x == expectedScale.x and actualScale.y == expectedScale.y, "model size lost " .. source.Name)
+        local displayScale = visual.TransformComponent.Scale
+        local anchorScale = anchor.TransformComponent.Scale
+        assert(math.abs(displayScale.x * anchorScale.x - 1) < 0.0001 and math.abs(displayScale.y * anchorScale.y - 1) < 0.0001, "actor stretches hp " .. source.Name)
+        local preview = bar:GetChildByName("EditorPreview")
+        assert(isvalid(preview) and not preview.Visible, "editor preview still visible " .. source.Name)
+        local geometry = _BattleUIController:GetHealthBarGeometry(unit.StandAnimationRUID)
+        assert(geometry ~= nil, "standing geometry not ready")
+        local center = visual.SpriteRendererComponent.FlipX and -geometry.centerX or geometry.centerX
+        local top = visual.TransformComponent:ToWorldPoint(Vector3(center, geometry.top, 0))
+        local actual = anchor.TransformComponent.WorldPosition
+        assert(math.abs(actual.x - top.x) < 0.001 and math.abs(actual.y - top.y - 0.15) < 0.001, "world hp misplaced " .. source.Name)
         local own = unit.Faction == mine
-        if own then
-            ownCount = ownCount + 1
-            assert(color.g > color.r, "own bar is not green")
-        else
-            enemyCount = enemyCount + 1
-            assert(color.r > color.g, "enemy bar is not red")
-        end
+        if own then ownCount = ownCount + 1 else enemyCount = enemyCount + 1 end
         local ratio = unit.MaxHp > 0 and math.max(0, math.min(1, unit.Hp / unit.MaxHp)) or 0
-        local progress = bar:GetComponent("script.UIResizableProgressBar")
-        assert(isvalid(progress), "screen hp progress missing " .. source.Name)
-        assert(fill.Enable == (ratio > 0), "hp fill visibility mismatch " .. source.Name)
-        local expectedWidth = progress.OriginalWidth * ratio
-        assert(math.abs(fillTransform.RectSize.x - expectedWidth) < 0.5, "hp fill width mismatch " .. source.Name)
+        local filled = 0
+        for x = 3, 58 do
+            local color = pixel:GetPixel(x, 5)
+            if color.r > 0 or color.g > 0 then
+                filled = filled + 1
+                assert(own and color.g > color.r or not own and color.r > color.g, "hp side color mismatch " .. source.Name)
+            end
+        end
+        assert(filled == math.floor(56 * ratio), "hp ratio mismatch " .. source.Name)
+        assert(bar.VisibleInHierarchy == visual.VisibleInHierarchy, "hp visibility mismatch " .. source.Name)
         if unit.Hp >= unit.MaxHp and unit.Hp > 0 then
             fullCount = fullCount + 1
-            assert(bar.Enable and fill.Enable, "full hp bar hidden")
+            assert(bar.VisibleInHierarchy, "full hp bar hidden")
         end
     end
     assert(ownCount > 0 and enemyCount > 0, "both sides must be visible")
+    assert(not isvalid(_EntityService:GetEntityByPath("/ui/BattleGroup/HealthBars")), "obsolete screen hp UI remains")
     local home = map:GetChildByName("ViewAvatar_1")
     local away = map:GetChildByName("ViewAvatar_2")
     assert(isvalid(home) and isvalid(away), "spectator avatars missing")
