@@ -1,9 +1,10 @@
 @Component
 script BattleHPBar extends Component
 	@ExecSpace("ClientOnly")
-	method void DestroyWorldBar()
-		-- Remove the client-owned hierarchy without touching the actor.
-		if isvalid(self._T.worldAnchor) then self._T.worldAnchor:Destroy() end
+	method void HideWorldBar()
+		-- Hide the authored hierarchy; its lifetime belongs to the actor.
+		local anchor = self.Entity:GetChildByName("HPAnchor")
+		if isvalid(anchor) then anchor:SetVisible(false, false, false) end
 		self._T.worldAnchor = nil
 		self._T.worldBar = nil
 		self._T.worldRatio = nil
@@ -14,7 +15,7 @@ script BattleHPBar extends Component
 		-- Keep authored model scale independent of the actor's scale and facing.
 		local player = _UserService.LocalPlayer
 		if not isvalid(player) or player.CurrentMap ~= self.Entity.CurrentMap then
-			self:DestroyWorldBar()
+			self:HideWorldBar()
 			return
 		end
 		local geometry = _BattleUIController:GetHealthBarGeometry(unit.StandAnimationRUID)
@@ -26,20 +27,14 @@ script BattleHPBar extends Component
 		local anchor = self._T.worldAnchor
 		local bar = self._T.worldBar
 		if not isvalid(anchor) or not isvalid(bar) then
-			self:DestroyWorldBar()
-			local map = self.Entity.CurrentMap
-			anchor = _SpawnService:SpawnByModelId("battlehpanchor", "HPAnchor", Vector3(0, 0, 0), map)
+			anchor = self.Entity:GetChildByName("HPAnchor")
 			if not isvalid(anchor) then return end
+			bar = anchor:GetChildByName("HealthBar")
+			if not isvalid(bar) then return end
 			self._T.worldAnchor = anchor
-			if not anchor:AttachTo(self.Entity) then self:DestroyWorldBar(); return end
-			bar = _SpawnService:SpawnByModelId("battleworldhpbar", "HealthBar", Vector3(0, 0, 0), map)
-			if not isvalid(bar) then self:DestroyWorldBar(); return end
 			self._T.worldBar = bar
-			local authoredScale = bar.TransformComponent.Scale
-			if not bar:AttachTo(anchor) then bar:Destroy(); self:DestroyWorldBar(); return end
-			bar.TransformComponent.Position = Vector3(0, 0, 0)
-			bar.TransformComponent.Scale = authoredScale
-			log("[VRF][BattleHPBar] WORLD_CREATE " .. self.Entity.Name)
+			self._T.worldRatio = nil
+			log("[VRF][BattleHPBar] WORLD_BIND " .. self.Entity.Name)
 		end
 		local center = geometry.centerX
 		if self.Entity.SpriteRendererComponent.FlipX then center = -center end
@@ -173,7 +168,7 @@ script BattleHPBar extends Component
 		local map = self.Entity.CurrentMap
 		local session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
 		if isvalid(session) and session.RequireMatchedFormations then
-			self:DestroyWorldBar()
+			self:HideWorldBar()
 			local view = map:GetComponent("script.BattleView")
 			local mine = isvalid(view) and view:GetLocalFaction() or ""
 			local display = mine ~= "" and view:GetVisual(self.Entity) or nil
@@ -189,14 +184,14 @@ script BattleHPBar extends Component
 			self:UpdateWorldBar(unit)
 		else
 			self:DestroyScreenBar()
-			self:DestroyWorldBar()
+			self:HideWorldBar()
 		end
 	end
 
 	@ExecSpace("ClientOnly")
 	method void OnEndPlay()
-		-- Destroy the client-only bar with its actor.
+		-- Release screen UI and hide the actor-owned world bar.
 		self:DestroyScreenBar()
-		self:DestroyWorldBar()
+		self:HideWorldBar()
 	end
 end
