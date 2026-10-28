@@ -1,6 +1,12 @@
 @Component
 script BattleHPBar extends Component
 	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		-- Keep the authored preview hidden until live health is ready.
+		self:HideWorldBar()
+	end
+
+	@ExecSpace("ClientOnly")
 	method void HideWorldBar()
 		-- Hide the authored hierarchy; its lifetime belongs to the actor.
 		local anchor = self.Entity:GetChildByName("HPAnchor")
@@ -21,7 +27,7 @@ script BattleHPBar extends Component
 		local geometry = _BattleUIController:GetHealthBarGeometry(unit.StandAnimationRUID)
 		local scale = self.Entity.TransformComponent.Scale
 		if geometry == nil or scale.x == 0 or scale.y == 0 then
-			if isvalid(self._T.worldAnchor) then self._T.worldAnchor:SetVisible(false, false, false) end
+			self:HideWorldBar()
 			return
 		end
 		local anchor = self._T.worldAnchor
@@ -31,6 +37,8 @@ script BattleHPBar extends Component
 			if not isvalid(anchor) then return end
 			bar = anchor:GetChildByName("HealthBar")
 			if not isvalid(bar) then return end
+			local preview = bar:GetChildByName("EditorPreview")
+			if isvalid(preview) then preview:SetVisible(false, false, false) end
 			self._T.worldAnchor = anchor
 			self._T.worldBar = bar
 			self._T.worldRatio = nil
