@@ -25,22 +25,32 @@ local ok, detail = pcall(function()
         assert(difference < 0.35, "position diverged " .. source.Name)
         assert(not isvalid(visual.KinematicbodyComponent) and not isvalid(visual.TriggerComponent), "visual has combat components")
         assert(source.SpriteRendererComponent.Color.a == 0, "original sprite still visible")
-        local fill = visual:GetChildByName("HPBarFill")
-        assert(isvalid(fill), "hp fill missing")
-        local color = fill.SpriteRendererComponent.Color
+        local bar = _EntityService:GetEntityByPath("/ui/BattleGroup/HealthBars/HP_" .. source.Name)
+        assert(isvalid(bar), "screen hp bar missing " .. source.Name)
+        local fill = bar:GetChildByName("Img_Value")
+        assert(isvalid(fill), "screen hp fill missing " .. source.Name)
+        local fillRenderer = fill.SpriteGUIRendererComponent
+        local fillTransform = fill.UITransformComponent
+        assert(isvalid(fillRenderer) and isvalid(fillTransform), "screen hp fill components missing " .. source.Name)
+        local color = fillRenderer.Color
         local own = unit.Faction == mine
         if own then
             ownCount = ownCount + 1
-            assert(not (color.r == 1 and color.g == 0 and color.b == 0), "own bar painted red")
+            assert(color.g > color.r, "own bar is not green")
         else
             enemyCount = enemyCount + 1
-            assert(color.r == 1 and color.g == 0 and color.b == 0, "enemy bar is not red")
+            assert(color.r > color.g, "enemy bar is not red")
         end
+        local ratio = unit.MaxHp > 0 and math.max(0, math.min(1, unit.Hp / unit.MaxHp)) or 0
+        local progress = bar:GetComponent("script.UIResizableProgressBar")
+        assert(isvalid(progress), "screen hp progress missing " .. source.Name)
+        assert(fill.Enable == (ratio > 0), "hp fill visibility mismatch " .. source.Name)
+        local expectedWidth = progress.OriginalWidth * ratio
+        assert(math.abs(fillTransform.RectSize.x - expectedWidth) < 0.5, "hp fill width mismatch " .. source.Name)
         if unit.Hp >= unit.MaxHp and unit.Hp > 0 then
             fullCount = fullCount + 1
-            assert(fill.Visible ~= false, "full hp bar hidden")
+            assert(bar.Enable and fill.Enable, "full hp bar hidden")
         end
-        assert(fill.TransformComponent.Scale.y > 0, "hp bar flipped vertically")
     end
     assert(ownCount > 0 and enemyCount > 0, "both sides must be visible")
     local home = map:GetChildByName("ViewAvatar_1")
