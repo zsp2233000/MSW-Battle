@@ -1,6 +1,85 @@
 @Component
 script BattleHPBar extends Component
 	@ExecSpace("ClientOnly")
+	method void DestroyWorldBar()
+		-- Remove the client-owned hierarchy without touching the actor.
+		if isvalid(self._T.worldAnchor) then self._T.worldAnchor:Destroy() end
+		self._T.worldAnchor = nil
+		self._T.worldBar = nil
+		self._T.worldRatio = nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void UpdateWorldBar(any unit)
+		-- Keep authored model scale independent of the actor's scale and facing.
+		local player = _UserService.LocalPlayer
+		if not isvalid(player) or player.CurrentMap ~= self.Entity.CurrentMap then
+			self:DestroyWorldBar()
+			return
+		end
+		local geometry = _BattleUIController:GetHealthBarGeometry(unit.StandAnimationRUID)
+		local scale = self.Entity.TransformComponent.Scale
+		if geometry == nil or scale.x == 0 or scale.y == 0 then
+			if isvalid(self._T.worldAnchor) then self._T.worldAnchor:SetVisible(false, false, false) end
+			return
+		end
+		local anchor = self._T.worldAnchor
+		local bar = self._T.worldBar
+		if not isvalid(anchor) or not isvalid(bar) then
+			self:DestroyWorldBar()
+			local map = self.Entity.CurrentMap
+			anchor = _SpawnService:SpawnByModelId("battlehpanchor", "HPAnchor", Vector3(0, 0, 0), map)
+			if not isvalid(anchor) then return end
+			self._T.worldAnchor = anchor
+			if not anchor:AttachTo(self.Entity) then self:DestroyWorldBar(); return end
+			bar = _SpawnService:SpawnByModelId("battleworldhpbar", "HealthBar", Vector3(0, 0, 0), map)
+			if not isvalid(bar) then self:DestroyWorldBar(); return end
+			self._T.worldBar = bar
+			local authoredScale = bar.TransformComponent.Scale
+			if not bar:AttachTo(anchor) then bar:Destroy(); self:DestroyWorldBar(); return end
+			bar.TransformComponent.Position = Vector3(0, 0, 0)
+			bar.TransformComponent.Scale = authoredScale
+			log("[VRF][BattleHPBar] WORLD_CREATE " .. self.Entity.Name)
+		end
+		local center = geometry.centerX
+		if self.Entity.SpriteRendererComponent.FlipX then center = -center end
+		anchor.TransformComponent.Position = Vector3(center, geometry.top + 0.15 / math.abs(scale.y), 0)
+		anchor.TransformComponent.Scale = Vector3(1 / scale.x, 1 / scale.y, 1)
+		anchor:SetVisible(true, false, false)
+		local pixel = bar.PixelRendererComponent
+		if not isvalid(pixel) then return end
+		local ratio = 0
+		if unit.MaxHp > 0 then ratio = math.max(0, math.min(1, unit.Hp / unit.MaxHp)) end
+		local own = unit.Faction == "PLAYER"
+		if self._T.worldRatio == ratio and self._T.worldOwn == own then return end
+		-- shortcut: 60x10 redraws only on HP/side changes; profile before increasing unit counts.
+		local colors = {}
+		local filled = math.floor(56 * ratio)
+		local shades = { 0.45, 0.7, 0.9, 1, 0.95, 1 }
+		for y = 1, 10 do
+			for x = 1, 60 do
+				local color = Color(0.12, 0.13, 0.15, 1)
+				if x >= 2 and x <= 59 and y >= 2 and y <= 9 then
+					color = y == 9 and Color(0.96, 0.97, 0.98, 1) or Color(0.55, 0.58, 0.62, 1)
+				end
+				if x >= 3 and x <= 58 and y >= 3 and y <= 8 then
+					color = Color(0, 0, 0, 1)
+					if x < 3 + filled then
+						local light = shades[y - 2]
+						local other = y == 8 and 0.3 or 0.04
+						color = own and Color(other, light, other, 1) or Color(light, other, other, 1)
+					end
+				end
+				table.insert(colors, color)
+			end
+		end
+		pixel:ResetWithColors(60, 10, colors)
+		self._T.worldRatio = ratio
+		self._T.worldOwn = own
+		log("[VRF][BattleHPBar] WORLD_HP " .. self.Entity.Name .. " ratio=" .. tostring(ratio))
+	end
+
+	@ExecSpace("ClientOnly")
 	method void DestroyScreenBar()
 		-- Remove only the screen-space presentation.
 		if isvalid(self._T.screenBar) then self._T.screenBar:Destroy() end
@@ -94,6 +173,7 @@ script BattleHPBar extends Component
 		local map = self.Entity.CurrentMap
 		local session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
 		if isvalid(session) and session.RequireMatchedFormations then
+			self:DestroyWorldBar()
 			local view = map:GetComponent("script.BattleView")
 			local mine = isvalid(view) and view:GetLocalFaction() or ""
 			local display = mine ~= "" and view:GetVisual(self.Entity) or nil
@@ -105,9 +185,11 @@ script BattleHPBar extends Component
 			return
 		end
 		if isvalid(session) and isvalid(unit) then
-			self:UpdateScreenBar(unit, self.Entity, unit.Faction == "PLAYER")
+			self:DestroyScreenBar()
+			self:UpdateWorldBar(unit)
 		else
 			self:DestroyScreenBar()
+			self:DestroyWorldBar()
 		end
 	end
 
@@ -115,5 +197,6 @@ script BattleHPBar extends Component
 	method void OnEndPlay()
 		-- Destroy the client-only bar with its actor.
 		self:DestroyScreenBar()
+		self:DestroyWorldBar()
 	end
 end
