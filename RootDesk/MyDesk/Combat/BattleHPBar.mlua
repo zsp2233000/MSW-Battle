@@ -106,8 +106,8 @@ script BattleHPBar extends Component
 			return
 		end
 		if session.RequireMatchedFormations then
-			local original = self.Entity:GetChildByName("HPAnchor")
-			if isvalid(original) then original:SetVisible(false, false, false) end
+			local authoredAnchor = self.Entity:GetChildByName("HPAnchor")
+			if isvalid(authoredAnchor) then authoredAnchor:SetVisible(false, false, false) end
 			local view = map:GetComponent("script.BattleView")
 			local mine = isvalid(view) and view:GetLocalFaction() or ""
 			local display = mine ~= "" and view:GetVisual(self.Entity) or nil
