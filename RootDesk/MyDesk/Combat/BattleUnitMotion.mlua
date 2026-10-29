@@ -47,6 +47,7 @@ script BattleUnitMotion extends Component
         local body = self.Entity.KinematicbodyComponent
         if not isvalid(attackerUnit) or not isvalid(attackerTransform) or not isvalid(defenderTransform)
             or not isvalid(body) or attackerUnit.Faction == unit.Faction or distance == nil or distance <= 0 then return false end
+        if unit.AttackPoiseActive then return false end
         local from = attackerTransform.WorldPosition
         local current = defenderTransform.WorldPosition
         local dx = current.x - from.x
@@ -274,6 +275,17 @@ script BattleUnitMotion extends Component
     method void AdvanceKnockback(number delta)
         -- Apply the validated knockback step through the kinematic body's collision-aware velocity.
         local unit = self._T.unit
+        if unit.AttackPoiseActive then
+            if self._T.knockbackRemaining > 0 then
+                local body = self.Entity:GetComponent("KinematicbodyComponent")
+                if isvalid(body) then body.MoveVelocity = Vector2(0, 0) end
+                self._T.knockbackStepX = 0
+                self._T.knockbackStepY = 0
+                self._T.knockbackRemaining = 0
+                unit.KnockbackActive = false
+            end
+            return
+        end
         if unit.IsDead or self._T.knockbackRemaining <= 0 or delta <= 0 then return end
         local kinematic = self.Entity:GetComponent("KinematicbodyComponent")
         local transform = self.Entity:GetComponent("TransformComponent")

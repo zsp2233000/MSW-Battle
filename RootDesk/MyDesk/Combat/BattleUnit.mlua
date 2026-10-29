@@ -26,6 +26,7 @@ script BattleUnit extends Component
     @Sync property integer HitEffectSerial = 0
     @Sync property string LastHitEffectRUID = ""
     @Sync property boolean KnockbackActive = false
+    @Sync property boolean AttackPoiseActive = false
 
     property number MoveSpeed = 2.0
     property integer AttackDamage = 35
@@ -56,6 +57,8 @@ script BattleUnit extends Component
         self._T.deathAnimationFrameCount = 0
         self._T.deathAnimationCompletionSource = ""
         self.KnockbackActive = false
+        self.AttackPoiseActive = false
+        self._T.attackPoiseRemaining = 0
         self._T.hitEffectRUID = ""
         if self.Hp <= 0 then self.Hp = self.MaxHp end
         self.CombatState = "IDLE"
@@ -103,6 +106,8 @@ script BattleUnit extends Component
         self.CombatState = "IDLE"
         self._T.displayName = displayName
         self.KnockbackActive = false
+        self.AttackPoiseActive = false
+        self._T.attackPoiseRemaining = 0
         self._T.attackConfigured = false
         if not isvalid(self._T.attackExecution) then
             log_error("[M1][BattleUnit] attack composition missing for " .. unitKind)
@@ -152,8 +157,20 @@ script BattleUnit extends Component
     @ExecSpace("ServerOnly")
     method void CancelAttack()
         -- Cancel any pending attack work when the unit enters the terminal result state.
+        self.AttackPoiseActive = false
+        self._T.attackPoiseRemaining = 0
         if not self:HasAttackExecution() then return end
         self._T.attackExecution:Cancel("ACTOR_STOP")
+    end
+
+    @ExecSpace("ServerOnly")
+    method void BeginAttackPoise()
+        -- Keep damage reactions from replacing a committed attack through its full animation.
+        if self.AttackAnimationDuration <= 0 then return end
+        self._T.attackPoiseRemaining = self.AttackAnimationDuration
+        self.AttackPoiseActive = true
+        log("[VRF][BattleUnit] ATTACK_POISE_START " .. self.Entity.Name
+            .. ", duration=" .. tostring(self.AttackAnimationDuration))
     end
 
     method boolean IsAlive()
@@ -203,7 +220,14 @@ script BattleUnit extends Component
 
     @ExecSpace("ServerOnly")
     method void Tick(number delta)
-        -- Advance all owned motion before the session advances attack execution.
+        -- Advance attack poise before the session advances attack execution.
+        if self._T.attackPoiseRemaining > 0 then
+            self._T.attackPoiseRemaining = math.max(0, self._T.attackPoiseRemaining - delta)
+            if self._T.attackPoiseRemaining == 0 then
+                self.AttackPoiseActive = false
+                log("[VRF][BattleUnit] ATTACK_POISE_END " .. self.Entity.Name)
+            end
+        end
         if isvalid(self._T.motion) then self._T.motion:Advance(delta) end
     end
 
@@ -229,7 +253,7 @@ script BattleUnit extends Component
         local session = self:GetSession()
         if isvalid(session) then session:EmitPresentation("DAMAGE", attacker, self.Entity, amount) end
         if self.Hp > 0 then
-            if allowHitStop then
+            if allowHitStop and self.AttackPoiseActive ~= true then
                 if isvalid(self._T.motion) then self._T.motion:OnResolvedHit() end
             end
             return
@@ -314,10 +338,16 @@ script BattleUnit extends Component
         if stateChanged then self._T.lastPresentationState = self.CombatState end
         local damageChanged = self.DamageTakenSerial ~= self._T.lastAnimationDamageSerial
         local attackChanged = self.AttackSerial ~= self._T.lastAnimationAttackSerial
+        local attackPresentationActive = self._T.presentationAction == "ATTACK"
+            and self._T.presentationDeadline ~= nil and self._T.presentationDeadline > _UtilLogic.ElapsedSeconds
         self._T.lastAnimationDamageSerial = self.DamageTakenSerial
         self._T.lastAnimationAttackSerial = self.AttackSerial
 
-        if damageChanged or (self.CombatState == "ON_HIT" and stateChanged) then
+        if self.AttackPoiseActive == true or attackPresentationActive then
+            if attackChanged and self.UnitKind ~= "TANK" then
+                self:PlayPresentationAnimation(self.AttackAnimationRUID, "ATTACK", true)
+            end
+        elseif damageChanged or (self.CombatState == "ON_HIT" and stateChanged) then
             self:PlayPresentationAnimation(self.HitAnimationRUID, "ON_HIT", damageChanged)
         elseif self._T.presentationAction == "ON_HIT" then
             -- Keep the hit clip visible while server movement continues during knockback.

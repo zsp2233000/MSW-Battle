@@ -1,57 +1,129 @@
 @Component
 script BattleHPBar extends Component
-	-- Match BarWidth to the full bar width configured in Maker.
-	property number BarWidth = 0.96
-	property number FillWidthRatio = 0.90625
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		-- Keep the authored preview hidden until live health is ready.
+		self:HideWorldBar()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HideWorldBar()
+		-- The actor owns its authored hierarchy; mirrored displays own only a local copy.
+		if self._T.worldDisplay ~= nil and self._T.worldDisplay ~= self.Entity and isvalid(self._T.worldAnchor) then
+			self._T.worldAnchor:Destroy()
+		end
+		local anchor = self.Entity:GetChildByName("HPAnchor")
+		if isvalid(anchor) then anchor:SetVisible(false, false, false) end
+		self._T.worldDisplay = nil
+		self._T.worldAnchor = nil
+		self._T.worldBar = nil
+		self._T.worldRatio = nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void UpdateWorldBar(any unit, Entity display, boolean own)
+		-- Keep authored model scale independent of the actor's scale and facing.
+		local player = _UserService.LocalPlayer
+		if not isvalid(player) or not isvalid(display) or player.CurrentMap ~= display.CurrentMap then
+			self:HideWorldBar()
+			return
+		end
+		local geometry = _BattleUIController:GetHealthBarGeometry(unit.StandAnimationRUID)
+		local scale = display.TransformComponent.Scale
+		if geometry == nil or scale.x == 0 or scale.y == 0 then
+			self:HideWorldBar()
+			return
+		end
+		if self._T.worldDisplay ~= display then self:HideWorldBar() end
+		local anchor = self._T.worldAnchor
+		local bar = self._T.worldBar
+		if not isvalid(anchor) or not isvalid(bar) then
+			self:HideWorldBar()
+			anchor = self.Entity:GetChildByName("HPAnchor")
+			if not isvalid(anchor) then return end
+			if display ~= self.Entity then
+				anchor = _SpawnService:SpawnByEntity(anchor, "HPAnchor", Vector3(0, 0, 0), display, true)
+				if not isvalid(anchor) then return end
+			end
+			self._T.worldAnchor = anchor
+			self._T.worldDisplay = display
+			bar = anchor:GetChildByName("HealthBar")
+			if not isvalid(bar) then self:HideWorldBar(); return end
+			local preview = bar:GetChildByName("EditorPreview")
+			if isvalid(preview) then preview:SetVisible(false, false, false) end
+			self._T.worldBar = bar
+			self._T.worldRatio = nil
+			log("[VRF][BattleHPBar] WORLD_BIND " .. self.Entity.Name .. " display=" .. display.Name)
+		end
+		local center = geometry.centerX
+		if display.SpriteRendererComponent.FlipX then center = -center end
+		anchor.TransformComponent.Position = Vector3(center, geometry.top + 0.15 / math.abs(scale.y), 0)
+		anchor.TransformComponent.Scale = Vector3(1 / scale.x, 1 / scale.y, 1)
+		anchor:SetVisible(display.EnabledInHierarchy and display.VisibleInHierarchy, false, false)
+		local pixel = bar.PixelRendererComponent
+		if not isvalid(pixel) then return end
+		local ratio = 0
+		if unit.MaxHp > 0 then ratio = math.max(0, math.min(1, unit.Hp / unit.MaxHp)) end
+		if self._T.worldRatio == ratio and self._T.worldOwn == own then return end
+		-- shortcut: 60x10 redraws only on HP/side changes; profile before increasing unit counts.
+		local colors = {}
+		local filled = math.floor(56 * ratio)
+		local shades = { 0.45, 0.7, 0.9, 1, 0.95, 1 }
+		for y = 1, 10 do
+			for x = 1, 60 do
+				local color = Color(0.12, 0.13, 0.15, 1)
+				if x >= 2 and x <= 59 and y >= 2 and y <= 9 then
+					color = y == 9 and Color(0.96, 0.97, 0.98, 1) or Color(0.55, 0.58, 0.62, 1)
+				end
+				if x >= 3 and x <= 58 and y >= 3 and y <= 8 then
+					color = Color(0, 0, 0, 1)
+					if x < 3 + filled then
+						local light = shades[y - 2]
+						local other = y == 8 and 0.3 or 0.04
+						color = own and Color(other, light, other, 1) or Color(light, other, other, 1)
+					end
+				end
+				table.insert(colors, color)
+			end
+		end
+		pixel:ResetWithColors(60, 10, colors)
+		self._T.worldRatio = ratio
+		self._T.worldOwn = own
+		log("[VRF][BattleHPBar] WORLD_HP " .. self.Entity.Name .. " ratio=" .. tostring(ratio) .. " own=" .. tostring(own))
+	end
 
 	@ExecSpace("ClientOnly")
 	method void OnUpdate(number delta)
-		-- Resolve dynamic children once, then follow the owning unit's synced health.
+		-- Resolve the owning unit once, then follow its synced health.
 		if not isvalid(self._T.battleUnit) then
 			self._T.battleUnit = self.Entity:GetComponent("script.BattleUnit")
 		end
-		if not isvalid(self._T.fillTransform) then
-			local fillEntity = self.Entity:GetChildByName("HPBarFill")
-			if isvalid(fillEntity) then
-				self._T.fillTransform = fillEntity.TransformComponent
-				self._T.fillFullScaleX = nil
-				self._T.lastRatio = nil
-				self._T.lastFacingSign = nil
-			end
-		end
-		local battleUnit = self._T.battleUnit
-		local fillTransform = self._T.fillTransform
-		if not isvalid(battleUnit) or not isvalid(fillTransform) then return end
-
-		local ratio = 0
-		if battleUnit.MaxHp > 0 then
-			ratio = battleUnit.Hp / battleUnit.MaxHp
-		end
-		ratio = math.max(0, math.min(1, ratio))
-
-		local facingSign = 1
-		if self.Entity.TransformComponent.Scale.x < 0 then facingSign = -1 end
-		if self._T.lastRatio == ratio and self._T.lastFacingSign == facingSign then
+		local unit = self._T.battleUnit
+		local map = self.Entity.CurrentMap
+		local session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
+		if not isvalid(session) or not isvalid(unit) or (unit.Faction ~= "PLAYER" and unit.Faction ~= "ENEMY") then
+			self:HideWorldBar()
 			return
 		end
-
-		local fillScale = fillTransform.Scale
-		local fillPosition = fillTransform.Position
-		if self._T.fillFullScaleX == nil then
-			self._T.fillFullScaleX = fillScale.x
-			self._T.fillStartX = fillPosition.x
+		if session.RequireMatchedFormations then
+			local authoredAnchor = self.Entity:GetChildByName("HPAnchor")
+			if isvalid(authoredAnchor) then authoredAnchor:SetVisible(false, false, false) end
+			local view = map:GetComponent("script.BattleView")
+			local mine = isvalid(view) and view:GetLocalFaction() or ""
+			local display = mine ~= "" and view:GetVisual(self.Entity) or nil
+			if isvalid(display) then
+				self:UpdateWorldBar(unit, display, unit.Faction == mine)
+			else
+				self:HideWorldBar()
+			end
+			return
 		end
+		self:UpdateWorldBar(unit, self.Entity, unit.Faction == "PLAYER")
+	end
 
-		-- Cancel the actor's horizontal mirror so the gauge keeps its screen-space left edge.
-		fillScale.x = self._T.fillFullScaleX * ratio * facingSign
-		fillTransform.Scale = fillScale
-
-		-- Anchor the left edge so damage drains the visible fill from right to left.
-		fillPosition.x = (self._T.fillStartX - self.BarWidth * self.FillWidthRatio * (1 - ratio) * 0.5) * facingSign
-		fillTransform.Position = fillPosition
-		self._T.lastRatio = ratio
-		self._T.lastFacingSign = facingSign
-		log("[M1][BattleHPBar] FILL " .. self.Entity.Name .. ", hp=" .. tostring(battleUnit.Hp)
-			.. "/" .. tostring(battleUnit.MaxHp) .. ", ratio=" .. tostring(ratio))
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		-- Release the local copy and hide the actor-owned world bar.
+		self:HideWorldBar()
 	end
 end

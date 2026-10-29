@@ -96,6 +96,9 @@ script BattleAttackComposition extends Component
             return
         end
         self._T.cooldownRemaining = math.max(0, (self._T.cooldownRemaining or 0) - delta)
+        if self._T.profile ~= nil and self._T.profile.MonsterType == "TANK" and isvalid(self._T.adapter) then
+            self._T.adapter:AdvanceContactCooldowns(delta)
+        end
         if self._T.pendingTarget == nil then return end
         local target = self._T.pendingTarget
         if not isvalid(self:GetActiveSession()) or not isvalid(target) then
@@ -146,6 +149,7 @@ script BattleAttackComposition extends Component
         local session = self:GetActiveSession()
         if not isvalid(unit) or not isvalid(session) then return end
         unit:FaceTarget(target)
+        if eventName == "ATTACK_START" then unit:BeginAttackPoise() end
         unit.AttackSerial = unit.AttackSerial + 1
         unit:PlayCombatSound(self._T.profile.AttackSoundRUID)
         session:EmitPresentation(eventName, self.Entity, target, self._T.profile.AttackDamage)

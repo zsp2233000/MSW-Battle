@@ -6,16 +6,19 @@ script UIResizableProgressBar extends UIProgressBar
 
 	@ExecSpace("ClientOnly")
 	method boolean Init()
+		-- Resolve the fill and capture its authored width before base initialization updates it.
+		if self.IsInitialized then return false end
+		local imgValue = self.Img_Value
+		if imgValue == nil then
+			local child = self.Entity:GetChildByName("Img_Value")
+			if isvalid(child) then imgValue = child.SpriteGUIRendererComponent end
+		end
+		if not isvalid(imgValue) then return false end
+		self.Img_Value = imgValue
+		self.OriginalWidth = imgValue.Entity.UITransformComponent.RectSize.x
 		if not __base:Init() then
 			return false
 		end
-		
-		local imgValue = self.Img_Value
-		if imgValue == nil then
-			return
-		end
-		
-		self.OriginalWidth = imgValue.Entity.UITransformComponent.RectSize.x
 		self:UpdateImage()
 		self:UpdateText()
 		

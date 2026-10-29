@@ -39,11 +39,3 @@ test("each successful hit keeps its damage event and target sound", () => {
   assert.match(unit, /@ExecSpace\("Multicast"\)\s+method void PlayCombatSound\(string soundRUID\)/);
   assert.doesNotMatch(unit, /lastPresentation(?:Attack|Damage)Serial/);
 });
-
-test("world HP fill uses synced HP and cached entity references", () => {
-  const bar = read("BattleHPBar.mlua");
-  assert.match(bar, /battleUnit\.Hp \/ battleUnit\.MaxHp/);
-  assert.match(bar, /if not isvalid\(self\._T\.battleUnit\) then/);
-  assert.match(bar, /if not isvalid\(self\._T\.fillTransform\) then/);
-  assert.match(bar, /fillScale\.x = self\._T\.fillFullScaleX \* ratio/);
-});

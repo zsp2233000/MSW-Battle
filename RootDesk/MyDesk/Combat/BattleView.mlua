@@ -62,7 +62,7 @@ script BattleView extends Component
                 record = self:CreateVisual(source)
                 if record ~= nil then self._T.visuals[source.Id] = record end
             end
-            if record ~= nil then self:UpdateVisual(record, unit, sign, mine) end
+            if record ~= nil then self:UpdateVisual(record, unit, sign) end
         end
         for id, record in pairs(self._T.visuals) do
             if not present[id] then
@@ -81,21 +81,9 @@ script BattleView extends Component
             log("[VRF][BattleView] CREATE_FAILED " .. source.Name)
             return nil
         end
-        local fill = visual:GetChildByName("HPBarFill")
-        local gauge = source:GetComponent("script.BattleHPBar")
-        if not isvalid(gauge) or not isvalid(fill) then visual:Destroy(); return nil end
-        local record = { source = source, visual = visual, fill = fill,
+        local record = { source = source, visual = visual,
             color = source.SpriteRendererComponent.Color, clip = "", attack = -1, damage = -1,
-            fillScale = fill.TransformComponent.Scale, fillPosition = fill.TransformComponent.Position,
-            fillColor = fill.SpriteRendererComponent.Color,
-            barWidth = gauge.BarWidth, fillWidthRatio = gauge.FillWidthRatio,
-            hiddenChildren = {}, callbacks = {} }
-        for _, child in ipairs(source.Children:ToTable()) do
-            if child.Name == "HPBarBackground" or child.Name == "HPBarFill" then
-                table.insert(record.hiddenChildren, { entity = child, visible = child.Visible })
-                child:SetVisible(false, false, false)
-            end
-        end
+            callbacks = {} }
         local spawner = source:GetComponent("DamageSkinSpawnerComponent")
         if isvalid(spawner) then record.spawnerEnabled = spawner.Enable; spawner.Enable = false end
         local body = source.KinematicbodyComponent
@@ -111,8 +99,8 @@ script BattleView extends Component
     end
 
     @ExecSpace("ClientOnly")
-    method void UpdateVisual(any record, any unit, number sign, string mine)
-        -- Mirror position and facing independently so gauges stay upright on a positive parent scale.
+    method void UpdateVisual(any record, any unit, number sign)
+        -- Mirror position and facing independently without changing the authoritative unit.
         local source = record.source
         local visual = record.visual
         local position = source.TransformComponent.WorldPosition
@@ -121,7 +109,7 @@ script BattleView extends Component
         local scale = source.TransformComponent.Scale
         visual.TransformComponent.Scale = Vector3(math.abs(scale.x), math.abs(scale.y), math.abs(scale.z))
         visual.SpriteRendererComponent.FlipX = (scale.x * sign < 0) ~= source.SpriteRendererComponent.FlipX
-        visual:SetVisible(source.Visible, false, false)
+        visual:SetVisible(source.EnabledInHierarchy and source.VisibleInHierarchy, false, false)
         local clip = source.SpriteRendererComponent.SpriteRUID
         if record.clip ~= clip or record.attack ~= unit.AttackSerial or record.damage ~= unit.DamageTakenSerial then
             if visual.SpriteRendererComponent.SpriteRUID == clip and record.clip == clip then
@@ -131,18 +119,6 @@ script BattleView extends Component
             record.clip = clip
             record.attack = unit.AttackSerial
             record.damage = unit.DamageTakenSerial
-        end
-        local ratio = 0
-        if unit.MaxHp > 0 then ratio = math.max(0, math.min(1, unit.Hp / unit.MaxHp)) end
-        record.fill.TransformComponent.Scale = Vector3(record.fillScale.x * ratio, record.fillScale.y, record.fillScale.z)
-        record.fill.TransformComponent.Position = Vector3(record.fillPosition.x - record.barWidth * record.fillWidthRatio * (1 - ratio) * 0.5, record.fillPosition.y, record.fillPosition.z)
-        local own = unit.Faction == mine
-        if own then record.fill.SpriteRendererComponent.Color = record.fillColor
-        else record.fill.SpriteRendererComponent.Color = Color(1, 0, 0, 1) end
-        if record.ratio ~= ratio or record.own ~= own then
-            record.ratio = ratio
-            record.own = own
-            log("[VRF][BattleView] HP " .. source.Name .. " ratio=" .. tostring(ratio) .. " own=" .. tostring(own) .. " faction=" .. unit.Faction)
         end
     end
 
@@ -265,9 +241,6 @@ script BattleView extends Component
             if isvalid(spawner) and record.spawnerEnabled ~= nil then spawner.Enable = record.spawnerEnabled end
             local body = record.source.KinematicbodyComponent
             if isvalid(body) and record.shadowEnabled ~= nil then body.EnableShadow = record.shadowEnabled end
-            for _, child in ipairs(record.hiddenChildren) do
-                if isvalid(child.entity) then child.entity:SetVisible(child.visible, false, false) end
-            end
         end
         if isvalid(record.visual) then
             for _, entry in ipairs(record.callbacks) do record.visual:DisconnectEvent(entry.eventType, entry.callback) end

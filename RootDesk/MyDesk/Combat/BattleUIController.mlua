@@ -15,9 +15,67 @@ script BattleUIController extends Logic
     method void OnBeginPlay()
         -- One client owner presents whichever battle map the local player currently occupies.
         self._T.hudKey = ""
+        self._T.healthGeometry = {}
         self:SetEnabled(self.root, false)
         self:SetEnabled(self.configErrorGroup, false)
         log("[VRF][BattlePresentation] UI controller ready")
+    end
+
+    @ExecSpace("ClientOnly")
+    method any GetHealthBarGeometry(string ruid)
+        -- Load each standing resource once, and retry incomplete resources without blocking each frame.
+        if ruid == nil or ruid == "" then return nil end
+        local cache = self._T.healthGeometry
+        if cache == nil then return nil end
+        local entry = cache[ruid]
+        if entry == nil then entry = {}; cache[ruid] = entry end
+        if entry.geometry ~= nil then return entry.geometry end
+        local now = _UtilLogic.ElapsedSeconds
+        if entry.pending and now - entry.attempt < 5 then return nil end
+        if not entry.pending and entry.attempt ~= nil and now - entry.attempt < 1 then return nil end
+        entry.pending = true
+        entry.attempt = now
+        _ResourceService:PreloadAsync({ ruid }, function()
+            local ok, geometry = pcall(function()
+                local maximum = nil
+                local left = nil
+                local right = nil
+                local function include(sprite)
+                    if isvalid(sprite) and sprite.IsLoadComplete ~= true then
+                        sprite = _ResourceService:LoadSpriteAndWait(sprite.RUID)
+                    end
+                    if not isvalid(sprite) or sprite.IsLoadComplete ~= true or sprite.Width <= 0 or sprite.Height <= 0 or sprite.PixelPerUnit <= 0 then return false end
+                    local edge = (sprite.Height - sprite.PivotPixel.y) / sprite.PixelPerUnit
+                    if maximum == nil or edge > maximum then maximum = edge end
+                    local frameLeft = -sprite.PivotPixel.x / sprite.PixelPerUnit
+                    local frameRight = (sprite.Width - sprite.PivotPixel.x) / sprite.PixelPerUnit
+                    if left == nil or frameLeft < left then left = frameLeft end
+                    if right == nil or frameRight > right then right = frameRight end
+                    return true
+                end
+                local resourceType = _ResourceService:GetTypeAndWait(ruid)
+                if resourceType == ResourceType.AnimationClip then
+                    local clip = _ResourceService:LoadAnimationClipAndWait(ruid)
+                    if not isvalid(clip) or clip.IsLoadComplete ~= true then return nil end
+                    for _, frame in ipairs(clip.Frames:ToTable()) do
+                        if not include(frame.FrameSprite) then return nil end
+                    end
+                elseif resourceType == ResourceType.Sprite then
+                    if not include(_ResourceService:LoadSpriteAndWait(ruid)) then return nil end
+                end
+                if maximum == nil then return nil end
+                return { top = maximum, centerX = (left + right) * 0.5 }
+            end)
+            entry.pending = false
+            if ok and geometry ~= nil then
+                entry.geometry = geometry
+                log("[VRF][BattleHPBar] GEOMETRY ruid=" .. ruid .. " top=" .. tostring(geometry.top) .. " centerX=" .. tostring(geometry.centerX))
+            elseif not entry.loggedFailure then
+                entry.loggedFailure = true
+                log("[VRF][BattleHPBar] GEOMETRY_WAIT ruid=" .. ruid .. " detail=" .. tostring(geometry))
+            end
+        end)
+        return nil
     end
 
     @ExecSpace("ClientOnly")
