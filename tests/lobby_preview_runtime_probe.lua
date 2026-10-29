@@ -12,19 +12,17 @@ local ok, detail = pcall(function()
     assert(isvalid(field) and field.EnabledInHierarchy, 'saved active formation preview is visible')
     local originalSlot = lobby.Snapshot.editSlot
     local active = lobby.Snapshot.saved.activeSlot
-    local expected = active > 0 and lobby.Snapshot.saved.slots[tostring(active)].units or {}
-    local count = 0
+    local expected = lobby.Snapshot.saved.slots[tostring(originalSlot)].units
     for index = 1, 6 do
         local marker = lobby:Ui('Lobby/Command/Field/Unit' .. tostring(index))
         assert(isvalid(marker), 'authored preview marker')
-        assert(marker.Enable == (expected[index] ~= nil), 'saved active count, not selected draft')
+        assert(marker.Enable == (expected[index] ~= nil), 'selected saved count, not active group or draft')
         if marker.Enable then
             local portrait = marker:GetChildByName('Portrait', false)
             local pos = portrait.UITransformComponent.anchoredPosition
             assert(portrait.EnabledInHierarchy and pos.x == 0 and math.abs(pos.y) <= 24, 'monster image directly occupies its saved position')
             assert(not isvalid(marker:GetChildByName('Link', false)), 'no roster connector')
         end
-        if marker.Enable then count = count + 1 end
     end
     for first = 1, #expected do
         local a = lobby:Ui('Lobby/Command/Field/Unit' .. tostring(first))
@@ -41,10 +39,25 @@ local ok, detail = pcall(function()
         click('Lobby/Slots/Slot' .. tostring(slot))
         assert(await(function() return lobby.Snapshot.editSlot == slot end), 'connected selector')
         assert(lobby.Snapshot.saved.activeSlot == active, 'selection never activates')
+        local selectedUnits = lobby.Snapshot.saved.slots[tostring(slot)].units
+        assert(string.find(lobby:Ui('Lobby/Summary').TextGUIRendererComponent.Text, '第 ' .. tostring(slot) .. ' 組'), 'preview identifies selected group')
         local label = lobby:Ui('Lobby/Slots/Slot' .. tostring(slot)).TextGUIRendererComponent.Text
         assert(string.find(label, '編輯'), 'editing label')
         for index = 1, 6 do
-            assert(lobby:Ui('Lobby/Command/Field/Unit' .. tostring(index)).Enable == (index <= count), 'selection preserves preview')
+            local marker = lobby:Ui('Lobby/Command/Field/Unit' .. tostring(index))
+            assert(marker.Enable == (selectedUnits[index] ~= nil), 'selection changes preview to that group')
+            if selectedUnits[index] ~= nil then
+                for _, option in ipairs(lobby.Snapshot.options) do
+                    if option[1] == selectedUnits[index].monsterId then
+                        assert(marker:GetChildByName('Portrait', false).SpriteGUIRendererComponent.ImageRUID.DataId == 'thumbnail://' .. option[3], 'selected group monster identity')
+                    end
+                end
+            end
+        end
+        assert(lobby:Ui('Lobby/Command/Field/Empty').Enable == (#selectedUnits == 0), 'empty group clears previous portraits')
+        if active > 0 then
+            local title = _MatchProbeInput.root:GetChildByName('Title', true)
+            assert(await(function() return string.find(title.TextGUIRendererComponent.Text, '出戰第 ' .. tostring(active) .. ' 組') end), 'match title retains actual active group')
         end
     end
     wait(0.4) -- This is a single selection, not the new double-click shortcut.
@@ -64,6 +77,6 @@ local ok, detail = pcall(function()
     click('ReturnLobby')
     assert(await(function() return _UserService.LocalPlayer.CurrentMapName == 'formationlobby' end), 'POC return')
     assert(await(function() return field.EnabledInHierarchy end), 'lobby rendering restored after POC')
-    log('[VRF][LobbyPreview] PASS direct monster images; saved active positions; five selectors; preparation and POC round trips')
+    log('[VRF][LobbyPreview] PASS selected saved previews; empty groups clear; active unchanged; preparation and POC round trips')
 end)
 if not ok then log('[VRF][LobbyPreview] FAIL ' .. tostring(detail)) end

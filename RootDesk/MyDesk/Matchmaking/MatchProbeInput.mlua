@@ -214,6 +214,13 @@ script MatchProbeInput extends Logic
             end
         end
         local mode = Environment:IsMakerPlay() and "本機配對" or "線上配對"
+        local title = self.root:GetChildByName("Title", true)
+        if isvalid(title) then
+            local active = formation.saved ~= nil and formation.saved.activeSlot or 0
+            local ready = formation.loadState == "READY" or formation.loadState == "NEW"
+            local activeLabel = not ready and "出戰未確認" or (active > 0 and ("出戰第 " .. tostring(active) .. " 組") or "尚未設定出戰")
+            title.TextGUIRendererComponent.Text = (self.State == "IDLE" and "對戰指令｜" or "後續配對｜") .. activeLabel
+        end
         self.status.TextGUIRendererComponent.Text = mode .. "\n" .. text
         if self.AutoSaveNotice ~= "" then self.status.TextGUIRendererComponent.Text = self.status.TextGUIRendererComponent.Text .. "\n" .. self.AutoSaveNotice end
         local summary = self.root:GetChildByName("FixedSummary", true)

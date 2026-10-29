@@ -649,7 +649,7 @@ script FormationLobby extends Logic
             summary = "編輯第 " .. tostring(editSlot) .. " 組 / 已保存 " .. tostring(#saved.slots[tostring(editSlot)].units) .. " / 6"
                 .. "    後續出戰：" .. (saved.activeSlot > 0 and ("第 " .. tostring(saved.activeSlot) .. " 組") or "尚未選定")
         end
-        self:RenderActivePreview()
+        self:RenderLobbyPreview()
         self:SetText("Editor/Summary", summary)
         for index = 1, 5 do
             local key = tostring(index)
@@ -713,23 +713,29 @@ script FormationLobby extends Logic
     end
 
     @ExecSpace("ClientOnly")
-    method void RenderActivePreview()
-        -- Fit the saved roster into the viewport, retaining its relative positions and clearing portrait overlap.
+    method void RenderLobbyPreview()
+        -- Preview the selected saved slot while activation remains an independent server-owned choice.
         local state = self.Snapshot
         local saved = state.saved
         local active = saved ~= nil and saved.activeSlot or 0
-        local slot = saved ~= nil and saved.slots[tostring(active)] or nil
+        local selected = state.editSlot or 1
+        local slot = saved ~= nil and saved.slots[tostring(selected)] or nil
+        local info = state.slots ~= nil and state.slots[tostring(selected)] or nil
         local units = slot ~= nil and slot.units or {}
         local ready = state.loadState == "READY" or state.loadState == "NEW"
-        local summary = "出戰編隊 · 尚未選定"
-        local empty = "請前往整備，保存編隊並設為出戰"
+        local summary = "第 " .. tostring(selected) .. " 組 · 已保存 " .. tostring(#units) .. " / 6"
+        local empty = "本組尚無已保存編隊，雙擊組別或點選編隊整備開始配置"
         if not ready then
-            summary = "出戰編隊 · 等待資料確認"
+            summary = "編隊預覽 · 等待資料確認"
             empty = (state.loadState == "ERROR" or state.loadState == "CONFLICT")
-                and "讀取未完成，請重試讀取；已保存內容與草稿仍保留" or "正在讀取出戰編隊…"
-        elseif active > 0 then
-            summary = "出戰第 " .. tostring(active) .. " 組 · 已保存 " .. tostring(#units) .. " / 6"
-            if not self:HasValidActive() then summary = summary .. " · 需至整備修正" end
+                and "讀取未完成，請重試讀取；已保存內容與草稿仍保留" or "正在讀取編隊資料…"
+        else
+            summary = summary .. (selected == active and " · 出戰" or " · 預覽")
+            if #units > 0 and info ~= nil and not info.savedValid then summary = summary .. " · 需至整備修正" end
+            if info ~= nil and info.dirty then
+                summary = summary .. " · 有未保存草稿"
+                empty = "本組有未保存草稿，請進入編隊整備查看或保存"
+            end
         end
         self:SetText("Lobby/Summary", summary)
         self:SetText("Lobby/Command/Field/Empty", empty)

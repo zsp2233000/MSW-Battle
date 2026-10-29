@@ -8,7 +8,7 @@ node --test tests/*.test.cjs
 
 Runtime probes use the Maker server or client runtime, native `AttackComponent` / `HitEvent`, and `BattleSession`; JavaScript does not recreate combat.
 
-Cardgame lobby probes, isolated storage-fault setup, cleanup and visual acceptance limits are recorded in [Issue #48](../docs/Issue-48-Lobby.md). They cover saved active previews, five selectors, draft isolation, preparation travel, queue/cancel and failure states through the production UI and services.
+Cardgame lobby probes, isolated storage-fault setup, cleanup and visual acceptance limits are recorded in [Issue #48](../docs/Issue-48-Lobby.md). They cover selected saved previews, empty groups, independent active selection, five selectors, draft isolation, preparation travel, queue/cancel and failure states through the production UI and services.
 
 `formation_placement_runtime_probe.lua` verifies shared 0.3 spacing, fractional positions, mirroring, existing document encoding, and production deployment in `server_main`; it removes its deployed fixtures afterwards. `centered_terrain_runtime_probe.lua` checks the template, simulation and lobby terrain in the same Play session. The local contract suite compares every map's terrain and coordinate transform with `map/template.map` so inconsistent developer-authored maps fail verification.
 

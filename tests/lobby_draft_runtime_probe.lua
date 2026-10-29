@@ -15,23 +15,30 @@ local active = l.Snapshot.saved.activeSlot
 local other = active == 1 and 2 or 1
 local backups = {}
 local positions = {}
+local previewCount = 0
 local saved = _FormationSchema:EncodeDocument(l.Snapshot.saved)
 local function previewUnchanged()
     assert(_FormationSchema:EncodeDocument(l.Snapshot.saved) == saved, 'draft editing never saves or activates')
-    for index, position in ipairs(positions) do
+    for index = 1, 6 do
         local marker = l:Ui('Lobby/Command/Field/Unit' .. tostring(index))
-        local actual = marker.UITransformComponent.anchoredPosition
-        assert(marker.Enable and math.abs(actual.x - position.x) < 0.001 and math.abs(actual.y - position.y) < 0.001, 'preview remains saved active positions')
+        assert(marker.Enable == (index <= previewCount), 'draft does not replace selected saved count')
+        if index <= previewCount then
+            local position = positions[index]
+            local actual = marker.UITransformComponent.anchoredPosition
+            assert(math.abs(actual.x - position.x) < 0.001 and math.abs(actual.y - position.y) < 0.001, 'preview remains selected saved positions')
+        end
     end
 end
 local ok, detail = pcall(function()
     assert(l:HasValidActive() and _MatchProbeInput.State == 'IDLE', 'valid active lobby fixture')
-    for index = 1, #l.Snapshot.saved.slots[tostring(active)].units do
-        local pos = l:Ui('Lobby/Command/Field/Unit' .. tostring(index)).UITransformComponent.anchoredPosition
-        positions[index] = {x=pos.x, y=pos.y}
-    end
     for _, slot in ipairs({other, active}) do
         select(slot)
+        positions = {}
+        previewCount = #l.Snapshot.saved.slots[tostring(slot)].units
+        for index = 1, previewCount do
+            local pos = l:Ui('Lobby/Command/Field/Unit' .. tostring(index)).UITransformComponent.anchoredPosition
+            positions[index] = {x=pos.x, y=pos.y}
+        end
         backups[slot] = _FormationSchema:CopyUnits(l.Snapshot.draft)
         local version = l.Snapshot.draftVersion
         local units = slot == active and {} or {{monsterId=l.Snapshot.options[1][1], x=-5.25, y=0.65}}

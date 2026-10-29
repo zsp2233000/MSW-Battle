@@ -1,9 +1,9 @@
--- Client: real saved active roster; catches inherited white backgrounds and overlapping portraits.
+-- Client: select a saved group with at least two units; catches white backgrounds and portrait overlap.
 local ok, detail = pcall(function()
     local l = _FormationLobby
     for attempt = 1, 100 do if l:HasValidActive() then break end wait(0.1) end
     assert(l:HasValidActive(), 'valid saved active fixture')
-    local units = l.Snapshot.saved.slots[tostring(l.Snapshot.saved.activeSlot)].units
+    local units = l.Snapshot.saved.slots[tostring(l.Snapshot.editSlot)].units
     assert(#units >= 2, 'use the crowded saved formation shown in the bug report')
     local opaque, overlaps = 0, 0
     local rectangles = {}
