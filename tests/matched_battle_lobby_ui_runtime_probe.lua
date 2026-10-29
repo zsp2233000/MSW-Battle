@@ -1,10 +1,14 @@
 -- client, after return. Exercises the actual connected queue/cancel button through its native event.
 local ok, detail = pcall(function()
+    -- Map transitions settle on a later frame than CurrentMapName; wait for the native UI to update.
+    wait(0.2)
     for attempt = 1, 200 do
-        if _UserService.LocalPlayer.CurrentMapName == "formationlobby" and _MatchProbeInput.State == "IDLE" then break end
+        if _UserService.LocalPlayer.CurrentMapName == "formationlobby" and _MatchProbeInput.State == "IDLE"
+            and _MatchProbeInput.action.EnabledInHierarchy and _MatchProbeInput.action.ButtonComponent.Enable then break end
         wait(0.1)
     end
     assert(_UserService.LocalPlayer.CurrentMapName == "formationlobby" and _MatchProbeInput.State == "IDLE", "returned lobby is usable")
+    assert(_MatchProbeInput.action.EnabledInHierarchy and _MatchProbeInput.action.ButtonComponent.Enable, "queue action is ready after map transition")
     assert(_MatchProbeInput.action.TextGUIRendererComponent.Text == "開始配對", "queue action visible")
     _MatchProbeInput.action:SendEvent(ButtonClickEvent())
     for attempt = 1, 100 do if _MatchProbeInput.State == "QUEUED" then break end wait(0.1) end

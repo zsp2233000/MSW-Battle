@@ -559,6 +559,22 @@ script FormationLobby extends Logic
         local state = self.Snapshot
         local load = state.loadState or "LOADING"
         local writable = load == "READY" or load == "NEW"
+        local status = self:Ui("Status")
+        if isvalid(status) then
+            local anchor = inLobby and Vector2(0, 1) or Vector2(0.5, 0)
+            status.UITransformComponent.AnchorsMin = anchor
+            status.UITransformComponent.AnchorsMax = anchor
+            status.UITransformComponent.Pivot = anchor
+            status.UITransformComponent.anchoredPosition = inLobby and Vector2(344, -994) or Vector2(0, 12)
+            status.UITransformComponent.RectSize = inLobby and Vector2(936, 70) or Vector2(1600, 44)
+        end
+        local edit = self:Ui("Lobby/Edit")
+        if isvalid(edit) then edit.ButtonComponent.Enable = writable and not state.pending end
+        local retry = self:Ui("Retry")
+        if isvalid(retry) then
+            retry.UITransformComponent.anchoredPosition = inLobby and Vector2(530, -646) or Vector2(830, -136)
+            retry.ButtonComponent.Enable = not state.pending
+        end
         self:SetEnabled("Retry", (inLobby or inEditor) and (load == "ERROR" or load == "CONFLICT"))
         local labels = { UNSAVED = "未保存", SAVING = "儲存中", SAVED = "保存成功", FAILED = "儲存失敗" }
         local text = labels[state.saveState] or "讀取中"
@@ -599,7 +615,7 @@ script FormationLobby extends Logic
             summary = "編輯第 " .. tostring(editSlot) .. " 組 / 已保存 " .. tostring(#saved.slots[tostring(editSlot)].units) .. " / 6"
                 .. "    後續出戰：" .. (saved.activeSlot > 0 and ("第 " .. tostring(saved.activeSlot) .. " 組") or "尚未選定")
         end
-        self:SetText("Lobby/Summary", summary .. "\n草稿：" .. tostring(#units) .. " / 6（本次登入保留）")
+        self:RenderActivePreview()
         self:SetText("Editor/Summary", summary)
         for index = 1, 5 do
             local key = tostring(index)
@@ -619,6 +635,8 @@ script FormationLobby extends Logic
             end
             self:SetText("Lobby/Slots/Slot" .. key, label)
             self:SetText("Editor/Slots/Slot" .. key, label)
+            local selector = self:Ui("Lobby/Slots/Slot" .. key)
+            if isvalid(selector) then selector.ButtonComponent.Enable = writable and not state.pending end
         end
         self:SetText("Editor/Selection", self.SelectedUnit > 0 and ("移動單位 " .. tostring(self.SelectedUnit) .. "：點選新站位") or ("放置：" .. self:MonsterName(self.SelectedMonsterId)))
         for index = 1, 6 do
@@ -649,6 +667,73 @@ script FormationLobby extends Logic
                 end
             end
         end
+    end
+
+    @ExecSpace("ClientOnly")
+    method boolean HasValidActive()
+        -- Only confirmed server validity can enable a new queue request, regardless of the selected draft.
+        local state = self.Snapshot
+        local saved = state.saved
+        local info = saved ~= nil and state.slots ~= nil and state.slots[tostring(saved.activeSlot)] or nil
+        return (state.loadState == "READY" or state.loadState == "NEW") and info ~= nil and info.savedValid == true
+    end
+
+    @ExecSpace("ClientOnly")
+    method void RenderActivePreview()
+        -- Draw the saved active roster with one uniform scale so relative distances and directions stay true.
+        local state = self.Snapshot
+        local saved = state.saved
+        local active = saved ~= nil and saved.activeSlot or 0
+        local slot = saved ~= nil and saved.slots[tostring(active)] or nil
+        local units = slot ~= nil and slot.units or {}
+        local ready = state.loadState == "READY" or state.loadState == "NEW"
+        local summary = "出戰編隊 · 尚未選定"
+        local empty = "請前往整備，保存編隊並設為出戰"
+        if not ready then
+            summary = "出戰編隊 · 等待資料確認"
+            empty = (state.loadState == "ERROR" or state.loadState == "CONFLICT")
+                and "讀取未完成，請重試讀取；已保存內容與草稿仍保留" or "正在讀取出戰編隊…"
+        elseif active > 0 then
+            summary = "出戰第 " .. tostring(active) .. " 組 · 已保存 " .. tostring(#units) .. " / 6"
+            if not self:HasValidActive() then summary = summary .. " · 需至整備修正" end
+        end
+        self:SetText("Lobby/Summary", summary)
+        self:SetText("Lobby/Command/Field/Empty", empty)
+        self:SetEnabled("Lobby/Command/Field/Empty", not ready or #units == 0)
+        local bounds = _FormationMapLayout:Bounds()
+        local centerX = (bounds.minX + 0.5) / 2
+        local centerY = (bounds.minY + bounds.maxY) / 2
+        for index = 1, 6 do
+            local path = "Lobby/Command/Field/Unit" .. tostring(index)
+            local marker = self:Ui(path)
+            local entry = ready and units[index] or nil
+            if isvalid(marker) then
+                marker:SetEnable(entry ~= nil)
+                if entry ~= nil then
+                    local position = Vector2(-260 + (entry.x - centerX) * 20, (entry.y - centerY) * 20)
+                    marker.UITransformComponent.anchoredPosition = position
+                    self:SetText(path .. "/Name", tostring(index) .. ". " .. self:MonsterName(entry.monsterId))
+                    local portrait = self:Ui(path .. "/Portrait")
+                    local rowY = 140 - (index - 1) * 56
+                    local name = self:Ui(path .. "/Name")
+                    name.UITransformComponent.anchoredPosition = Vector2(300 - position.x, rowY - position.y)
+                    portrait.UITransformComponent.anchoredPosition = Vector2(80 - position.x, rowY - position.y)
+                    local line = self:Ui(path .. "/Link")
+                    local dx, dy = 48 - position.x, rowY - position.y
+                    line.UITransformComponent.RectSize = Vector2(math.sqrt(dx * dx + dy * dy), 1)
+                    line.UITransformComponent.UIRotation = Vector3(0, 0, math.atan(dy, dx) * 180 / math.pi)
+                    portrait:SetEnable(false)
+                    for _, option in ipairs(state.options or {}) do
+                        if option[1] == entry.monsterId then
+                            portrait.SpriteGUIRendererComponent.ImageRUID = DataRef("thumbnail://" .. option[3])
+                            portrait:SetEnable(true)
+                            break
+                        end
+                    end
+                end
+            end
+        end
+        log("[VRF][LobbyPreview] active=" .. tostring(active) .. " savedCount=" .. tostring(#units) .. " editSlot=" .. tostring(state.editSlot) .. " ready=" .. tostring(ready))
     end
 
     @ExecSpace("ClientOnly")

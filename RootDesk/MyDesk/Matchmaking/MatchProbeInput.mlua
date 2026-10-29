@@ -57,12 +57,29 @@ script MatchProbeInput extends Logic
             if isvalid(panel) then
                 -- Keep editor controls clear and stay below the platform's top-right menu.
                 local editor = map == "formationsim"
-                local anchor = editor and Vector2(1, 1) or Vector2(1, 0)
+                local lobby = map == "formationlobby"
+                local anchor = lobby and Vector2(0, 1) or (editor and Vector2(1, 1) or Vector2(1, 0))
                 panel.UITransformComponent.AnchorsMin = anchor
                 panel.UITransformComponent.AnchorsMax = anchor
                 panel.UITransformComponent.Pivot = anchor
-                panel.UITransformComponent.anchoredPosition = editor and Vector2(-24, -154) or Vector2(-24, 24)
+                panel.UITransformComponent.anchoredPosition = lobby and Vector2(1320, -210) or (editor and Vector2(-24, -154) or Vector2(-24, 24))
+                panel.UITransformComponent.RectSize = lobby and Vector2(520, 710) or Vector2(600, 290)
+                self.action.UITransformComponent.AlignmentOption = AlignmentType.BottomCenter
+                self.action.UITransformComponent.Pivot = Vector2(0.5, 0)
+                self.action.UITransformComponent.anchoredPosition = Vector2(0, lobby and 28 or 20)
+                self.action.UITransformComponent.RectSize = lobby and Vector2(464, 104) or Vector2(420, 88)
+                self.status.UITransformComponent.anchoredPosition = lobby and Vector2(32, -170) or Vector2(24, -20)
+                self.status.UITransformComponent.RectSize = lobby and Vector2(456, 160) or Vector2(552, 74)
+                local fixed = self.root:GetChildByName("FixedSummary", true)
+                if isvalid(fixed) then
+                    fixed.UITransformComponent.anchoredPosition = lobby and Vector2(32, -348) or Vector2(24, -98)
+                    fixed.UITransformComponent.RectSize = lobby and Vector2(456, 152) or Vector2(552, 76)
+                end
+                local title = panel:GetChildByName("Title", false)
+                if isvalid(title) then title:SetEnable(lobby) end
             end
+            self._T.pending = true
+            self._T.pendingSeconds = 0
             _MatchProbe:RequestStatus()
         end
         self:Render()
@@ -89,6 +106,14 @@ script MatchProbeInput extends Logic
     method void Click()
         -- Identify start, cancellation and return commands with the observed attempt generation.
         if self.Busy or self._T.pending or self.State == "BATTLE" then return end
+        if self.State == "IDLE" then
+            local formation = _FormationLobby.Snapshot
+            if (formation.loadState ~= "READY" and formation.loadState ~= "NEW") or formation.pending then return end
+            if not _FormationLobby:HasValidActive() then
+                if _UserService.LocalPlayer.CurrentMapName == "formationlobby" then _FormationLobby:Travel("formationsim") end
+                return
+            end
+        end
         self._T.pending = true
         self._T.pendingSeconds = 0
         if self.Message == "READINESS_FAILED" then
@@ -113,6 +138,8 @@ script MatchProbeInput extends Logic
         local elapsed = self.Started > 0 and math.max(0, math.floor((DateTime.UtcNow.Elapsed - self.Started) / 1000)) or 0
         local text = "選定已保存的出戰編隊後，即可開始配對"
         local label = "開始配對"
+        local formation = _FormationLobby.Snapshot
+        local idleBlocked = false
         if self.State == "QUEUED" then
             text = "正在尋找對手 · 已等候 " .. tostring(elapsed) .. " 秒"
             label = "取消配對"
@@ -170,6 +197,22 @@ script MatchProbeInput extends Logic
         if self.Message == "ROOM_CREATE_FAILED" or self.Message == "ADMISSION_SAVE_FAILED" then text = "戰場建立或入場資料保存失敗，可取消入場後重試" end
         if self.Message == "TRANSFER_EXPIRED" then text = "入場預約已逾期，正在恢復編隊草稿" end
         if self.State == "IDLE" and (self.Message == "RETURNED" or self.Message == "CANCELLED") then text = "已返回或取消，可以重新開始配對" end
+        if self.State == "IDLE" then
+            local ready = formation.loadState == "READY" or formation.loadState == "NEW"
+            idleBlocked = not ready or formation.pending == true
+            if not ready then
+                text = "編隊資料尚未確認，請等待載入或重試讀取"
+                label = "等待讀取"
+            elseif formation.pending then
+                text = "正在等待保存或出戰確認，完成後即可操作"
+                label = "處理中…"
+            elseif not _FormationLobby:HasValidActive() then
+                text = "請先整備一至六個單位，保存後明確設為出戰"
+                local inLobby = _UserService.LocalPlayer.CurrentMapName == "formationlobby"
+                label = inLobby and "前往整備" or "請先保存並設為出戰"
+                idleBlocked = not inLobby
+            end
+        end
         local mode = Environment:IsMakerPlay() and "本機配對" or "線上配對"
         self.status.TextGUIRendererComponent.Text = mode .. "\n" .. text
         if self.AutoSaveNotice ~= "" then self.status.TextGUIRendererComponent.Text = self.status.TextGUIRendererComponent.Text .. "\n" .. self.AutoSaveNotice end
@@ -179,7 +222,7 @@ script MatchProbeInput extends Logic
             summary.TextGUIRendererComponent.Text = "本局編隊：" .. fixed .. "\n保存與切換出戰組僅供後續配對使用"
         end
         self.action.TextGUIRendererComponent.Text = label
-        self.action.ButtonComponent.Enable = self.State ~= "BATTLE" and not self.Busy and not self._T.pending
+        self.action.ButtonComponent.Enable = self.State ~= "BATTLE" and not self.Busy and not self._T.pending and not idleBlocked
     end
 
     @ExecSpace("ClientOnly")
