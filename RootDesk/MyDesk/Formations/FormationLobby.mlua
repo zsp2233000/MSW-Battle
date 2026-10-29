@@ -714,7 +714,7 @@ script FormationLobby extends Logic
 
     @ExecSpace("ClientOnly")
     method void RenderActivePreview()
-        -- Draw the saved active roster with one uniform scale so relative distances and directions stay true.
+        -- Fit the saved roster into the viewport, retaining its relative positions and clearing portrait overlap.
         local state = self.Snapshot
         local saved = state.saved
         local active = saved ~= nil and saved.activeSlot or 0
@@ -734,9 +734,24 @@ script FormationLobby extends Logic
         self:SetText("Lobby/Summary", summary)
         self:SetText("Lobby/Command/Field/Empty", empty)
         self:SetEnabled("Lobby/Command/Field/Empty", not ready or #units == 0)
-        local bounds = _FormationMapLayout:Bounds()
-        local centerX = (bounds.minX + 0.5) / 2
-        local centerY = (bounds.minY + bounds.maxY) / 2
+        local field = self:Ui("Lobby/Command/Field").UITransformComponent.RectSize
+        local minX, maxX, minY, maxY = 0, 0, 0, 0
+        local nearest = math.huge
+        for index, entry in ipairs(units) do
+            if index == 1 then minX, maxX, minY, maxY = entry.x, entry.x, entry.y, entry.y end
+            minX, maxX = math.min(minX, entry.x), math.max(maxX, entry.x)
+            minY, maxY = math.min(minY, entry.y), math.max(maxY, entry.y)
+            for other = 1, index - 1 do
+                -- Square portrait bounds overlap only when both axis gaps are smaller than their size.
+                nearest = math.min(nearest, math.max(math.abs(entry.x - units[other].x), math.abs(entry.y - units[other].y)))
+            end
+        end
+        local centerX, centerY = (minX + maxX) / 2, (minY + maxY) / 2
+        local scale = 1
+        if #units > 1 then
+            scale = math.min((field.x - 192) / math.max(0.001, maxX - minX), (field.y - 208) / math.max(0.001, maxY - minY))
+        end
+        local portraitSize = math.min(56, nearest * scale * 0.8)
         for index = 1, 6 do
             local path = "Lobby/Command/Field/Unit" .. tostring(index)
             local marker = self:Ui(path)
@@ -744,10 +759,14 @@ script FormationLobby extends Logic
             if isvalid(marker) then
                 marker:SetEnable(entry ~= nil)
                 if entry ~= nil then
-                    local position = Vector2((entry.x - centerX) * 20, (entry.y - centerY) * 20)
+                    local position = Vector2((entry.x - centerX) * scale, (entry.y - centerY) * scale + 8)
                     marker.UITransformComponent.anchoredPosition = position
-                    self:SetText(path .. "/Name", tostring(index) .. ". " .. self:MonsterName(entry.monsterId))
+                    self:SetText(path .. "/Name", tostring(index))
+                    local label = self:Ui(path .. "/Name")
+                    label:SetEnable(portraitSize >= 32)
+                    label.UITransformComponent.anchoredPosition = Vector2(portraitSize / 2 - 10, -portraitSize / 2 + 10)
                     local portrait = self:Ui(path .. "/Portrait")
+                    portrait.UITransformComponent.RectSize = Vector2(portraitSize, portraitSize)
                     portrait:SetEnable(false)
                     for _, option in ipairs(state.options or {}) do
                         if option[1] == entry.monsterId then
@@ -759,7 +778,8 @@ script FormationLobby extends Logic
                 end
             end
         end
-        log("[VRF][LobbyPreview] active=" .. tostring(active) .. " savedCount=" .. tostring(#units) .. " editSlot=" .. tostring(state.editSlot) .. " ready=" .. tostring(ready))
+        log("[VRF][LobbyPreview] active=" .. tostring(active) .. " savedCount=" .. tostring(#units) .. " editSlot=" .. tostring(state.editSlot) .. " ready=" .. tostring(ready)
+            .. " scale=" .. tostring(scale) .. " portraitSize=" .. tostring(portraitSize))
     end
 
     @ExecSpace("ClientOnly")
