@@ -6,6 +6,7 @@ script UIResizableProgressBar extends UIProgressBar
 
 	@ExecSpace("ClientOnly")
 	method boolean Init()
+		-- Resolve the fill and capture its authored width before base initialization updates it.
 		if self.IsInitialized then return false end
 		local imgValue = self.Img_Value
 		if imgValue == nil then
