@@ -15,6 +15,9 @@ script FormationLobby extends Logic
         self._T.cards = {}
         self._T.optionsKey = ""
         self._T.mapName = ""
+        self._T.lastLobbySlot = 0
+        self._T.lastLobbyClick = 0
+        self._T.editWhenSelected = 0
         self._T.identityElapsed = 0
         self._T.identityKey = ""
         self._T.showUnits = false
@@ -53,6 +56,9 @@ script FormationLobby extends Logic
         local player = _UserService.LocalPlayer
         self:UpdateLobbyPlayer(player)
         if not isvalid(player) or not isvalid(self.root) then return end
+        if player.CurrentMapName ~= "formationlobby" or _UtilLogic.ElapsedSeconds - self._T.lastLobbyClick > 5 then
+            self._T.editWhenSelected = 0
+        end
         self._T.identityElapsed = self._T.identityElapsed + delta
         if player.CurrentMapName == "formationlobby" and self._T.identityElapsed >= 0.5 then
             self._T.identityElapsed = 0
@@ -69,7 +75,10 @@ script FormationLobby extends Logic
         self.root:SetEnable(true)
         if not self._T.bound then
             self._T.bound = true
-            self:Bind("Lobby/Edit", function() self:Travel("formationsim") end)
+            self:Bind("Lobby/Edit", function()
+                local slotId = self._T.lastLobbySlot > 0 and self._T.lastLobbySlot or (self.Snapshot.editSlot or 1)
+                self:SelectLobbySlot(slotId, true)
+            end)
             self:Bind("Lobby/Legacy", function() self:Travel("template") end)
             self:Bind("Editor/Back", function() self:RequestReturnToLobby() end)
             self:Bind("ReturnLobby", function()
@@ -96,7 +105,7 @@ script FormationLobby extends Logic
             self:Bind("Editor/ToggleUnits", function() self._T.showUnits = not self._T.showUnits self:Render() end)
             for index = 1, 5 do
                 local slotId = index
-                self:Bind("Lobby/Slots/Slot" .. tostring(index), function() _FormationService:RequestSelectSlot(slotId) end)
+                self:Bind("Lobby/Slots/Slot" .. tostring(index), function() self:SelectLobbySlot(slotId, false) end)
                 self:Bind("Editor/Slots/Slot" .. tostring(index), function() _FormationService:RequestSelectSlot(slotId) end)
             end
             for index = 1, 6 do
@@ -112,6 +121,9 @@ script FormationLobby extends Logic
         local mapName = player.CurrentMapName
         if mapName ~= self._T.mapName then
             self._T.mapName = mapName
+            self._T.lastLobbySlot = 0
+            self._T.lastLobbyClick = 0
+            self._T.editWhenSelected = 0
             self._T.editorCollapsed = false
             if mapName == "formationlobby" then
                 if self._T.returnAfterSave then self:CancelReturnSave("arrived in lobby") end
@@ -192,6 +204,20 @@ script FormationLobby extends Logic
     end
 
     @ExecSpace("ClientOnly")
+    method void SelectLobbySlot(integer slotId, boolean openEditor)
+        -- Single clicks select; a second click on the same slot opens only after server selection acknowledgement.
+        local state = self.Snapshot
+        if self._T.mapName ~= "formationlobby" or state.pending
+            or (state.loadState ~= "READY" and state.loadState ~= "NEW") then return end
+        local now = _UtilLogic.ElapsedSeconds
+        local doubleClick = self._T.lastLobbySlot == slotId and now - self._T.lastLobbyClick <= 0.35
+        self._T.lastLobbySlot = slotId
+        self._T.lastLobbyClick = now
+        self._T.editWhenSelected = (openEditor or doubleClick) and slotId or 0
+        _FormationService:RequestSelectSlot(slotId)
+    end
+
+    @ExecSpace("ClientOnly")
     method void Observe(table snapshot, integer sequence)
         -- Ignore out-of-order replies and keep edits made during a save visibly unsaved.
         if sequence <= self.ObservedSequence then return end
@@ -202,6 +228,14 @@ script FormationLobby extends Logic
         self:BuildOptions(snapshot.options or {})
         if self.SelectedUnit > #(snapshot.draft or {}) then self.SelectedUnit = 0 end
         self:Render()
+        local player = _UserService.LocalPlayer
+        if self._T.editWhenSelected == snapshot.editSlot and isvalid(player) and player.CurrentMapName == "formationlobby"
+            and _UtilLogic.ElapsedSeconds - self._T.lastLobbyClick <= 5
+            and not snapshot.pending and (snapshot.loadState == "READY" or snapshot.loadState == "NEW") then
+            self._T.editWhenSelected = 0
+            self:Travel("formationsim")
+            log("[VRF][LobbyEdit] opening selected slot=" .. tostring(snapshot.editSlot))
+        end
         log("[VRF][FormationUI] slot=" .. tostring(snapshot.editSlot) .. " load=" .. snapshot.loadState .. " save=" .. snapshot.saveState .. " draft=" .. tostring(snapshot.draftVersion) .. " confirmed=" .. tostring(snapshot.savedDraftVersion))
     end
 
@@ -565,8 +599,8 @@ script FormationLobby extends Logic
             status.UITransformComponent.AnchorsMin = anchor
             status.UITransformComponent.AnchorsMax = anchor
             status.UITransformComponent.Pivot = anchor
-            status.UITransformComponent.anchoredPosition = inLobby and Vector2(344, -994) or Vector2(0, 12)
-            status.UITransformComponent.RectSize = inLobby and Vector2(936, 70) or Vector2(1600, 44)
+            status.UITransformComponent.anchoredPosition = inLobby and Vector2(880, -952) or Vector2(0, 12)
+            status.UITransformComponent.RectSize = inLobby and Vector2(400, 112) or Vector2(1600, 44)
         end
         local edit = self:Ui("Lobby/Edit")
         if isvalid(edit) then edit.ButtonComponent.Enable = writable and not state.pending end
@@ -710,18 +744,10 @@ script FormationLobby extends Logic
             if isvalid(marker) then
                 marker:SetEnable(entry ~= nil)
                 if entry ~= nil then
-                    local position = Vector2(-260 + (entry.x - centerX) * 20, (entry.y - centerY) * 20)
+                    local position = Vector2((entry.x - centerX) * 20, (entry.y - centerY) * 20)
                     marker.UITransformComponent.anchoredPosition = position
                     self:SetText(path .. "/Name", tostring(index) .. ". " .. self:MonsterName(entry.monsterId))
                     local portrait = self:Ui(path .. "/Portrait")
-                    local rowY = 140 - (index - 1) * 56
-                    local name = self:Ui(path .. "/Name")
-                    name.UITransformComponent.anchoredPosition = Vector2(300 - position.x, rowY - position.y)
-                    portrait.UITransformComponent.anchoredPosition = Vector2(80 - position.x, rowY - position.y)
-                    local line = self:Ui(path .. "/Link")
-                    local dx, dy = 48 - position.x, rowY - position.y
-                    line.UITransformComponent.RectSize = Vector2(math.sqrt(dx * dx + dy * dy), 1)
-                    line.UITransformComponent.UIRotation = Vector3(0, 0, math.atan(dy, dx) * 180 / math.pi)
                     portrait:SetEnable(false)
                     for _, option in ipairs(state.options or {}) do
                         if option[1] == entry.monsterId then

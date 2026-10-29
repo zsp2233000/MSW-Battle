@@ -18,20 +18,23 @@ local ok, detail = pcall(function()
         local marker = lobby:Ui('Lobby/Command/Field/Unit' .. tostring(index))
         assert(isvalid(marker), 'authored preview marker')
         assert(marker.Enable == (expected[index] ~= nil), 'saved active count, not selected draft')
+        if marker.Enable then
+            local portrait = marker:GetChildByName('Portrait', false)
+            local pos = portrait.UITransformComponent.anchoredPosition
+            assert(portrait.EnabledInHierarchy and pos.x == 0 and math.abs(pos.y) <= 24, 'monster image directly occupies its saved position')
+            assert(not isvalid(marker:GetChildByName('Link', false)), 'no roster connector')
+        end
         if marker.Enable then count = count + 1 end
     end
     for first = 1, #expected do
         local a = lobby:Ui('Lobby/Command/Field/Unit' .. tostring(first))
         local pa = a.UITransformComponent.anchoredPosition
-        local labelA = a:GetChildByName('Name', false).UITransformComponent.anchoredPosition
         for second = first + 1, #expected do
             local b = lobby:Ui('Lobby/Command/Field/Unit' .. tostring(second))
             local pb = b.UITransformComponent.anchoredPosition
             local dx, dy = expected[second].x - expected[first].x, expected[second].y - expected[first].y
             local sx, sy = pb.x - pa.x, pb.y - pa.y
             assert(math.abs(sx * dy - sy * dx) < 0.01 and sx * dx + sy * dy > 0, 'relative direction and proportions')
-            local labelB = b:GetChildByName('Name', false).UITransformComponent.anchoredPosition
-            assert(math.abs((pb.y + labelB.y) - (pa.y + labelA.y)) >= 44, 'roster labels remain separate even for dense positions')
         end
     end
     for slot = 1, 5 do
@@ -44,6 +47,7 @@ local ok, detail = pcall(function()
             assert(lobby:Ui('Lobby/Command/Field/Unit' .. tostring(index)).Enable == (index <= count), 'selection preserves preview')
         end
     end
+    wait(0.4) -- This is a single selection, not the new double-click shortcut.
     click('Lobby/Slots/Slot' .. tostring(originalSlot))
     assert(await(function() return lobby.Snapshot.editSlot == originalSlot end), 'restore selection')
     click('Lobby/Edit')
@@ -60,6 +64,6 @@ local ok, detail = pcall(function()
     click('ReturnLobby')
     assert(await(function() return _UserService.LocalPlayer.CurrentMapName == 'formationlobby' end), 'POC return')
     assert(await(function() return field.EnabledInHierarchy end), 'lobby rendering restored after POC')
-    log('[VRF][LobbyPreview] PASS saved active positions; separate labels; five selectors; preparation and POC round trips')
+    log('[VRF][LobbyPreview] PASS direct monster images; saved active positions; five selectors; preparation and POC round trips')
 end)
 if not ok then log('[VRF][LobbyPreview] FAIL ' .. tostring(detail)) end

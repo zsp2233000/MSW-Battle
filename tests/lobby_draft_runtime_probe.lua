@@ -6,6 +6,7 @@ end
 local l = _FormationLobby
 local function click(path) l:Ui(path):SendEvent(ButtonClickEvent()) end
 local function select(slot)
+    wait(0.4) -- Keep these deliberate single selections outside the double-click window.
     click('Lobby/Slots/Slot' .. tostring(slot))
     assert(await(function() return l.Snapshot.editSlot == slot end), 'select editor target')
 end
