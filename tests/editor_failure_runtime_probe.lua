@@ -18,14 +18,14 @@ local ok, detail = pcall(function()
     assert(await(function() return _FormationSchema:SameUnits(l.Snapshot.draft,units) end), 'valid draft prepared')
     _FormationService:RequestRetryLoad()
     assert(await(function() return l.Snapshot.loadState == 'ERROR' end), 'injected read failure')
-    assert(l:Ui('Retry').EnabledInHierarchy and l:Ui('Retry').ButtonComponent.Enable, 'editor retry reachable')
-    local retryPosition = l:Ui('Retry').UITransformComponent.anchoredPosition
+    assert(l:Ui('EditorControls/Retry').EnabledInHierarchy and l:Ui('EditorControls/Retry').ButtonComponent.Enable, 'editor retry reachable')
+    local retryPosition = l:Ui('EditorControls/Retry').UITransformComponent.anchoredPosition
     assert(retryPosition.x >= 0 and retryPosition.y <= 0, 'retry remains inside top-left screen bounds')
     assert(not l:Ui('Editor/Save').ButtonComponent.Enable and not l:Ui('Editor/Activate').ButtonComponent.Enable
         and not l:Ui('Editor/Catalog/Monster1').ButtonComponent.Enable, 'unconfirmed actions disabled')
     assert(_FormationSchema:EncodeDocument(l.Snapshot.saved) == saved
         and _FormationSchema:SameUnits(l.Snapshot.draft,units), 'read failure retains data')
-    click('Retry')
+    click('EditorControls/Retry')
     assert(await(function() return l.Snapshot.loadState == 'READY' end), 'connected retry recovers')
     click('Editor/Save')
     assert(await(function() return l.Snapshot.pending end), 'write pending')
@@ -37,8 +37,8 @@ local ok, detail = pcall(function()
     assert(await(function() return l.Snapshot.saveState == 'FAILED' and not l.Snapshot.pending end), 'injected save failure')
     assert(_FormationSchema:EncodeDocument(l.Snapshot.saved) == saved
         and _FormationSchema:SameUnits(l.Snapshot.draft,units), 'failed write retains confirmed data and draft')
-    assert(l:Ui('Retry').EnabledInHierarchy, 'failed write offers reconciliation')
-    click('Retry')
+    assert(l:Ui('EditorControls/Retry').EnabledInHierarchy, 'failed write offers reconciliation')
+    click('EditorControls/Retry')
     assert(await(function() return l.Snapshot.loadState == 'READY' end), 'reconcile after failed write')
     assert(l:Ui('Editor/Save').ButtonComponent.Enable, 'retry save available after reconciliation')
     log('[VRF][EditorFailure] PASS read retry; pending controls; failed save retains data')

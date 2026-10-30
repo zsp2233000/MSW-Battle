@@ -18,6 +18,26 @@ MonsterCatalog 從已驗證的伺服器 profile 發送種類、生命值、傷�
 
 同日卡片層級修訂另行驗證：本機契約 32/32、105 entities strict lint 無 Error／Warning，Maker build 0 Error、同兩項既有 Warning。`EditorIntel` 新增逐張切換時的金色／一般底框、唯一勾選、裝飾超出底框及重複卡框不存在檢查，PASS；`CardLayers` runtime 檢查裝飾在名稱後、勾選在圖像前及原生 ColorTint 保留，PASS。兩次原生截圖確認 Shooter 與 Tank 切換後的框色、名稱及圖像清楚，最後 Stop 返回編輯模式。此輪只重跑卡片與情報檢查，完整保存流程、失敗注入、18 筆目錄及實體滑鼠各狀態未重跑；此前紀錄保留如下。
 
+## Maker 編輯方式修訂
+
+整備與卡片模板預設在編輯模式啟用，大廳預設隱藏。Maker 開啟 `FormationGroup` 的 UI 編輯畫面後，可直接調整 `Editor` 與 `Editor/Catalog/Template`，不用先解除父節點的停用狀態。Play 時 `FormationLobby.OnBeginPlay` 自動隱藏預覽；正式怪物卡片仍從模板複製，再填入伺服器目錄的名稱、圖片與種類。結束 Play 會恢復檔案中的編輯預設。
+
+固定版面由 `.ui` 管理；程式負責資料、選取、事件與顯示切換。原本共用且由程式搬動的狀態、重試與收合按鈕，改為各畫面各自的控制項。收合按鈕位於獨立的 `EditorControls`，收起 `Editor` 後仍能操作。配對面板也分為同一 `MatchGroup.ui` 內的三個容器，各自保存版面；切換畫面時解除前一顆按鈕的事件，再綁定目前的按鈕。既有 Cardgame 圖像、按鈕狀態、正式編隊權限與保存流程沿用。
+
+| 要調整的內容 | Maker 路徑與屬性 |
+|---|---|
+| 卡片格子大小、間隔與欄數 | `FormationGroup/Editor/Catalog` → `ScrollLayoutGroupComponent.CellSize`、`GridSpacing`、`ConstraintCount`；列表依 `CellSize` 排列，不能只改模板根節點的 `RectSize` |
+| 名稱文字與排列 | `FormationGroup/Editor/Catalog/Template/MonsterName` → `TextGUIRendererComponent` 字型、對齊、`FontSize`，以及 `UITransformComponent` 尺寸、位置；啟用 `BestFit` 時也需調整 `MinSize`／`MaxSize` |
+| 種類、圖像與裝飾 | 同一模板下的 `Identity`、`PortraitViewport/Portrait`、`CardSign`；修改尺寸時同步留意子項位置與原素材比例 |
+| 整備狀態、重試及收合位置 | `FormationGroup/EditorControls/Status`、`Retry`、`Toggle` |
+| 各畫面的配對版面 | `MatchGroup/Match`（大廳）、`EditorMatch`（整備）、`BattleMatch`（戰鬥）及各自的 `Action`、`Status`、`FixedSummary` |
+
+編輯預覽使用一張示例卡片。正式名稱、種類、情報及圖片由資料提供；編輯模板的文字內容不會改掉正式目錄。大廳相對站位縮放及重疊避讓仍依編隊內容動態計算；這部分保留程式排版。既有背景排序修正也保留。
+
+此輪驗證：本機契約 **33/33**；FormationGroup 109 entities strict lint **0 Error、1 Warning**（L016，底部操作列刻意靠左，保留玩家部署區）；MatchGroup 19 entities strict lint **0 Error、0 Warning**。Maker build **0 Error**、保留原有兩項 Warning，runtime 無 Error／Warning。`EditorAuthoring` PASS：Play 隱藏預覽、卡片繼承模板字級、改動固定位置／尺寸後 Render 與地圖切換不覆蓋、收合／展開、三種配對容器的內容路由。`EditorIntel`、`EditorFlow`、`EditorFailure`、`MatchedLobbyUI`、`AuthoringPOC` 均 PASS；配對測試實際排隊後取消，POC 測試經正式入口進入再返回。
+
+原生整備截圖確認版面與卡片內容維持可讀。Stop 後透過 Maker Command Console 的 `list_entities -path World/ui/FormationGroup/Editor -enableonly`、模板及 `EditorMatch` 查詢，確認編輯模式中的預設啟用狀態。完整保存流程使用唯一隔離儲存鍵；失敗注入已重設，原有存檔未覆寫。戰鬥版面以畫面切換方法與結果顯示驗證，未重跑雙玩家完整對戰；實體滑鼠各狀態、小視窗與手機仍屬下方人工驗收範圍。
+
 ## 驗證紀錄
 
 2026-10-30，原生 Maker，1920×1080 參考畫布。Refresh 後讀 build，再 Play；下列 runtime 結論均有最終 PASS，派送成功不算測試通過。

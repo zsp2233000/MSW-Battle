@@ -47,7 +47,7 @@ local ok, detail = pcall(function()
     end
     click('Editor/Catalog/Monster1')
     assert(not change(function() input:HandleWorldClick(Vector3(-6,0,0)) end), 'seventh unit rejected')
-    assert(#l.Snapshot.draft == 6 and string.find(l:Ui('Status').TextGUIRendererComponent.Text,'無法放置',1,true), 'capacity reason visible')
+    assert(#l.Snapshot.draft == 6 and string.find(l:Ui('EditorControls/Status').TextGUIRendererComponent.Text,'無法放置',1,true), 'capacity reason visible')
     input:HandleWorldClick(Vector3(-3,0,0))
     assert(not change(function() input:HandleWorldClick(Vector3(5,0,0)) end), 'enemy-side position rejected')
     local illegal = _FormationSchema:CopyUnits(l.Snapshot.draft)

@@ -33,6 +33,10 @@ script FormationLobby extends Logic
         self._T.returnSavePhase = ""
         self._T.returnSaveElapsed = 0
         self.ObservedSequence = -1
+        for _, path in ipairs({ "Lobby", "Editor", "EditorControls", "Editor/Catalog/Template" }) do
+            self:SetEnabled(path, false)
+        end
+        log("[VRF][FormationUI] authoring preview hidden for play")
     end
 
     @ExecSpace("ClientOnly")
@@ -81,19 +85,17 @@ script FormationLobby extends Logic
             end)
             self:Bind("Lobby/Legacy", function() self:Travel("template") end)
             self:Bind("Editor/Back", function() self:RequestReturnToLobby() end)
-            self:Bind("ReturnLobby", function()
-                if self._T.mapName == "formationsim" then
-                    self._T.editorCollapsed = not self._T.editorCollapsed
-                    self:Render()
-                    log("[VRF][FormationUI] editor collapsed=" .. tostring(self._T.editorCollapsed))
-                else
-                    self:RequestReturnToLobby()
-                end
+            self:Bind("ReturnLobby", function() self:RequestReturnToLobby() end)
+            self:Bind("EditorControls/Toggle", function()
+                self._T.editorCollapsed = not self._T.editorCollapsed
+                self:Render()
+                log("[VRF][FormationUI] editor collapsed=" .. tostring(self._T.editorCollapsed))
             end)
             self:Bind("ExitConfirm/Window/SaveAndReturn", function() self:SaveAndReturn() end)
             self:Bind("ExitConfirm/Window/ReturnWithoutSave", function() self:ReturnWithoutSaving() end)
             self:Bind("ExitConfirm/Window/ContinueEditing", function() self:ContinueEditing() end)
             self:Bind("Retry", function() _FormationService:RequestRetryLoad() end)
+            self:Bind("EditorControls/Retry", function() _FormationService:RequestRetryLoad() end)
             self:Bind("Editor/Save", function() _FormationService:RequestSave(self.Snapshot.draftVersion or 0, self.Snapshot.editSlot or 1) end)
             self:Bind("Editor/Activate", function()
                 local state = self.Snapshot
@@ -266,7 +268,7 @@ script FormationLobby extends Logic
         -- Ask before leaving whenever any formation slot has a draft not confirmed in storage.
         local state = self.Snapshot
         if state.pending then
-            self:SetText("Status", "儲存處理中，完成後再返回大廳")
+            self:SetStatus("儲存處理中，完成後再返回大廳")
             log("[VRF][FormationExit] blocked while storage is pending")
             return
         end
@@ -486,7 +488,7 @@ script FormationLobby extends Logic
             self:CloseReturnConfirmation()
         end
         if reason ~= "cancelled by player" and reason ~= "arrived in lobby" then
-            self:SetText("Status", "儲存未完成，草稿仍保留；請檢查狀態後再試。")
+            self:SetStatus("儲存未完成，草稿仍保留；請檢查狀態後再試。")
         end
         log("[VRF][FormationExit] staying in editor: " .. reason)
     end
@@ -608,6 +610,13 @@ script FormationLobby extends Logic
     end
 
     @ExecSpace("ClientOnly")
+    method void SetStatus(string value)
+        -- Each screen owns its authored status layout while sharing the same state message.
+        self:SetText("Status", value)
+        self:SetText("EditorControls/Status", value)
+    end
+
+    @ExecSpace("ClientOnly")
     method void Render()
         -- Present private draft, confirmed content and save state in both lobby and simulation.
         if not isvalid(self.root) then return end
@@ -617,6 +626,7 @@ script FormationLobby extends Logic
         self:SetEnabled("ExitConfirm", self._T.returnConfirm == true)
         self:SetEnabled("Lobby", inLobby)
         self:SetEnabled("Editor", inEditor and not self._T.editorCollapsed)
+        self:SetEnabled("EditorControls", inEditor)
         self:SetEnabled("Editor/Units", inEditor and self._T.showUnits)
         if inEditor then
             -- Maker can retain import order after a layout refresh; keep the panel fills below existing controls.
@@ -627,41 +637,27 @@ script FormationLobby extends Logic
             local details = self:Ui("Editor/Units")
             if isvalid(details) then _UILogic:SetSiblingIndex(details.UITransformComponent, #details.Parent.Children:ToTable()) end
         end
-        self:SetEnabled("ReturnLobby", not inLobby)
-        local toggle = self:Ui("ReturnLobby")
-        if isvalid(toggle) then
-            toggle.UITransformComponent.anchoredPosition = inEditor and Vector2(-56, -456) or Vector2(0, -400)
-            toggle.UITransformComponent.RectSize = inEditor and Vector2(176, 88) or Vector2(200, 88)
-            self:SetText("ReturnLobby", inEditor and (self._T.editorCollapsed and "展開整備面板" or "收起整備面板") or "遊戲大廳")
-        end
-        self:SetEnabled("Status", inLobby or inEditor)
+        self:SetEnabled("ReturnLobby", not inLobby and not inEditor)
+        self:SetText("EditorControls/Toggle", self._T.editorCollapsed and "展開整備面板" or "收起整備面板")
+        self:SetEnabled("Status", inLobby)
         local state = self.Snapshot
         local load = state.loadState or "LOADING"
         local writable = load == "READY" or load == "NEW"
-        local status = self:Ui("Status")
-        if isvalid(status) then
-            local anchor = Vector2(0, 1)
-            status.UITransformComponent.AnchorsMin = anchor
-            status.UITransformComponent.AnchorsMax = anchor
-            status.UITransformComponent.Pivot = anchor
-            status.UITransformComponent.anchoredPosition = inLobby and Vector2(880, -952) or Vector2(48, -1044)
-            status.UITransformComponent.RectSize = inLobby and Vector2(400, 112) or Vector2(944, 32)
-        end
         local edit = self:Ui("Lobby/Edit")
         if isvalid(edit) then edit.ButtonComponent.Enable = writable and not state.pending end
-        local retry = self:Ui("Retry")
-        if isvalid(retry) then
-            retry.UITransformComponent.anchoredPosition = inLobby and Vector2(530, -646) or Vector2(1112, -560)
-            retry.UITransformComponent.RectSize = inLobby and Vector2(300, 88) or Vector2(200, 88)
-            retry.ButtonComponent.Enable = not state.pending
+        for _, path in ipairs({ "Retry", "EditorControls/Retry" }) do
+            local retry = self:Ui(path)
+            if isvalid(retry) then retry.ButtonComponent.Enable = not state.pending end
         end
-        self:SetEnabled("Retry", (inLobby or inEditor) and (load == "ERROR" or load == "CONFLICT"))
+        local needsRetry = load == "ERROR" or load == "CONFLICT"
+        self:SetEnabled("Retry", inLobby and needsRetry)
+        self:SetEnabled("EditorControls/Retry", inEditor and needsRetry)
         local labels = { UNSAVED = "未保存", SAVING = "儲存中", SAVED = "保存成功", FAILED = "儲存失敗" }
         local text = labels[state.saveState] or "讀取中"
         if load == "LOADING" then text = "讀取中" end
         if load == "ERROR" or load == "CONFLICT" then text = "讀取需重試 / " .. text end
         if load == "NEW" then text = "首次使用 / " .. text end
-        self:SetText("Status", text .. "    " .. (state.message or "正在讀取個人編隊"))
+        self:SetStatus(text .. "    " .. (state.message or "正在讀取個人編隊"))
         local dirtyCount = self:DirtySlotCount(state.slots or {})
         local saveBlockReason = self:ReturnSaveBlockReason()
         if self._T.returnAfterSave then

@@ -53,6 +53,25 @@ test('five formations expose stable selectors in lobby and editor with explicit 
   assert.equal(ui.find('Editor/Catalog/Template/SelectedGlow/Border'), null, 'selection does not cover the ornament with a second frame');
 });
 
+test('Maker exposes the editor template and each screen owns its fixed controls', () => {
+  const ui = UIBuilder.read('ui/FormationGroup.ui');
+  for (const path of ['Editor', 'EditorControls', 'Editor/Catalog/Template']) {
+    assert.equal(ui.find(path).jsonString.enable, true, `${path} can be edited without enabling its parents`);
+  }
+  assert.equal(ui.find('Lobby').jsonString.enable, false, 'lobby does not obscure the authoring preview');
+  assert.match(ui.getComponent('Editor/Catalog/Template/PortraitViewport/Portrait', 'MOD.Core.SpriteGUIRendererComponent').ImageRUID.DataId,
+    /^thumbnail:\/\/[a-f0-9]{32}$/, 'sample portrait is visible while editing');
+  for (const path of ['EditorControls/Toggle', 'EditorControls/Retry', 'Retry', 'ReturnLobby']) {
+    assert.ok(ui.hasComponent(path, 'MOD.Core.ButtonComponent'), path);
+  }
+  assert.ok(ui.find('EditorControls/Status'));
+  const match = UIBuilder.read('ui/MatchGroup.ui');
+  for (const panel of ['Match', 'EditorMatch', 'BattleMatch']) {
+    for (const control of ['Action', 'Status', 'FixedSummary']) assert.ok(match.find(`${panel}/${control}`));
+    assert.equal(match.find(panel).jsonString.enable, panel === 'EditorMatch', 'only editor matchmaking is shown in Maker');
+  }
+});
+
 test('every map preserves the template formation terrain and coordinate system', () => {
   const reference = MapBuilder.read('map/template.map');
   const terrain = map => {

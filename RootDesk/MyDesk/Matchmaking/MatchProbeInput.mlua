@@ -19,6 +19,11 @@ script MatchProbeInput extends Logic
         -- One visible action owns queue, cancellation and return in both execution environments.
         self._T.map = ""
         self._T.click = nil
+        self._T.panel = nil
+        for _, name in ipairs({ "Match", "EditorMatch", "BattleMatch" }) do
+            local panel = self.root:GetChildByName(name, false)
+            if isvalid(panel) then panel:SetEnable(false) end
+        end
         self.State = "IDLE"
         self.Message = ""
         self.Started = 0
@@ -36,11 +41,7 @@ script MatchProbeInput extends Logic
     method void OnUpdate(number delta)
         -- Update the local wait clock; request recovery once per actual map transition.
         local player = _UserService.LocalPlayer
-        if not isvalid(player) or not isvalid(self.root) or not isvalid(self.action) then return end
-        if self._T.click == nil then
-            self._T.click = self.action:ConnectEvent(ButtonClickEvent, function() self:Click() end)
-            log("[VRF][MatchUI] visible matchmaking button connected")
-        end
+        if not isvalid(player) or not isvalid(self.root) then return end
         local map = player.CurrentMapName
         if self._T.pending then
             self._T.pendingSeconds = self._T.pendingSeconds + delta
@@ -53,36 +54,37 @@ script MatchProbeInput extends Logic
         self.root:SetEnable((map == "formationlobby" or map == "formationsim" or map == "matchprobe") and not confirming)
         if player.CurrentMapName ~= self._T.map then
             self._T.map = player.CurrentMapName
-            local panel = self.root:GetChildByName("Match", false)
-            if isvalid(panel) then
-                -- Keep editor controls clear and stay below the platform's top-right menu.
-                local editor = map == "formationsim"
-                local lobby = map == "formationlobby"
-                local anchor = (lobby or editor) and Vector2(0, 1) or Vector2(1, 0)
-                panel.UITransformComponent.AnchorsMin = anchor
-                panel.UITransformComponent.AnchorsMax = anchor
-                panel.UITransformComponent.Pivot = anchor
-                panel.UITransformComponent.anchoredPosition = lobby and Vector2(1320, -210) or (editor and Vector2(48, -816) or Vector2(-24, 24))
-                panel.UITransformComponent.RectSize = lobby and Vector2(520, 710) or (editor and Vector2(944, 112) or Vector2(600, 290))
-                self.action.UITransformComponent.AlignmentOption = editor and AlignmentType.BottomRight or AlignmentType.BottomCenter
-                self.action.UITransformComponent.Pivot = editor and Vector2(1, 0) or Vector2(0.5, 0)
-                self.action.UITransformComponent.anchoredPosition = editor and Vector2(-16, 12) or Vector2(0, lobby and 28 or 20)
-                self.action.UITransformComponent.RectSize = lobby and Vector2(464, 104) or (editor and Vector2(208, 88) or Vector2(420, 88))
-                self.status.UITransformComponent.anchoredPosition = lobby and Vector2(32, -170) or Vector2(24, -20)
-                self.status.UITransformComponent.RectSize = lobby and Vector2(456, 160) or (editor and Vector2(328, 72) or Vector2(552, 74))
-                local fixed = self.root:GetChildByName("FixedSummary", true)
-                if isvalid(fixed) then
-                    fixed.UITransformComponent.anchoredPosition = lobby and Vector2(32, -348) or (editor and Vector2(376, -20) or Vector2(24, -98))
-                    fixed.UITransformComponent.RectSize = lobby and Vector2(456, 152) or (editor and Vector2(328, 72) or Vector2(552, 76))
-                end
-                local title = panel:GetChildByName("Title", false)
-                if isvalid(title) then title:SetEnable(lobby) end
-            end
+            self:SelectScreen(map)
             self._T.pending = true
             self._T.pendingSeconds = 0
             _MatchProbe:RequestStatus()
         end
         self:Render()
+    end
+
+    @ExecSpace("ClientOnly")
+    method void SelectScreen(string map)
+        -- Each screen keeps its authored layout and owns exactly one connected action.
+        if isvalid(self.action) and self._T.click ~= nil then self.action:DisconnectEvent(ButtonClickEvent, self._T.click) end
+        self._T.click = nil
+        self._T.panel = nil
+        self.action = nil
+        self.status = nil
+        local screens = { formationlobby = "Match", formationsim = "EditorMatch", matchprobe = "BattleMatch" }
+        for _, name in ipairs({ "Match", "EditorMatch", "BattleMatch" }) do
+            local panel = self.root:GetChildByName(name, false)
+            if isvalid(panel) then
+                panel:SetEnable(name == screens[map])
+                if name == screens[map] then self._T.panel = panel end
+            end
+        end
+        if not isvalid(self._T.panel) then return end
+        self.action = self._T.panel:GetChildByName("Action", false)
+        self.status = self._T.panel:GetChildByName("Status", false)
+        if isvalid(self.action) then
+            self._T.click = self.action:ConnectEvent(ButtonClickEvent, function() self:Click() end)
+            log("[VRF][MatchUI] visible matchmaking button connected screen=" .. map)
+        end
     end
 
     @ExecSpace("ClientOnly")
@@ -134,7 +136,7 @@ script MatchProbeInput extends Logic
     @ExecSpace("ClientOnly")
     method void Render()
         -- Present the same player flow for local FIFO and published native matchmaking.
-        if not isvalid(self.status) or not isvalid(self.action) then return end
+        if not isvalid(self._T.panel) or not isvalid(self.status) or not isvalid(self.action) then return end
         local elapsed = self.Started > 0 and math.max(0, math.floor((DateTime.UtcNow.Elapsed - self.Started) / 1000)) or 0
         local text = "選定已保存的出戰編隊後，即可開始配對"
         local label = "開始配對"
@@ -214,7 +216,7 @@ script MatchProbeInput extends Logic
             end
         end
         local mode = Environment:IsMakerPlay() and "本機配對" or "線上配對"
-        local title = self.root:GetChildByName("Title", true)
+        local title = self._T.panel:GetChildByName("Title", false)
         if isvalid(title) then
             local active = formation.saved ~= nil and formation.saved.activeSlot or 0
             local ready = formation.loadState == "READY" or formation.loadState == "NEW"
@@ -223,7 +225,7 @@ script MatchProbeInput extends Logic
         end
         self.status.TextGUIRendererComponent.Text = mode .. "\n" .. text
         if self.AutoSaveNotice ~= "" then self.status.TextGUIRendererComponent.Text = self.status.TextGUIRendererComponent.Text .. "\n" .. self.AutoSaveNotice end
-        local summary = self.root:GetChildByName("FixedSummary", true)
+        local summary = self._T.panel:GetChildByName("FixedSummary", false)
         if isvalid(summary) then
             local fixed = self.FixedSummary ~= "" and self.FixedSummary or "尚未開始"
             summary.TextGUIRendererComponent.Text = "本局編隊：" .. fixed .. "\n保存與切換出戰組僅供後續配對使用"
