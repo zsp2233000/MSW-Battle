@@ -46,7 +46,7 @@ local ok, detail = pcall(function()
     for index = 1, 5 do check(lobby.Snapshot.saved.slots[tostring(index)].id == index, 'stable slot ' .. index) end
     click('Editor/Activate')
     check(untilState(function() return lobby.Snapshot.saved.activeSlot == 1 and not lobby.Snapshot.pending end), 'activation independently persisted')
-    click('Editor/AddMode')
+    click('Editor/Catalog/Monster1')
     version = lobby.Snapshot.draftVersion
     input:HandleWorldClick(Vector3(-2.25, -1.35, 0))
     check(untilState(function() return lobby.Snapshot.draftVersion > version end), 'new draft after save')

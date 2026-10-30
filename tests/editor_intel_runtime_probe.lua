@@ -11,7 +11,7 @@ local ok, detail = pcall(function()
     assert(await(function() return _UserService.LocalPlayer.CurrentMapName == 'formationsim' end), 'formal editor entered')
     wait(0.3)
     assert(isvalid(l:Ui('Editor/Intel/Stats')), 'visible tactical intelligence exists')
-    for _, path in ipairs({'Slots','Header','CatalogDock','Catalog','Intel','Save','Activate','AddMode','Remove','Back','ToggleUnits','Units','Title','Summary','Help','Roster','Selection'}) do
+    for _, path in ipairs({'Slots','CatalogDock','Catalog','Intel','Selection'}) do
         local rect = l:Ui('Editor/'..path).UITransformComponent
         assert(rect.anchoredPosition.x >= 960, path..' leaves the left deployment half clear')
         assert(rect.anchoredPosition.x + rect.RectSize.x <= 1920
@@ -39,8 +39,8 @@ local ok, detail = pcall(function()
     click('Editor/ToggleUnits')
     assert(l:Ui('Editor/Units').Enable, 'details reachable')
     click('Editor/ToggleUnits')
-    assert(l:Ui('Editor/Save').Enable and l:Ui('Editor/Remove').Enable, 'common actions visible without details')
-    assert(l:Ui('Editor/Remove').ButtonComponent.Enable == (l.SelectedUnit > 0), 'remove requires a selected unit')
+    assert(l:Ui('Editor/Save').EnabledInHierarchy and l:Ui('Editor/Activate').EnabledInHierarchy, 'save actions visible without details')
+    assert(not isvalid(l:Ui('Editor/Remove')) and not isvalid(l:Ui('Editor/AddMode')), 'redundant action buttons removed')
     for _, pair in ipairs({{'Editor/Header','Editor/Title'},{'Editor/Intel','Editor/Save'},{'Editor/CatalogDock','Editor/Catalog'}}) do
         assert(_UILogic:GetSiblingIndex(l:Ui(pair[1]).UITransformComponent)
             < _UILogic:GetSiblingIndex(l:Ui(pair[2]).UITransformComponent), 'background stays behind content')

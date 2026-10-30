@@ -7,6 +7,7 @@ end
 local function click(path) l:Ui(path):SendEvent(ButtonClickEvent()) end
 local originalSlot = l.Snapshot.editSlot
 local backup = nil
+local touchHandler = nil
 local ok, detail = pcall(function()
     click('Lobby/Slots/Slot5')
     assert(await(function() return l.Snapshot.editSlot == 5 end), 'fixture slot selected')
@@ -21,13 +22,19 @@ local ok, detail = pcall(function()
     wait(.3)
     click('Editor/Catalog/Monster1')
     local saved=_FormationSchema:EncodeDocument(l.Snapshot.saved)
-    local expected=_UILogic:ScreenToWorldPosition(Vector2(640,540))
-    log('[VRF][EditorNativeInput] READY native left click=(640,540) expected='..tostring(expected.x)..','..tostring(expected.y))
+    local expected = nil
+    -- Maker rebases simulated coordinates into its scene rect; observe the actual delivered point.
+    touchHandler = _InputService:ConnectEvent(ScreenTouchEvent, function(event)
+        if event.TouchId == 1 then expected = _UILogic:ScreenToWorldPosition(event.TouchPoint) end
+    end)
+    log('[VRF][EditorNativeInput] READY native left click=(640,540)')
     assert(await(function() return #l.Snapshot.draft == 1 end), 'real screen input reaches battlefield')
     local unit=l.Snapshot.draft[1]
+    assert(expected ~= nil, 'actual screen input observed')
     assert(math.abs(unit.x-expected.x)<.001 and math.abs(unit.y-expected.y)<.001, 'native camera conversion preserves position')
     assert(_FormationSchema:EncodeDocument(l.Snapshot.saved)==saved, 'native placement changes only draft')
 end)
+if touchHandler ~= nil then _InputService:DisconnectEvent(ScreenTouchEvent, touchHandler) end
 if backup ~= nil and l.Snapshot.editSlot == 5 then
     _FormationService:RequestDraft(backup,l.Snapshot.draftVersion,5)
     await(function() return _FormationSchema:SameUnits(l.Snapshot.draft,backup) end)

@@ -100,8 +100,6 @@ script FormationLobby extends Logic
                 if state.saved == nil then return end
                 _FormationService:RequestActivate(state.editSlot, state.saved.slots[tostring(state.editSlot)].revision)
             end)
-            self:Bind("Editor/Remove", function() self:RemoveSelected() end)
-            self:Bind("Editor/AddMode", function() self.SelectedUnit = 0 self:Render() end)
             self:Bind("Editor/ToggleUnits", function() self._T.showUnits = not self._T.showUnits self:Render() end)
             for index = 1, 5 do
                 local slotId = index
@@ -560,7 +558,7 @@ script FormationLobby extends Logic
             local layout = catalog:GetComponent("ScrollLayoutGroupComponent")
             if isvalid(layout) then layout:ResetScrollPosition(UITransformAxis.Vertical) end
         end
-        log("[VRF][FormationUI] cards=" .. tostring(#options) .. " columns=2 scroll=vertical")
+        log("[VRF][FormationUI] cards=" .. tostring(#options) .. " columns=3 scroll=vertical")
     end
 
     @ExecSpace("ClientOnly")
@@ -634,7 +632,8 @@ script FormationLobby extends Logic
         self:SetEnabled("ReturnLobby", not inLobby)
         local toggle = self:Ui("ReturnLobby")
         if isvalid(toggle) then
-            toggle.UITransformComponent.anchoredPosition = inEditor and Vector2(396, 464) or Vector2(0, -400)
+            toggle.UITransformComponent.anchoredPosition = inEditor and Vector2(-56, -456) or Vector2(0, -400)
+            toggle.UITransformComponent.RectSize = inEditor and Vector2(176, 88) or Vector2(200, 88)
             self:SetText("ReturnLobby", inEditor and (self._T.editorCollapsed and "展開整備面板" or "收起整備面板") or "遊戲大廳")
         end
         self:SetEnabled("Status", inLobby or inEditor)
@@ -647,8 +646,8 @@ script FormationLobby extends Logic
             status.UITransformComponent.AnchorsMin = anchor
             status.UITransformComponent.AnchorsMax = anchor
             status.UITransformComponent.Pivot = anchor
-            status.UITransformComponent.anchoredPosition = inLobby and Vector2(880, -952) or Vector2(1408, -982)
-            status.UITransformComponent.RectSize = inLobby and Vector2(400, 112) or Vector2(464, 74)
+            status.UITransformComponent.anchoredPosition = inLobby and Vector2(880, -952) or Vector2(48, -1044)
+            status.UITransformComponent.RectSize = inLobby and Vector2(400, 112) or Vector2(944, 32)
         end
         local edit = self:Ui("Lobby/Edit")
         if isvalid(edit) then edit.ButtonComponent.Enable = writable and not state.pending end
@@ -746,8 +745,6 @@ script FormationLobby extends Logic
         if isvalid(continueEditing) then continueEditing.ButtonComponent.Enable = true end
         local slotInfo = state.slots and state.slots[tostring(editSlot)] or nil
         if isvalid(activate) then activate.ButtonComponent.Enable = writable and not state.pending and slotInfo ~= nil and slotInfo.savedValid == true end
-        local remove = self:Ui("Editor/Remove")
-        if isvalid(remove) then remove.ButtonComponent.Enable = writable and self.SelectedUnit > 0 and units[self.SelectedUnit] ~= nil end
         for _, card in ipairs(self._T.cards or {}) do
             if isvalid(card.entity) then card.entity.ButtonComponent.Enable = writable end
             local selected = card.monsterId == self.SelectedMonsterId

@@ -28,7 +28,7 @@ test('native login destination is configured on the server before players spawn'
 
 test('five formations expose stable selectors in lobby and editor with explicit save and activation', () => {
   const ui = UIBuilder.read('ui/FormationGroup.ui');
-  for (const name of ['Lobby/Edit', 'Editor/Save', 'Editor/Activate', 'Retry', 'Editor/Remove']) {
+  for (const name of ['Lobby/Edit', 'Editor/Save', 'Editor/Activate', 'Retry']) {
     assert.ok(ui.find(name), name);
   }
   for (const screen of ['Lobby', 'Editor']) {
@@ -39,10 +39,16 @@ test('five formations expose stable selectors in lobby and editor with explicit 
     }
   }
   assert.equal(ui.find('Editor/Board'), null, 'formation placement is in world space');
+  assert.equal(ui.find('Editor/AddMode'), null, 'deployment resumes by choosing a monster card');
+  assert.equal(ui.find('Editor/Remove'), null, 'unit removal uses world input');
   const surface = ui.getComponent('Editor', 'MOD.Core.SpriteGUIRendererComponent');
   assert.equal(surface.RaycastTarget, false, 'editor root leaves the real battlefield clickable');
   assert.equal(surface.Color.a, 0, 'editor root leaves the real battlefield visible');
   assert.ok(ui.find('Editor/Intel/Stats'), 'tactical intelligence remains outside the details');
+  for (const path of ['Editor/Catalog/Template', 'Editor/Catalog/Template/SelectedGlow/Border']) {
+    const {RectSize: size} = ui.getComponent(path, 'MOD.Core.UITransformComponent');
+    assert.ok(Math.abs(size.x / size.y - 142 / 206) < 0.0001, 'Cardgame frame keeps its native portrait ratio');
+  }
 });
 
 test('every map preserves the template formation terrain and coordinate system', () => {
