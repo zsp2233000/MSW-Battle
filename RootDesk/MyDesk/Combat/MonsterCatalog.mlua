@@ -282,10 +282,11 @@ script MonsterCatalog extends Component
     end
 
     method table GetDeploymentOptions()
-        -- Return the sorted, limited fields needed to display deployment cards.
+        -- Keep identity/image positions stable and append display-only intelligence from the validated profile.
         local options = {}
         for _, profile in pairs(self._T.profilesById or {}) do
-            table.insert(options, { profile.MonsterId, profile.MonsterName, profile.StandAnimationRUID })
+            table.insert(options, { profile.MonsterId, profile.MonsterName, profile.StandAnimationRUID,
+                profile.MonsterType, profile.MaxHp, profile.AttackDamage, profile.AttackIntervalSeconds, profile.AttackRange })
         end
         table.sort(options, function(left, right) return left[1] < right[1] end)
         return options

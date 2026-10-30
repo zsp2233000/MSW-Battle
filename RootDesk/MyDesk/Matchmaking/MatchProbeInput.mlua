@@ -62,18 +62,18 @@ script MatchProbeInput extends Logic
                 panel.UITransformComponent.AnchorsMin = anchor
                 panel.UITransformComponent.AnchorsMax = anchor
                 panel.UITransformComponent.Pivot = anchor
-                panel.UITransformComponent.anchoredPosition = lobby and Vector2(1320, -210) or (editor and Vector2(-24, -154) or Vector2(-24, 24))
-                panel.UITransformComponent.RectSize = lobby and Vector2(520, 710) or Vector2(600, 290)
+                panel.UITransformComponent.anchoredPosition = lobby and Vector2(1320, -210) or (editor and Vector2(-48, -768) or Vector2(-24, 24))
+                panel.UITransformComponent.RectSize = lobby and Vector2(520, 710) or (editor and Vector2(472, 290) or Vector2(600, 290))
                 self.action.UITransformComponent.AlignmentOption = AlignmentType.BottomCenter
                 self.action.UITransformComponent.Pivot = Vector2(0.5, 0)
                 self.action.UITransformComponent.anchoredPosition = Vector2(0, lobby and 28 or 20)
                 self.action.UITransformComponent.RectSize = lobby and Vector2(464, 104) or Vector2(420, 88)
                 self.status.UITransformComponent.anchoredPosition = lobby and Vector2(32, -170) or Vector2(24, -20)
-                self.status.UITransformComponent.RectSize = lobby and Vector2(456, 160) or Vector2(552, 74)
+                self.status.UITransformComponent.RectSize = lobby and Vector2(456, 160) or (editor and Vector2(424, 74) or Vector2(552, 74))
                 local fixed = self.root:GetChildByName("FixedSummary", true)
                 if isvalid(fixed) then
                     fixed.UITransformComponent.anchoredPosition = lobby and Vector2(32, -348) or Vector2(24, -98)
-                    fixed.UITransformComponent.RectSize = lobby and Vector2(456, 152) or Vector2(552, 76)
+                    fixed.UITransformComponent.RectSize = lobby and Vector2(456, 152) or (editor and Vector2(424, 76) or Vector2(552, 76))
                 end
                 local title = panel:GetChildByName("Title", false)
                 if isvalid(title) then title:SetEnable(lobby) end

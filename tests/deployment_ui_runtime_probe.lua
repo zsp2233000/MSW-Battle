@@ -81,7 +81,8 @@ local function startSingleUnitBattle()
             _TimerService:SetTimerOnce(function()
                 check(adapter.session.Phase == "BATTLE" and adapter.session.InitialPlayerAlive == 1,
                     "start-button action starts a one-unit battle")
-                check(adapter.optionContainer.Enable == false and adapter.startButton.Enable == false,
+                check(not adapter.optionContainer.EnabledInHierarchy and not adapter.startButton.EnabledInHierarchy
+                    and not adapter.startButton.ButtonComponent.Enable,
                     "deployment controls hide and disable after battle starts")
 
                 local function observeResult(elapsed)

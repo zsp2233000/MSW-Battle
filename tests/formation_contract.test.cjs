@@ -39,8 +39,10 @@ test('five formations expose stable selectors in lobby and editor with explicit 
     }
   }
   assert.equal(ui.find('Editor/Board'), null, 'formation placement is in world space');
-  const dock = ui.listEntities().find(e => e.path === '/ui/FormationGroup/Editor');
-  assert.ok(dock.size[1] <= 350, 'editor controls leave the terrain visible');
+  const surface = ui.getComponent('Editor', 'MOD.Core.SpriteGUIRendererComponent');
+  assert.equal(surface.RaycastTarget, false, 'editor root leaves the real battlefield clickable');
+  assert.equal(surface.Color.a, 0, 'editor root leaves the real battlefield visible');
+  assert.ok(ui.find('Editor/Intel/Stats'), 'tactical intelligence remains outside the details');
 });
 
 test('every map preserves the template formation terrain and coordinate system', () => {

@@ -495,12 +495,21 @@ script FormationLobby extends Logic
 
     @ExecSpace("ClientOnly")
     method void BuildOptions(table options)
-        -- Clone the same five-column battle cards when the formal catalog changes.
+        -- Rebuild catalog cards only when server-published identity, art or intelligence changes.
         local parts = {}
-        for _, option in ipairs(options) do table.insert(parts, option[1] .. "|" .. option[2] .. "|" .. option[3]) end
+        local foundSelection = false
+        for _, option in ipairs(options) do
+            local fields = {}
+            for _, value in ipairs(option) do table.insert(fields, tostring(value)) end
+            table.insert(parts, table.concat(fields, "|"))
+            if option[1] == self.SelectedMonsterId then foundSelection = true end
+        end
         local key = table.concat(parts, "\n")
         if key == self._T.optionsKey then return end
+        local template = self:Ui("Editor/Catalog/Template")
+        if not isvalid(template) then return end
         self._T.optionsKey = key
+        if not foundSelection then self.SelectedMonsterId = #options > 0 and options[1][1] or "" end
         for _, card in ipairs(self._T.cards) do
             if isvalid(card.entity) then
                 card.entity:DisconnectEvent(ButtonClickEvent, card.callback)
@@ -508,8 +517,6 @@ script FormationLobby extends Logic
             end
         end
         self._T.cards = {}
-        local template = self:Ui("Editor/Catalog/Template")
-        if not isvalid(template) then return end
         for index, option in ipairs(options) do
             local monsterId = option[1]
             local card = template:Clone("Monster" .. tostring(index))
@@ -534,6 +541,11 @@ script FormationLobby extends Logic
                 if isvalid(border) then border.SpriteGUIRendererComponent.RaycastTarget = false end
                 if isvalid(check) then check.SpriteGUIRendererComponent.RaycastTarget = false end
             end
+            local identity = card:GetChildByName("Identity", true)
+            if isvalid(identity) then
+                local kinds = { TANK = "坦克", ASSAULT = "戰士", SHOOTER = "射手" }
+                identity.TextGUIRendererComponent.Text = kinds[option[4]] or ""
+            end
             local callback = card:ConnectEvent(ButtonClickEvent, function()
                 self.SelectedMonsterId = monsterId
                 self.SelectedUnit = 0
@@ -548,7 +560,34 @@ script FormationLobby extends Logic
             local layout = catalog:GetComponent("ScrollLayoutGroupComponent")
             if isvalid(layout) then layout:ResetScrollPosition(UITransformAxis.Vertical) end
         end
-        log("[VRF][FormationUI] cards=" .. tostring(#options) .. " columns=5 scroll=vertical")
+        log("[VRF][FormationUI] cards=" .. tostring(#options) .. " columns=7 scroll=vertical")
+    end
+
+    @ExecSpace("ClientOnly")
+    method void RenderIntel()
+        -- A selected world unit takes precedence over the placement card; statistics never enter draft commands.
+        local unit = (self.Snapshot.draft or {})[self.SelectedUnit]
+        local monsterId = unit ~= nil and unit.monsterId or self.SelectedMonsterId
+        local option = nil
+        for _, entry in ipairs(self.Snapshot.options or {}) do
+            if entry[1] == monsterId then option = entry break end
+        end
+        self:SetText("Editor/Intel/Context", unit ~= nil and ("單位 " .. tostring(self.SelectedUnit) .. " · 已選取") or "待部署怪物")
+        self:SetText("Editor/Intel/Name", option ~= nil and option[2] or "等待怪物目錄")
+        local portrait = self:Ui("Editor/Intel/Portrait")
+        if isvalid(portrait) then
+            portrait:SetEnable(option ~= nil)
+            if option ~= nil then portrait.SpriteGUIRendererComponent.ImageRUID = DataRef("thumbnail://" .. option[3]) end
+        end
+        local kinds = { TANK = "坦克", ASSAULT = "戰士", SHOOTER = "射手" }
+        local stats = "目錄讀取完成後顯示戰術情報"
+        if option ~= nil then
+            stats = "種類    " .. (kinds[option[4]] or "—") .. "\n生命值    " .. tostring(option[5])
+                .. "\n傷害    " .. tostring(option[6]) .. "\n攻擊間隔    " .. tostring(option[7]) .. " 秒"
+                .. "\n攻擊距離    " .. tostring(option[8])
+        end
+        self:SetText("Editor/Intel/Stats", stats)
+        self:SetText("Editor/Units/Detail", "MonsterId：" .. monsterId .. (unit ~= nil and string.format("\n相對站位 (%.2f, %.2f)", unit.x, unit.y) or "\n尚未選取場上單位"))
     end
 
     @ExecSpace("ClientOnly")
@@ -583,10 +622,19 @@ script FormationLobby extends Logic
         self:SetEnabled("Lobby", inLobby)
         self:SetEnabled("Editor", inEditor and not self._T.editorCollapsed)
         self:SetEnabled("Editor/Units", inEditor and self._T.showUnits)
+        if inEditor then
+            -- Maker can retain import order after a layout refresh; keep the panel fills below existing controls.
+            for _, path in ipairs({ "Editor/Header", "Editor/CatalogDock", "Editor/Intel" }) do
+                local panel = self:Ui(path)
+                if isvalid(panel) then _UILogic:SetSiblingIndex(panel.UITransformComponent, 0) end
+            end
+            local details = self:Ui("Editor/Units")
+            if isvalid(details) then _UILogic:SetSiblingIndex(details.UITransformComponent, #details.Parent.Children:ToTable()) end
+        end
         self:SetEnabled("ReturnLobby", not inLobby)
         local toggle = self:Ui("ReturnLobby")
         if isvalid(toggle) then
-            toggle.UITransformComponent.anchoredPosition = inEditor and Vector2(-780, 460) or Vector2(0, -400)
+            toggle.UITransformComponent.anchoredPosition = inEditor and Vector2(-812, 212) or Vector2(0, -400)
             self:SetText("ReturnLobby", inEditor and (self._T.editorCollapsed and "展開整備面板" or "收起整備面板") or "遊戲大廳")
         end
         self:SetEnabled("Status", inLobby or inEditor)
@@ -599,14 +647,15 @@ script FormationLobby extends Logic
             status.UITransformComponent.AnchorsMin = anchor
             status.UITransformComponent.AnchorsMax = anchor
             status.UITransformComponent.Pivot = anchor
-            status.UITransformComponent.anchoredPosition = inLobby and Vector2(880, -952) or Vector2(0, 12)
-            status.UITransformComponent.RectSize = inLobby and Vector2(400, 112) or Vector2(1600, 44)
+            status.UITransformComponent.anchoredPosition = inLobby and Vector2(880, -952) or Vector2(-256, 8)
+            status.UITransformComponent.RectSize = inLobby and Vector2(400, 112) or Vector2(1312, 36)
         end
         local edit = self:Ui("Lobby/Edit")
         if isvalid(edit) then edit.ButtonComponent.Enable = writable and not state.pending end
         local retry = self:Ui("Retry")
         if isvalid(retry) then
-            retry.UITransformComponent.anchoredPosition = inLobby and Vector2(530, -646) or Vector2(830, -136)
+            retry.UITransformComponent.anchoredPosition = inLobby and Vector2(530, -646) or Vector2(48, -80)
+            retry.UITransformComponent.RectSize = inLobby and Vector2(300, 88) or Vector2(200, 88)
             retry.ButtonComponent.Enable = not state.pending
         end
         self:SetEnabled("Retry", (inLobby or inEditor) and (load == "ERROR" or load == "CONFLICT"))
@@ -671,14 +720,20 @@ script FormationLobby extends Logic
             self:SetText("Editor/Slots/Slot" .. key, label)
             local selector = self:Ui("Lobby/Slots/Slot" .. key)
             if isvalid(selector) then selector.ButtonComponent.Enable = writable and not state.pending end
+            local editorSelector = self:Ui("Editor/Slots/Slot" .. key)
+            if isvalid(editorSelector) then editorSelector.ButtonComponent.Enable = writable and not state.pending end
         end
         self:SetText("Editor/Selection", self.SelectedUnit > 0 and ("移動單位 " .. tostring(self.SelectedUnit) .. "：點選新站位") or ("放置：" .. self:MonsterName(self.SelectedMonsterId)))
+        self:RenderIntel()
+        self:SetText("Editor/Roster", "編隊草稿 " .. tostring(#units) .. " / 6 · 可重複部署")
         for index = 1, 6 do
             local entry = units[index]
             local label = tostring(index) .. ". 空位"
             if entry ~= nil then label = tostring(index) .. ". " .. self:MonsterName(entry.monsterId) .. string.format("  (%.2f, %.2f)", entry.x, entry.y) end
             if self.SelectedUnit == index then label = "> " .. label end
             self:SetText("Editor/Units/Unit" .. tostring(index), label)
+            local button = self:Ui("Editor/Units/Unit" .. tostring(index))
+            if isvalid(button) then button.ButtonComponent.Enable = writable and entry ~= nil end
         end
         local save = self:Ui("Editor/Save")
         local activate = self:Ui("Editor/Activate")
@@ -691,7 +746,10 @@ script FormationLobby extends Logic
         if isvalid(continueEditing) then continueEditing.ButtonComponent.Enable = true end
         local slotInfo = state.slots and state.slots[tostring(editSlot)] or nil
         if isvalid(activate) then activate.ButtonComponent.Enable = writable and not state.pending and slotInfo ~= nil and slotInfo.savedValid == true end
+        local remove = self:Ui("Editor/Remove")
+        if isvalid(remove) then remove.ButtonComponent.Enable = writable and self.SelectedUnit > 0 and units[self.SelectedUnit] ~= nil end
         for _, card in ipairs(self._T.cards or {}) do
+            if isvalid(card.entity) then card.entity.ButtonComponent.Enable = writable end
             local selected = card.monsterId == self.SelectedMonsterId
             if isvalid(card.glow) then card.glow:SetEnable(selected) end
             if selected and isvalid(card.entity) then
