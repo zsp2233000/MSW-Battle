@@ -10,11 +10,13 @@ MonsterCatalog 從已驗證的伺服器 profile 發送種類、生命值、傷�
 
 1920×1080 參考畫布中，右側區塊從 x=1040 開始、寬 832，右邊留 48、底部留 24。組別在 y=136；卡片面板在 y=256、高 480，實際捲動視窗為 784×412；能力情報在 y=752、高 304，延伸到 y=1056。三個區塊依序填滿右側可用高度。
 
-卡片外框原素材 Border_2 為 142×206，原先被壓成 144×138，造成扁平。改為 213×309，卡片本體與選取外框皆保留原始比例；內側 CardSign 也依 302×424 比例縮放。每列三張卡片，正式三種怪物可在同一列看到；更多怪物用原生垂直捲動顯示。
+卡片外框原素材 Border_2 為 142×206，原先被壓成 144×138，造成扁平。改為 213×309。CardSign 依套件原卡片的相對尺寸放大至 226.5×318，略超出底框；名稱置於 y=-84。選取時直接切換底框為套件 Border_2_Gold，並顯示勾選，移除覆蓋在裝飾與內容上方的第二張完整卡框及名稱臨時提層。底框、裝飾、圖像與文字維持固定層級，原生 ColorTint 按鈕狀態保留。每列三張卡片，正式三種怪物可在同一列看到；更多怪物用原生垂直捲動顯示。
 
 標題與草稿摘要移到頂端；操作提示、橫向配對面板，以及保存、設為出戰、返回、詳情與收合五個按鈕放在左下方。狀態文字位於最下緣。詳情由使用者主動開啟，顯示在左側，關閉後恢復中央地圖視野。
 
 同日修訂後複測：`EditorIntel` 包含右側三個區塊及選取提示的螢幕邊界檢查，以及已移除按鈕不存在的檢查；`EditorNativeInput`、`EditorFlow`、`EditorFailure`、18 筆正式目錄與原生滾輪皆 PASS。本機契約 32/32 通過，strict lint 無 Error／Warning，build 保留相同兩項既有 Warning。原生畫面確認直式卡框、完整情報、操作提示、配對文字及中央部署區清楚可見。
+
+同日卡片層級修訂另行驗證：本機契約 32/32、105 entities strict lint 無 Error／Warning，Maker build 0 Error、同兩項既有 Warning。`EditorIntel` 新增逐張切換時的金色／一般底框、唯一勾選、裝飾超出底框及重複卡框不存在檢查，PASS；`CardLayers` runtime 檢查裝飾在名稱後、勾選在圖像前及原生 ColorTint 保留，PASS。兩次原生截圖確認 Shooter 與 Tank 切換後的框色、名稱及圖像清楚，最後 Stop 返回編輯模式。此輪只重跑卡片與情報檢查，完整保存流程、失敗注入、18 筆目錄及實體滑鼠各狀態未重跑；此前紀錄保留如下。
 
 ## 驗證紀錄
 
@@ -23,7 +25,7 @@ MonsterCatalog 從已驗證的伺服器 profile 發送種類、生命值、傷�
 | 檢查 | 證據 |
 |---|---|
 | 本機契約 | `node --test tests/*.test.cjs`：32/32 通過 |
-| UIBuilder strict lint | 106 entities，0 Error、0 Warning |
+| UIBuilder strict lint | 105 entities，0 Error、0 Warning |
 | Maker build | 0 Error；保留原有 IsPCPlatform 舊 API、BattleViewAvatar 動作選擇器兩項 Warning |
 | 正式卡片與情報 | `editor_intel_runtime_probe.lua`：逐張卡片選取、正式五項情報、場上選取、詳情開關、保存操作可見、冗餘按鈕已移除與實際背景排序 PASS |
 | 編輯完整流程 | `editor_flow_runtime_probe.lua`：重複兵種、分數座標移動、移除、六人上限、邊界、0.3 間距、保存、明確設為出戰、乾淨返回與未保存返回選擇 PASS |

@@ -534,9 +534,7 @@ script FormationLobby extends Logic
             local glow = card:GetChildByName("SelectedGlow", true)
             if isvalid(glow) then
                 glow:SetEnable(self.SelectedMonsterId == monsterId)
-                local border = glow:GetChildByName("Border", true)
                 local check = glow:GetChildByName("Check", true)
-                if isvalid(border) then border.SpriteGUIRendererComponent.RaycastTarget = false end
                 if isvalid(check) then check.SpriteGUIRendererComponent.RaycastTarget = false end
             end
             local identity = card:GetChildByName("Identity", true)
@@ -746,15 +744,12 @@ script FormationLobby extends Logic
         local slotInfo = state.slots and state.slots[tostring(editSlot)] or nil
         if isvalid(activate) then activate.ButtonComponent.Enable = writable and not state.pending and slotInfo ~= nil and slotInfo.savedValid == true end
         for _, card in ipairs(self._T.cards or {}) do
-            if isvalid(card.entity) then card.entity.ButtonComponent.Enable = writable end
             local selected = card.monsterId == self.SelectedMonsterId
-            if isvalid(card.glow) then card.glow:SetEnable(selected) end
-            if selected and isvalid(card.entity) then
-                local name = card.entity:GetChildByName("MonsterName", true)
-                if isvalid(name) and isvalid(name.UITransformComponent) then
-                    _UILogic:SetSiblingIndex(name.UITransformComponent, #name.Parent.Children:ToTable())
-                end
+            if isvalid(card.entity) then
+                card.entity.ButtonComponent.Enable = writable
+                card.entity.SpriteGUIRendererComponent.ImageRUID = DataRef(selected and "359082ed43c44cc1a597b00b61bafa36" or "dc14abffdb9f400e819f61b9ab7e6805")
             end
+            if isvalid(card.glow) then card.glow:SetEnable(selected) end
         end
     end
 

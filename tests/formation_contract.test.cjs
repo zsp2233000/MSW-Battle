@@ -45,10 +45,12 @@ test('five formations expose stable selectors in lobby and editor with explicit 
   assert.equal(surface.RaycastTarget, false, 'editor root leaves the real battlefield clickable');
   assert.equal(surface.Color.a, 0, 'editor root leaves the real battlefield visible');
   assert.ok(ui.find('Editor/Intel/Stats'), 'tactical intelligence remains outside the details');
-  for (const path of ['Editor/Catalog/Template', 'Editor/Catalog/Template/SelectedGlow/Border']) {
-    const {RectSize: size} = ui.getComponent(path, 'MOD.Core.UITransformComponent');
-    assert.ok(Math.abs(size.x / size.y - 142 / 206) < 0.0001, 'Cardgame frame keeps its native portrait ratio');
-  }
+  const {RectSize: frame} = ui.getComponent('Editor/Catalog/Template', 'MOD.Core.UITransformComponent');
+  const {RectSize: sign} = ui.getComponent('Editor/Catalog/Template/CardSign', 'MOD.Core.UITransformComponent');
+  assert.ok(Math.abs(frame.x / frame.y - 142 / 206) < 0.0001, 'Cardgame frame keeps its native portrait ratio');
+  assert.ok(Math.abs(sign.x / sign.y - 302 / 424) < 0.0001, 'Cardgame ornament keeps its source ratio');
+  assert.ok(sign.x > frame.x && sign.y > frame.y, 'ornament extends beyond the frame as in the source card');
+  assert.equal(ui.find('Editor/Catalog/Template/SelectedGlow/Border'), null, 'selection does not cover the ornament with a second frame');
 });
 
 test('every map preserves the template formation terrain and coordinate system', () => {

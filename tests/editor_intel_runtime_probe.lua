@@ -21,6 +21,17 @@ local ok, detail = pcall(function()
     for index, option in ipairs(l.Snapshot.options) do
         click('Editor/Catalog/Monster' .. tostring(index))
         assert(l.SelectedMonsterId == option[1] and l.SelectedUnit == 0, 'card selects stable MonsterId')
+        for otherIndex, other in ipairs(l.Snapshot.options) do
+            local card = l:Ui('Editor/Catalog/Monster' .. tostring(otherIndex))
+            local selected = other[1] == option[1]
+            assert(card.SpriteGUIRendererComponent.ImageRUID.DataId == (selected and '359082ed43c44cc1a597b00b61bafa36' or 'dc14abffdb9f400e819f61b9ab7e6805'), 'only selected card uses the gold base frame')
+            local glow = card:GetChildByName('SelectedGlow')
+            assert(glow.Enable == selected, 'check mark follows exclusive selection')
+            assert(not isvalid(glow:GetChildByName('Border')), 'no frame overlays the card content')
+            local frame = card.UITransformComponent.RectSize
+            local sign = card:GetChildByName('CardSign').UITransformComponent.RectSize
+            assert(sign.x > frame.x and sign.y > frame.y, 'ornament extends beyond the base frame')
+        end
         local stats = l:Ui('Editor/Intel/Stats').TextGUIRendererComponent.Text
         assert(string.find(stats, kinds[option[4]], 1, true), 'formal monster kind')
         for _, value in ipairs({option[5], option[6], option[7], option[8]}) do
