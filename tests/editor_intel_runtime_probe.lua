@@ -11,6 +11,12 @@ local ok, detail = pcall(function()
     assert(await(function() return _UserService.LocalPlayer.CurrentMapName == 'formationsim' end), 'formal editor entered')
     wait(0.3)
     assert(isvalid(l:Ui('Editor/Intel/Stats')), 'visible tactical intelligence exists')
+    for _, path in ipairs({'Slots','Header','CatalogDock','Catalog','Intel','Save','Activate','AddMode','Remove','Back','ToggleUnits','Units','Title','Summary','Help','Roster','Selection'}) do
+        local rect = l:Ui('Editor/'..path).UITransformComponent
+        assert(rect.anchoredPosition.x >= 960, path..' leaves the left deployment half clear')
+        assert(rect.anchoredPosition.x + rect.RectSize.x <= 1920
+            and -rect.anchoredPosition.y + rect.RectSize.y <= 1080, path..' remains inside the reference screen')
+    end
     local kinds = { TANK='坦克', ASSAULT='戰士', SHOOTER='射手' }
     for index, option in ipairs(l.Snapshot.options) do
         click('Editor/Catalog/Monster' .. tostring(index))

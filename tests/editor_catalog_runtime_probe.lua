@@ -1,7 +1,7 @@
 -- Client, guarded 18-row MonsterData fixture: identity, intelligence, real scrolling and last-row selection.
 local l = _FormationLobby
 local function await(predicate)
-    for _=1,100 do if predicate() then return true end wait(.1) end
+    for _=1,300 do if predicate() then return true end wait(.1) end
     return false
 end
 local ok, detail = pcall(function()
@@ -24,7 +24,7 @@ local ok, detail = pcall(function()
     local layout=l:Ui('Editor/Catalog').ScrollLayoutGroupComponent
     layout:ResetScrollPosition(UITransformAxis.Vertical)
     wait(.2)
-    log('[VRF][EditorCatalog] WHEEL_READY cursor=(240,180) delta=-1 x16, 250ms apart; viewport gap')
+    log('[VRF][EditorCatalog] WHEEL_READY cursor=(1208,570) delta=-1 x40, 250ms apart; right viewport gap')
     assert(await(function() return layout:GetScrollNormalizedPosition().y > .8 end), 'native mouse wheel reaches last row')
     local last=l.Snapshot.options[18]
     local card=l:Ui('Editor/Catalog/Monster18')

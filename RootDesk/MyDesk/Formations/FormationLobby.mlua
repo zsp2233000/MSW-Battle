@@ -560,7 +560,7 @@ script FormationLobby extends Logic
             local layout = catalog:GetComponent("ScrollLayoutGroupComponent")
             if isvalid(layout) then layout:ResetScrollPosition(UITransformAxis.Vertical) end
         end
-        log("[VRF][FormationUI] cards=" .. tostring(#options) .. " columns=7 scroll=vertical")
+        log("[VRF][FormationUI] cards=" .. tostring(#options) .. " columns=2 scroll=vertical")
     end
 
     @ExecSpace("ClientOnly")
@@ -634,7 +634,7 @@ script FormationLobby extends Logic
         self:SetEnabled("ReturnLobby", not inLobby)
         local toggle = self:Ui("ReturnLobby")
         if isvalid(toggle) then
-            toggle.UITransformComponent.anchoredPosition = inEditor and Vector2(-812, 212) or Vector2(0, -400)
+            toggle.UITransformComponent.anchoredPosition = inEditor and Vector2(396, 464) or Vector2(0, -400)
             self:SetText("ReturnLobby", inEditor and (self._T.editorCollapsed and "展開整備面板" or "收起整備面板") or "遊戲大廳")
         end
         self:SetEnabled("Status", inLobby or inEditor)
@@ -643,18 +643,18 @@ script FormationLobby extends Logic
         local writable = load == "READY" or load == "NEW"
         local status = self:Ui("Status")
         if isvalid(status) then
-            local anchor = inLobby and Vector2(0, 1) or Vector2(0.5, 0)
+            local anchor = Vector2(0, 1)
             status.UITransformComponent.AnchorsMin = anchor
             status.UITransformComponent.AnchorsMax = anchor
             status.UITransformComponent.Pivot = anchor
-            status.UITransformComponent.anchoredPosition = inLobby and Vector2(880, -952) or Vector2(-256, 8)
-            status.UITransformComponent.RectSize = inLobby and Vector2(400, 112) or Vector2(1312, 36)
+            status.UITransformComponent.anchoredPosition = inLobby and Vector2(880, -952) or Vector2(1408, -982)
+            status.UITransformComponent.RectSize = inLobby and Vector2(400, 112) or Vector2(464, 74)
         end
         local edit = self:Ui("Lobby/Edit")
         if isvalid(edit) then edit.ButtonComponent.Enable = writable and not state.pending end
         local retry = self:Ui("Retry")
         if isvalid(retry) then
-            retry.UITransformComponent.anchoredPosition = inLobby and Vector2(530, -646) or Vector2(48, -80)
+            retry.UITransformComponent.anchoredPosition = inLobby and Vector2(530, -646) or Vector2(1112, -560)
             retry.UITransformComponent.RectSize = inLobby and Vector2(300, 88) or Vector2(200, 88)
             retry.ButtonComponent.Enable = not state.pending
         end
