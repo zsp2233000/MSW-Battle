@@ -793,7 +793,7 @@ script FormationLobby extends Logic
         if load == "LOADING" or load == "NOT_LOADED" then text = "讀取中" end
         if needsRetry then text = "需確認" end
         if load == "NEW" then text = "首次使用" end
-        if dirty then text = "有未儲存變更 *" end
+        if dirty then text = "有未儲存變更" end
         if busy then text = "儲存中…" end
         local note = state.message or "正在讀取個人隊伍"
         -- Surface why the primary save is unavailable whenever it matters; "no change" needs no explanation.
@@ -805,7 +805,7 @@ script FormationLobby extends Logic
         local editSlot = state.editSlot or 1
         local summary = "尚無預存隊伍"
         if saved ~= nil then
-            summary = "第 " .. tostring(editSlot) .. " 組" .. (dirty and " *" or "") .. " / 已保存 " .. tostring(#saved.slots[tostring(editSlot)].units) .. " / 6"
+            summary = "第 " .. tostring(editSlot) .. " 組 / 已保存 " .. tostring(#saved.slots[tostring(editSlot)].units) .. " / 6"
                 .. "    後續出戰：" .. (saved.activeSlot > 0 and ("第 " .. tostring(saved.activeSlot) .. " 組") or "尚未選定")
         end
         self:RenderLobbyPreview()
@@ -816,7 +816,6 @@ script FormationLobby extends Logic
             local slot = saved and saved.slots[key] or nil
             local info = state.slots and state.slots[key] or nil
             local label = "第 " .. key .. " 組"
-            if index == editSlot and dirty then label = label .. " *" end
             if slot == nil then
                 label = label .. "\n讀取中"
             else
@@ -831,6 +830,7 @@ script FormationLobby extends Logic
                 self:SetText(base, label)
                 self:SetEnabled(base .. "/EditFrame", isCurrent)
                 self:SetEnabled(base .. "/ActiveBadge", isActive)
+                self:SetEnabled(base .. "/DirtyMark", isCurrent and dirty)
                 if isCurrent then
                     for _, edge in ipairs({ "Top", "Bottom", "Left", "Right" }) do
                         local bar = self:Ui(base .. "/EditFrame/" .. edge)

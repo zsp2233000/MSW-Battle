@@ -168,7 +168,12 @@ test('#50 group selectors mark the viewed and active group; save and cards use n
       const base = `${screen}/Slots/Slot${slot}`;
       assert.equal(ui.find(`${base}/EditFrame`).jsonString.enable, false, `${base}/EditFrame starts hidden`);
       assert.ok(ui.getComponent(`${base}/EditFrame`, 'MOD.Core.SpriteGUIRendererComponent').Color.a <= 0.15, `${base}/EditFrame fill stays quiet so the label is readable`);
-      assert.equal(ui.find(`${base}/ActiveBadge`).jsonString.enable, false, `${base}/ActiveBadge starts hidden`);
+      // Both markers are sprites, so their art is an ImageRUID the designer can swap in Maker.
+      for (const marker of ['ActiveBadge', 'DirtyMark']) {
+        assert.equal(ui.find(`${base}/${marker}`).jsonString.enable, false, `${base}/${marker} starts hidden`);
+        assert.ok(ui.hasComponent(`${base}/${marker}`, 'MOD.Core.SpriteGUIRendererComponent'), `${marker} is a sprite`);
+        assert.equal(ui.hasComponent(`${base}/${marker}`, 'MOD.Core.TextGUIRendererComponent'), false, `${marker} is not text`);
+      }
       for (const edge of ['Top', 'Bottom', 'Left', 'Right']) {
         assert.equal(ui.getComponent(`${base}/EditFrame/${edge}`, 'MOD.Core.SpriteGUIRendererComponent').RaycastTarget, false);
       }
