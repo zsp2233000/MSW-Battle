@@ -188,12 +188,18 @@ test('#50 group selectors mark the viewed and active group; save and cards use n
   assert.equal(ui.find('Editor/Slots/Slot1').jsonString.enable, true);
 });
 
-test('#50 only a usable save button blinks and the unsaved marker node is gone', () => {
+test('#50 a usable save shows the authored hint instead of blinking', () => {
   const lobby = read('RootDesk/MyDesk/Formations/FormationLobby.mlua');
-  assert.match(method(lobby, 'Render'), /self\._T\.saveBlink = canSave and saveButton or nil/);
-  assert.match(method(lobby, 'PulseSlotFrames'), /saveBlink[\s\S]*math\.sin/);
+  assert.match(method(lobby, 'Render'), /SetEnabled\("Editor\/Save\/SaveHint", canSave\)/);
+  assert.ok(!lobby.includes('saveBlink'));
+  const ui = UIBuilder.read('ui/FormationGroup.ui');
+  const hint = ui.getComponent('Editor/Save/SaveHint', 'MOD.Core.SpriteGUIRendererComponent');
+  assert.equal(hint.ImageRUID.DataId, 'b2ae5080eb1041b8a780a20c4b350257');
+  assert.equal(hint.RaycastTarget, false, '提示圖不攔截按鈕點擊');
+  assert.equal(hint.AnimClipPlayType, 1, '提示動畫必須循環播放，不能播完一次便停住');
+  assert.ok(ui.find('Editor/Save/SaveHint').jsonString.enable, 'Maker 編輯時可直接調整');
   assert.ok(!lobby.includes('DirtyMark'));
-  assert.equal(UIBuilder.read('ui/FormationGroup.ui').find('Editor/Slots/Slot1/DirtyMark'), null);
+  assert.equal(ui.find('Editor/Slots/Slot1/DirtyMark'), null);
 });
 
 test('#50 the viewed group uses a static button tint in both screens', () => {
@@ -212,11 +218,11 @@ test('#50 the viewed group uses a static button tint in both screens', () => {
   assert.match(render, /SetEnabled\(base \.\. "\/ActiveBadge", isActive\)/);
 });
 
-test('#50 group selection has no animated frame or renderer sorting overrides', () => {
+test('#50 group selection has no pulse or renderer sorting overrides', () => {
   // OverrideSorting is read-only and OrderInLayer is only writable in World UI mode, so such writes are errors or no-ops.
   const lobby = read('RootDesk/MyDesk/Formations/FormationLobby.mlua');
   assert.doesNotMatch(lobby, /OverrideSorting|OrderInLayer/);
-  assert.doesNotMatch(lobby, /frameBars|EditFrame/, 'group selection does no per-frame animation work');
+  assert.doesNotMatch(lobby, /PulseSlotFrames|frameBars|self\._T\.pulse|EditFrame/, 'group selection does no per-frame animation work');
 });
 
 test('#50 review fixes: no silent drops while a request is outstanding', () => {
@@ -265,7 +271,10 @@ test('#50 mouse preview and local edits share one rule set and keep selection ru
   const right = method(input, 'RightClick');
   assert.match(right, /mode == "MOVE"[\s\S]*return[\s\S]*mode == "PLACE"[\s\S]*return[\s\S]*HandleWorldRemoval/);
   assert.match(method(input, 'UpdateHover'), /IsPointerOverUI\(\)[\s\S]*UnitAt/, 'hover is world-only and uses the click hit rule');
-  assert.match(method(input, 'ApplyHover'), /Scale = Vector3\(1, 1, 1\)/, 'the previous unit is restored');
+  const hover = method(input, 'ApplyHover');
+  assert.match(hover, /PreviewMode\(\) == "PLACE" then index = 0 end/, '放置模式不暗示場上單位可被選取');
+  assert.ok(hover.indexOf('index = 0') < hover.indexOf('previous == index'), '已亮起的單位也會先清除 hover');
+  assert.match(hover, /Scale = Vector3\(1, 1, 1\)/, 'the previous unit is restored');
   assert.match(method(input, 'HandleRightClick'), /IsPointerOverUI\(\)\s*then return end/, 'a click on UI never reaches the world');
   assert.match(method(input, 'HandleWorldRemoval'), /PreviewMode\(\) ~= ""/);
   assert.match(method(lobby, 'PreviewMode'), /CanEdit\(\)/, 'no preview while pending, confirming or unconfirmed');

@@ -34,7 +34,6 @@ script FormationLobby extends Logic
         self._T.reconcileRequested = false
         self._T.draftReset = true
         self._T.baseUnits = {}
-        self._T.pulse = 0
         self.ObservedSequence = -1
         self.Draft = {}
         self.DraftVersion = 0
@@ -76,7 +75,6 @@ script FormationLobby extends Logic
             self:UpdateIdentity()
         end
         self:UpdateAwaiting(delta)
-        self:PulseSlotFrames(delta)
         if player.CurrentMapName == "matchprobe" then
             self.root:SetEnable(false)
             return
@@ -148,20 +146,6 @@ script FormationLobby extends Logic
         self:CloseConfirmation()
         self:Render()
         log("[VRF][FormationSave] unconfirmed locally id=" .. awaiting.id)
-    end
-
-    @ExecSpace("ClientOnly")
-    method void PulseSlotFrames(number delta)
-        -- Preserve the usable save button blink.
-        local state = self.Snapshot
-        if state.editSlot == nil then return end
-        self._T.pulse = self._T.pulse + delta
-        local blink = self._T.saveBlink
-        if isvalid(blink) and blink.EnabledInHierarchy then
-            -- Swing between the gold tint and a bright warm white, about twice a second.
-            local mix = 0.5 + 0.5 * math.sin(self._T.pulse * 6)
-            blink.SpriteGUIRendererComponent.Color = Color(1, 0.86 + 0.14 * mix, 0.5 + 0.4 * mix, 1)
-        end
     end
 
     @ExecSpace("ClientOnly")
@@ -851,8 +835,8 @@ script FormationLobby extends Logic
         -- Usable save is gold; the native sprite swap still supplies hover, pressed and disabled looks.
         local saveButton = self:Ui("Editor/Save")
         if isvalid(saveButton) then saveButton.SpriteGUIRendererComponent.Color = canSave and Color(1, 0.86, 0.5, 1) or Color(1, 1, 1, 1) end
-        -- A usable save blinks (see PulseSlotFrames); anything else stays still.
-        self._T.saveBlink = canSave and saveButton or nil
+        -- 圖片由 Maker 調整，只切換顯示，不覆寫素材、大小或位置。
+        self:SetEnabled("Editor/Save/SaveHint", canSave)
         self:SetButton("Editor/Activate", activateReason == "" and self._T.confirmKind == "")
         for _, card in ipairs(self._T.cards or {}) do
             local selected = card.monsterId == self.SelectedMonsterId

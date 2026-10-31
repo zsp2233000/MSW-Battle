@@ -81,7 +81,8 @@ script FormationMapInput extends Component
 
     @ExecSpace("ClientOnly")
     method void ApplyHover(integer index)
-        -- Restore the previous unit, then style the new one. Shared by the cursor path and verification probes.
+        -- 放置時點擊不會選取單位，因此所有 hover 入口都必須清除選取暗示。
+        if _FormationLobby:PreviewMode() == "PLACE" then index = 0 end
         local previous = self._T.hoverIndex or 0
         if previous == index then return end
         local old = self._T.previews[previous]

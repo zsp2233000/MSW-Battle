@@ -77,6 +77,27 @@ local ok, detail = pcall(function()
     -- Right-click: cancels only the preview; with none armed it removes; moving keeps the original spot.
     input:HandleWorldClick(Vector3(-5, 0, 0))
     assert(#l.Draft == 1, 'placed')
+    assert(await(function() return input.PreviewCount == 1 end), '放置實體已建立')
+    -- 暫停逐幀游標更新，讓 hover 斷言不受作業系統游標位置影響；結束一定恢復。
+    input.Enable = false
+    local hoverOk, hoverDetail = pcall(function()
+        local entity = input._T.previews[1]
+        local armed = l.SelectedMonsterId
+        input:ApplyHover(1)
+        assert(input._T.hoverIndex == 0 and near(entity.TransformComponent.Scale.x, 1), '放置模式不新增 hover')
+        l.SelectedMonsterId = ''
+        input:ApplyHover(1)
+        assert(input._T.hoverIndex == 1 and near(entity.TransformComponent.Scale.x, 1.12), '取消放置後恢復 hover')
+        assert(near(entity.SpriteRendererComponent.Color.b, 0.55), '一般 hover 的醒目色')
+        l.SelectedMonsterId = armed
+        input:ApplyHover(1)
+        assert(input._T.hoverIndex == 0 and near(entity.TransformComponent.Scale.x, 1), '重新選卡清除既有 hover')
+        local tint = entity.SpriteRendererComponent.Color
+        assert(near(tint.r, 1) and near(tint.g, 1) and near(tint.b, 1), '清除後恢復原色')
+        log('[VRF][Preview50] hover PLACE suppressed; idle restored; existing highlight cleared')
+    end)
+    input.Enable = true
+    assert(hoverOk, tostring(hoverDetail))
     input:RightClick(-5, 0)
     assert(l.SelectedMonsterId == '' and #l.Draft == 1 and l:PreviewMode() == '', 'the same right-click cancels the preview and removes nothing')
     input:HandleWorldClick(Vector3(-5, 0, 0))
