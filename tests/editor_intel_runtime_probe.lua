@@ -45,7 +45,7 @@ local ok, detail = pcall(function()
         'compact intel omits portrait and heading')
     assert(l:Ui('Editor/Intel').UITransformComponent.RectSize.y <= 160, 'compact intel height')
     assert(l:Ui('Editor/Catalog').ScrollLayoutGroupComponent.ConstraintCount == 4, 'four catalog columns')
-    local units = l.Snapshot.draft
+    local units = l.Draft
     if #units > 0 then
         local unit = units[1]
         _UserService.LocalPlayer.CurrentMap:GetComponent('FormationMapInput'):HandleWorldClick(Vector3(unit.x, unit.y, 0))

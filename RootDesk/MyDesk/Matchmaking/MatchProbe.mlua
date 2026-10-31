@@ -102,17 +102,16 @@ script MatchProbe extends Logic
             message = failure.message
         end
         self._T.presentationSequence[userId] = (self._T.presentationSequence[userId] or 0) + 1
-        local notice = ticket ~= nil and ticket.notice or ""
-        self:ReceiveState(state, message, started, count, _RoomService.RoomKey, self._T.busy[userId] == true, summary, attempt, _WorldInstanceService.WorldInstanceId .. ":" .. _RoomService.RoomKey, self._T.presentationSequence[userId], notice, userId)
+        self:ReceiveState(state, message, started, count, _RoomService.RoomKey, self._T.busy[userId] == true, summary, attempt, _WorldInstanceService.WorldInstanceId .. ":" .. _RoomService.RoomKey, self._T.presentationSequence[userId], userId)
     end
 
     @ExecSpace("Client")
-    method void ReceiveState(string state, string message, number started, integer count, string sourceRoom, boolean busy, string summary, string attempt, string sequenceKey, integer sequence, string autoSaveNotice)
+    method void ReceiveState(string state, string message, number started, integer count, string sourceRoom, boolean busy, string summary, string attempt, string sequenceKey, integer sequence)
         -- Deliver state and in-flight ownership to the visible button controller.
         if sourceRoom ~= _RoomService.RoomKey then return end
         local player = _UserService.LocalPlayer
         if isvalid(player) and (player.CurrentMapName == "matchprobe") ~= (sourceRoom ~= "__main__") then return end
-        _MatchProbeInput:Observe(state, message, started, count, busy, summary, attempt, sequenceKey, sequence, autoSaveNotice)
+        _MatchProbeInput:Observe(state, message, started, count, busy, summary, attempt, sequenceKey, sequence)
     end
 
     @ExecSpace("ServerOnly")
@@ -287,7 +286,7 @@ script MatchProbe extends Logic
 
     @ExecSpace("ServerOnly")
     method void Matched(string userId, table ticket)
-        -- Confirm the editor save before sealing the handoff; retain the queue-time roster and latest drafts.
+        -- Seal the handoff with confirmed content only; matching never saves, and the queue-time roster stays fixed (#50).
         if self._T.records[userId] ~= ticket or ticket.data.state ~= "QUEUED" then return end
         ticket.data.state = "SAVING"
         self:PublishState(userId, "MATCHED")

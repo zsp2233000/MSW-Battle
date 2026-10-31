@@ -12,7 +12,6 @@ script MatchProbeInput extends Logic
     property boolean Busy = false
     property string FixedSummary = ""
     property string Attempt = ""
-    property string AutoSaveNotice = ""
 
     @ExecSpace("ClientOnly")
     method void OnBeginPlay()
@@ -20,7 +19,7 @@ script MatchProbeInput extends Logic
         self._T.map = ""
         self._T.click = nil
         self._T.panel = nil
-        for _, name in ipairs({ "Match", "EditorMatch", "BattleMatch" }) do
+        for _, name in ipairs({ "Match", "BattleMatch" }) do
             local panel = self.root:GetChildByName(name, false)
             if isvalid(panel) then panel:SetEnable(false) end
         end
@@ -31,7 +30,6 @@ script MatchProbeInput extends Logic
         self.Busy = false
         self.FixedSummary = ""
         self.Attempt = ""
-        self.AutoSaveNotice = ""
         self._T.sequences = {}
         self._T.pending = false
         self._T.pendingSeconds = 0
@@ -51,7 +49,8 @@ script MatchProbeInput extends Logic
             end
         end
         local confirming = isvalid(self.exitConfirmation) and self.exitConfirmation.Enable
-        self.root:SetEnable((map == "formationlobby" or map == "formationsim" or map == "matchprobe") and not confirming)
+        -- Matchmaking starts from the lobby only; the formation editor offers no matching entry.
+        self.root:SetEnable((map == "formationlobby" or map == "matchprobe") and not confirming)
         if player.CurrentMapName ~= self._T.map then
             self._T.map = player.CurrentMapName
             self:SelectScreen(map)
@@ -70,8 +69,8 @@ script MatchProbeInput extends Logic
         self._T.panel = nil
         self.action = nil
         self.status = nil
-        local screens = { formationlobby = "Match", formationsim = "EditorMatch", matchprobe = "BattleMatch" }
-        for _, name in ipairs({ "Match", "EditorMatch", "BattleMatch" }) do
+        local screens = { formationlobby = "Match", matchprobe = "BattleMatch" }
+        for _, name in ipairs({ "Match", "BattleMatch" }) do
             local panel = self.root:GetChildByName(name, false)
             if isvalid(panel) then
                 panel:SetEnable(name == screens[map])
@@ -88,11 +87,10 @@ script MatchProbeInput extends Logic
     end
 
     @ExecSpace("ClientOnly")
-    method void Observe(string state, string message, number started, integer count, boolean busy, string summary, string attempt, string sourceRoom, integer sequence, string autoSaveNotice)
+    method void Observe(string state, string message, number started, integer count, boolean busy, string summary, string attempt, string sourceRoom, integer sequence)
         -- Retain server observations beyond a short toast lifetime.
         if sequence <= (self._T.sequences[sourceRoom] or 0) then return end
         self._T.sequences[sourceRoom] = sequence
-        self.AutoSaveNotice = autoSaveNotice or ""
         self.FixedSummary = summary
         self.Attempt = attempt
         self._T.pending = false
@@ -155,7 +153,7 @@ script MatchProbeInput extends Logic
             text = "正在確認取消；若服務或清理失敗可重試"
             label = "重試取消"
         elseif self.State == "SAVING" then
-            text = "已找到對手，正在自動保存目前編輯組與交接草稿"
+            text = "已找到對手，正在確認入場資料"
             label = "取消配對"
         elseif self.State == "COMMITTING" or self.State == "TRANSFER" then
             text = "配對成功，正在進入對局房間"
@@ -183,7 +181,7 @@ script MatchProbeInput extends Logic
             text = "對局狀態需要恢復，請返回大廳重試"
             label = "返回大廳"
         elseif self.State == "RETURNING" then
-            text = "正在返回大廳並還原隊伍草稿"
+            text = "正在返回大廳並還原已儲存隊伍"
             label = self.Busy and "返回中…" or "重試返回"
         end
         if self.Message == "NEED_LOADED_VALID_ACTIVE_FORMATION_AND_NO_PENDING_SAVE" then text = "請先儲存有效隊伍並設為出戰，等待保存完成" end
@@ -192,12 +190,12 @@ script MatchProbeInput extends Logic
         if self.Message == "DUPLICATE_PROFILE" then text = "同一帳號無法互相配對，請使用不同模擬玩家" end
         if self.Message == "HANDOFF_SAVE_FAILED" or self.Message == "HANDOFF_SEAL_FAILED" then text = "入場資料保存失敗，可取消入場後重試" end
         if self.Message == "READINESS_FAILED" then text = "連線通知失敗，請重試入場" label = "重試入場" end
-        if self.Message == "RESTORE_RETRY_REQUIRED" then text = "草稿尚未完成還原，請重試返回" end
-        if self.Message == "RETURN_MOVE ok=false" or self.Message == "RETURN_RETRY_MOVE ok=false" or self.Message == "ROOM_MISMATCH_RETURN_FAILED" then text = "返回大廳失敗，隊伍草稿仍保留；請重試返回" label = "重試返回" end
+        if self.Message == "RESTORE_RETRY_REQUIRED" then text = "隊伍尚未完成還原，請重試返回" end
+        if self.Message == "RETURN_MOVE ok=false" or self.Message == "RETURN_RETRY_MOVE ok=false" or self.Message == "ROOM_MISMATCH_RETURN_FAILED" then text = "返回大廳失敗，已儲存隊伍仍保留；請重試返回" label = "重試返回" end
         if self.Message == "RETURN_SAVE_FAILED" or self.Message == "ROOM_MISMATCH_SAVE_FAILED" then text = "返回資料保存失敗，請重試返回" label = "重試返回" end
         if self.Message == "ROOM_MOVE ok=false" then text = "進入戰場失敗，可取消入場後重新配對" end
         if self.Message == "ROOM_CREATE_FAILED" or self.Message == "ADMISSION_SAVE_FAILED" then text = "戰場建立或入場資料保存失敗，可取消入場後重試" end
-        if self.Message == "TRANSFER_EXPIRED" then text = "入場預約已逾期，正在恢復隊伍草稿" end
+        if self.Message == "TRANSFER_EXPIRED" then text = "入場預約已逾期，正在恢復已儲存隊伍" end
         if self.State == "IDLE" and (self.Message == "RETURNED" or self.Message == "CANCELLED") then text = "已返回或取消，可以重新開始配對" end
         if self.State == "IDLE" then
             local ready = formation.loadState == "READY" or formation.loadState == "NEW"
@@ -224,7 +222,6 @@ script MatchProbeInput extends Logic
             title.TextGUIRendererComponent.Text = (self.State == "IDLE" and "對戰指令｜" or "後續配對｜") .. activeLabel
         end
         self.status.TextGUIRendererComponent.Text = mode .. "\n" .. text
-        if self.AutoSaveNotice ~= "" then self.status.TextGUIRendererComponent.Text = self.status.TextGUIRendererComponent.Text .. "\n" .. self.AutoSaveNotice end
         local summary = self._T.panel:GetChildByName("FixedSummary", false)
         if isvalid(summary) then
             local fixed = self.FixedSummary ~= "" and self.FixedSummary or "尚未開始"

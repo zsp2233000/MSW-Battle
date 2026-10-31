@@ -19,14 +19,19 @@ script FormationSchema extends Logic
     end
 
     method any ValidateUnits(any entries, any catalog, boolean allowEmpty)
-        -- Validate the new coordinate contract before accepting saved units or transferred drafts.
+        -- Validate submitted or stored units against the server's formal monster catalog.
+        return self:ValidateShape(entries, function(monsterId) return catalog:GetProfile(monsterId) ~= nil end, allowEmpty)
+    end
+
+    method any ValidateShape(any entries, any hasMonster, boolean allowEmpty)
+        -- One rule set serves the server and the client's unsaved-content checks; only monster lookup differs.
         local count = self:ArrayCount(entries, 6)
         if count < 0 or (count == 0 and not allowEmpty) then return nil end
         local units = {}
         for index = 1, count do
             local entry = entries[index]
             if type(entry) ~= "table" or type(entry.monsterId) ~= "string" then return nil end
-            if catalog:GetProfile(entry.monsterId) == nil then return nil end
+            if not hasMonster(entry.monsterId) then return nil end
             if not self:IsFinite(entry.x) or not self:IsFinite(entry.y) then return nil end
             if not _FormationMapLayout:CanDeploy(entry.x, entry.y) then return nil end
             for _, other in ipairs(units) do

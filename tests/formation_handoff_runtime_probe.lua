@@ -17,13 +17,14 @@ local ok, detail = pcall(function()
     original[1].x = -7.25
     assert(_FormationHandoff:Roster(ticket.id)[1].x == -3.25, 'rosters are detached')
     local session = _FormationService:GetSession(userId)
-    local slot = session.editSlot
-    _FormationService:UpdateDraftForUser(userId, {{monsterId='monster_tank',x=-4.25,y=-1.25}}, session.drafts[tostring(slot)].version, slot)
-    assert(_FormationHandoff:Seal(userId, ticket, function() return true end), 'seal the latest draft')
+    local revision = session.saved.slots[tostring(session.editSlot)].revision
+    assert(_FormationHandoff:Seal(userId, ticket, function() return true end), 'seal confirmed content')
     assert(_FormationHandoff:Roster(ticket.id)[1].x == -3.25, 'sealing never replaces the queue-time formation')
-    assert(session.drafts[tostring(slot)].savedVersion == session.drafts[tostring(slot)].version, 'automatic save confirmed')
+    assert(session.saved.slots[tostring(session.editSlot)].revision == revision, 'matching writes nothing')
+    local capture = _FormationHandoff:Capture(userId)
+    assert(capture ~= nil and capture.saved ~= nil and capture.drafts == nil and capture.autoSaveMessage == nil, 'the handoff carries confirmed content only')
     assert(_FormationHandoff:Close(userId, ticket, 'CANCELLED'), 'close the fixture reservation')
     assert(_FormationHandoff:Roster(ticket.id) == nil, 'closed tickets cannot supply a roster')
-    log('[VRF][HandoffReserve] PASS metadata-only ticket; immutable detached roster; automatic save; close')
+    log('[VRF][HandoffReserve] PASS metadata-only ticket; immutable detached roster; no automatic save; no unsaved content in the handoff; close')
 end)
 if not ok then log('[VRF][HandoffReserve] FAIL '..tostring(detail)) end

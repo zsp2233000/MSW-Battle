@@ -34,7 +34,8 @@ local ok, detail = pcall(function()
     for _, path in ipairs({'Status','Retry','ReturnLobby','EditorControls/Status','EditorControls/Retry','EditorControls/Toggle'}) do
         keepAuthored(l:Ui(path))
     end
-    for _, screen in ipairs({'Match','EditorMatch','BattleMatch'}) do
+    assert(not isvalid(m.root:GetChildByName('EditorMatch')), 'the editor has no matchmaking screen')
+    for _, screen in ipairs({'Match','BattleMatch'}) do
         local panel = m.root:GetChildByName(screen)
         keepAuthored(panel)
         for _, child in ipairs({'Action','Status','FixedSummary'}) do keepAuthored(panel:GetChildByName(child)) end
@@ -44,7 +45,7 @@ local ok, detail = pcall(function()
     l:BuildOptions(l.Snapshot.options)
     click('Lobby/Edit')
     assert(await(function() return _UserService.LocalPlayer.CurrentMapName == 'formationsim'
-        and m._T.panel.Name == 'EditorMatch' and not m._T.pending end), 'editor layout selected on map transition')
+        and m._T.panel == nil and not m.root.Enable end), 'matchmaking hidden in the editor on map transition')
     wait(.3)
     for _, card in ipairs(l._T.cards) do
         assert(card.entity:GetChildByName('MonsterName').TextGUIRendererComponent.FontSize == originalFont + 3,
@@ -55,7 +56,7 @@ local ok, detail = pcall(function()
     assert(not l:Ui('Editor').Enable and l:Ui('EditorControls/Toggle').EnabledInHierarchy, 'collapsed panel can be expanded')
     click('EditorControls/Toggle')
     assert(l:Ui('Editor').EnabledInHierarchy and not l:Ui('Editor/Catalog/Template').Enable, 'expand shows generated cards only')
-    for _, route in ipairs({{'matchprobe','BattleMatch'},{'formationlobby','Match'},{'formationsim','EditorMatch'}}) do
+    for _, route in ipairs({{'matchprobe','BattleMatch'},{'formationlobby','Match'}}) do
         m:SelectScreen(route[1])
         m.State, m.FixedSummary, m.Message = 'RESULT_WIN', 'authoring probe', ''
         m:Render()
@@ -63,7 +64,7 @@ local ok, detail = pcall(function()
         assert(m.action.TextGUIRendererComponent.Text == '返回大廳', 'selected action receives state')
         assert(string.find(m._T.panel:GetChildByName('FixedSummary').TextGUIRendererComponent.Text, 'authoring probe', 1, true),
             'selected summary receives data')
-        for _, name in ipairs({'Match','EditorMatch','BattleMatch'}) do
+        for _, name in ipairs({'Match','BattleMatch'}) do
             assert(m.root:GetChildByName(name).Enable == (name == route[2]), 'exactly one screen enabled')
         end
     end

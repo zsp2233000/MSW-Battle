@@ -8,6 +8,8 @@ script FormationMapLayout extends Logic
         -- Instance rooms use their template-verified battlefield when the static template is unavailable.
         local map = _EntityService:GetEntityByPath("/maps/" .. self.ReferenceMapName)
         if not isvalid(map) then map = _EntityService:GetEntityByPath("/maps/matchprobe") end
+        -- A client editing preview may only hold its own map; every map shares the template terrain.
+        if not isvalid(map) then map = _EntityService:GetEntityByPath("/maps/formationsim") end
         if not isvalid(map) then return nil end
         local entity = map:GetChildByName("RectTileMap", true)
         if not isvalid(entity) then return nil end

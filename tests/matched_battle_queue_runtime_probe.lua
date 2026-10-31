@@ -21,10 +21,10 @@ local ok, detail = pcall(function()
     local setup = function(userId, units)
         local record = _FormationService:GetSession(userId)
         local slotId = record.editSlot
-        _FormationService:UpdateDraftForUser(userId, units, record.drafts[tostring(slotId)].version, slotId)
-        _FormationService:SaveForUser(userId, record.drafts[tostring(slotId)].version, slotId)
-        for attempt = 1, 200 do if not record.pending then break end wait(0.1) end
-        assert(record.drafts[tostring(slotId)].saveState == "SAVED", "save confirmed")
+        local revision = record.saved.slots[tostring(slotId)].revision
+        _FormationService:SaveForUser(userId, units, slotId, revision, _UtilLogic:NewGuid())
+        for attempt = 1, 200 do if not record.pending and #record.saved.slots[tostring(slotId)].units == #units then break end wait(0.1) end
+        assert(#record.saved.slots[tostring(slotId)].units == #units, "save confirmed")
         _FormationService:ActivateForUser(userId, slotId, record.saved.slots[tostring(slotId)].revision)
         for attempt = 1, 200 do if not record.pending then break end wait(0.1) end
         assert(record.saved.activeSlot == slotId, "saved slot activated")
@@ -45,9 +45,7 @@ local ok, detail = pcall(function()
     local expected = {}
     for _, userId in ipairs({firstId, secondId}) do
         local session = _FormationService:GetSession(userId)
-        local drafts = {}
-        for index = 1, 5 do drafts[tostring(index)] = _FormationSchema:CopyUnits(session.drafts[tostring(index)].units) end
-        expected[userId] = { saved = _FormationSchema:CopyDocument(session.saved), editSlot = session.editSlot, drafts = drafts, player = _UserService:GetUserEntityByUserId(userId) }
+        expected[userId] = { saved = _FormationSchema:CopyDocument(session.saved), editSlot = session.editSlot, player = _UserService:GetUserEntityByUserId(userId) }
     end
     log("[VRF][MatchedQueue] queued six; later confirmed save one; cancel/requeue passed")
     _MatchProbe:QueueForUser(secondId)
@@ -78,13 +76,8 @@ local ok, detail = pcall(function()
             assert(_FormationSchema:SameUnits(before.slots[key].units, after.slots[key].units), "all five saved formations retained")
         end
         assert(restored.editSlot == expected[userId].editSlot, "editor selection retained")
-        local beforeDrafts = expected[userId].drafts
-        local afterDrafts = restored.drafts
-        for index = 1, 5 do
-            local key = tostring(index)
-            assert(_FormationSchema:SameUnits(beforeDrafts[key], afterDrafts[key].units), "all five login drafts retained")
-        end
+        assert(restored.drafts == nil, "no unsaved content is kept or restored by the server")
     end
-    log("[VRF][MatchedPreservation] PASS five saved slots, active selection, draft contents and editor selection")
+    log("[VRF][MatchedPreservation] PASS five saved slots, active selection and editor selection; no unsaved content restored")
 end)
 if not ok then log("[VRF][MatchedQueue] FAIL " .. tostring(detail)) end

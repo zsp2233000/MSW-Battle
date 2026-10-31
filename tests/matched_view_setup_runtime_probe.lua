@@ -8,9 +8,6 @@ local ok, detail = pcall(function()
         assert(record.initialized and not record.pending, "formation must be loaded and idle")
         local slot = record.saved.slots[tostring(record.saved.activeSlot)]
         assert(slot ~= nil and #slot.units == 6, "save and activate a six-unit formation first")
-        for _, draft in pairs(record.drafts) do
-            assert((#draft.units == 0 and draft.saveState == "UNSAVED") or draft.version == draft.savedVersion, "save drafts before running the queue probe")
-        end
     end
     for _, user in ipairs(users) do _MatchProbe:QueueForUser(user.PlayerComponent.UserId) end
     log("[VRF][BattleView] SETUP_DISPATCHED verify admission and RESULT_PASS in the matched instance")
