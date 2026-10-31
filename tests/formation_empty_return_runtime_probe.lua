@@ -40,7 +40,7 @@ local ok, detail = pcall(function()
     if save.ButtonComponent.Enable then save:SendEvent(ButtonClickEvent()) end
     wait(0.2)
     local message = _EntityService:GetEntityByPath('/ui/FormationGroup/ExitConfirm/Window/Message').TextGUIRendererComponent.Text
-    assert(not save.ButtonComponent.Enable and string.find(message, '空編隊', 1, true) ~= nil,
+    assert(not save.ButtonComponent.Enable and string.find(message, '空隊伍', 1, true) ~= nil,
         'empty formation needs a visible explanation and a disabled save-and-return button')
     local messageEntity = _EntityService:GetEntityByPath('/ui/FormationGroup/ExitConfirm/Window/Message')
     assert(messageEntity.TextGUIRendererComponent:GetPreferredHeight(message, messageEntity.UITransformComponent.RectSize.x)
@@ -56,7 +56,7 @@ local ok, detail = pcall(function()
     click('ExitConfirm/Window/SaveAndReturn')
     await(function() return ui.Snapshot.editSlot == slotId end, 'batch return selects the dirty slot')
     message = _EntityService:GetEntityByPath('/ui/FormationGroup/ExitConfirm/Window/Message').TextGUIRendererComponent.Text
-    assert(dialog.Enable and not save.ButtonComponent.Enable and string.find(message, '空編隊', 1, true) ~= nil,
+    assert(dialog.Enable and not save.ButtonComponent.Enable and string.find(message, '空隊伍', 1, true) ~= nil,
         'a batch that reaches an empty draft retains its actionable confirmation')
     click('ExitConfirm/Window/ContinueEditing')
     click('Editor/Back')

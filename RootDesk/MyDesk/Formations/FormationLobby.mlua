@@ -13,6 +13,8 @@ script FormationLobby extends Logic
         self._T.bound = false
         self._T.bindings = {}
         self._T.cards = {}
+        self._T.hoverCard = nil
+        self:SetEnabled("CardTooltip", false)
         self._T.optionsKey = ""
         self._T.mapName = ""
         self._T.lastLobbySlot = 0
@@ -60,6 +62,7 @@ script FormationLobby extends Logic
         local player = _UserService.LocalPlayer
         self:UpdateLobbyPlayer(player)
         if not isvalid(player) or not isvalid(self.root) then return end
+        self:UpdateCardTooltip()
         if player.CurrentMapName ~= "formationlobby" or _UtilLogic.ElapsedSeconds - self._T.lastLobbyClick > 5 then
             self._T.editWhenSelected = 0
         end
@@ -258,7 +261,7 @@ script FormationLobby extends Logic
         local info = state.slots and state.slots[tostring(slotId)] or nil
         if info == nil or not info.dirty or state.draftValid == true then return "" end
         if #(state.draft or {}) == 0 then
-            return "第 " .. tostring(slotId) .. " 組是空編隊，請至少放置一個單位後再儲存。"
+            return "第 " .. tostring(slotId) .. " 組是空隊伍，請至少放置一個單位後再儲存。"
         end
         return "第 " .. tostring(slotId) .. " 組站位尚未符合規則，請調整後再儲存。"
     end
@@ -506,6 +509,8 @@ script FormationLobby extends Logic
         end
         local key = table.concat(parts, "\n")
         if key == self._T.optionsKey then return end
+        self._T.hoverCard = nil
+        self:SetEnabled("CardTooltip", false)
         local template = self:Ui("Editor/Catalog/Template")
         if not isvalid(template) then return end
         self._T.optionsKey = key
@@ -513,6 +518,8 @@ script FormationLobby extends Logic
         for _, card in ipairs(self._T.cards) do
             if isvalid(card.entity) then
                 card.entity:DisconnectEvent(ButtonClickEvent, card.callback)
+                card.entity:DisconnectEvent(UITouchEnterEvent, card.enterCallback)
+                card.entity:DisconnectEvent(UITouchExitEvent, card.exitCallback)
                 card.entity:Destroy()
             end
         end
@@ -549,7 +556,19 @@ script FormationLobby extends Logic
                 self.SelectedUnit = 0
                 self:Render()
             end)
-            table.insert(self._T.cards, { entity = card, callback = callback, monsterId = monsterId, glow = glow })
+            local enterCallback = card:ConnectEvent(UITouchEnterEvent, function()
+                self._T.hoverCard = card
+                self:RenderMonsterInfo("CardTooltip", option)
+                self:UpdateCardTooltip()
+            end)
+            local exitCallback = card:ConnectEvent(UITouchExitEvent, function()
+                if self._T.hoverCard == card then
+                    self._T.hoverCard = nil
+                    self:SetEnabled("CardTooltip", false)
+                end
+            end)
+            table.insert(self._T.cards, { entity = card, callback = callback, enterCallback = enterCallback,
+                exitCallback = exitCallback, monsterId = monsterId, glow = glow })
             card:SetEnable(true)
         end
         if self.SelectedMonsterId == "" and #options > 0 then self.SelectedMonsterId = options[1][1] end
@@ -558,7 +577,7 @@ script FormationLobby extends Logic
             local layout = catalog:GetComponent("ScrollLayoutGroupComponent")
             if isvalid(layout) then layout:ResetScrollPosition(UITransformAxis.Vertical) end
         end
-        log("[VRF][FormationUI] cards=" .. tostring(#options) .. " columns=3 scroll=vertical")
+        log("[VRF][FormationUI] cards=" .. tostring(#options) .. " scroll=vertical")
     end
 
     @ExecSpace("ClientOnly")
@@ -570,22 +589,50 @@ script FormationLobby extends Logic
         for _, entry in ipairs(self.Snapshot.options or {}) do
             if entry[1] == monsterId then option = entry break end
         end
-        self:SetText("Editor/Intel/Context", unit ~= nil and ("單位 " .. tostring(self.SelectedUnit) .. " · 已選取") or "待部署怪物")
-        self:SetText("Editor/Intel/Name", option ~= nil and option[2] or "等待怪物目錄")
-        local portrait = self:Ui("Editor/Intel/Portrait")
-        if isvalid(portrait) then
-            portrait:SetEnable(option ~= nil)
-            if option ~= nil then portrait.SpriteGUIRendererComponent.ImageRUID = DataRef("thumbnail://" .. option[3]) end
-        end
-        local kinds = { TANK = "坦克", ASSAULT = "戰士", SHOOTER = "射手" }
-        local stats = "目錄讀取完成後顯示戰術情報"
-        if option ~= nil then
-            stats = "種類    " .. (kinds[option[4]] or "—") .. "\n生命值    " .. tostring(option[5])
-                .. "\n傷害    " .. tostring(option[6]) .. "\n攻擊間隔    " .. tostring(option[7]) .. " 秒"
-                .. "\n攻擊距離    " .. tostring(option[8])
-        end
-        self:SetText("Editor/Intel/Stats", stats)
+        self:RenderMonsterInfo("Editor/Intel", option)
         self:SetText("Editor/Units/Detail", "MonsterId：" .. monsterId .. (unit ~= nil and string.format("\n相對站位 (%.2f, %.2f)", unit.x, unit.y) or "\n尚未選取場上單位"))
+    end
+
+    @ExecSpace("ClientOnly")
+    method void RenderMonsterInfo(string target, table option)
+        -- Share the same catalog values between selected intelligence and hover previews.
+        self:SetText(target .. "/Name", option ~= nil and option[2] or "等待怪物目錄")
+        local kinds = { TANK = "坦克", ASSAULT = "戰士", SHOOTER = "射手" }
+        self:SetText(target .. "/Kind", option ~= nil and ("種類：" .. (kinds[option[4]] or "—")) or "")
+        local fields = { "Health", "Damage", "Interval", "Range" }
+        for index, field in ipairs(fields) do
+            local path = target .. "/Stats/" .. field
+            self:SetEnabled(path, option ~= nil)
+            self:SetText(path .. "/Value", option ~= nil and (tostring(option[index + 4]) .. (field == "Interval" and " 秒" or "")) or "")
+        end
+        self:SetText(target .. "/Stats", option == nil and "目錄讀取完成後顯示戰術情報" or "")
+    end
+
+    @ExecSpace("ClientOnly")
+    method void UpdateCardTooltip()
+        -- Follow the cursor while keeping the authored popup inside the reference canvas.
+        local card = self._T.hoverCard
+        local player = _UserService.LocalPlayer
+        if not isvalid(card) or not card.EnabledInHierarchy or not isvalid(player)
+            or player.CurrentMapName ~= "formationsim" or self._T.editorCollapsed
+            or self._T.returnConfirm or self.Snapshot.pending then
+            self._T.hoverCard = nil
+            self:SetEnabled("CardTooltip", false)
+            return
+        end
+        local popup = self:Ui("CardTooltip")
+        if not isvalid(popup) then return end
+        local cursor = _UILogic:ScreenToUIPosition(_InputService:GetCursorPosition())
+        local size = popup.UITransformComponent.RectSize
+        local canvas = self.root.UITransformComponent.RectSize
+        local halfWidth, halfHeight = canvas.x / 2, canvas.y / 2
+        local x, y = cursor.x + 24, cursor.y - 24
+        if x + size.x > halfWidth - 12 then x = cursor.x - size.x - 24 end
+        if y - size.y < -halfHeight + 12 then y = cursor.y + size.y + 24 end
+        popup.UITransformComponent.anchoredPosition = Vector2(
+            math.max(-halfWidth + 12, math.min(x, halfWidth - size.x - 12)),
+            math.max(-halfHeight + size.y + 12, math.min(y, halfHeight - 12)))
+        popup:SetEnable(true)
     end
 
     @ExecSpace("ClientOnly")
@@ -657,7 +704,7 @@ script FormationLobby extends Logic
         if load == "LOADING" then text = "讀取中" end
         if load == "ERROR" or load == "CONFLICT" then text = "讀取需重試 / " .. text end
         if load == "NEW" then text = "首次使用 / " .. text end
-        self:SetStatus(text .. "    " .. (state.message or "正在讀取個人編隊"))
+        self:SetStatus(text .. "    " .. (state.message or "正在讀取個人隊伍"))
         local dirtyCount = self:DirtySlotCount(state.slots or {})
         local saveBlockReason = self:ReturnSaveBlockReason()
         if self._T.returnAfterSave then
@@ -686,7 +733,7 @@ script FormationLobby extends Logic
         local units = state.draft or {}
         local saved = state.saved
         local editSlot = state.editSlot or 1
-        local summary = "尚無預存編隊"
+        local summary = "尚無預存隊伍"
         if saved ~= nil then
             summary = "編輯第 " .. tostring(editSlot) .. " 組 / 已保存 " .. tostring(#saved.slots[tostring(editSlot)].units) .. " / 6"
                 .. "    後續出戰：" .. (saved.activeSlot > 0 and ("第 " .. tostring(saved.activeSlot) .. " 組") or "尚未選定")
@@ -716,9 +763,8 @@ script FormationLobby extends Logic
             local editorSelector = self:Ui("Editor/Slots/Slot" .. key)
             if isvalid(editorSelector) then editorSelector.ButtonComponent.Enable = writable and not state.pending end
         end
-        self:SetText("Editor/Selection", self.SelectedUnit > 0 and ("移動單位 " .. tostring(self.SelectedUnit) .. "：點選新站位") or ("放置：" .. self:MonsterName(self.SelectedMonsterId)))
         self:RenderIntel()
-        self:SetText("Editor/Roster", "編隊草稿 " .. tostring(#units) .. " / 6 · 可重複部署")
+        self:SetText("Editor/Roster", "隊伍草稿 " .. tostring(#units) .. " / 6 · 可重複部署")
         for index = 1, 6 do
             local entry = units[index]
             local label = tostring(index) .. ". 空位"
@@ -770,17 +816,17 @@ script FormationLobby extends Logic
         local units = slot ~= nil and slot.units or {}
         local ready = state.loadState == "READY" or state.loadState == "NEW"
         local summary = "第 " .. tostring(selected) .. " 組 · 已保存 " .. tostring(#units) .. " / 6"
-        local empty = "本組尚無已保存編隊，雙擊組別或點選編隊整備開始配置"
+        local empty = "本組尚無已保存隊伍，雙擊組別或點選「編輯隊伍」開始配置"
         if not ready then
-            summary = "編隊預覽 · 等待資料確認"
+            summary = "隊伍預覽 · 等待資料確認"
             empty = (state.loadState == "ERROR" or state.loadState == "CONFLICT")
-                and "讀取未完成，請重試讀取；已保存內容與草稿仍保留" or "正在讀取編隊資料…"
+                and "讀取未完成，請重試讀取；已保存內容與草稿仍保留" or "正在讀取隊伍資料…"
         else
             summary = summary .. (selected == active and " · 出戰" or " · 預覽")
             if #units > 0 and info ~= nil and not info.savedValid then summary = summary .. " · 需至整備修正" end
             if info ~= nil and info.dirty then
                 summary = summary .. " · 有未保存草稿"
-                empty = "本組有未保存草稿，請進入編隊整備查看或保存"
+                empty = "本組有未保存草稿，請進入「編輯隊伍」查看或保存"
             end
         end
         self:SetText("Lobby/Summary", summary)
@@ -863,6 +909,8 @@ script FormationLobby extends Logic
     @ExecSpace("ClientOnly")
     method void OnEndPlay()
         -- Release authored and cloned button subscriptions at world session shutdown.
+        self._T.hoverCard = nil
+        self:SetEnabled("CardTooltip", false)
         self:UpdateLobbyPlayer(nil)
         for _, binding in ipairs(self._T.bindings or {}) do
             if isvalid(binding.entity) then binding.entity:DisconnectEvent(ButtonClickEvent, binding.callback) end
@@ -870,6 +918,8 @@ script FormationLobby extends Logic
         for _, card in ipairs(self._T.cards or {}) do
             if isvalid(card.entity) then
                 card.entity:DisconnectEvent(ButtonClickEvent, card.callback)
+                card.entity:DisconnectEvent(UITouchEnterEvent, card.enterCallback)
+                card.entity:DisconnectEvent(UITouchExitEvent, card.exitCallback)
                 card.entity:Destroy()
             end
         end

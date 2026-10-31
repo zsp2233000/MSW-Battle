@@ -45,6 +45,17 @@ test('five formations expose stable selectors in lobby and editor with explicit 
   assert.equal(surface.RaycastTarget, false, 'editor root leaves the real battlefield clickable');
   assert.equal(surface.Color.a, 0, 'editor root leaves the real battlefield visible');
   assert.ok(ui.find('Editor/Intel/Stats'), 'tactical intelligence remains outside the details');
+  for (const path of ['Editor/Intel/Portrait', 'Editor/Intel/Context', 'Editor/Selection']) {
+    assert.equal(ui.find(path), null, 'compact intelligence omits duplicate art and labels');
+  }
+  assert.ok(ui.find('Editor/Intel/Kind'));
+  const catalog = ui.getComponent('Editor/Catalog', 'MOD.Core.ScrollLayoutGroupComponent');
+  const viewport = ui.getComponent('Editor/Catalog', 'MOD.Core.UITransformComponent').RectSize;
+  assert.equal(catalog.ConstraintCount, 4);
+  assert.ok(4 * catalog.CellSize.x + 3 * catalog.GridSpacing.x + catalog.Padding.left
+    + catalog.Padding.right + catalog.ScrollBarThickness <= viewport.x, 'four cards fit beside scrollbar');
+  assert.ok(2 * catalog.CellSize.y + catalog.GridSpacing.y + catalog.Padding.top
+    + catalog.Padding.bottom <= viewport.y, 'two complete rows fit without scrolling');
   const {RectSize: frame} = ui.getComponent('Editor/Catalog/Template', 'MOD.Core.UITransformComponent');
   const {RectSize: sign} = ui.getComponent('Editor/Catalog/Template/CardSign', 'MOD.Core.UITransformComponent');
   assert.ok(frame.y > frame.x, 'editable Cardgame frame remains portrait');

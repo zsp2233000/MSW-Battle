@@ -18,8 +18,10 @@ local ok, detail = pcall(function()
         l:Ui('Editor/Catalog/Monster'..row.index):SendEvent(ButtonClickEvent())
         assert(l.SelectedMonsterId == id, 'same-type stable identity selected')
         assert(l:Ui('Editor/Intel/Name').TextGUIRendererComponent.Text == expected[1], 'renamed formal name')
-        local stats=l:Ui('Editor/Intel/Stats').TextGUIRendererComponent.Text
-        for index=2,5 do assert(string.find(stats,tostring(expected[index]),1,true), 'independent profile stat') end
+        for index, field in ipairs({'Health','Damage','Interval','Range'}) do
+            local stats=l:Ui('Editor/Intel/Stats/'..field..'/Value').TextGUIRendererComponent.Text
+            assert(string.find(stats,tostring(expected[index+1]),1,true), 'independent profile stat')
+        end
     end
     local layout=l:Ui('Editor/Catalog').ScrollLayoutGroupComponent
     layout:ResetScrollPosition(UITransformAxis.Vertical)

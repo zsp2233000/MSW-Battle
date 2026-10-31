@@ -154,7 +154,7 @@ script FormationService extends Logic
                 record.initialized = true
                 -- An older read does not prove a timed-out CAS can no longer commit.
                 if uncertain == nil or (raw or "") ~= uncertain.expected then record.uncertain = nil end
-                record.message = missing and "首次使用，尚無預存編隊" or "已讀取預存編隊；草稿只在本次登入保留"
+                record.message = missing and "首次使用，尚無預存隊伍" or "已讀取預存隊伍；草稿只在本次登入保留"
                 local draft = record.drafts[tostring(record.editSlot)]
                 if #draft.units > 0 and _FormationSchema:ValidateUnits(draft.units, catalog, false) == nil then
                     record.message = "既有站位需調整至可行走地形；原保存內容保留，調整完成後再儲存"
@@ -248,13 +248,13 @@ script FormationService extends Logic
         local slot = record.saved.slots[tostring(slotId)]
         if slot == nil or slotId ~= record.editSlot or slot.revision ~= expectedRevision then self:Publish(record) return end
         if #slot.units == 0 then
-            record.message = "請先成功儲存第 " .. tostring(slotId) .. " 組編隊"
+            record.message = "請先成功儲存第 " .. tostring(slotId) .. " 組隊伍"
             self:Publish(record)
             return
         end
         local catalog = self:GetCatalog()
         if catalog == nil or _FormationSchema:ValidateUnits(slot.units, catalog, false) == nil then
-            record.message = "已保存站位需調整，請修正並儲存後再設為出戰編隊"
+            record.message = "已保存站位需調整，請修正並儲存後再設為出戰隊伍"
             self:Publish(record)
             return
         end
@@ -282,7 +282,7 @@ script FormationService extends Logic
         local raw = _FormationSchema:EncodeDocument(doc)
         if #raw > 4000 then
             record.drafts[tostring(slotId)].saveState = "FAILED"
-            record.message = "編隊資料過大，未儲存"
+            record.message = "隊伍資料過大，未儲存"
             self:Publish(record)
             return
         end
@@ -329,7 +329,7 @@ script FormationService extends Logic
                 if draft.savedVersion ~= draft.version then record.message = record.message .. "；該組草稿仍未保存" end
             else
                 if kind == "SAVE" then draft.saveState = "FAILED" end
-                record.message = description .. "失敗（代碼 " .. tostring(code) .. "），保留已保存編隊、原出戰選擇與所有草稿"
+                record.message = description .. "失敗（代碼 " .. tostring(code) .. "），保留已保存隊伍、原出戰選擇與所有草稿"
                 -- A timeout may have committed. Reload before another write rather than blind retry.
                 record.loadState = "CONFLICT"
                 if code == 1000004 then
@@ -356,7 +356,7 @@ script FormationService extends Logic
     method string AutoSaveForMatch(string forUserId, any isCurrent)
         -- Save the matched editor version to its original slot; a bounded wait never changes the fixed roster.
         local record = self:GetSession(forUserId)
-        if record == nil or not record.initialized then return "無法自動保存：編隊尚未讀取；仍以本局編隊入場" end
+        if record == nil or not record.initialized then return "無法自動保存：隊伍尚未讀取；仍以本局隊伍入場" end
         local slotId = record.editSlot
         local draft = record.drafts[tostring(slotId)]
         local version = draft.version
@@ -370,17 +370,17 @@ script FormationService extends Logic
         end
         if isCurrent ~= nil and not isCurrent() then return "" end
         if self._T.sessions[forUserId] ~= record or record.transferLocked then return "自動保存未完成；草稿保留" end
-        if draft.savedVersion >= version then return "自動保存已確認相同或較新版本；仍以本局編隊入場" end
+        if draft.savedVersion >= version then return "自動保存已確認相同或較新版本；仍以本局隊伍入場" end
         local catalog = self:GetCatalog()
         local clean = catalog ~= nil and _FormationSchema:ValidateUnits(units, catalog, false) or nil
         if clean == nil then
             draft.saveState = "FAILED"
-            record.message = "自動保存失敗：草稿須有一至六個單位及合法站位；草稿保留，仍以本局編隊入場"
+            record.message = "自動保存失敗：草稿須有一至六個單位及合法站位；草稿保留，仍以本局隊伍入場"
             self:Publish(record)
             return record.message
         end
         if record.loadState ~= "READY" and record.loadState ~= "NEW" then
-            return "自動保存未確認：請返回後重試讀取；草稿保留，仍以本局編隊入場"
+            return "自動保存未確認：請返回後重試讀取；草稿保留，仍以本局隊伍入場"
         end
         local doc = _FormationSchema:CopyDocument(record.saved)
         doc.slots[tostring(slotId)].units = clean
@@ -391,7 +391,7 @@ script FormationService extends Logic
             wait(0.05)
         end
         log("[VRF][AutoSave] slot=" .. tostring(slotId) .. " version=" .. tostring(version) .. " confirmed=" .. tostring(draft.savedVersion == version))
-        return "自動保存：" .. record.message .. "；仍以本局編隊入場"
+        return "自動保存：" .. record.message .. "；仍以本局隊伍入場"
     end
 
 

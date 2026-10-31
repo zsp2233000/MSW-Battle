@@ -1,4 +1,4 @@
-# #49 戰術沙盤整備
+# #49 編輯隊伍
 
 沿用 [#44](https://github.com/zsp2233000/MSW-Battle/issues/44) 的 B 方案與 Cardgame 素材。真正的 formationsim 戰場與連續座標布陣保留；依使用者最新回饋，右側只保留編隊組別、怪物卡片及能力情報，其他操作分布在頂端與左下方，讓左側中央部署區保持清楚。半透明棕色面板與空心邊框保留地圖可見性；技術 ID、座標及六人名單放入可開關的詳情。
 
@@ -7,6 +7,24 @@ MonsterCatalog 從已驗證的伺服器 profile 發送種類、生命值、傷�
 保留其餘既有 UI UUID、正式事件、保存格式及地圖，移除「繼續部署」與「移除單位」按鈕及其綁定。點選怪物卡片即可回到部署；右鍵先取消已選單位，沒有選取單位時可對場上單位右鍵移除。右側列表採三欄與原生垂直捲動，卡片間隙也有透明接收表面。面板填色在 runtime 明確排到既有控制項後方，避免 Maker 保留舊匯入順序後遮住文字與按鈕。讀取失敗時重試顯示在右側停用的卡片區；未確認及保存待處理期間停用相關操作。失敗後沿用既有重讀確認流程，保留草稿及已確認資料。
 
 ## 版面與卡片比例修訂
+
+### 最新修訂：精簡情報與四欄目錄
+
+卡片滑鼠提示：`FormationGroup/CardTooltip` 是獨立於目錄捲動區的浮窗容器，沿用 Cardgame 框、名稱、種類及四項圖示數值。卡片 UITouchEnterEvent 顯示該卡資訊，UITouchExitEvent 隱藏；共用 RenderMonsterInfo 填值，不改 SelectedMonsterId 或 SelectedUnit。浮窗以游標偏移 24px 跟隨，靠近畫面右側／底部會翻轉，並保留 12px 邊距；依 Maker 原生 RectSize 計算，可直接調整外觀。所有浮窗圖像不接受 raycast，CanvasGroup 不攔截點擊。目錄重建、收合、待處理、返回確認、離開整備及結束 Play 清除 hover；舊卡的 exit 不會關掉下一張卡的提示。新增事件在重建及 OnEndPlay 解除。
+
+提示驗證：本機契約 33/33、UI lint 無 Error、三項既有 Warning，Maker build 無 Error、兩項既有 Warning。CardTooltip runtime probe PASS（卡片資料、選取不變、交錯 enter／exit、收合、目前游標位置邊界及重建清理），EditorIntel 回歸 PASS，runtime 無 Error／Warning。原生截圖確認浮窗文字、圖示可讀，最後 Stop 返回編輯模式。以 SendEvent 驗證原生事件訂閱；尚未用實體滑鼠驗證移入／移出與螢幕四角跟隨，也未驗證手機。
+
+數據圖示修訂：Stats 下的 Health、Damage、Interval、Range 各自包含 Icon（32×32、保留圖片比例、不接收點擊）、Label 與 Value。沿用使用者提供的四個 RUID；名稱與種類維持第一行，四項數值仍採兩行兩欄。Maker 可分別調整圖示 RUID、位置、尺寸及標題文字，程式只更新 Value；資料未載入時停用四個欄位並顯示等待訊息。生命值圖示為 `7ecb5769578f4b05808afaad17ee83ac`、傷害 `e8ed10a8b44d47d5a0d42f7f32656a58`、攻擊間隔 `3acca56f55eb49b3b67cd85fcc43cd0f`、攻擊距離 `bdf149709f8e4f998295898db054f51d`。
+
+圖示驗證：本機契約 33/33、123 entities lint 無 Error，維持既有三項 Warning；Maker build 無 Error，最終 runtime 無 Error／Warning，EditorIntel PASS，涵蓋逐張選卡、場上單位選取、各數值更新及圖示啟用。原生截圖確認四個圖示可見、標題及數值可讀，最後 Stop 返回編輯模式。已同步更新溢出目錄 probe 的數值欄位讀取，但本輪未重跑 18 筆 fixture、完整保存／配對或手機。
+
+情報區移至右下 y=896，高 160、寬 832；移除肖像、「待部署怪物」標題及重複的放置名稱提示。第一行為名稱與種類，接著兩行顯示生命值／傷害、攻擊間隔／攻擊距離。選取卡片及場上單位仍共用 RenderIntel，等待資料時保留讀取提示。名稱、Kind 與 Stats 皆可在 Maker 原生屬性面板調整。
+
+目錄外框仍從 y=256 開始，高度增至 624，捲動視窗為 784×556。原生網格改為四欄，保留 149×216 卡片、40×24 間距、垂直捲動，以及使用者已調整的卡片文字位置。靜態幾何檢查涵蓋四欄加捲軸寬度與完整兩列所需高度；目錄足夠時目標同時顯示八張。
+
+本輪本機契約 33/33 通過，107 entities UI lint 無 Error，維持既有三項 Warning（兩項 L004、一項 L016）。已同步更新 EditorIntel runtime probe 的種類欄位與移除節點檢查。Maker MCP 此輪不可用，尚未 Refresh、檢查 build 或執行 Play；八張卡片的實際顯示、捲動及選取更新待 runtime 驗證。以下為先前版本的歷史版面與驗證紀錄。
+
+MCP 恢復後補驗：Refresh／Play 後 build 0 Error、2 項既有 Warning，runtime 無 Error／Warning，EditorIntel PASS。暫時以 client 目錄擴至 12 張，網格相對位置確認前 8 張含裝飾邊界完整落在視窗內；第 8 張選取及情報更新 PASS，捲動至最後項目的 normalized position 從 0 變為 1。原生截圖確認四欄兩列完整顯示與精簡情報可讀。初次跨節點 GetWorldCorners 檢查與捲動後讀卡片 local position 的檢查不適用，改採相對網格尺寸、捲動位置及畫面交叉驗證。正式三筆目錄已還原並有 CompactRestore PASS，最後 Stop 返回編輯模式。未重測實體滑鼠滾輪、保存、配對或手機。
 
 1920×1080 參考畫布中，右側區塊從 x=1040 開始、寬 832，右邊留 48、底部留 24。組別在 y=136；卡片面板在 y=256、高 480，實際捲動視窗為 784×412；能力情報在 y=752、高 304，延伸到 y=1056。三個區塊依序填滿右側可用高度。
 
@@ -83,4 +101,8 @@ MonsterCatalog 從已驗證的伺服器 profile 發送種類、生命值、傷�
 
 mouse_input 工具明示不會點擊引擎管理的 UI；正式按鈕用已綁定的 SendEvent 驗證，不能稱作真實滑鼠點擊。額外面板點擊 probe 的 IsPointerOverUI 回傳 false，未能證明真實滑鼠的 UI 阻擋；保留人工檢查，不能以模擬器結果宣稱通過。面板接收表面及裝飾不接收點擊的設定已檢查。
 
-請用實際 PC 滑鼠確認面板點擊不會穿透布陣、右鍵取消選取與移除、四種按鈕視覺狀態、詳情彈出後的閱讀感，以及較小 PC 視窗。移除流程已由世界輸入方法驗證；mouse_input 不會發出右鍵 KeyDownEvent，尚未驗證實體 PC 右鍵。沒有可直接切換 PC 解析度的 Maker MCP 工具；未驗證手機。本票保留開啟等待使用者驗收，#50–#52 的後續改版未納入。
+請用實際 PC 滑鼠確認面板點擊不會穿透布陣、右鍵取消選取與移除、四種按鈕視覺狀態、詳情彈出後的閱讀感，以及較小 PC 視窗。移除流程已由世界輸入方法驗證；mouse_input 不會發出右鍵 KeyDownEvent，尚未驗證實體 PC 右鍵。沒有可直接切換 PC 解析度的 Maker MCP 工具；未驗證手機。使用者於 2026-10-31 指示提交並結案；上述未驗證項目仍保留為人工驗收邊界，#50–#52 的後續改版未納入。
+
+## 結案修訂（2026-10-31）
+
+怪物容器統一稱為「隊伍」，原「戰術沙盤」標題與編輯入口改為「編輯隊伍」；保存、讀取、配對與戰鬥提示同步使用隊伍用語，技術識別與保存格式不變。命名修訂後本機契約 33/33 通過，UIBuilder lint 無 Error；本輪 Maker MCP 不可用，未補驗 Refresh 後的實際文字顯示。依使用者指示結案，先前 runtime 證據與人工驗收邊界如上。

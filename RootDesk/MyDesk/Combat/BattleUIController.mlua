@@ -135,9 +135,9 @@ script BattleUIController extends Logic
         self._T.hudKey = key
         local title, hint = "準備中", "等待戰場就緒"
         if phase == "DEPLOYMENT" then
-            title, hint = "部署階段", "選擇怪物，組成你的編隊"
+            title, hint = "部署階段", "選擇怪物，組成你的隊伍"
         elseif phase == "BATTLE" then
-            title, hint = "戰鬥進行中", "雙方編隊自動交戰"
+            title, hint = "戰鬥進行中", "雙方隊伍自動交戰"
         elseif phase == "RESULT" then
             title, hint = "戰鬥結束", "本次對戰已結算"
         end

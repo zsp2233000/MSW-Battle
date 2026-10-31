@@ -11,7 +11,7 @@ local ok, detail = pcall(function()
     assert(await(function() return _UserService.LocalPlayer.CurrentMapName == 'formationsim' end), 'formal editor entered')
     wait(0.3)
     assert(isvalid(l:Ui('Editor/Intel/Stats')), 'visible tactical intelligence exists')
-    for _, path in ipairs({'Slots','CatalogDock','Catalog','Intel','Selection'}) do
+    for _, path in ipairs({'Slots','CatalogDock','Catalog','Intel'}) do
         local rect = l:Ui('Editor/'..path).UITransformComponent
         assert(rect.anchoredPosition.x >= 960, path..' leaves the left deployment half clear')
         assert(rect.anchoredPosition.x + rect.RectSize.x <= 1920
@@ -32,13 +32,19 @@ local ok, detail = pcall(function()
             local sign = card:GetChildByName('CardSign').UITransformComponent.RectSize
             assert(sign.x > frame.x and sign.y > frame.y, 'ornament extends beyond the base frame')
         end
-        local stats = l:Ui('Editor/Intel/Stats').TextGUIRendererComponent.Text
-        assert(string.find(stats, kinds[option[4]], 1, true), 'formal monster kind')
-        for _, value in ipairs({option[5], option[6], option[7], option[8]}) do
+        assert(string.find(l:Ui('Editor/Intel/Kind').TextGUIRendererComponent.Text, kinds[option[4]], 1, true), 'formal monster kind')
+        for statIndex, field in ipairs({'Health','Damage','Interval','Range'}) do
+            local value = option[statIndex + 4]
+            local stats = l:Ui('Editor/Intel/Stats/'..field..'/Value').TextGUIRendererComponent.Text
             assert(value ~= nil and string.find(stats, tostring(value), 1, true), 'formal combat statistic shown')
+            assert(l:Ui('Editor/Intel/Stats/'..field..'/Icon').EnabledInHierarchy, 'stat icon visible')
         end
         assert(l:Ui('Editor/Intel/Name').TextGUIRendererComponent.Text == option[2], 'formal name shown')
     end
+    assert(not isvalid(l:Ui('Editor/Intel/Portrait')) and not isvalid(l:Ui('Editor/Intel/Context')),
+        'compact intel omits portrait and heading')
+    assert(l:Ui('Editor/Intel').UITransformComponent.RectSize.y <= 160, 'compact intel height')
+    assert(l:Ui('Editor/Catalog').ScrollLayoutGroupComponent.ConstraintCount == 4, 'four catalog columns')
     local units = l.Snapshot.draft
     if #units > 0 then
         local unit = units[1]

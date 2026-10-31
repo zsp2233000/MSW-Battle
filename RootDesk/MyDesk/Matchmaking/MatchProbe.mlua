@@ -64,7 +64,7 @@ script MatchProbe extends Logic
     method void Receive(string message)
         -- Reuse the existing toast; F8 provides repeatable status without exposing private payloads.
         if message == "NEED_LOADED_VALID_ACTIVE_FORMATION_AND_NO_PENDING_SAVE" then
-            _UIToast:ShowMessage("請先儲存有效編隊並設為出戰，等待保存完成")
+            _UIToast:ShowMessage("請先儲存有效隊伍並設為出戰，等待保存完成")
         elseif message == "MATCHMAKING_NOT_CONFIGURED" then
             _UIToast:ShowMessage("線上配對服務尚未設定")
         end
