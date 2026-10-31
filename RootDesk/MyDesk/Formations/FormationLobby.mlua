@@ -555,6 +555,7 @@ script FormationLobby extends Logic
         if self.SelectedMonsterId == "" and #options > 0 then self.SelectedMonsterId = options[1][1] end
         local catalog = self:Ui("Editor/Catalog")
         if isvalid(catalog) then
+            catalog.FormationCardLayout:Apply()
             local layout = catalog:GetComponent("ScrollLayoutGroupComponent")
             if isvalid(layout) then layout:ResetScrollPosition(UITransformAxis.Vertical) end
         end

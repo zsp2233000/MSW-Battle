@@ -26,13 +26,18 @@ MonsterCatalog 從已驗證的伺服器 profile 發送種類、生命值、傷�
 
 | 要調整的內容 | Maker 路徑與屬性 |
 |---|---|
-| 卡片格子大小、間隔與欄數 | `FormationGroup/Editor/Catalog` → `ScrollLayoutGroupComponent.CellSize`、`GridSpacing`、`ConstraintCount`；列表依 `CellSize` 排列，不能只改模板根節點的 `RectSize` |
+| 整張卡片等比例縮小 | `FormationGroup/Editor/Catalog` → `FormationCardLayout.CardScale`；`1` 為原尺寸、`0.85` 為 85%、`0.75` 為 75%。有效範圍 0.5～1，超出時限制至範圍內；保存後重新 Play 套用，編輯模式維持原尺寸模板 |
+| 卡片間隔與欄數 | 同一 `Catalog` → `ScrollLayoutGroupComponent.GridSpacing`、`ConstraintCount`；`CellSize` 在 Play 時依 `CardScale` 自動計算，不用手動同步 |
 | 名稱文字與排列 | `FormationGroup/Editor/Catalog/Template/MonsterName` → `TextGUIRendererComponent` 字型、對齊、`FontSize`，以及 `UITransformComponent` 尺寸、位置；啟用 `BestFit` 時也需調整 `MinSize`／`MaxSize` |
 | 種類、圖像與裝飾 | 同一模板下的 `Identity`、`PortraitViewport/Portrait`、`CardSign`；修改尺寸時同步留意子項位置與原素材比例 |
 | 整備狀態、重試及收合位置 | `FormationGroup/EditorControls/Status`、`Retry`、`Toggle` |
 | 各畫面的配對版面 | `MatchGroup/Match`（大廳）、`EditorMatch`（整備）、`BattleMatch`（戰鬥）及各自的 `Action`、`Status`、`FixedSummary` |
 
 編輯預覽使用一張示例卡片。正式名稱、種類、情報及圖片由資料提供；編輯模板的文字內容不會改掉正式目錄。大廳相對站位縮放及重疊避讓仍依編隊內容動態計算；這部分保留程式排版。既有背景排序修正也保留。
+
+卡片縮放保留既有模板階層：格子尺寸控制底框與點擊範圍，模板直接子項的位置與視覺比例同步縮放，怪物圖片與勾選標記跟隨父項。原始位置、比例及格子尺寸於本次 Play 第一次建立卡片時記錄；重新建立目錄或重複套用比例不會累積縮小。字級與原始素材保持可編輯，卡片區域尺寸、欄數與間隔不隨縮放改變。
+
+縮放修訂驗證：本機契約 33/33；strict lint 維持 109 entities、0 Error、1 項既有 L016 Warning。Maker build 0 Error、兩項既有 Warning，最終驗證輪 runtime 無 Error／Warning。`CardScaleProbe`、`EditorAuthoring`、`EditorIntel` PASS；原生畫面比對確認 65% 與 100% 的框、圖片、文字及標記同比例縮放。此輪未重跑保存失敗注入、完整配對對戰或手機；最後已 Stop 返回編輯模式。
 
 此輪驗證：本機契約 **33/33**；FormationGroup 109 entities strict lint **0 Error、1 Warning**（L016，底部操作列刻意靠左，保留玩家部署區）；MatchGroup 19 entities strict lint **0 Error、0 Warning**。Maker build **0 Error**、保留原有兩項 Warning，runtime 無 Error／Warning。`EditorAuthoring` PASS：Play 隱藏預覽、卡片繼承模板字級、改動固定位置／尺寸後 Render 與地圖切換不覆蓋、收合／展開、三種配對容器的內容路由。`EditorIntel`、`EditorFlow`、`EditorFailure`、`MatchedLobbyUI`、`AuthoringPOC` 均 PASS；配對測試實際排隊後取消，POC 測試經正式入口進入再返回。
 

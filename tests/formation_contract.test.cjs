@@ -51,6 +51,7 @@ test('five formations expose stable selectors in lobby and editor with explicit 
   assert.ok(Math.abs(sign.x / sign.y - 302 / 424) < 0.0001, 'Cardgame ornament keeps its source ratio');
   assert.ok(sign.x > frame.x && sign.y > frame.y, 'ornament extends beyond the frame as in the source card');
   assert.equal(ui.find('Editor/Catalog/Template/SelectedGlow/Border'), null, 'selection does not cover the ornament with a second frame');
+  assert.equal(ui.getComponent('Editor/Catalog', 'script.FormationCardLayout').CardScale, 1, 'one inspector setting controls whole-card scale');
 });
 
 test('Maker exposes the editor template and each screen owns its fixed controls', () => {

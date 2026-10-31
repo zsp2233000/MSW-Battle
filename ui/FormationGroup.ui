@@ -4706,7 +4706,7 @@
       {
         "id": "afc7580a-e000-41ef-a462-ac767cf4726b",
         "path": "/ui/FormationGroup/Editor/Catalog",
-        "componentNames": "MOD.Core.UITransformComponent,MOD.Core.ScrollLayoutGroupComponent,MOD.Core.SpriteGUIRendererComponent",
+        "componentNames": "MOD.Core.UITransformComponent,MOD.Core.ScrollLayoutGroupComponent,MOD.Core.SpriteGUIRendererComponent,script.FormationCardLayout",
         "jsonString": {
           "name": "Catalog",
           "path": "/ui/FormationGroup/Editor/Catalog",
@@ -4852,6 +4852,11 @@
               "Type": 1,
               "Enable": true,
               "@type": "MOD.Core.SpriteGUIRendererComponent"
+            },
+            {
+              "Enable": true,
+              "CardScale": 1,
+              "@type": "script.FormationCardLayout"
             }
           ],
           "@version": 1
