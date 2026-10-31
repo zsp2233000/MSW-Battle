@@ -94,7 +94,7 @@ script FormationService extends Logic
         local epoch = record.loadEpoch
         if self._T.writers[record.profile] ~= nil then
             record.loadState = "ERROR"
-            record.message = "上一筆儲存尚未完成，請稍後重試讀取"
+            record.message = "上一筆儲存尚未完成，請稍後重新讀取"
             self:Publish(record)
             return
         end
@@ -114,7 +114,7 @@ script FormationService extends Logic
             if self._T.sessions[record.userId] ~= record or record.loadEpoch ~= epoch then return end
             record.loadEpoch = record.loadEpoch + 1
             record.loadState = "ERROR"
-            record.message = "讀取逾時；可重試讀取"
+            record.message = "讀取逾時；可重新讀取"
             self:Publish(record)
         end, math.max(1, math.min(10, self.SaveTimeoutSeconds)))
         self._T.saveTimers[readTimeout] = true
@@ -133,7 +133,7 @@ script FormationService extends Logic
             end
             if doc == nil then
                 record.loadState = "ERROR"
-                record.message = "讀取失敗，原資料未變更；請重試讀取"
+                record.message = "讀取失敗，原資料未變更；請重新讀取"
             else
                 local uncertain = record.uncertain
                 record.saved = doc
@@ -142,10 +142,10 @@ script FormationService extends Logic
                 record.initialized = true
                 -- An older read does not prove a timed-out CAS can no longer commit.
                 if uncertain == nil or (raw or "") ~= uncertain.expected then record.uncertain = nil end
-                record.message = missing and "首次使用，尚無預存隊伍" or "已讀取預存隊伍"
+                record.message = missing and "尚未儲存任何隊伍。" or "已讀取已儲存的隊伍"
                 local slot = record.saved.slots[tostring(record.editSlot)]
                 if #slot.units > 0 and _FormationSchema:ValidateUnits(slot.units, catalog, false) == nil then
-                    record.message = "既有站位需調整至可行走地形；原保存內容保留，調整完成後再儲存"
+                    record.message = "既有站位需調整至可行走地形；已儲存的內容保留，調整完成後再儲存"
                 end
             end
             log("[VRF][Formations] load=" .. record.loadState)
@@ -185,9 +185,9 @@ script FormationService extends Logic
         if record == nil then return end
         -- A request that cannot be correlated still gets an answer, so no client waits on silence.
         if type(requestId) ~= "string" or #requestId == 0 or #requestId > 64 then self:Publish(record) return end
-        if record.transferLocked then self:Reject(record, "SAVE", slotId, requestId, "REJECTED", "配對交接已封存，返回後可繼續編輯") return end
+        if record.transferLocked then self:Reject(record, "SAVE", slotId, requestId, "REJECTED", "配對進行中，返回大廳後可繼續編輯") return end
         if not record.initialized or (record.loadState ~= "NEW" and record.loadState ~= "READY") then
-            self:Reject(record, "SAVE", slotId, requestId, "REJECTED", "必須先成功讀取資料；請重試讀取")
+            self:Reject(record, "SAVE", slotId, requestId, "REJECTED", "必須先成功讀取資料；請重新讀取")
             return
         end
         if record.pending then self:Reject(record, "SAVE", slotId, requestId, "REJECTED", "上一筆儲存尚未完成") return end
@@ -198,7 +198,7 @@ script FormationService extends Logic
         local key = tostring(slotId)
         local slot = record.saved.slots[key]
         if slot.revision ~= expectedRevision then
-            self:Reject(record, "SAVE", slotId, requestId, "REJECTED", "已保存版本已更新；請重試讀取確認後再儲存")
+            self:Reject(record, "SAVE", slotId, requestId, "REJECTED", "已儲存版本已更新；請重新讀取確認後再儲存")
             return
         end
         local catalog = self:GetCatalog()
@@ -238,7 +238,7 @@ script FormationService extends Logic
         end
         local catalog = self:GetCatalog()
         if catalog == nil or _FormationSchema:ValidateUnits(slot.units, catalog, false) == nil then
-            record.message = "已保存站位需調整，請修正並儲存後再設為出戰隊伍"
+            record.message = "已儲存的位置需要調整，請修正並儲存後再設為出戰隊伍"
             self:Publish(record)
             return
         end
@@ -252,7 +252,7 @@ script FormationService extends Logic
     method void Write(table record, table doc, string kind, integer slotId, string requestId)
         -- Serialize per profile and compare existing bytes so delayed old writers cannot replace newer saves.
         if record.loadState ~= "NEW" and record.loadState ~= "READY" then
-            self:Reject(record, kind, slotId, requestId, "REJECTED", "必須先成功讀取資料；請重試讀取")
+            self:Reject(record, kind, slotId, requestId, "REJECTED", "必須先成功讀取資料；請重新讀取")
             return
         end
         if self._T.writers[record.profile] ~= nil then
@@ -310,7 +310,8 @@ script FormationService extends Logic
                     record.uncertain = { expected = expected }
                     record.message = description .. "逾時，尚未取得持久確認；請按「確認結果」重新讀取"
                 else
-                    record.message = description .. "失敗（代碼 " .. tostring(code) .. "），已保存隊伍與出戰選擇未變更；請重試讀取後再試"
+                    log("[Formation] write failed code=" .. tostring(code))
+                    record.message = description .. "失敗，已儲存的隊伍與出戰選擇沒有變更；請重新讀取後再試"
                 end
                 record.result = { requestId = requestId, kind = kind, slotId = slotId, status = timedOut and "UNCONFIRMED" or "FAILED", code = code }
             end

@@ -276,7 +276,7 @@ script FormationHandoff extends Logic
         record.initialized = true
         record.loadState = transfer.loadState or "READY"
         record.uncertain = transfer.uncertain and { expected = record.raw } or nil
-        record.message = transfer.message or "已恢復交接前的預存隊伍"
+        record.message = transfer.message or "已還原為配對前儲存的隊伍"
         _FormationService:Publish(record)
         if record.uncertain ~= nil then _FormationService:Load(record) end
         log("[VRF][MatchProbe] formations restored; confirmed content only")

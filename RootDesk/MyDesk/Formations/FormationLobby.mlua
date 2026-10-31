@@ -327,7 +327,7 @@ script FormationLobby extends Logic
         -- Explain unsaveable content in plain words; an empty group can be shown but never saved.
         if #self.Draft == 0 then return "空隊伍無法儲存，請至少放置一個單位" end
         if _FormationSchema:ValidateShape(self.Draft, function(monsterId) return self:HasOption(monsterId) end, false) == nil then
-            return "站位不符合規則，請調整後再儲存"
+            return "有單位無法放在目前位置，請調整後再儲存"
         end
         return ""
     end
@@ -360,8 +360,8 @@ script FormationLobby extends Logic
         if state.saved == nil or load == "LOADING" or load == "NOT_LOADED" then return "讀取中，完成後才能儲存" end
         if self:Busy() then return "儲存處理中，請稍候" end
         if self:Unconfirmed() then return "上次儲存結果尚未確認，請按「確認結果」" end
-        if load == "CONFLICT" then return "上次操作失敗，請按「重試讀取」確認後再儲存" end
-        if load == "ERROR" then return "讀取失敗，請按「重試讀取」" end
+        if load == "CONFLICT" then return "上次操作失敗，請按「重新讀取」確認後再儲存" end
+        if load == "ERROR" then return "讀取失敗，請按「重新讀取」" end
         if not self:IsDirty() then return "沒有變更" end
         return self:DraftInvalidReason()
     end
@@ -378,7 +378,7 @@ script FormationLobby extends Logic
         if self:IsDirty() then return "請先成功儲存這組的變更，才能設為出戰" end
         if #state.saved.slots[tostring(slotId)].units == 0 then return "請先儲存第 " .. tostring(slotId) .. " 組隊伍" end
         local info = state.slots and state.slots[tostring(slotId)] or nil
-        if info == nil or not info.savedValid then return "已保存站位需調整，請修正並儲存" end
+        if info == nil or not info.savedValid then return "已儲存的位置需要調整，請修正並儲存" end
         return ""
     end
 
@@ -460,7 +460,7 @@ script FormationLobby extends Logic
         -- Leaving asks first whenever the viewed group holds unsaved changes.
         local state = self.Snapshot
         if self:Busy() or self._T.confirmKind ~= "" then
-            self:SetStatus("儲存處理中，完成後再返回大廳")
+            self:SetStatus("正在儲存，完成後返回大廳…")
             return
         end
         if self:Unconfirmed() then
@@ -633,14 +633,14 @@ script FormationLobby extends Logic
         -- Share the same catalog values between selected intelligence and hover previews.
         self:SetText(target .. "/Name", option ~= nil and option[2] or "等待怪物目錄")
         local kinds = { TANK = "坦克", ASSAULT = "戰士", SHOOTER = "射手" }
-        self:SetText(target .. "/Kind", option ~= nil and ("種類：" .. (kinds[option[4]] or "—")) or "")
+        self:SetText(target .. "/Kind", option ~= nil and (kinds[option[4]] or "—") or "")
         local fields = { "Health", "Damage", "Interval", "Range" }
         for index, field in ipairs(fields) do
             local path = target .. "/Stats/" .. field
             self:SetEnabled(path, option ~= nil)
             self:SetText(path .. "/Value", option ~= nil and (tostring(option[index + 4]) .. (field == "Interval" and " 秒" or "")) or "")
         end
-        self:SetText(target .. "/Stats", option == nil and "目錄讀取完成後顯示戰術情報" or "")
+        self:SetText(target .. "/Stats", option == nil and "正在載入怪物資料…" or "")
     end
 
     @ExecSpace("ClientOnly")
@@ -784,7 +784,7 @@ script FormationLobby extends Logic
             if isvalid(details) then _UILogic:SetSiblingIndex(details.UITransformComponent, #details.Parent.Children:ToTable()) end
         end
         self:SetEnabled("ReturnLobby", not inLobby and not inEditor)
-        self:SetText("EditorControls/Toggle", self._T.editorCollapsed and "展開整備面板" or "收起整備面板")
+        self:SetText("EditorControls/Toggle", self._T.editorCollapsed and "展開面板" or "收合面板")
         self:SetEnabled("Status", inLobby)
         local state = self.Snapshot
         local load = state.loadState or "LOADING"
@@ -794,7 +794,7 @@ script FormationLobby extends Logic
         local edit = self:Ui("Lobby/Edit")
         if isvalid(edit) then edit.ButtonComponent.Enable = writable and not state.pending end
         local needsRetry = load == "ERROR" or load == "CONFLICT" or self._T.localUnconfirmed == true
-        local retryLabel = self:Unconfirmed() and "確認結果" or "重試讀取"
+        local retryLabel = self:Unconfirmed() and "確認結果" or "重新讀取"
         for _, path in ipairs({ "Retry", "EditorControls/Retry" }) do
             self:SetText(path, retryLabel)
             self:SetButton(path, not state.pending)
@@ -807,7 +807,7 @@ script FormationLobby extends Logic
         if load == "LOADING" or load == "NOT_LOADED" then text = "讀取中" end
         if needsRetry then text = "需確認" end
         if load == "NEW" then text = "首次使用" end
-        if dirty then text = "有未儲存變更" end
+        if dirty then text = "有尚未儲存的變更" end
         if busy then text = "儲存中…" end
         local note = state.message or "正在讀取個人隊伍"
         -- Surface why the primary save is unavailable whenever it matters; "no change" needs no explanation.
@@ -817,10 +817,10 @@ script FormationLobby extends Logic
         local units = self.Draft
         local saved = state.saved
         local editSlot = state.editSlot or 1
-        local summary = "尚無預存隊伍"
+        local summary = "尚未儲存任何隊伍"
         if saved ~= nil then
-            summary = "第 " .. tostring(editSlot) .. " 組 / 已保存 " .. tostring(#saved.slots[tostring(editSlot)].units) .. " / 6"
-                .. "    後續出戰：" .. (saved.activeSlot > 0 and ("第 " .. tostring(saved.activeSlot) .. " 組") or "尚未選定")
+            summary = "第 " .. tostring(editSlot) .. " 組 · 已儲存 " .. tostring(#saved.slots[tostring(editSlot)].units) .. " / 6"
+                .. "    出戰隊伍：" .. (saved.activeSlot > 0 and ("第 " .. tostring(saved.activeSlot) .. " 組") or "尚未選定")
         end
         self:RenderLobbyPreview()
         self:SetText("Editor/Summary", summary)
@@ -832,7 +832,7 @@ script FormationLobby extends Logic
             if slot == nil then
                 label = label .. "\n讀取中"
             else
-                label = label .. (#slot.units == 0 and "\n空欄位" or ("\n已保存 " .. tostring(#slot.units) .. "/6"))
+                label = label .. (#slot.units == 0 and "\n空隊伍" or ("\n" .. tostring(#slot.units) .. " / 6"))
                 if info ~= nil and #slot.units > 0 and not info.savedValid then label = label .. " / 需修正" end
                 if state.pending and state.pendingSlot == index then label = label .. (state.pendingKind == "SAVE" and " / 儲存中" or " / 出戰確認中") end
             end
@@ -897,12 +897,12 @@ script FormationLobby extends Logic
         local info = state.slots ~= nil and state.slots[tostring(selected)] or nil
         local units = slot ~= nil and slot.units or {}
         local ready = state.loadState == "READY" or state.loadState == "NEW"
-        local summary = "第 " .. tostring(selected) .. " 組 · 已保存 " .. tostring(#units) .. " / 6"
-        local empty = "本組尚無已保存隊伍，雙擊組別或點選「編輯隊伍」開始配置"
+        local summary = "第 " .. tostring(selected) .. " 組 · 已儲存 " .. tostring(#units) .. " / 6"
+        local empty = "本組尚未儲存隊伍，雙擊組別或點「編輯隊伍」開始配置"
         if not ready then
             summary = "隊伍預覽 · 等待資料確認"
             empty = (state.loadState == "ERROR" or state.loadState == "CONFLICT")
-                and "讀取未完成，請重試讀取；已保存內容仍保留" or "正在讀取隊伍資料…"
+                and "讀取未完成，請按「重新讀取」；已儲存的內容仍保留" or "正在讀取隊伍資料…"
         else
             summary = summary .. (selected == active and " · 出戰" or " · 預覽")
             if #units > 0 and info ~= nil and not info.savedValid then summary = summary .. " · 需至整備修正" end

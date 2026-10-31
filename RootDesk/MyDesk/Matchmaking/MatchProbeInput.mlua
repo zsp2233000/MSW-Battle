@@ -136,7 +136,7 @@ script MatchProbeInput extends Logic
         -- Present the same player flow for local FIFO and published native matchmaking.
         if not isvalid(self._T.panel) or not isvalid(self.status) or not isvalid(self.action) then return end
         local elapsed = self.Started > 0 and math.max(0, math.floor((DateTime.UtcNow.Elapsed - self.Started) / 1000)) or 0
-        local text = "選定已保存的出戰隊伍後，即可開始配對"
+        local text = "選好已儲存的出戰隊伍後，即可開始配對"
         local label = "開始配對"
         local formation = _FormationLobby.Snapshot
         local idleBlocked = false
@@ -144,13 +144,13 @@ script MatchProbeInput extends Logic
             text = "正在尋找對手 · 已等候 " .. tostring(elapsed) .. " 秒"
             label = "取消配對"
         elseif self.State == "RENEWING" then
-            text = "服務請求已到期，正在續候 · 累計 " .. tostring(elapsed) .. " 秒"
+            text = "正在尋找對手 · 已等候 " .. tostring(elapsed) .. " 秒"
             label = "取消配對"
         elseif self.State == "QUEUE_ERROR" then
-            text = "配對服務失效或回覆異常，已停止等候；請取消後重試"
-            label = "清理並取消"
+            text = "配對已停止，請取消後重新配對。"
+            label = "取消配對"
         elseif self.State == "CANCELLED" then
-            text = "正在確認取消；若服務或清理失敗可重試"
+            text = "正在取消配對，請稍候。"
             label = "重試取消"
         elseif self.State == "SAVING" then
             text = "已找到對手，正在確認入場資料"
@@ -184,32 +184,32 @@ script MatchProbeInput extends Logic
             text = "正在返回大廳並還原已儲存隊伍"
             label = self.Busy and "返回中…" or "重試返回"
         end
-        if self.Message == "NEED_LOADED_VALID_ACTIVE_FORMATION_AND_NO_PENDING_SAVE" then text = "請先儲存有效隊伍並設為出戰，等待保存完成" end
-        if self.Message == "MATCHMAKING_NOT_CONFIGURED" then text = "配對服務尚未完成設定，請設定測試 leaderboard" end
+        if self.Message == "NEED_LOADED_VALID_ACTIVE_FORMATION_AND_NO_PENDING_SAVE" then text = "請先儲存隊伍並設為出戰，儲存完成後再試。" end
+        if self.Message == "MATCHMAKING_NOT_CONFIGURED" then text = "目前無法配對，請稍後再試。" end
         if self.Message == "DISABLED_OR_NOT_PUBLISHED" then text = "配對尚未開放，或此帳號未獲授權" end
         if self.Message == "DUPLICATE_PROFILE" then text = "同一帳號無法互相配對，請使用不同模擬玩家" end
-        if self.Message == "HANDOFF_SAVE_FAILED" or self.Message == "HANDOFF_SEAL_FAILED" then text = "入場資料保存失敗，可取消入場後重試" end
-        if self.Message == "READINESS_FAILED" then text = "連線通知失敗，請重試入場" label = "重試入場" end
+        if self.Message == "HANDOFF_SAVE_FAILED" or self.Message == "HANDOFF_SEAL_FAILED" then text = "入場資料儲存失敗，可取消入場後重試" end
+        if self.Message == "READINESS_FAILED" then text = "尚未完成入場，請按「重試入場」。" label = "重試入場" end
         if self.Message == "RESTORE_RETRY_REQUIRED" then text = "隊伍尚未完成還原，請重試返回" end
         if self.Message == "RETURN_MOVE ok=false" or self.Message == "RETURN_RETRY_MOVE ok=false" or self.Message == "ROOM_MISMATCH_RETURN_FAILED" then text = "返回大廳失敗，已儲存隊伍仍保留；請重試返回" label = "重試返回" end
-        if self.Message == "RETURN_SAVE_FAILED" or self.Message == "ROOM_MISMATCH_SAVE_FAILED" then text = "返回資料保存失敗，請重試返回" label = "重試返回" end
+        if self.Message == "RETURN_SAVE_FAILED" or self.Message == "ROOM_MISMATCH_SAVE_FAILED" then text = "返回資料儲存失敗，請重試返回" label = "重試返回" end
         if self.Message == "ROOM_MOVE ok=false" then text = "進入戰場失敗，可取消入場後重新配對" end
-        if self.Message == "ROOM_CREATE_FAILED" or self.Message == "ADMISSION_SAVE_FAILED" then text = "戰場建立或入場資料保存失敗，可取消入場後重試" end
-        if self.Message == "TRANSFER_EXPIRED" then text = "入場預約已逾期，正在恢復已儲存隊伍" end
+        if self.Message == "ROOM_CREATE_FAILED" or self.Message == "ADMISSION_SAVE_FAILED" then text = "戰場建立或入場資料儲存失敗，可取消入場後重試" end
+        if self.Message == "TRANSFER_EXPIRED" then text = "入場已逾時，正在還原已儲存的隊伍" end
         if self.State == "IDLE" and (self.Message == "RETURNED" or self.Message == "CANCELLED") then text = "已返回或取消，可以重新開始配對" end
         if self.State == "IDLE" then
             local ready = formation.loadState == "READY" or formation.loadState == "NEW"
             idleBlocked = not ready or formation.pending == true
             if not ready then
-                text = "隊伍資料尚未確認，請等待載入或重試讀取"
+                text = "正在載入隊伍；若持續沒有回應，請按「重新讀取」。"
                 label = "等待讀取"
             elseif formation.pending then
-                text = "正在等待保存或出戰確認，完成後即可操作"
+                text = "正在儲存或設定出戰，請稍候。"
                 label = "處理中…"
             elseif not _FormationLobby:HasValidActive() then
-                text = "請先整備一至六個單位，保存後明確設為出戰"
+                text = "請先放置 1～6 個單位，儲存後設為出戰。"
                 local inLobby = _UserService.LocalPlayer.CurrentMapName == "formationlobby"
-                label = inLobby and "前往整備" or "請先保存並設為出戰"
+                label = inLobby and "前往整備" or "請先儲存並設為出戰"
                 idleBlocked = not inLobby
             end
         end
@@ -224,8 +224,7 @@ script MatchProbeInput extends Logic
         self.status.TextGUIRendererComponent.Text = mode .. "\n" .. text
         local summary = self._T.panel:GetChildByName("FixedSummary", false)
         if isvalid(summary) then
-            local fixed = self.FixedSummary ~= "" and self.FixedSummary or "尚未開始"
-            summary.TextGUIRendererComponent.Text = "本局隊伍：" .. fixed .. "\n保存與切換出戰組僅供後續配對使用"
+            summary.TextGUIRendererComponent.Text = self.FixedSummary ~= "" and ("本局隊伍：" .. self.FixedSummary .. "\n本局隊伍已固定；儲存與出戰設定於下次配對生效。") or "本局隊伍：尚未開始"
         end
         self.action.TextGUIRendererComponent.Text = label
         self.action.ButtonComponent.Enable = self.State ~= "BATTLE" and not self.Busy and not self._T.pending and not idleBlocked
