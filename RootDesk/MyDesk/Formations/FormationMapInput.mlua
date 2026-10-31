@@ -15,7 +15,7 @@ script FormationMapInput extends Component
         self._T.ghostLegal = false
         self._T.ghostMode = ""
         self._T.hoverIndex = 0
-        self._T.touch =_InputService:ConnectEvent(ScreenTouchEvent, self.HandleTouch)
+        self._T.touch = _InputService:ConnectEvent(ScreenTouchEvent, self.HandleTouch)
         self._T.key = _InputService:ConnectEvent(KeyDownEvent, self.HandleRightClick)
         self._T.inMap = false
         self._T.selected = -1
@@ -81,7 +81,7 @@ script FormationMapInput extends Component
 
     @ExecSpace("ClientOnly")
     method void ApplyHover(integer index)
-        -- 放置時點擊不會選取單位，因此所有 hover 入口都必須清除選取暗示。
+        -- Clicks while placing never select a unit, so every hover path must clear the selection cue.
         if _FormationLobby:PreviewMode() == "PLACE" then index = 0 end
         local previous = self._T.hoverIndex or 0
         if previous == index then return end

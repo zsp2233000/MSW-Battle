@@ -28,4 +28,4 @@
 
 PlayerData 範例中的 [PlayerDBManager](https://github.com/MSW-Git/MSWPackages/blob/main/player-data-package/MyDesk/PlayerDataPackage/Sample/PlayerDBManager.mlua) 與 [PlayerData](https://github.com/MSW-Git/MSWPackages/blob/main/player-data-package/MyDesk/PlayerDataPackage/Sample/PlayerData.mlua) 尚無完整的保存成功回覆與失敗補救，且組裝待寫資料時便清除 dirty。採用時須補足寫入確認、失敗保留待存狀態與版本處理；五組編隊及啟用組欄位須由本遊戲定義。未儲存變更（2026-10-31 起僅存在 client）、已保存編隊與本局編隊須分離，避免排隊期間的編輯或後續保存改變本局使用的內容。
 
-原生 [MatchmakingService](https://maplestoryworlds-creators.nexon.com/en/apiReference?postId=1397) 可列為配對候選；其請求／結果有效期限、成功後等待編隊保存完成再傳送的支援仍未獲文件證實，須在發布環境驗證。驗證亦須涵蓋保存失敗時攜帶草稿與固定本局編隊跨 instance 進場。官方 [001_Lobby 教學](https://maplestoryworlds-creators.nexon.com/en/docs?postId=1136) 可參考等待 UI 與 InstanceRoom 派送，但尚未證實涵蓋跨 WorldInstance 配對，且其 Ready／倒數流程須依本次已確認流程調整。
+原生 [MatchmakingService](https://maplestoryworlds-creators.nexon.com/en/apiReference?postId=1397) 可列為配對候選；其請求／結果有效期限、成功後等待編隊保存完成再傳送的支援仍未獲文件證實，須在發布環境驗證。驗證亦須涵蓋交接資料不含未儲存內容（2026-10-31 修訂，取代原「保存失敗時攜帶草稿」）與固定本局編隊跨 instance 進場。官方 [001_Lobby 教學](https://maplestoryworlds-creators.nexon.com/en/docs?postId=1136) 可參考等待 UI 與 InstanceRoom 派送，但尚未證實涵蓋跨 WorldInstance 配對，且其 Ready／倒數流程須依本次已確認流程調整。

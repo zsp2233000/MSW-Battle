@@ -30,6 +30,7 @@ script FormationLobby extends Logic
         self._T.confirmKind = ""
         self._T.confirmTarget = 0
         self._T.awaiting = nil
+        self._T.savingNoticeText = ""
         self._T.localUnconfirmed = false
         self._T.reconcileRequested = false
         self._T.draftReset = true
@@ -38,7 +39,7 @@ script FormationLobby extends Logic
         self.Draft = {}
         self.DraftVersion = 0
         self.DraftSlot = 0
-        for _, path in ipairs({ "Lobby", "Editor", "EditorControls", "Editor/Catalog/Template" }) do
+        for _, path in ipairs({ "Lobby", "Editor", "EditorControls", "Editor/Catalog/Template", "SavingNotice" }) do
             self:SetEnabled(path, false)
         end
         log("[VRF][FormationUI] authoring preview hidden for play")
@@ -705,6 +706,12 @@ script FormationLobby extends Logic
     end
 
     @ExecSpace("ClientOnly")
+    method boolean Saving()
+        -- A save is in flight while this client awaits its reply or the server reports a pending save.
+        return self._T.awaiting ~= nil or (self.Snapshot.pending == true and self.Snapshot.pendingKind == "SAVE")
+    end
+
+    @ExecSpace("ClientOnly")
     method void RenderConfirmation()
         -- Describe the pending switch or return and which of its three choices are currently possible.
         local kind = self._T.confirmKind
@@ -733,6 +740,28 @@ script FormationLobby extends Logic
     end
 
     @ExecSpace("ClientOnly")
+    method void RenderSavingNotice()
+        -- A plain save blocks the screen with a small notice whose window hugs its text; confirmations keep their own modal.
+        local show = self:Saving() and self._T.confirmKind == ""
+        self:SetEnabled("SavingNotice", show)
+        if not show then return end
+        local message = "儲存中…"
+        if self._T.savingNoticeText == message then return end
+        local label = self:Ui("SavingNotice/Window/Message")
+        local window = self:Ui("SavingNotice/Window")
+        if not isvalid(label) or not isvalid(window) then return end
+        -- Size from the rendered text so a font or wording change never needs a layout edit.
+        local text = label.TextGUIRendererComponent
+        text.Text = message
+        local width = text:GetPreferredWidth(message) + 4
+        local height = text:GetPreferredHeight(message, width)
+        label.UITransformComponent.RectSize = Vector2(width, height)
+        window.UITransformComponent.RectSize = Vector2(width + 96, height + 64)
+        self._T.savingNoticeText = message
+        log("[VRF][SavingNotice] sized text=" .. string.format("%.0fx%.0f", width, height))
+    end
+
+    @ExecSpace("ClientOnly")
     method void Render()
         -- Present unsaved content, confirmed content and save state in both lobby and editor.
         if not isvalid(self.root) then return end
@@ -740,6 +769,7 @@ script FormationLobby extends Logic
         local inLobby = mapName == "formationlobby"
         local inEditor = mapName == "formationsim"
         self:SetEnabled("ExitConfirm", self._T.confirmKind ~= "")
+        self:RenderSavingNotice()
         self:SetEnabled("Lobby", inLobby)
         self:SetEnabled("Editor", inEditor and not self._T.editorCollapsed)
         self:SetEnabled("EditorControls", inEditor)
@@ -815,8 +845,9 @@ script FormationLobby extends Logic
                 if isvalid(button) then button.SpriteGUIRendererComponent.Color = isCurrent and Color(1, 0.86, 0.5, 1) or Color(1, 1, 1, 1) end
                 self:SetEnabled(base .. "/ActiveBadge", isActive)
             end
-            self:SetButton("Lobby/Slots/Slot" .. key, writable and not state.pending)
-            self:SetButton("Editor/Slots/Slot" .. key, writable and not busy and self._T.confirmKind == "")
+            -- Clicks are already ignored while a request is pending; disabling here only swaps the sprite and flashes the row.
+            self:SetButton("Lobby/Slots/Slot" .. key, writable)
+            self:SetButton("Editor/Slots/Slot" .. key, writable)
         end
         self:RenderIntel()
         self:SetText("Editor/Roster", "隊伍 " .. tostring(#units) .. " / 6 · 可重複部署")
@@ -828,7 +859,7 @@ script FormationLobby extends Logic
             self:SetText("Editor/Units/Unit" .. tostring(index), label)
             self:SetButton("Editor/Units/Unit" .. tostring(index), self:CanEdit() and entry ~= nil)
         end
-        self:SetText("Editor/Save", (self._T.awaiting ~= nil or (state.pending and state.pendingKind == "SAVE")) and "儲存中…" or "儲存隊伍")
+        self:SetText("Editor/Save", self:Saving() and "儲存中…" or "儲存隊伍")
         self:SetText("Editor/Activate", "設為出戰")
         local canSave = saveReason == "" and self._T.confirmKind == ""
         self:SetButton("Editor/Save", canSave)
