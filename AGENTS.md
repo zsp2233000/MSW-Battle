@@ -11,14 +11,16 @@ You are an expert assistant for **MapleStory World (MSW)** development. You help
 
 Before analyzing, planning, searching, or editing, all of the Foundation context below must be **present in your context window**. On the first turn of a session that means loading all of it; on later turns load only what is missing — never loaded yet, or lost to context compaction. Do **not** re-read a Foundation file that is already fully in context this session. Already having a *different* MSW skill in context from a previous turn is **not** a substitute for a missing Foundation item.
 
-**1. Two Foundation Skills, in order:**
+**1. Two Foundation Skills via the `Skill` tool, in order:**
 
 | # | Skill identifier | What it covers |
 |:-:|---|---|
-| 1 | `msw-general` | Workspace structure, platform rules (`TileMapMode↔Body`, world unit, `SpriteRUID`, spawn), ModelBuilder, MCP tools, `.model`/`.map`/`.ui`/`.dataset` authoring, validated template catalog. Every other MSW skill assumes this is loaded. |
+| 1 | `msw-general` | Workspace structure, platform rules (`TileMapMode↔Body`, world unit, `SpriteRUID`, spawn), MCP tools, `.model`/`.map`/`.ui`/`.dataset` authoring, validated template catalog. Every other MSW skill assumes this is loaded. |
 | 2 | `msw-ui-system` | UI single entry point — HUDs, popups, toasts, menus, tabs, dialogs. Even "Galaga" needs a score/lives HUD. `.ui` files MUST go through a builder; never edit raw JSON. |
 
-**2. Four Foundation references (in full):**
+> ⛔ **Never** load a skill by path (`Read("plugins/msw-maker-base-skill/skills/...")`, `Glob`, `ls`, `Grep`). The plugin lives in Claude Code's global plugin cache, not in the workspace's `plugins/` folder. Use the `Skill` tool — it resolves the absolute path automatically.
+
+**2. Four Foundation references via `Read` (in full, no `offset`/`limit`):**
 
 | Reference | Why it is required in context |
 |---|---|
@@ -59,7 +61,8 @@ If any answer below cannot be cited from MSW reference text actually loaded **in
 
 #### Hard rules for loading skills/references
 
-- Read every reference **in full**.
+- Use the `Skill` tool — never path-based `Read` / `ls` / `Glob` / `Grep` to find skill files.
+- Read every reference **in full** — no `offset`/`limit`, no `cat` / `head` / `tail` / `Get-Content` / pipes for skill or reference files.
 - Loading SKILL.md alone ≠ "skill loaded" when `references/*.md` siblings exist; SKILL.md is a thin index. Read every reference whose topic intersects with the request.
 - A skill loaded in a previous turn does **not** exempt this turn from re-classification. If this turn touches a new domain, load the additional skill **before** Plan. The plugin's `UserPromptSubmit` hook injects a short `<msw-skill-router-reminder>` system message at the start of every turn to re-arm this rule; the Domain matrix below is the single source of truth it points back to.
 - Skipping any Foundation Skill, any Foundation reference, or any required `references/*.md` for a fired sub-trigger — even when the task looks "trivial" — is treated as "skill NOT loaded".
@@ -110,6 +113,27 @@ When a sub-trigger fires, the listed `references/*.md` is **required** in additi
   - `Global/NativeModel/` — MSW built-in `.model` templates (monsters, NPCs, items). Read-only reference — copy into `MyDesk/Models/` to customize; read to learn JSON structure and component composition.
 - `Environment/` — `.d.mlua` API definitions. Read-only.
 
+### Cross-platform tool rules
+
+⛔ **Never use shell commands to inspect the workspace.** Shell behavior differs across Windows PowerShell, Git Bash, and macOS bash (path separator, escape rules, encoding, command names). Cursor / Claude Code's built-in tools are the only portable choice.
+
+| To do this | ✅ Use this | ❌ Never use |
+|---|---|---|
+| List files | `Glob("RootDesk/MyDesk/**/*.mlua")` | `ls`, `dir`, `Get-ChildItem`, `gci` |
+| Check folder | `Glob("map/*")` | `ls`, `Test-Path`, `dir` |
+| Read a file | `Read("RootDesk/MyDesk/Foo.mlua")`; for `.map` use `MapBuilder.read(...)` | `cat`, `type`, `Get-Content`, `gc`, `head`, `tail`, `more`, `less` |
+| Search contents | `Grep("@Logic", glob: "*.mlua")` | `grep`, `findstr`, `Select-String`, `sls`, `rg` directly |
+| Find file by name | `Glob("**/PlayerController.mlua")` | `find`, `where`, `Get-ChildItem -Recurse` |
+
+The `Bash` / shell tool is reserved for actual programs (`git`, `npm`, MCP, build scripts). When you must invoke one:
+
+1. Prefer workspace-relative paths (`git add RootDesk/MyDesk/Foo.mlua`).
+2. If an absolute path is unavoidable, use forward slashes and double-quote: `"D:/msw-world-projects/.../map/"` — never `D:\...`. In bash on Windows, `\` is an escape character; `D:\foo\bar\` collapses to `D:foobar`.
+3. Always double-quote paths containing spaces or non-ASCII.
+4. Prefer POSIX commands (`ls`, `mv`, `cp`, `rm`) over OS-specific (`dir`, `type`, `del`).
+
+> Symptom of violation: `ls: cannot access 'D:msw-world-projects...'` — the backslashes were eaten by bash. Stop and re-issue as `Glob` / `Read` / `Grep`.
+
 ### Runtime interaction requires MCP — no exceptions
 
 ⛔ **Never claim a runtime result without an actual MCP tool call.**
@@ -119,6 +143,8 @@ When a sub-trigger fires, the listed `references/*.md` is **required** in additi
 - Saying "no errors" without calling `logs(kind="build")` or `logs(kind="normal")` is a hallucination.
 
 If a task requires runtime interaction (playing, clicking, typing, verifying behavior, checking logs), you **must** invoke the corresponding Maker MCP tool (`play`, `stop`, `logs`, `keyboard_input`, `mouse_input`, `maker_execute_script`). Text alone cannot substitute for tool execution. Use `screenshot` when you need to identify screen coordinates for input targeting or when the user explicitly requests it.
+
+Produce that evidence with the **fewest calls**: prefer one `maker_execute_script` probe over a long `keyboard_input`/`mouse_input` chain when the input path itself is not under test, and keep `logs` reads scoped — every tool call is a full model round-trip whose output stays in context for the rest of the session.
 
 ## 0. Plan (MANDATORY)
 
@@ -141,7 +167,7 @@ If a task requires runtime interaction (playing, clicking, typing, verifying beh
 
      Search only the file types relevant to the request; read matches to learn patterns and dependencies.
 
-3. **`TodoWrite`** — break the task into concrete, verifiable steps. A **Verify** todo (load `msw-scripting`, then Read `references/verify-checklist.md`) is required (see ## 3). Mark each todo `in_progress` when starting; `completed` only after verification passes.
+3. **`TodoWrite`** — break the task into concrete, verifiable steps. A single **Verify** todo covering **all** implementation todos is required (see ## 3): plant `[VRF]` evidence while implementing, then verify everything in **one runtime cycle per turn** — never one play cycle per todo. Mark each todo `in_progress` when starting; `completed` only after verification passes.
 
 ## 1. Analyze
 
@@ -158,7 +184,7 @@ If a task requires runtime interaction (playing, clicking, typing, verifying beh
 - **`Global/`**: never create new files here (Maker won't register them) or delete. Existing `Global/*.model` files may be edited in place via `ModelBuilder` + Maker Refresh; create new custom models under `RootDesk/MyDesk/Models/`. `Environment/` (`.d.mlua`) is read-only; `.config` files are values-only and Maker-managed.
 - **Use builders for structured files:** `.model`, `.ui`, and `.map` edits must go through their skill-local builders (`ModelBuilder`, `UIBuilder`, `MapBuilder`) instead of raw JSON patching unless the relevant reference explicitly permits an exception.
 - **Property types:** use `integer` (not `int`), `number` (not `float`).
-- **Add `log()` calls** at critical checkpoints (e.g. `OnBeginPlay` entry, key variable values, important events) so Verify can confirm behavior.
+- **Add `[VRF]`-prefixed `log()` calls** (e.g. `log("[VRF] wave spawned n=3")`) at critical checkpoints — `OnBeginPlay` entry, branch results, key values, important events — so Verify can collect all evidence in one scoped log read; the `OnBeginPlay` marker doubles as the boot signal for log timing.
 - **`SpawnService` parent must NOT be nil.** Pass the target map entity (`self.Entity.CurrentMap`, or `_EntityService:GetEntityByPath("/maps/map01")`).
 
   ```
@@ -190,39 +216,9 @@ The camera perspective (`TileMapMode`) determines the entire physics, movement, 
 | `RectTile` | Top-down | `KinematicbodyComponent` | `RectTileMapComponent` tiles | No | Free 4-directional |
 | `SideViewRectTile` | Side-view | `SideviewbodyComponent` | `RectTileMapComponent` tiles | Yes | Left/right + jump (tile-based) |
 
-### Script lifecycle
-
-**Component lifecycle methods** (execute in this order based on entity state):
-
-- `OnInitialize` — once after the entity and its components are created. Earliest point to reference other components, but they may not all be ready yet.
-- `OnBeginPlay` — once when logic starts. Guarantees other components/entities exist; safe to reference.
-- `OnMapEnter(Entity)` / `OnMapLeave(Entity)` — fires on every map transition. On the client, `OnMapEnter` also fires for other players already in the map. Both server and client.
-- `OnSyncProperty(string name, any value)` — client-only. Called when a `@Sync` property finishes synchronizing. Not called if sync setting is None.
-- `OnUpdate(number delta)` — every frame.
-- `OnEndPlay` — when the entity is removed from the map.
-- `OnDestroy` — immediately before the entity is destroyed.
-
-**Logic lifecycle** — Logic is an engine-managed global singleton: created **once per world session** and persists across **all** map transitions. Its lifecycle is a **subset** of Component's — `OnMapEnter` / `OnMapLeave` do **NOT** fire on `@Logic`.
-
-- `OnInitialize`, `OnBeginPlay` — once at world start.
-- `OnUpdate` — every frame; runs **before** any Component's `OnUpdate`.
-- `OnEndPlay` — only at world session end (e.g. shutdown). **Not** on map change.
-- `OnDestroy` — when the Logic is removed (rare).
-
-> ⚠️ **`OnMapEnter` / `OnMapLeave` do not fire on `@Logic`** — they are dispatched only to Components attached to map-scoped entities. Writing `method void OnMapEnter(Entity m) ... end` on a Logic compiles but the method is never invoked (silent dead code). For per-map setup/cleanup either (1) move the behavior to a `@Component` on the map entity (preferred), or (2) inside the Logic, poll `_UserService.LocalPlayer.CurrentMap` from `OnUpdate` and react to changes. Because a Logic survives map transitions, any timer / event handler / mutable state in a Logic that should reset per map must be cleared by one of these workarounds — there is no automatic hook.
-
-**ExecSpace annotations** — control where code runs:
-
-| Annotation | Behavior |
-|---|---|
-| `@ExecSpace("ServerOnly")` | Server only. |
-| `@ExecSpace("ClientOnly")` | Client only. |
-| `@ExecSpace("Server")` | Server; if called from client, sends a request to the server. |
-| `@ExecSpace("Client")` | Client; if called from server, sends a request to the client. |
-
 ## 3. Verify
 
-Load `msw-scripting` (`Skill: msw-scripting`) if not already loaded this turn, then Read `references/verify-checklist.md` in full and follow it.
+Ensure `msw-scripting` and its `references/verify-checklist.md` are fully in context — `Skill: msw-scripting` / `Read` only what is missing this session; never re-read what is already in context. Then follow the checklist: **one runtime cycle per turn covering all of this turn's changes**.
 
 ## 4. On Failure
 
