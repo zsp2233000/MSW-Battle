@@ -239,6 +239,8 @@ test('#50 mouse preview and local edits share one rule set and keep selection ru
   // Right-click cancels only the preview; removal needs no preview.
   const right = method(input, 'RightClick');
   assert.match(right, /mode == "MOVE"[\s\S]*return[\s\S]*mode == "PLACE"[\s\S]*return[\s\S]*HandleWorldRemoval/);
+  assert.match(method(input, 'UpdateHover'), /IsPointerOverUI\(\)[\s\S]*UnitAt/, 'hover is world-only and uses the click hit rule');
+  assert.match(method(input, 'ApplyHover'), /Scale = Vector3\(1, 1, 1\)/, 'the previous unit is restored');
   assert.match(method(input, 'HandleRightClick'), /IsPointerOverUI\(\)\s*then return end/, 'a click on UI never reaches the world');
   assert.match(method(input, 'HandleWorldRemoval'), /PreviewMode\(\) ~= ""/);
   assert.match(method(lobby, 'PreviewMode'), /CanEdit\(\)/, 'no preview while pending, confirming or unconfirmed');

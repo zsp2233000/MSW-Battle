@@ -14,7 +14,8 @@ script FormationMapInput extends Component
         self._T.ghostRuid = ""
         self._T.ghostLegal = false
         self._T.ghostMode = ""
-        self._T.touch = _InputService:ConnectEvent(ScreenTouchEvent, self.HandleTouch)
+        self._T.hoverIndex = 0
+        self._T.touch =_InputService:ConnectEvent(ScreenTouchEvent, self.HandleTouch)
         self._T.key = _InputService:ConnectEvent(KeyDownEvent, self.HandleRightClick)
         self._T.inMap = false
         self._T.selected = -1
@@ -63,6 +64,39 @@ script FormationMapInput extends Component
             end
         end
         self:UpdateGhost()
+        self:UpdateHover()
+    end
+
+    @ExecSpace("ClientOnly")
+    method void UpdateHover()
+        -- The unit under the cursor brightens and grows slightly; the cursor never reaches a unit through the UI.
+        local lobby = _FormationLobby
+        local index = 0
+        if lobby:CanEdit() and not _InputService:IsPointerOverUI() then
+            local world = _UILogic:ScreenToWorldPosition(_InputService:GetCursorPosition())
+            index = self:UnitAt(Vector3(world.x, world.y, 0))
+        end
+        self:ApplyHover(index)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ApplyHover(integer index)
+        -- Restore the previous unit, then style the new one. Shared by the cursor path and verification probes.
+        local previous = self._T.hoverIndex or 0
+        if previous == index then return end
+        local old = self._T.previews[previous]
+        if isvalid(old) then
+            old.SpriteRendererComponent.Color = Color(1, 1, 1, 1)
+            old.TransformComponent.Scale = Vector3(1, 1, 1)
+        end
+        local entity = self._T.previews[index]
+        if index > 0 and isvalid(entity) then
+            entity.SpriteRendererComponent.Color = Color(1, 0.92, 0.55, 1)
+            entity.TransformComponent.Scale = Vector3(1.12, 1.12, 1)
+            self._T.hoverIndex = index
+        else
+            self._T.hoverIndex = 0
+        end
     end
 
     @ExecSpace("ClientOnly")
@@ -110,6 +144,8 @@ script FormationMapInput extends Component
         local draft = lobby.Draft
         local options = lobby.Snapshot.options or {}
         self:ClearSelectionEffect()
+        -- Entities may be reused or removed below; the next frame re-applies the hover.
+        self:ApplyHover(0)
         self.PreviewVersion = lobby.DraftVersion
         self._T.previewSlot = lobby.DraftSlot
         self._T.optionCount = #options
@@ -301,6 +337,7 @@ script FormationMapInput extends Component
         self._T.ghost = nil
         self._T.ghostRuid = ""
         self._T.ghostMode = ""
+        self._T.hoverIndex = 0
         self._T.previews = {}
         self._T.previewIds = {}
         self.PreviewCount = 0
