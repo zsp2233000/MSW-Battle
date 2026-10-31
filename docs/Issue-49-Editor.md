@@ -26,8 +26,8 @@ MonsterCatalog 從已驗證的伺服器 profile 發送種類、生命值、傷�
 
 | 要調整的內容 | Maker 路徑與屬性 |
 |---|---|
-| 整張卡片等比例縮小 | `FormationGroup/Editor/Catalog` → `FormationCardLayout.CardScale`；`1` 為原尺寸、`0.85` 為 85%、`0.75` 為 75%。有效範圍 0.5～1，超出時限制至範圍內；保存後重新 Play 套用，編輯模式維持原尺寸模板 |
-| 卡片間隔與欄數 | 同一 `Catalog` → `ScrollLayoutGroupComponent.GridSpacing`、`ConstraintCount`；`CellSize` 在 Play 時依 `CardScale` 自動計算，不用手動同步 |
+| 單張卡片尺寸及內容跟隨 | `FormationGroup/Editor/Catalog` → `ScrollLayoutGroupComponent.CellSize`，目前採用 `149×216`。原生伸縮錨點讓外框、圖片區域與文字寬度跟隨尺寸，模板根節點由網格管理，不能直接改其 Width／Height |
+| 卡片間隔與欄數 | 同一 `Catalog` → `ScrollLayoutGroupComponent.GridSpacing`、`ConstraintCount`；卡片區域尺寸另由 Catalog 的 UITransform 管理 |
 | 名稱文字與排列 | `FormationGroup/Editor/Catalog/Template/MonsterName` → `TextGUIRendererComponent` 字型、對齊、`FontSize`，以及 `UITransformComponent` 尺寸、位置；啟用 `BestFit` 時也需調整 `MinSize`／`MaxSize` |
 | 種類、圖像與裝飾 | 同一模板下的 `Identity`、`PortraitViewport/Portrait`、`CardSign`；修改尺寸時同步留意子項位置與原素材比例 |
 | 整備狀態、重試及收合位置 | `FormationGroup/EditorControls/Status`、`Retry`、`Toggle` |
@@ -35,7 +35,13 @@ MonsterCatalog 從已驗證的伺服器 profile 發送種類、生命值、傷�
 
 編輯預覽使用一張示例卡片。正式名稱、種類、情報及圖片由資料提供；編輯模板的文字內容不會改掉正式目錄。大廳相對站位縮放及重疊避讓仍依編隊內容動態計算；這部分保留程式排版。既有背景排序修正也保留。
 
-卡片縮放保留既有模板階層：格子尺寸控制底框與點擊範圍，模板直接子項的位置與視覺比例同步縮放，怪物圖片與勾選標記跟隨父項。原始位置、比例及格子尺寸於本次 Play 第一次建立卡片時記錄；重新建立目錄或重複套用比例不會累積縮小。字級與原始素材保持可編輯，卡片區域尺寸、欄數與間隔不隨縮放改變。
+目前採用原生屬性面板編輯，已移除 FormationCardLayout 與 CardScale，沒有新增 Editor UI 面板或 Play 時覆寫尺寸的程式。CardSign、PortraitViewport、Portrait 及 SelectedGlow 使用全伸縮；名稱與種類使用底部水平伸縮，保留文字區域高度並開啟 BestFit；怪物圖片保持自身比例。這是跟隨父尺寸的重新排版，不是所有元素嚴格等比例縮放。大幅改變長寬比仍會使 Cardgame 裝飾變形，固定底部的文字也不會自動追隨素材內部銘牌。
+
+149×216 修正：原先沿用 213×309 的兩層圖片留白，縮小後圖片容器只剩 56×27。改為外層左右 16、上 20、下 70，內層四邊 8，使圖片容器為 101×110；名稱高度 28、底部中心 44，種類高度 24、底部中心 16，並調小字級上限。非對稱伸縮留白的 anchoredPosition 同步保存為中心偏移 25，避免 Maker 匯入後回到垂直置中。靜態 lint 的 L004 因此保留；以 Maker 解析後的尺寸、位置與截圖驗證。
+
+本輪驗證：本機契約 33/33，UI lint 0 Error、2 Warning（上述 L004 及既有 L016）。Maker build 0 Error、2 項既有 Warning，runtime 無 Error／Warning。CardResize PASS：149×216、181×263、213×309 的圖片可用範圍、圖像／名稱／種類不重疊、選取及重建目錄；原生 Play 截圖確認 149×216 三張正式卡片。已 Stop／Refresh 返回編輯模式；未操作 Maker 原生屬性面板或重跑保存／配對流程。
+
+2026-10-31 原生尺寸修訂：本機契約 33/33，strict lint 109 entities、0 Error、1 項既有 L016 Warning。Maker build 無 Error，最終 runtime 無 Error／Warning；CardResize、EditorAuthoring、EditorIntel PASS。已測試 181×263、160×250、恢復原尺寸及重建目錄，並比對 Play 中 181×263 畫面。Maker 原生屬性面板的手動輸入及編輯畫面預覽仍待使用者確認；未重跑完整保存／配對或手機。以下縮放紀錄屬先前版本。
 
 縮放修訂驗證：本機契約 33/33；strict lint 維持 109 entities、0 Error、1 項既有 L016 Warning。Maker build 0 Error、兩項既有 Warning，最終驗證輪 runtime 無 Error／Warning。`CardScaleProbe`、`EditorAuthoring`、`EditorIntel` PASS；原生畫面比對確認 65% 與 100% 的框、圖片、文字及標記同比例縮放。此輪未重跑保存失敗注入、完整配對對戰或手機；最後已 Stop 返回編輯模式。
 

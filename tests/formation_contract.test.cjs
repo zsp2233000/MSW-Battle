@@ -47,11 +47,17 @@ test('five formations expose stable selectors in lobby and editor with explicit 
   assert.ok(ui.find('Editor/Intel/Stats'), 'tactical intelligence remains outside the details');
   const {RectSize: frame} = ui.getComponent('Editor/Catalog/Template', 'MOD.Core.UITransformComponent');
   const {RectSize: sign} = ui.getComponent('Editor/Catalog/Template/CardSign', 'MOD.Core.UITransformComponent');
-  assert.ok(Math.abs(frame.x / frame.y - 142 / 206) < 0.0001, 'Cardgame frame keeps its native portrait ratio');
-  assert.ok(Math.abs(sign.x / sign.y - 302 / 424) < 0.0001, 'Cardgame ornament keeps its source ratio');
+  assert.ok(frame.y > frame.x, 'editable Cardgame frame remains portrait');
+  assert.ok(sign.y > sign.x, 'editable Cardgame ornament remains portrait');
   assert.ok(sign.x > frame.x && sign.y > frame.y, 'ornament extends beyond the frame as in the source card');
   assert.equal(ui.find('Editor/Catalog/Template/SelectedGlow/Border'), null, 'selection does not cover the ornament with a second frame');
-  assert.equal(ui.getComponent('Editor/Catalog', 'script.FormationCardLayout').CardScale, 1, 'one inspector setting controls whole-card scale');
+  assert.equal(ui.hasComponent('Editor/Catalog', 'script.FormationCardLayout'), false, 'native layout owns card dimensions');
+  for (const part of ['CardSign', 'PortraitViewport', 'PortraitViewport/Portrait', 'SelectedGlow']) {
+    assert.equal(ui.getComponent('Editor/Catalog/Template/' + part, 'MOD.Core.UITransformComponent').AlignmentOption, 15);
+  }
+  for (const part of ['MonsterName', 'Identity']) {
+    assert.equal(ui.getComponent('Editor/Catalog/Template/' + part, 'MOD.Core.UITransformComponent').AlignmentOption, 11);
+  }
 });
 
 test('Maker exposes the editor template and each screen owns its fixed controls', () => {
