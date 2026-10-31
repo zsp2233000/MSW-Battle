@@ -178,6 +178,7 @@ test('#50 group selectors mark the viewed and active group; save and cards use n
   assert.equal(save.Transition, 1, 'native colour states');
   assert.ok(save.Colors.NormalColor.r > save.Colors.DisabledColor.r && save.Colors.NormalColor.b < 0.6, 'usable save is highlighted, disabled is grey');
   assert.equal(ui.getComponent('Editor/Save', 'MOD.Core.TextGUIRendererComponent').Text, '儲存隊伍');
+  assert.ok(save.Colors.HighlightedColor.b - save.Colors.NormalColor.b >= 0.3, 'hover is clearly lighter than normal');
   for (const path of ['Editor/Activate', 'Editor/Save', 'Editor/Back']) assert.equal(ui.find(path).jsonString.enable, true, `${path} is always visible`);
   assert.equal(ui.find('Editor/Slots/Slot1').jsonString.enable, true);
   // Only the edge bars pulse; recolouring the fill hid the group label in the first native capture.
