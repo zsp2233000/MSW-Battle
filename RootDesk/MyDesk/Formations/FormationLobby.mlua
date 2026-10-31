@@ -159,6 +159,12 @@ script FormationLobby extends Logic
         -- Only the four edge bars pulse; the authored translucent fill stays put so the label remains readable.
         -- Render caches the viewed group's bars, so a frame costs no path lookups.
         local alpha = 0.7 + 0.3 * math.sin(self._T.pulse * 4)
+        local blink = self._T.saveBlink
+        if isvalid(blink) and blink.EnabledInHierarchy then
+            -- Swing between the gold tint and a bright warm white, about twice a second.
+            local mix = 0.5 + 0.5 * math.sin(self._T.pulse * 6)
+            blink.SpriteGUIRendererComponent.Color = Color(1, 0.86 + 0.14 * mix, 0.5 + 0.4 * mix, 1)
+        end
         for _, bar in ipairs(self._T.frameBars or {}) do
             if isvalid(bar) and bar.EnabledInHierarchy then bar.SpriteGUIRendererComponent.Color = Color(1, 0.86, 0.36, alpha) end
         end
@@ -830,7 +836,6 @@ script FormationLobby extends Logic
                 self:SetText(base, label)
                 self:SetEnabled(base .. "/EditFrame", isCurrent)
                 self:SetEnabled(base .. "/ActiveBadge", isActive)
-                self:SetEnabled(base .. "/DirtyMark", isCurrent and dirty)
                 if isCurrent then
                     for _, edge in ipairs({ "Top", "Bottom", "Left", "Right" }) do
                         local bar = self:Ui(base .. "/EditFrame/" .. edge)
@@ -859,6 +864,8 @@ script FormationLobby extends Logic
         -- Usable save is gold; the native sprite swap still supplies hover, pressed and disabled looks.
         local saveButton = self:Ui("Editor/Save")
         if isvalid(saveButton) then saveButton.SpriteGUIRendererComponent.Color = canSave and Color(1, 0.86, 0.5, 1) or Color(1, 1, 1, 1) end
+        -- A usable save blinks (see PulseSlotFrames); anything else stays still.
+        self._T.saveBlink = canSave and saveButton or nil
         self:SetButton("Editor/Activate", activateReason == "" and self._T.confirmKind == "")
         for _, card in ipairs(self._T.cards or {}) do
             local selected = card.monsterId == self.SelectedMonsterId

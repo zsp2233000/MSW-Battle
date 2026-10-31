@@ -169,7 +169,7 @@ test('#50 group selectors mark the viewed and active group; save and cards use n
       assert.equal(ui.find(`${base}/EditFrame`).jsonString.enable, false, `${base}/EditFrame starts hidden`);
       assert.ok(ui.getComponent(`${base}/EditFrame`, 'MOD.Core.SpriteGUIRendererComponent').Color.a <= 0.15, `${base}/EditFrame fill stays quiet so the label is readable`);
       // Both markers are sprites, so their art is an ImageRUID the designer can swap in Maker.
-      for (const marker of ['ActiveBadge', 'DirtyMark']) {
+      for (const marker of ['ActiveBadge']) {
         assert.equal(ui.find(`${base}/${marker}`).jsonString.enable, false, `${base}/${marker} starts hidden`);
         assert.ok(ui.hasComponent(`${base}/${marker}`, 'MOD.Core.SpriteGUIRendererComponent'), `${marker} is a sprite`);
         assert.equal(ui.hasComponent(`${base}/${marker}`, 'MOD.Core.TextGUIRendererComponent'), false, `${marker} is not text`);
@@ -192,6 +192,14 @@ test('#50 group selectors mark the viewed and active group; save and cards use n
   assert.equal(ui.find('Editor/Slots/Slot1').jsonString.enable, true);
   // Only the edge bars pulse; recolouring the fill hid the group label in the first native capture.
   assert.doesNotMatch(method(read('RootDesk/MyDesk/Formations/FormationLobby.mlua'), 'PulseSlotFrames'), /frame\.SpriteGUIRendererComponent/);
+});
+
+test('#50 only a usable save button blinks and the unsaved marker node is gone', () => {
+  const lobby = read('RootDesk/MyDesk/Formations/FormationLobby.mlua');
+  assert.match(method(lobby, 'Render'), /self\._T\.saveBlink = canSave and saveButton or nil/);
+  assert.match(method(lobby, 'PulseSlotFrames'), /saveBlink[\s\S]*math\.sin/);
+  assert.ok(!lobby.includes('DirtyMark'));
+  assert.equal(UIBuilder.read('ui/FormationGroup.ui').find('Editor/Slots/Slot1/DirtyMark'), null);
 });
 
 test('#50 the highlight edge is a visible, unsliced bar; no code sets renderer sorting', () => {
