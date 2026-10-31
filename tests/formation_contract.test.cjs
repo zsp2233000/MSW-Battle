@@ -166,16 +166,12 @@ test('#50 group selectors mark the viewed and active group; save and cards use n
   for (const screen of ['Lobby', 'Editor']) {
     for (let slot = 1; slot <= 5; slot++) {
       const base = `${screen}/Slots/Slot${slot}`;
-      assert.equal(ui.find(`${base}/EditFrame`).jsonString.enable, false, `${base}/EditFrame starts hidden`);
-      assert.ok(ui.getComponent(`${base}/EditFrame`, 'MOD.Core.SpriteGUIRendererComponent').Color.a <= 0.15, `${base}/EditFrame fill stays quiet so the label is readable`);
-      // Both markers are sprites, so their art is an ImageRUID the designer can swap in Maker.
+      assert.equal(ui.find(`${base}/EditFrame`), null, `${base} uses button colour instead of an animated frame`);
+      // The active-group marker remains independent of the viewed group's button colour.
       for (const marker of ['ActiveBadge']) {
         assert.equal(ui.find(`${base}/${marker}`).jsonString.enable, false, `${base}/${marker} starts hidden`);
         assert.ok(ui.hasComponent(`${base}/${marker}`, 'MOD.Core.SpriteGUIRendererComponent'), `${marker} is a sprite`);
         assert.equal(ui.hasComponent(`${base}/${marker}`, 'MOD.Core.TextGUIRendererComponent'), false, `${marker} is not text`);
-      }
-      for (const edge of ['Top', 'Bottom', 'Left', 'Right']) {
-        assert.equal(ui.getComponent(`${base}/EditFrame/${edge}`, 'MOD.Core.SpriteGUIRendererComponent').RaycastTarget, false);
       }
     }
   }
@@ -190,8 +186,6 @@ test('#50 group selectors mark the viewed and active group; save and cards use n
   assert.equal(ui.getComponent('Editor/Save', 'MOD.Core.TextGUIRendererComponent').Text, '儲存隊伍');
   for (const path of ['Editor/Activate', 'Editor/Save', 'Editor/Back']) assert.equal(ui.find(path).jsonString.enable, true, `${path} is always visible`);
   assert.equal(ui.find('Editor/Slots/Slot1').jsonString.enable, true);
-  // Only the edge bars pulse; recolouring the fill hid the group label in the first native capture.
-  assert.doesNotMatch(method(read('RootDesk/MyDesk/Formations/FormationLobby.mlua'), 'PulseSlotFrames'), /frame\.SpriteGUIRendererComponent/);
 });
 
 test('#50 only a usable save button blinks and the unsaved marker node is gone', () => {
@@ -202,14 +196,27 @@ test('#50 only a usable save button blinks and the unsaved marker node is gone',
   assert.equal(UIBuilder.read('ui/FormationGroup.ui').find('Editor/Slots/Slot1/DirtyMark'), null);
 });
 
-test('#50 the highlight edge is a visible, unsliced bar; no code sets renderer sorting', () => {
+test('#50 the viewed group uses a static button tint in both screens', () => {
   const ui = UIBuilder.read('ui/FormationGroup.ui');
-  assert.ok(ui.getComponent('Editor/Slots/Slot1/EditFrame/Top', 'MOD.Core.UITransformComponent').RectSize.y >= 8, 'a clearly visible highlight edge');
-  assert.equal(ui.getComponent('Editor/Slots/Slot1/EditFrame/Top', 'MOD.Core.SpriteGUIRendererComponent').Type, 0, 'unsliced so the edge keeps its thickness');
+  for (const screen of ['Lobby', 'Editor']) {
+    for (let index = 1; index <= 5; index++) {
+      const path = `${screen}/Slots/Slot${index}`;
+      assert.equal(ui.find(`${path}/EditFrame`), null, '選取框與動畫已移除');
+      assert.equal(ui.getComponent(path, 'MOD.Core.ButtonComponent').Transition, 2, 'native sprite swap preserves the selection tint on hover');
+      assert.deepEqual(ui.getComponent(path, 'MOD.Core.SpriteGUIRendererComponent').Color, {r: 1, g: 1, b: 1, a: 1}, 'unselected colour');
+    }
+  }
+  const render = method(read('RootDesk/MyDesk/Formations/FormationLobby.mlua'), 'Render');
+  assert.match(render, /local isCurrent = index == editSlot/);
+  assert.match(render, /button\.SpriteGUIRendererComponent\.Color = isCurrent and Color\(1, 0\.86, 0\.5, 1\) or Color\(1, 1, 1, 1\)/);
+  assert.match(render, /SetEnabled\(base \.\. "\/ActiveBadge", isActive\)/);
+});
+
+test('#50 group selection has no animated frame or renderer sorting overrides', () => {
   // OverrideSorting is read-only and OrderInLayer is only writable in World UI mode, so such writes are errors or no-ops.
   const lobby = read('RootDesk/MyDesk/Formations/FormationLobby.mlua');
   assert.doesNotMatch(lobby, /OverrideSorting|OrderInLayer/);
-  assert.doesNotMatch(method(lobby, 'PulseSlotFrames'), /self:Ui\(/, 'the per-frame pulse does no path lookups');
+  assert.doesNotMatch(lobby, /frameBars|EditFrame/, 'group selection does no per-frame animation work');
 });
 
 test('#50 review fixes: no silent drops while a request is outstanding', () => {

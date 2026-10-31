@@ -152,21 +152,15 @@ script FormationLobby extends Logic
 
     @ExecSpace("ClientOnly")
     method void PulseSlotFrames(number delta)
-        -- Keep the current group's frame lively so the viewed group is unmistakable.
+        -- Preserve the usable save button blink.
         local state = self.Snapshot
         if state.editSlot == nil then return end
         self._T.pulse = self._T.pulse + delta
-        -- Only the four edge bars pulse; the authored translucent fill stays put so the label remains readable.
-        -- Render caches the viewed group's bars, so a frame costs no path lookups.
-        local alpha = 0.7 + 0.3 * math.sin(self._T.pulse * 4)
         local blink = self._T.saveBlink
         if isvalid(blink) and blink.EnabledInHierarchy then
             -- Swing between the gold tint and a bright warm white, about twice a second.
             local mix = 0.5 + 0.5 * math.sin(self._T.pulse * 6)
             blink.SpriteGUIRendererComponent.Color = Color(1, 0.86 + 0.14 * mix, 0.5 + 0.4 * mix, 1)
-        end
-        for _, bar in ipairs(self._T.frameBars or {}) do
-            if isvalid(bar) and bar.EnabledInHierarchy then bar.SpriteGUIRendererComponent.Color = Color(1, 0.86, 0.36, alpha) end
         end
     end
 
@@ -816,7 +810,6 @@ script FormationLobby extends Logic
         end
         self:RenderLobbyPreview()
         self:SetText("Editor/Summary", summary)
-        local frameBars = {}
         for index = 1, 5 do
             local key = tostring(index)
             local slot = saved and saved.slots[key] or nil
@@ -834,19 +827,13 @@ script FormationLobby extends Logic
             for _, screen in ipairs({ "Lobby", "Editor" }) do
                 local base = screen .. "/Slots/Slot" .. key
                 self:SetText(base, label)
-                self:SetEnabled(base .. "/EditFrame", isCurrent)
+                local button = self:Ui(base)
+                if isvalid(button) then button.SpriteGUIRendererComponent.Color = isCurrent and Color(1, 0.86, 0.5, 1) or Color(1, 1, 1, 1) end
                 self:SetEnabled(base .. "/ActiveBadge", isActive)
-                if isCurrent then
-                    for _, edge in ipairs({ "Top", "Bottom", "Left", "Right" }) do
-                        local bar = self:Ui(base .. "/EditFrame/" .. edge)
-                        if isvalid(bar) then table.insert(frameBars, bar) end
-                    end
-                end
             end
             self:SetButton("Lobby/Slots/Slot" .. key, writable and not state.pending)
             self:SetButton("Editor/Slots/Slot" .. key, writable and not busy and self._T.confirmKind == "")
         end
-        self._T.frameBars = frameBars
         self:RenderIntel()
         self:SetText("Editor/Roster", "隊伍 " .. tostring(#units) .. " / 6 · 可重複部署")
         for index = 1, 6 do
