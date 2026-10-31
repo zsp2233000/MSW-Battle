@@ -854,7 +854,11 @@ script FormationLobby extends Logic
         end
         self:SetText("Editor/Save", (self._T.awaiting ~= nil or (state.pending and state.pendingKind == "SAVE")) and "儲存中…" or "儲存隊伍")
         self:SetText("Editor/Activate", "設為出戰")
-        self:SetButton("Editor/Save", saveReason == "" and self._T.confirmKind == "")
+        local canSave = saveReason == "" and self._T.confirmKind == ""
+        self:SetButton("Editor/Save", canSave)
+        -- Usable save is gold; the native sprite swap still supplies hover, pressed and disabled looks.
+        local saveButton = self:Ui("Editor/Save")
+        if isvalid(saveButton) then saveButton.SpriteGUIRendererComponent.Color = canSave and Color(1, 0.86, 0.5, 1) or Color(1, 1, 1, 1) end
         self:SetButton("Editor/Activate", activateReason == "" and self._T.confirmKind == "")
         for _, card in ipairs(self._T.cards or {}) do
             local selected = card.monsterId == self.SelectedMonsterId

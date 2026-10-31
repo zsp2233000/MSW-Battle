@@ -175,10 +175,14 @@ test('#50 group selectors mark the viewed and active group; save and cards use n
     }
   }
   const save = ui.getComponent('Editor/Save', 'MOD.Core.ButtonComponent');
-  assert.equal(save.Transition, 1, 'native colour states');
-  assert.ok(save.Colors.NormalColor.r > save.Colors.DisabledColor.r && save.Colors.NormalColor.b < 0.6, 'usable save is highlighted, disabled is grey');
+  const activate = ui.getComponent('Editor/Activate', 'MOD.Core.ButtonComponent');
+  for (const path of ['Editor/Save', 'Editor/Back', 'EditorControls/Toggle', 'Editor/Slots/Slot1', 'Lobby/Slots/Slot1', 'Lobby/Edit']) {
+    const button = ui.getComponent(path, 'MOD.Core.ButtonComponent');
+    assert.equal(button.Transition, activate.Transition, `${path} hovers with the same native sprite swap as the other buttons`);
+    assert.deepEqual(button.ImageRUIDs, activate.ImageRUIDs, path);
+  }
+  assert.match(method(read('RootDesk/MyDesk/Formations/FormationLobby.mlua'), 'Render'), /Editor\/Save[\s\S]*canSave and Color\(1, 0\.86, 0\.5, 1\)/, 'usable save is gold');
   assert.equal(ui.getComponent('Editor/Save', 'MOD.Core.TextGUIRendererComponent').Text, '儲存隊伍');
-  assert.ok(save.Colors.HighlightedColor.b - save.Colors.NormalColor.b >= 0.3, 'hover is clearly lighter than normal');
   for (const path of ['Editor/Activate', 'Editor/Save', 'Editor/Back']) assert.equal(ui.find(path).jsonString.enable, true, `${path} is always visible`);
   assert.equal(ui.find('Editor/Slots/Slot1').jsonString.enable, true);
   // Only the edge bars pulse; recolouring the fill hid the group label in the first native capture.
