@@ -48,6 +48,10 @@
 
 經使用者同意，以 Maker 原生截圖確認（1920×1080）：戰鬥中 HUD 只蓋到外牆，場地與地圖下緣完整可見；結果視窗的文字與邊框、分隔線都不重疊。
 
+## LWA-3048
+
+`BattleViewAvatar.model` 同時掛著 Body 與 Face 兩個 ActionSelector，生成 `ViewAvatar_1`／`_2` 時各報一次 `LWA-3048`，引擎也預告之後不再加入後者。Face selector 沒有編寫值，程式也沒有使用，已移除；重跑配對後 runtime 為 0 Warning，頭像與名牌正常。上方所記的既有 `LWA-3048` 只適用於移除之前。Build Console 的 `LWA-4013` 在 Refresh 後仍留著 16:43 的舊時間戳，尚未確認會在下次重新驗證時消失。
+
 ## 未驗收
 
 - **原生外觀**：上述截圖只涵蓋參考解析度的戰鬥與勝利畫面。較小視窗、失敗／平手畫面，以及按鈕四種狀態的實體滑鼠操作還沒有畫面證據；其中結果面板的按鈕是否實際壓在 Dimmer 之上，也要由實體點擊確認（MatchGroup 的 GroupOrder 6 高於 BattleGroup 的 2）。
