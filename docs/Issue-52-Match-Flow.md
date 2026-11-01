@@ -8,6 +8,9 @@
 - 送出開始／取消後立即鎖住整備；只有正式 `IDLE` 且沒有在途狀態請求才解鎖。大廳選組、雙擊整備、POC 入口及 local 編輯共用這個條件；配對期間清除尚未完成的整備進場意圖。
 - `MatchProbe.IsFormationLocked` 供伺服器選組、儲存、啟用與移動重驗證，涵蓋請求中的 yield、等待、取消未確認、入場與返回。原有 transfer lock 仍由 FormationService 管理。
 - 原生取消成功後才寫入取消終態。取消或終態寫入失敗都維持鎖定並提供重試；配對預約寫入未確認也保留待取消的票券，不提前呈現可編輯狀態。
+- 取消等待使用票券外的 `cancelling` 旗標，保留真正的排隊／入場階段，對外呈現 `CANCELLING`；原生回覆失敗不再留下假取消終態。取消確認後、取消終態寫入尚未確認時仍呈現 `CANCELLING`，只有持久確認才清掉票券並回到 `IDLE`。
+- 取消期間收到配對成功會暫存，取消失敗後接續同一票券；已在準備中的配對則等取消回覆後才越過 `COMMITTING` 邊界。取消成功會阻止入場，恢復入場時清掉過期的取消錯誤，保留原本的本局隊伍與版本。
+- `CancelMatching` 共用既有原生回覆判斷，供可見取消及 `Depart` 使用；斷線清理收到取消失敗時不再寫入取消終態。Maker 專用的 `ConfigureMakerCancelFaults` 只注入回覆與延遲，不修改正式環境的原生服務路徑。
 - `FormationHandoff.Close` 先驗證原票券與世代，再讀回持久狀態，讓逾時後才完成的預約或取消寫入能由同一取消操作恢復。讀取失敗、較新的票券或已進入交接的狀態仍拒絕取消；已持久完成的相同終態可直接確認，不重寫 payload。
 - 儲存逾時後，只有讀回 `READY`／`NEW` 才恢復返回操作；保留服務端的晚到寫入防護。client 在 `CONFLICT`、`LOADING` 或 `ERROR` 且結果未確認時持續禁止離開，確認後可以放棄變更返回，不必再儲存一次。
 - 固定本局編隊、經過時間、直接入場、confirmed-only 交接與結果仍沿用既有服務。選組預覽不改出戰組，配對不儲存編輯內容，不新增 Ready 或倒數。
@@ -58,7 +61,7 @@
 
 已讀取 Maker 原生截圖：大廳、等待／配對預約錯誤、整備、離開確認與勝利結果。確認必要控制項可見、確認選項未被遮住、結果與返回操作分開呈現。截圖在 Maker `McpScreenshots` 目錄：`185159_572`（等待）、`190927_433`（錯誤）、`191633_777`（大廳）、`192106_123`（整備）、`192143_990`（確認）、`191301_077`（結果）；日期前綴均為 `maker_play_20261101_`。戰鬥 HUD 本輪取得 runtime 正向證據，未取得戰鬥進行中的截圖，外觀亦沿用 #51 已確認的版面。
 
-尚未驗收：五個畫面的實體 PC 滑鼠、hover／pressed／disabled 外觀、首次顯示的繪製延遲、較小 PC 視窗、手機，以及失敗／平手結果外觀。Maker mouse_input 工具明示不能點擊標準引擎 UI，不能用 SendEvent 冒充實體點擊。未對本機實際入場傳送失敗或 RETURN_SAVE_FAILED 提示做完整故障回歸；本輪返回失敗使用 MoveToLobby 邊界，相關既有探針與服務保留。
+尚未驗收：五個畫面的實體 PC 滑鼠、hover／pressed／disabled 外觀、首次顯示的繪製延遲、較小 PC 視窗、手機，以及失敗／平手結果外觀。Maker mouse_input 工具明示不能點擊標準引擎 UI，不能用 SendEvent 冒充實體點擊。入場傳送失敗與 RETURN_SAVE_FAILED 的本機故障回歸已補上，證據如下；原生服務在發布環境的失敗仍須另外驗收。
 
 發布環境仍須兩個真實帳號、不同 WorldInstance，驗證原生配對續期／取消競態、跨 instance 交接、原生傳送失敗與返回。沒有將本機兩玩家往返當成此項通過。
 
@@ -66,4 +69,31 @@
 
 主代理已依 Standards／Spec 兩軸檢視改動與相連程式，包含 RPC 身分、服務端鎖定、取消與 storage yield、舊 attempt／延遲回覆、固定隊伍與 session 還原、UI 群組及 POC 相容性。未新增依賴或替換戰鬥與資料模型。
 
-本次恢復修正重試平行子代理：Standards 檢視 `5f52e1c` 之後的恢復修正（新增 session 清理前），回報無硬性違規，提出取消狀態及 READY／NEW 判斷重複的維護性建議；保留現有各層驗證以維持最小修改。其測試 session 清理風險已補上原選組與存檔讀回。子代理亦表示任務內容為密文、固定點由其推斷，因此此報告只作補充；Spec 子代理兩次均以密文為由拒絕閱讀，未完成獨立規格審查。主代理已另行對照 #52 與上述 red／green 證據，不能將子代理啟動成功當成審查通過。剩餘人工及發布驗收邊界如上。
+初版 Spec 子代理確實回覆了 `5fe25f7...5f52e1c` 的報告：未發現範圍擴張，指出實體驗收與入場／返回寫入失敗的驗證缺口，以及取消失敗後仍保留 CANCELLED 的疑慮。這份報告保留作為初版審查，不能當成 `04d313d` 及後續修正的重審。
+
+恢復修正的 Standards 子代理回報無硬性違規，另有狀態判斷重複的維護性建議；測試 session 清理風險已補上原選組與存檔讀回。後續 Spec 呼叫仍回傳舊版報告，且自述新任務為密文，未取得可靠的更新版獨立審查。主代理已逐項核對下列重現與修正；子代理啟動或回傳舊報告均不算更新版審查通過。
+
+## 取消失敗與競態修正（2026-11-01，基線 04d313d）
+
+重現時透過 `ConfigureMakerCancelFaults(1, 1)` 讓共用取消邊界回覆 `InternalError`。修正前 21:46:07 的正式按鈕探針失敗：原隊列被留在 CANCELLED。另於 22:31:44 重現準備中的配對恢復到 COMMITTING 後，取消錯誤仍覆蓋新狀態；已在可繼續入場時清除過期錯誤。
+
+最終同一輪 Maker Play 的正向證據：
+
+| 案例 | 探針／結果 |
+|---|---|
+| 取消回覆失敗、保留原隊列與固定隊伍、重試才解鎖 | `match_cancel_runtime_probe.lua` FAILURE，22:38:33 PASS |
+| 已進入 SAVING 後取消成功，提交等待取消、雙方均不入場 | `match_cancel_race_runtime_probe.lua` SUCCESS，22:42:17 PASS；VRF 同時記錄 requested state=SAVING 與 commit waits for cancellation |
+| SAVING 途中取消失敗、配對繼續、舊錯誤不蓋住 COMMITTING | 同 server probe 的 SEAL_FAILURE，加 client probe 的 PROGRESS，22:48:40／22:49:04 PASS |
+| 取消期間收到配對成功、取消失敗後接續入場，再注入傳送失敗 | server probe ENTRY，22:49:22 PASS；client probe ENTRY，22:49:48 PASS，原因可見且正式取消入場按鈕還原大廳 |
+| 自然戰鬥結束後，返回資料寫入失敗仍保留結果並提供重試 | `matched_battle_return_save_runtime_probe.lua`，22:51:55 PASS；22:56:24 確認已回大廳 |
+| 既有晚到預約／取消寫入恢復 | 重用 `match_recovery_runtime_probe.lua`，篩選非 hf2602 的本機玩家，其餘流程不變；22:56:28／22:57:25 PASS |
+| 斷線清理指令遇到取消失敗，不能寫入假取消終態 | `match_cancel_disconnect_runtime_probe.lua`，22:59:56 PASS；最後在同一取消邊界確認成功後清理票券 |
+| 清理與診斷 | 23:02:49 所有故障、StorageKey 復原，原 session 讀回成功；runtime 0 Error／Warning，Maker build 0 Error、兩個既有 Warning；contract suite 53/53；client LSP 0 Error／Warning，server 仍只有既有原生事件定義缺失的 10 個診斷 |
+
+重跑先以唯一的 FormationService.StorageKey，透過既有 Load／SaveForUser／ActivateForUser 建立一隻合法單位的第一組出戰隊伍；此輪使用 monster_warrior，站位 (-5, 0)。新增 hf2602 後須等其實體及原票券恢復完成，再用相同隔離鍵建立同樣隊伍。跨 room 的 Handoff.StorageKey 維持預設 BattleTransferV2。每個 race 模式跑完才開始下一個；SEAL_FAILURE 的 client PROGRESS 先派送，server timer 透過同一 StateForUser 觀察 SAVING 後才取消，不靠固定延遲猜階段。
+
+ENTRY 保留移動故障直到 client 完成可見的取消入場，之後重設 ConfigureMakerTransferFaults(0, 0)，並由 ReturnForUser 還原另一位參與者。正常配對後，先把新 instance 的 FormationService.StorageKey 設成同一隔離鍵，等雙方入場後注入 ConfigureMakerFaults(0, 1, 0)，再執行返回存檔故障探針。斷線清理探針最後才執行，僅呼叫正式 Depart 指令，不代表真實網路斷線已驗證。最後重設所有取消／傳送／儲存故障、還原兩個 StorageKey、Load 原 session，再 Stop Play；沒有清空 DataStorage 或寫入原本的隊伍存檔。
+
+前幾次延遲探針曾在準備階段尚未開始、票券仍寫入或虛擬玩家尚未建立時取值，屬前置狀態不足。已改成等待 StateForUser 的 SAVING、確認寫入完成與實體就緒，最後一輪全部通過。實體操作、真實網路斷線、兩個真實帳號及跨 WorldInstance 原生取消競態仍未驗收。
+
+提交前複查另補兩處。重連後的取消若與 `Depart` 在途的取消重疊，修正前 `match_cancel_reconnect_runtime_probe.lua` 於 23:21:59 失敗，鎖定不會解除；現在由 `Depart` 擁有該票券，新的取消不再重入，23:24:50 PASS。重試取消開始時也清除前次失敗，途中不再顯示失敗文案：`match_cancel_runtime_probe.lua` FAILURE 新增斷言，23:24:38 PASS；這項沒有取得修正前的有效紅燈。同一輪 `match_recovery_runtime_probe.lua` CANCEL 也重跑。此次只重跑上述單人探針，雙人 race、返回存檔與 `Depart` 探針沿用前一輪結果，未在這兩行修正後重跑。

@@ -140,7 +140,7 @@ script MatchProbeInput extends Logic
         _FormationLobby:Render()
         if self.Message == "READINESS_FAILED" then
             _MatchProbe:RequestStatus()
-        elseif self.State == "QUEUED" or self.State == "SAVING" or self.State == "RENEWING" or self.State == "QUEUE_ERROR" or self.State == "CANCELLED" then
+        elseif self.State == "QUEUED" or self.State == "SAVING" or self.State == "RENEWING" or self.State == "QUEUE_ERROR" or self.State == "CANCELLING" or self.State == "CANCELLED" then
             _MatchProbe:RequestCancel(self.Attempt)
         elseif self.State == "IN_ROOM" or self.State == "TRANSFER" or self.State == "COMMITTING" or self.State == "RETURNING"
             or self.State == "ROOM_MISMATCH" or self.State == "WAITING" or self.State == "ENTRY_FAILED" or self.State == "ABORTED" or string.sub(self.State, 1, 7) == "RESULT_" then
@@ -171,7 +171,7 @@ script MatchProbeInput extends Logic
         elseif self.State == "QUEUE_ERROR" then
             text = "配對已停止，請取消後重新配對。"
             label = "取消配對"
-        elseif self.State == "CANCELLED" then
+        elseif self.State == "CANCELLING" or self.State == "CANCELLED" then
             text = "正在取消配對，請稍候。"
             label = "重試取消"
         elseif self.State == "SAVING" then
@@ -217,7 +217,8 @@ script MatchProbeInput extends Logic
         if self.Message == "ROOM_MOVE ok=false" then text = "進入戰場失敗，可取消入場後重新配對" end
         if self.Message == "ROOM_CREATE_FAILED" or self.Message == "ADMISSION_SAVE_FAILED" then text = "戰場建立或入場資料儲存失敗，可取消入場後重試" end
         if self.Message == "RESERVATION_SAVE_FAILED" then text = "配對資料儲存未完成，請取消後重新配對" end
-        if self.Message == "CANCEL_FAILED" or self.Message == "CANCEL_SAVE_FAILED" then text = "取消尚未完成，請重試取消；完成前暫停整備" end
+        if self.Message == "CANCEL_FAILED" then text = "取消失敗，請重試取消；完成前暫停整備" label = "重試取消" end
+        if self.Message == "CANCEL_SAVE_FAILED" then text = "取消尚未完成，請重試取消；完成前暫停整備" label = "重試取消" end
         if self.Message == "LOBBY_ONLY" then text = "請先完成編輯並返回大廳，再開始配對" end
         if self.Message == "TRANSFER_EXPIRED" then text = "入場已逾時，正在還原已儲存的隊伍" end
         -- A sent return outranks the previous failure until the server answers.
@@ -226,7 +227,7 @@ script MatchProbeInput extends Logic
             label = "返回中…"
         end
         if self._T.pending and self.State == "IDLE" then text = "正在確認配對狀態…" label = "處理中…" end
-        if self._T.pending and (self.State == "QUEUED" or self.State == "RENEWING" or self.State == "CANCELLED" or self.State == "QUEUE_ERROR" or self.State == "SAVING") then
+        if self._T.pending and (self.State == "QUEUED" or self.State == "RENEWING" or self.State == "CANCELLING" or self.State == "CANCELLED" or self.State == "QUEUE_ERROR" or self.State == "SAVING") then
             text = "正在確認取消結果，完成前暫停整備…" label = "取消中…"
         end
         if self.State == "IDLE" and (self.Message == "RETURNED" or self.Message == "CANCELLED") then text = "已返回或取消，可以重新開始配對" end

@@ -72,11 +72,20 @@ script MatchProbe extends Logic
     end
 
     @ExecSpace("ServerOnly")
+    method string StateForUser(string userId)
+        -- Return the coordinator phase without payloads; battle presentation resolves IN_ROOM separately.
+        local ticket = self._T.records[userId]
+        if ticket == nil then return "IDLE" end
+        if ticket.cancelling or ticket.data.state == "CANCELLED" then return "CANCELLING" end
+        return ticket.data.state
+    end
+
+    @ExecSpace("ServerOnly")
     method void PublishState(string userId, string message)
         -- Publish private presentation state without exposing capsule contents or accepting client identities.
         if self:Player(userId) == nil then return end
         local ticket = self._T.records[userId]
-        local state = ticket ~= nil and ticket.data.state or "IDLE"
+        local state = self:StateForUser(userId)
         local started = ticket ~= nil and ticket.data.started or 0
         local inMatchRoom = ticket ~= nil and state == "IN_ROOM" and _RoomService:IsInstanceRoom() and _RoomService.RoomKey == ticket.data.matchKey
         local count = inMatchRoom and #_UserService.UserEntities.Values or 0
@@ -299,6 +308,12 @@ script MatchProbe extends Logic
         -- Seal the handoff with confirmed content only; matching never saves, and the queue-time roster stays fixed (#50).
         if self._T.records[userId] ~= ticket or ticket.data.state ~= "QUEUED" then return end
         ticket.data.state = "SAVING"
+        if ticket.cancelling then
+            ticket.matchPending = true
+            log("[VRF][MatchCancel] matched response deferred until cancellation settles")
+            return
+        end
+        self._T.failures[userId] = nil
         self:PublishState(userId, "MATCHED")
         local matched = self:Match(ticket.data.profile)
         if self._T.records[userId] ~= ticket or ticket.data.state ~= "SAVING" then return end
@@ -308,12 +323,16 @@ script MatchProbe extends Logic
         local sealed = _FormationHandoff:Seal(userId, ticket, function()
             return self._T.records[userId] == ticket and ticket.data.state == "SAVING" and self:Player(userId) ~= nil
         end)
+        -- Cancellation may yield while this match is sealing; its reply decides whether commit can proceed.
+        if ticket.cancelling then log("[VRF][MatchCancel] commit waits for cancellation") end
+        while ticket.cancelling and self._T.records[userId] == ticket and not self._T.ended do wait(0.1) end
         if self._T.records[userId] ~= ticket or ticket.data.state ~= "SAVING" then return end
         if not sealed then
             ticket.data.state = "QUEUE_ERROR"
             self:Report(userId, "CAPTURE_NOT_READY; cancel and retry")
             return
         end
+        self._T.failures[userId] = nil
         ticket.data.matchKey = matched.key
         ticket.data.match = matched
         ticket.data.expires = DateTime.UtcNow.Elapsed + self.TransferLifetimeSeconds * 1000
@@ -405,6 +424,30 @@ script MatchProbe extends Logic
     end
 
     @ExecSpace("ServerOnly")
+    method void ConfigureMakerCancelFaults(integer failures, number delaySeconds)
+        -- Inject only the cancellation response, leaving the shared state machine and storage real.
+        if not Environment:IsMakerPlay() then return end
+        self._T.cancelFailures = math.max(0, failures)
+        self._T.cancelDelay = math.max(0, math.min(10, delaySeconds))
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean CancelMatching(string profile)
+        -- Share native cancellation confirmation between visible retries and disconnect cleanup.
+        local code = MatchmakingResultCode.Ok
+        if Environment:IsMakerPlay() then
+            local fail = (self._T.cancelFailures or 0) > 0
+            if fail then self._T.cancelFailures = self._T.cancelFailures - 1 end
+            if (self._T.cancelDelay or 0) > 0 then wait(self._T.cancelDelay) end
+            if fail then code = MatchmakingResultCode.InternalError end
+        else
+            code = _MatchmakingService:CancelMatchingAndWait(profile)
+        end
+        log("[VRF][MatchCancel] native code=" .. tostring(code))
+        return code == MatchmakingResultCode.Ok or code == MatchmakingResultCode.NotMatching or code == MatchmakingResultCode.AlreadyMatched or code == MatchmakingResultCode.RequestNotFound or code == MatchmakingResultCode.MatchingExpired
+    end
+
+    @ExecSpace("ServerOnly")
     method void CancelForUser(string userId)
         -- Cancel the actual selected adapter while preserving the common attempt and tombstone guards.
         local player = self:Player(userId)
@@ -415,25 +458,38 @@ script MatchProbe extends Logic
             ticket = _FormationHandoff:Read(player.PlayerComponent.ProfileCode)
             self._T.busy[userId] = nil
         end
-        if ticket == nil or ticket.data == nil then return end
+        -- A reconnected player cannot join Depart's in-flight cancellation; that cleanup owns this ticket.
+        if ticket == nil or ticket.data == nil or ticket.cancelling then return end
         local state = ticket.data.state
         if state ~= "QUEUED" and state ~= "RENEWING" and state ~= "QUEUE_ERROR" and state ~= "SAVING" and state ~= "CANCELLED" then self:Report(userId, "COMMITTED_USE_RETURN_OR_STATUS") return end
-        ticket.data.state = "CANCELLED"
+        log("[VRF][MatchCancel] requested state=" .. state)
+        ticket.cancelling = true
         self._T.busy[userId] = true
+        self._T.failures[userId] = nil
         self:PublishState(userId, "CANCELLING")
         while ticket.submitting do wait(0.1) end
-        local code = MatchmakingResultCode.Ok
-        if not Environment:IsMakerPlay() then code = _MatchmakingService:CancelMatchingAndWait(ticket.data.profile) end
-        local cancelled = code == MatchmakingResultCode.Ok or code == MatchmakingResultCode.NotMatching or code == MatchmakingResultCode.AlreadyMatched or code == MatchmakingResultCode.RequestNotFound or code == MatchmakingResultCode.MatchingExpired
+        local cancelled = state == "CANCELLED" or self:CancelMatching(ticket.data.profile)
+        if self._T.records[userId] ~= ticket or self._T.ended then return end
         if not cancelled then
+            ticket.cancelling = nil
             self._T.busy[userId] = nil
             self:Report(userId, "CANCEL_FAILED")
+            if self:Player(userId) == nil then self._T.records[userId] = nil return end
+            if ticket.matchPending and ticket.data.state == "SAVING" then
+                ticket.matchPending = nil
+                ticket.data.state = "QUEUED"
+                log("[VRF][MatchCancel] resume pending match")
+                self:Matched(userId, ticket)
+            end
             return
         end
+        ticket.matchPending = nil
+        ticket.data.state = "CANCELLED"
         local stored = _FormationHandoff:Close(userId, ticket, "CANCELLED")
+        ticket.cancelling = nil
         self._T.busy[userId] = nil
-        if stored then self._T.records[userId] = nil end
-        self:Report(userId, "CANCEL code=" .. tostring(code) .. " tombstone=" .. tostring(stored))
+        if stored or self:Player(userId) == nil then self._T.records[userId] = nil end
+        self:Report(userId, "CANCEL tombstone=" .. tostring(stored))
         self:Report(userId, stored and "CANCELLED" or "CANCEL_SAVE_FAILED")
     end
 
@@ -641,12 +697,17 @@ script MatchProbe extends Logic
         self._T.queueCommands[userId] = nil
         local ticket = self._T.records[userId]
         if ticket == nil then return end
+        if ticket.cancelling then return end
         if ticket.data.state == "QUEUED" or ticket.data.state == "SAVING" or ticket.data.state == "RENEWING" or ticket.data.state == "QUEUE_ERROR" then
-            ticket.data.state = "CANCELLED"
-            local code = MatchmakingResultCode.Ok
-            if not Environment:IsMakerPlay() then code = _MatchmakingService:CancelMatchingAndWait(ticket.data.profile) end
-            local stored = _FormationHandoff:Close(userId, ticket, "CANCELLED")
-            log("[VRF][MatchProbe] leave cancel=" .. tostring(code) .. " tombstone=" .. tostring(stored))
+            ticket.cancelling = true
+            local cancelled = self:CancelMatching(ticket.data.profile)
+            local stored = false
+            if cancelled then
+                ticket.data.state = "CANCELLED"
+                stored = _FormationHandoff:Close(userId, ticket, "CANCELLED")
+            end
+            ticket.cancelling = nil
+            log("[VRF][MatchProbe] leave cancel=" .. tostring(cancelled) .. " tombstone=" .. tostring(stored))
         end
         if self._T.records[userId] == ticket then self._T.records[userId] = nil end
         log("[VRF][MatchDisconnect] match=" .. ticket.data.matchKey .. " combatPreserved=true online=false")

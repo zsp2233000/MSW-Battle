@@ -83,7 +83,7 @@ local ok, detail = pcall(function()
         m.action:SendEvent(ButtonClickEvent())
         assert(not m:AllowsFormationActions(), 'cancel request keeps editing locked')
         assert(await(function() return m.Message == 'CANCEL_SAVE_FAILED' and not m._T.pending end), 'failed cancellation reported')
-        assert(m.State == 'CANCELLED' and not m:AllowsFormationActions(), 'unconfirmed cancellation keeps editing locked')
+        assert(m.State == 'CANCELLING' and not m:AllowsFormationActions(), 'unconfirmed cancellation keeps editing locked')
         assert(not l:Ui('Lobby/Edit').ButtonComponent.Enable and m.action.ButtonComponent.Enable, 'only retry cancellation is usable')
         log('[VRF][Flow52] CANCEL_FAILURE PASS no early unlock')
     elseif PHASE == 'CANCEL_RECOVER' then
