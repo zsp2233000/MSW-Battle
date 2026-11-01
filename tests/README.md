@@ -24,6 +24,8 @@ The editing rules (unsaved changes, the save / switch / leave decision, block re
 
 The earlier five-slot, empty-return, delayed / failure / relogin and handoff-late-leave formation probes (`formation_slots_*`, `formation_empty_return_runtime_probe.lua` and the rest of that family) were retired when #50 moved unsaved changes to the client, because the draft behaviour they drove no longer exists. [Issue #50](../docs/Issue-50-Editor-Save.md) lists them; [Issue #29](../docs/Issue-29-Formations.md) keeps their original evidence as history. Current coverage is the #50 probes above.
 
+The two-player battle HUD, own result and return flow are recorded in [Issue #51](../docs/Issue-51-Battle-HUD.md). `matched_battle_result_ui_runtime_probe.lua` runs in `client` and must be dispatched after the player enters the match, because moving rooms resets the client context.
+
 ## Maker runtime procedure
 
 For each combat runtime probe listed below, use a fresh Play test. Stop, clear logs, Refresh, read build logs, then Play and wait until `template` reaches `DEPLOYMENT`. Pass the entire Lua file to `maker_execute_script` with `context=server_main`, except the client probes identified below. A successful script dispatch is not a passing test: read normal logs until that probe's final `PASS` or `FAILURES=...` marker appears. Inspect all build and normal Error / Warning entries. The only expected diagnostic in this suite is the single `unsupported attack profile` message intentionally caused by the first invalid-profile case in `attack_execution_runtime_probe.lua`. Stop after each combat probe.

@@ -91,7 +91,7 @@ local function observeResult(elapsed)
     if adapter.session.Phase ~= "RESULT" then finish(); return end
     later(function()
         local result = adapter.session.Result
-        local win, lose, draw = adapter.resultWin.Enable, adapter.resultLose.Enable, adapter.resultDraw.Enable
+        local win, lose, draw = _BattleUIController.resultWin.Enable, _BattleUIController.resultLose.Enable, _BattleUIController.resultDraw.Enable
         check((win and 1 or 0) + (lose and 1 or 0) + (draw and 1 or 0) == 1
             and ((result == "WIN" and win) or (result == "LOSE" and lose) or (result == "DRAW" and draw)),
             "exactly the matching delivered result entity is enabled")

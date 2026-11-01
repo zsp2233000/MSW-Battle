@@ -19,7 +19,8 @@ script MatchProbeInput extends Logic
         self._T.map = ""
         self._T.click = nil
         self._T.panel = nil
-        for _, name in ipairs({ "Match", "BattleMatch" }) do
+        self._T.screen = ""
+        for _, name in ipairs({ "Match", "BattleMatch", "BattleResult" }) do
             local panel = self.root:GetChildByName(name, false)
             if isvalid(panel) then panel:SetEnable(false) end
         end
@@ -53,28 +54,39 @@ script MatchProbeInput extends Logic
         self.root:SetEnable((map == "formationlobby" or map == "matchprobe") and not confirming)
         if player.CurrentMapName ~= self._T.map then
             self._T.map = player.CurrentMapName
-            self:SelectScreen(map)
             self._T.pending = true
             self._T.pendingSeconds = 0
             _MatchProbe:RequestStatus()
         end
+        local screen = self:ScreenFor(map)
+        if screen ~= self._T.screen then self:SelectScreen(screen) end
         self:Render()
     end
 
     @ExecSpace("ClientOnly")
-    method void SelectScreen(string map)
+    method string ScreenFor(string map)
+        -- Battle keeps the field clear; a settled result moves the action under the result window.
+        if map == "formationlobby" then return "Match" end
+        if map ~= "matchprobe" then return "" end
+        if _BattleUIController.OwnResult ~= "" then return "BattleResult" end
+        if self.State == "BATTLE" then return "" end
+        return "BattleMatch"
+    end
+
+    @ExecSpace("ClientOnly")
+    method void SelectScreen(string screen)
         -- Each screen keeps its authored layout and owns exactly one connected action.
         if isvalid(self.action) and self._T.click ~= nil then self.action:DisconnectEvent(ButtonClickEvent, self._T.click) end
         self._T.click = nil
         self._T.panel = nil
         self.action = nil
         self.status = nil
-        local screens = { formationlobby = "Match", matchprobe = "BattleMatch" }
-        for _, name in ipairs({ "Match", "BattleMatch" }) do
+        self._T.screen = screen
+        for _, name in ipairs({ "Match", "BattleMatch", "BattleResult" }) do
             local panel = self.root:GetChildByName(name, false)
             if isvalid(panel) then
-                panel:SetEnable(name == screens[map])
-                if name == screens[map] then self._T.panel = panel end
+                panel:SetEnable(name == screen)
+                if name == screen then self._T.panel = panel end
             end
         end
         if not isvalid(self._T.panel) then return end
@@ -82,7 +94,7 @@ script MatchProbeInput extends Logic
         self.status = self._T.panel:GetChildByName("Status", false)
         if isvalid(self.action) then
             self._T.click = self.action:ConnectEvent(ButtonClickEvent, function() self:Click() end)
-            log("[VRF][MatchUI] visible matchmaking button connected screen=" .. map)
+            log("[VRF][MatchUI] visible matchmaking button connected screen=" .. screen)
         end
     end
 
@@ -168,8 +180,7 @@ script MatchProbeInput extends Logic
             text = "自動戰鬥中，戰鬥結束後可返回大廳"
             label = "戰鬥進行中…"
         elseif self.State == "RESULT_WIN" or self.State == "RESULT_LOSE" or self.State == "RESULT_DRAW" then
-            local results = { RESULT_WIN = "勝利", RESULT_LOSE = "失敗", RESULT_DRAW = "平手" }
-            text = "戰鬥結果：" .. results[self.State]
+            text = "可返回大廳繼續整備或再次配對"
             label = "返回大廳"
         elseif self.State == "ENTRY_FAILED" then
             text = "對局入場未完成，請返回大廳重新配對"
@@ -196,6 +207,11 @@ script MatchProbeInput extends Logic
         if self.Message == "ROOM_MOVE ok=false" then text = "進入戰場失敗，可取消入場後重新配對" end
         if self.Message == "ROOM_CREATE_FAILED" or self.Message == "ADMISSION_SAVE_FAILED" then text = "戰場建立或入場資料儲存失敗，可取消入場後重試" end
         if self.Message == "TRANSFER_EXPIRED" then text = "入場已逾時，正在還原已儲存的隊伍" end
+        -- A sent return outranks the previous failure until the server answers.
+        if self._T.pending and (self.State == "RETURNING" or string.sub(self.State, 1, 7) == "RESULT_") then
+            text = "正在返回大廳…"
+            label = "返回中…"
+        end
         if self.State == "IDLE" and (self.Message == "RETURNED" or self.Message == "CANCELLED") then text = "已返回或取消，可以重新開始配對" end
         if self.State == "IDLE" then
             local ready = formation.loadState == "READY" or formation.loadState == "NEW"
@@ -221,7 +237,7 @@ script MatchProbeInput extends Logic
             local activeLabel = not ready and "出戰未確認" or (active > 0 and ("出戰第 " .. tostring(active) .. " 組") or "尚未設定出戰")
             title.TextGUIRendererComponent.Text = (self.State == "IDLE" and "對戰指令｜" or "後續配對｜") .. activeLabel
         end
-        self.status.TextGUIRendererComponent.Text = mode .. "\n" .. text
+        self.status.TextGUIRendererComponent.Text = self._T.screen == "BattleResult" and text or (mode .. "\n" .. text)
         local summary = self._T.panel:GetChildByName("FixedSummary", false)
         if isvalid(summary) then
             summary.TextGUIRendererComponent.Text = self.FixedSummary ~= "" and ("本局隊伍：" .. self.FixedSummary .. "\n本局隊伍已固定；儲存與出戰設定於下次配對生效。") or "本局隊伍：尚未開始"

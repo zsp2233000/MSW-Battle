@@ -93,9 +93,9 @@ local function startSingleUnitBattle()
                     check(adapter.session.Phase == "RESULT", "natural one-unit battle reaches a result")
                     if adapter.session.Phase == "RESULT" then
                         local result = adapter.session.Result
-                        local win = adapter.resultWin.Enable == true
-                        local lose = adapter.resultLose.Enable == true
-                        local draw = adapter.resultDraw.Enable == true
+                        local win = _BattleUIController.resultWin.Enable == true
+                        local lose = _BattleUIController.resultLose.Enable == true
+                        local draw = _BattleUIController.resultDraw.Enable == true
                         local visible = (win and 1 or 0) + (lose and 1 or 0) + (draw and 1 or 0)
                         local correct = (result == "WIN" and win) or (result == "LOSE" and lose) or (result == "DRAW" and draw)
                         check(visible == 1 and correct, "natural result enables exactly its matching result entity")

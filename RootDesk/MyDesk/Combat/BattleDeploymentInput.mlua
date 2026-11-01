@@ -11,13 +11,8 @@ script BattleDeploymentInput extends Component
     property integer PreviewCardCount = 18
     property any catalogOptions = nil
     property boolean optionsBuilding = false
-    property any resultWin = nil
-    property any resultLose = nil
-    property any resultDraw = nil
     property Entity deploymentCountText = "e750d0ba-eb3b-41b2-8dc0-fc59a43dd448"
     property Entity selectionText = "a6da5bc2-713c-4834-ab97-227ac9d0e174"
-    property Entity resultPlayerText = "506bb73b-00a6-4313-ba14-ba1d3189f3a9"
-    property Entity resultEnemyText = "585aa74a-1ef0-4897-9885-4b996eb49840"
     property Entity configErrorGroup = "b54bf636-0511-441c-9947-d1a0f3c3fe34"
     property Entity configErrorMessage = "0fd05f4a-9c88-4f4b-83e7-99dbae361488"
     property any buttonBindings = nil
@@ -26,7 +21,6 @@ script BattleDeploymentInput extends Component
     property any screenTouchHandler = nil
     property any keyDownHandler = nil
     property string selectedMonsterId = ""
-    property string displayedResult = ""
     property string observedPhase = "__UNINITIALIZED__"
     property boolean observedInMap = false
     property integer observedGeneration = -1
@@ -45,14 +39,10 @@ script BattleDeploymentInput extends Component
         self.optionContainer = self:FindNamedUiEntity("MonsterOptionContainer")
         self.optionTemplate = self:FindNamedUiEntity("MonsterOptionTemplate")
         self.startButton = self:FindNamedUiEntity("BtnStart")
-        self.resultWin = self:FindNamedUiEntity("ResultWin")
-        self.resultLose = self:FindNamedUiEntity("ResultLose")
-        self.resultDraw = self:FindNamedUiEntity("ResultDraw")
         self._T.hudKey = nil
         self._T.selectedMonsterName = ""
         self._T.optionBuildSerial = 0
         self._T.portraitFrameSizes = {}
-        self:SetResultEntities("")
         self.observedPhase = "__UNINITIALIZED__"
         self.observedGeneration = -1
         self.optionsReady = false
@@ -99,9 +89,6 @@ script BattleDeploymentInput extends Component
                 self.session:RequestMonsterOptions()
             end
         end
-        local result = ""
-        if self.session.Phase == "RESULT" then result = self.session.Result end
-        if result ~= self.displayedResult then self:SetResultEntities(result) end
         if self.session.Phase == "CONFIG_ERROR" and isvalid(self.configErrorMessage) then
             local label = self.configErrorMessage:GetComponent("TextGUIRendererComponent")
             if isvalid(label) and label.Text ~= self.session.ConfigurationError then
@@ -130,7 +117,6 @@ script BattleDeploymentInput extends Component
             end
         end
         self.buttonBindings = {}
-        self:SetResultEntities("")
         self._T.hudKey = nil
         self._T.portraitFrameSizes = nil
         self.startButtonAction = nil
@@ -441,18 +427,14 @@ script BattleDeploymentInput extends Component
         local phase = self.session.Phase
         local playerAlive = self.session.PlayerAlive
         local enemyAlive = self.session.EnemyAlive
-        local initialPlayer = self.session.InitialPlayerAlive
-        local initialEnemy = self.session.InitialEnemyAlive
         local limit = self.session.DeploymentMaxUnits
         local selectedName = self._T.selectedMonsterName or ""
-        local key = phase .. ":" .. tostring(playerAlive) .. ":" .. tostring(enemyAlive) .. ":" .. tostring(initialPlayer) .. ":" .. tostring(initialEnemy) .. ":" .. tostring(limit) .. ":" .. selectedName
+        local key = phase .. ":" .. tostring(playerAlive) .. ":" .. tostring(enemyAlive) .. ":" .. tostring(limit) .. ":" .. selectedName
         if self._T.hudKey == key then return end
         self._T.hudKey = key
         self:SetUiText(self.deploymentCountText, "已部署  " .. tostring(playerAlive) .. " / " .. tostring(limit))
         if selectedName == "" then selectedName = "請先選擇怪物" end
         self:SetUiText(self.selectionText, selectedName)
-        self:SetUiText(self.resultPlayerText, tostring(playerAlive) .. " / " .. tostring(initialPlayer))
-        self:SetUiText(self.resultEnemyText, tostring(enemyAlive) .. " / " .. tostring(initialEnemy))
         if isvalid(self.startButton) then
             local ready = self:IsDeploymentEnabled() and playerAlive > 0
             local button = self.startButton.ButtonComponent
@@ -493,17 +475,6 @@ script BattleDeploymentInput extends Component
         -- Send a right-click removal request to the authoritative map session.
         if position == nil or not self:IsDeploymentEnabled() then return end
         self.session:RequestRemoveDeployedUnit(position)
-    end
-
-    @ExecSpace("ClientOnly")
-    method void SetResultEntities(string result)
-        -- Keep exactly the matching delivered result entity enabled.
-        if isvalid(self.resultWin) then self.resultWin:SetEnable(result == "WIN") end
-        if isvalid(self.resultLose) then self.resultLose:SetEnable(result == "LOSE") end
-        if isvalid(self.resultDraw) then self.resultDraw:SetEnable(result == "DRAW") end
-        self.displayedResult = result
-        if result ~= "" then log("[M1][DeploymentUI] result=" .. result) end
-        if result ~= "" then log("[VRF][BattleUI] result=" .. result) end
     end
 
 end

@@ -10,6 +10,8 @@ local ok, detail = pcall(function()
     assert(_UserService.LocalPlayer.CurrentMapName == "formationlobby" and _MatchProbeInput.State == "IDLE", "returned lobby is usable")
     assert(_MatchProbeInput.action.EnabledInHierarchy and _MatchProbeInput.action.ButtonComponent.Enable, "queue action is ready after map transition")
     assert(_MatchProbeInput.action.TextGUIRendererComponent.Text == "開始配對", "queue action visible")
+    assert(not _BattleUIController.root.Enable and not _BattleUIController.result.Enable and _BattleUIController.OwnResult == "", "no battle or result layer remains")
+    assert(not _MatchProbeInput.root:GetChildByName("BattleResult", false).Enable and not _MatchProbeInput.root:GetChildByName("BattleMatch", false).Enable, "no battle panel remains")
     _MatchProbeInput.action:SendEvent(ButtonClickEvent())
     for attempt = 1, 100 do if _MatchProbeInput.State == "QUEUED" then break end wait(0.1) end
     assert(_MatchProbeInput.State == "QUEUED" and _MatchProbeInput.Started > 0, "visible queue has a start time")
