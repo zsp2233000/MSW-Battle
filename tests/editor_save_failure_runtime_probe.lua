@@ -3,8 +3,11 @@
 --   FAIL   : _FormationStorage:ConfigureMakerSaveResponse('FAIL', 0)     explicit failure
 --   SILENT : _FormationStorage:ConfigureMakerSaveResponse('SILENT', 0)   never answers, so the 5 s watchdog fires
 --   LATE   : _FormationStorage:ConfigureMakerSaveResponse('LATE', 9)     commits, but answers after the watchdog
--- PHASE 1 injects the fault. Reset the fault with ConfigureMakerSaveResponse('', 0) before PHASE 2 (recovery; FAIL and SILENT).
+-- PHASE 1 injects the fault. Reset the fault with ConfigureMakerSaveResponse('', 0) before PHASE 2 (manual save)
+-- or PHASE 3 (SILENT: confirm, discard and return without saving again).
 local MODE, PHASE = 'FAIL', 1
+-- Set true when the isolated fixture already has one saved unit in group 1, to also exercise READY reads.
+local EXISTING = false
 local l = _FormationLobby
 local function await(predicate, tries)
     for _ = 1, tries or 120 do if predicate() then return true end wait(0.1) end
@@ -28,13 +31,19 @@ local ok, detail = pcall(function()
     if PHASE == 1 then
         if dialogOpen() then l:Run(_FormationEditSession:ContinueEditing()) end
         _FormationService:RequestRetryLoad()
-        assert(await(function() return _FormationEditSession.Snapshot.loadState == 'NEW' end), 'isolated new-player fixture')
+        assert(await(function() return _FormationEditSession.Snapshot.loadState == (EXISTING and 'READY' or 'NEW') end), 'isolated fixture loaded')
         assert(click('Lobby/Edit'), 'edit button')
         assert(await(inEditor), 'editor entered')
         wait(0.4)
         local input = _UserService.LocalPlayer.CurrentMap:GetComponent('FormationMapInput')
-        click('Editor/Catalog/Monster1')
-        input:HandleWorldClick(Vector3(-5, 0, 0))
+        if EXISTING then
+            _FormationEditSession.SelectedMonsterId = ''
+            _FormationEditSession.SelectedUnit = 1
+            input:HandleWorldClick(Vector3(-6, 1, 0))
+        else
+            click('Editor/Catalog/Monster1')
+            input:HandleWorldClick(Vector3(-5, 0, 0))
+        end
         assert(#_FormationEditSession.Draft == 1 and _FormationEditSession:IsDirty() and enabled('Editor/Save'), 'a valid change is ready to save')
         local before = #_FormationEditSession.Snapshot.saved.slots['1'].units
 
@@ -82,6 +91,21 @@ local ok, detail = pcall(function()
             assert(#_FormationEditSession.Snapshot.saved.slots['1'].units == 1 and not _FormationEditSession:IsDirty() and not _FormationEditSession:IsDirty(), 'late success clears the marker by content')
             log('[VRF][Save50F] LATE-mode ok')
         end
+
+    elseif PHASE == 3 then
+        assert(MODE == 'SILENT' and map() == 'formationsim' and _FormationEditSession:IsDirty(), 'unconfirmed local changes')
+        local saved = _FormationEditSession.Snapshot.saved
+        assert(click('EditorControls/Retry'), 'confirm-result action')
+        assert(await(function() return _FormationEditSession:Writable() and not _FormationEditSession:Busy() end), 'durable content read back')
+        assert(_FormationEditSession.Snapshot.uncertain and not _FormationEditSession:Unconfirmed(), 'late-write guard retained after reconciliation')
+        assert(_FormationEditSession:IsDirty(), 'read preserves unsaved content')
+        assert(click('Editor/Back') and dialogOpen(), 'discard choice offered')
+        assert(click('ExitConfirm/Window/ReturnWithoutSave'), 'discard and return')
+        assert(await(function() return map() == 'formationlobby' end), 'reconciled discard returns without another save')
+        assert(_FormationEditSession.Snapshot.saved.revision == saved.revision
+            and #_FormationEditSession.Snapshot.saved.slots['1'].units == #saved.slots['1'].units
+            and not _FormationEditSession:IsDirty(), 'saved version unchanged and local changes discarded')
+        log('[VRF][Save50F] discard after reconciliation ok load=' .. _FormationEditSession.Snapshot.loadState)
 
     elseif PHASE == 2 then
         -- Recovery after the fault was reset: read the durable content again, then save by hand.

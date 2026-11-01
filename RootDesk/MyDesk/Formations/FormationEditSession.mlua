@@ -174,7 +174,8 @@ script FormationEditSession extends Logic
     method boolean Unconfirmed()
         -- An earlier write may still have committed; writes, switching and leaving wait until a read settles it.
         -- The server keeps its own late-reply guard after that read, but the player may then continue.
-        return (self.Snapshot.loadState == "CONFLICT" and self.Snapshot.uncertain == true) or self._T.localUnconfirmed == true
+        local load = self.Snapshot.loadState
+        return (self.Snapshot.uncertain == true and load ~= "READY" and load ~= "NEW") or self._T.localUnconfirmed == true
     end
 
     @ExecSpace("ClientOnly")

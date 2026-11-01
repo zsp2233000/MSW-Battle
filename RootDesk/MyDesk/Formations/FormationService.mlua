@@ -409,7 +409,8 @@ script FormationService extends Logic
         local player = _UserService:GetUserEntityByUserId(senderUserId)
         if not isvalid(player) then return end
         local record = self:GetSession(senderUserId)
-        if _MatchProbe:IsFormationLocked(senderUserId) or (record ~= nil and (record.transferLocked or record.pending or record.uncertain ~= nil)) then
+        local reconciled = record ~= nil and (record.loadState == "READY" or record.loadState == "NEW")
+        if _MatchProbe:IsFormationLocked(senderUserId) or (record ~= nil and (record.transferLocked or record.pending or (record.uncertain ~= nil and not reconciled))) then
             if record ~= nil then self:Publish(record) end
             return
         end
@@ -421,6 +422,7 @@ script FormationService extends Logic
             if isvalid(movement) then movement:Stop() end
         end
         _TeleportService:TeleportToMapPosition(player, Vector3(0, 0, 0), destination)
+        if record ~= nil and record.uncertain ~= nil then log("[VRF][Formations] reconciled travel=" .. destination) end
         if record ~= nil then self:Publish(record) end
     end
 

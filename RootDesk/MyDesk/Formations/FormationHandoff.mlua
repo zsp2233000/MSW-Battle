@@ -200,9 +200,20 @@ script FormationHandoff extends Logic
         if terminalState ~= "CANCELLED" and terminalState ~= "RETURNED" then return false end
         local record = self._T.records[ticket.profile]
         if record == nil or record.attempt ~= ticket.id or record.epoch ~= ticket.epoch or record.writing ~= nil then return false end
+        -- A timed-out write may have committed after Store returned; retry against durable authority.
+        local latest = self:Read(ticket.profile)
+        if latest == nil or latest.id ~= ticket.id then return false end
+        if latest.data ~= nil and latest.data.attempt == ticket.id then
+            local state = latest.data.state
+            if terminalState == "CANCELLED" and state ~= "QUEUED" and state ~= "RENEWING" and state ~= "QUEUE_ERROR" and state ~= "SAVING" and state ~= "CANCELLED" then return false end
+            if terminalState == "RETURNED" and state ~= "RETURNING" and state ~= "RETURNED" then return false end
+        end
+        ticket.epoch = latest.epoch
+        record = self._T.records[ticket.profile]
         if record.metadata ~= nil and record.metadata.state == terminalState and record.transfer == nil then
             ticket.data.state = terminalState
             self:Release(forUserId, ticket.id)
+            log("[VRF][Handoff] closed=" .. terminalState .. " already durable")
             return true
         end
         local transfer, previous = record.transfer, ticket.data.state

@@ -8,6 +8,8 @@
 - 送出開始／取消後立即鎖住整備；只有正式 `IDLE` 且沒有在途狀態請求才解鎖。大廳選組、雙擊整備、POC 入口及 local 編輯共用這個條件；配對期間清除尚未完成的整備進場意圖。
 - `MatchProbe.IsFormationLocked` 供伺服器選組、儲存、啟用與移動重驗證，涵蓋請求中的 yield、等待、取消未確認、入場與返回。原有 transfer lock 仍由 FormationService 管理。
 - 原生取消成功後才寫入取消終態。取消或終態寫入失敗都維持鎖定並提供重試；配對預約寫入未確認也保留待取消的票券，不提前呈現可編輯狀態。
+- `FormationHandoff.Close` 先驗證原票券與世代，再讀回持久狀態，讓逾時後才完成的預約或取消寫入能由同一取消操作恢復。讀取失敗、較新的票券或已進入交接的狀態仍拒絕取消；已持久完成的相同終態可直接確認，不重寫 payload。
+- 儲存逾時後，只有讀回 `READY`／`NEW` 才恢復返回操作；保留服務端的晚到寫入防護。client 在 `CONFLICT`、`LOADING` 或 `ERROR` 且結果未確認時持續禁止離開，確認後可以放棄變更返回，不必再儲存一次。
 - 固定本局編隊、經過時間、直接入場、confirmed-only 交接與結果仍沿用既有服務。選組預覽不改出戰組，配對不儲存編輯內容，不新增 Ready 或倒數。
 - 返回失敗原因在後續結果狀態發布中保留；重試送出後先顯示「返回中…」。重試／確認結果按鈕先啟用再寫文案，避免首次建立原生 UI 時使用舊的樣板文案。
 - 沒有改 `.ui`、地圖、模型、怪物數值或血條。
@@ -34,6 +36,10 @@
 | 返回後再次配對／取消 | `matched_battle_lobby_ui_runtime_probe.lua`：`[VRF][MatchedLobbyUI] PASS` |
 | 既有 POC 入口與自然結果 | 從正式大廳 POC 按鈕進入 template，等待卡片建立完成，再執行 `deployment_ui_runtime_probe.lua`：`[M1][DeploymentUIProbe] PASS`；最後這次 Play 的 runtime 0 Error／Warning |
 | 儲存失敗／逾時／晚到回覆 | 既有 `editor_save_failure_runtime_probe.lua` 的 FAIL、SILENT、LATE；失敗保留內容、逾時禁止切組與離開、恢復讀取後手動儲存、晚到成功不執行已中止的返回 |
+| 晚到預約／取消寫入後重試 | `match_recovery_runtime_probe.lua` 的 RESERVE／CANCEL：修正前兩者皆重現取消重試仍鎖定；修正後 21:02:09／21:02:39 均 `PASS`，已儲存組別、版本及出戰選擇不變 |
+| 確認逾時結果後直接放棄返回 | `editor_save_failure_runtime_probe.lua` SILENT phase 3：修正前返回被阻擋；修正後 `NEW`（21:04:10）與 `READY`（21:05:52）皆 PASS，未再次儲存，保存版本不變 |
+| 讀取中／讀取失敗不提前解鎖 | `edit_session_runtime_probe.lua`：新增 `CONFLICT`／`LOADING`／`ERROR` 的未確認狀態，以及保留 guard 的 `READY`；修正前 LOADING 失敗，修正後 21:07:08 `[VRF][EditSession] PASS` |
+| 返回清理、舊寫入與舊票券 | 重跑 `formation_handoff_failure_runtime_probe.lua`，改用隔離鍵下的本機玩家，額外斷言舊 ticket 不能 Close 新 attempt；21:08:07／21:08:12 兩項 PASS，晚到舊寫入與舊鎖定釋放仍被阻擋 |
 
 本機探針只透過正式 ButtonClickEvent、map input handler 與伺服器服務操作，不代表實體滑鼠點擊。測試前幾次的 FAIL 涉及探針前置狀態：非第一組、尚未完成切圖／讀取、返回 session 尚未還原，以及序列化字串比較。已改為等待可操作狀態與資料還原，並逐欄檢查五組內容、版本與 writeId；保留失敗紀錄，不將派送成功當作 PASS。POC 初次複驗過早讀取 optionsReady 而卡片尚未完整建立，只有卡片數量檢查失敗，其餘部署至自然結果皆通過；重跑需同時等待 optionCards 與 optionData 數量相同。
 
@@ -45,6 +51,8 @@
 4. 進房會重設 client context。取得新的 `server_instance_*` key 後，在該 context 設 `ConfigureMakerTransferFaults(0, 1)`，並立即在 client 派送既有 result UI probe，才能看到正在進行的戰鬥。
 5. 真實 client 返回後，從該 instance 對 `hf2602` 呼叫 ReturnForUser；主房間 roundtrip coroutine 會等兩者的保存資料都完成還原才驗證。最後在 client 執行 lobby UI probe。
 6. 儲存故障探針各使用新的隔離編隊鍵，將 server session 的 editSlot 設為 1，且先返回大廳並清除測試的 local 變更。依既有檔案註解注入 FAIL／SILENT／LATE，完成後將 `ConfigureMakerSaveResponse('', 0)`、`ConfigureMakerFaults(0, 0, 0)`、`ConfigureMakerTransferFaults(0, 0)` 復原，還原兩個預設 StorageKey，Stop Play。沒有清空 DataStorage，也沒有覆寫正式編隊存檔。
+7. 恢復修正：單一玩家在大廳時，以 server_main 執行 `match_recovery_runtime_probe.lua`，分別設 `MODE='RESERVE'`／`'CANCEL'`；探針自行建立隔離保存與交接鍵，將 timeout 設為 1 秒、寫入延遲設為 2.5 秒，待晚到寫入完成後直接重試取消，不先呼叫 Read 或 Recover 修復快取。最後自動復原鍵、timeout、故障與選組，讀回原本存檔並等待成功，避免記憶體保留測試隊伍；補上清理後於 21:19:35／21:20:19 複驗兩個模式皆 PASS，且各自記錄 original session reload complete。
+8. 放棄返回：隔離的新存檔先執行 SILENT phase 1，清除 acknowledgement fault 後執行 phase 3。再以新隔離鍵透過 SaveForUser 保存第一組一隻 `monster_tank`（-5, 0）、ActivateForUser 啟用，設 `EXISTING=true`，重跑 phase 1／3，涵蓋 `READY`；不得在確認與放棄之間另存一次。此次修正的最終 Play runtime 為 0 Error／Warning，build 維持 0 Error 及兩個既有 Warning。
 
 ## 原生視覺與待驗收
 
@@ -56,4 +64,6 @@
 
 ## 審查
 
-已依 code-review 的 Standards／Spec 兩軸由主代理檢視改動與相連程式；平行 sub-agent 啟動回報不支援的模型，未產生獨立審查報告。檢視包含 RPC 身分、服務端鎖定、取消與 storage yield、舊 attempt／延遲回覆、固定編隊與 session 還原、UI 群組及 POC 相容性。未新增依賴或替換戰鬥與資料模型；剩餘驗收邊界如上。
+主代理已依 Standards／Spec 兩軸檢視改動與相連程式，包含 RPC 身分、服務端鎖定、取消與 storage yield、舊 attempt／延遲回覆、固定隊伍與 session 還原、UI 群組及 POC 相容性。未新增依賴或替換戰鬥與資料模型。
+
+本次恢復修正重試平行子代理：Standards 檢視 `5f52e1c` 之後的恢復修正（新增 session 清理前），回報無硬性違規，提出取消狀態及 READY／NEW 判斷重複的維護性建議；保留現有各層驗證以維持最小修改。其測試 session 清理風險已補上原選組與存檔讀回。子代理亦表示任務內容為密文、固定點由其推斷，因此此報告只作補充；Spec 子代理兩次均以密文為由拒絕閱讀，未完成獨立規格審查。主代理已另行對照 #52 與上述 red／green 證據，不能將子代理啟動成功當成審查通過。剩餘人工及發布驗收邊界如上。

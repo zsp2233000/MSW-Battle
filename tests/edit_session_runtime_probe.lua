@@ -98,6 +98,16 @@ local ok, detail = pcall(function()
     observe(savedWith(1, { { monsterId = 'monster_tank', x = -5, y = 0 }, { monsterId = 'monster_tank', x = -3, y = 0 } }))
     assert(not s:Unconfirmed() and s:Writable() and s:IsDirty() and #s.Draft == 3, 'the read unlocks writes and keeps the change')
 
+    for _, load in ipairs({ 'CONFLICT', 'LOADING', 'ERROR' }) do
+        local value = snapshot({ loadState = load, uncertain = true })
+        observe(value)
+        assert(s:Unconfirmed() and kinds(s:RequestReturnToLobby()) == 'NOTICE', 'unsettled read keeps leaving blocked: ' .. load)
+    end
+    local reconciled = savedWith(1, { { monsterId = 'monster_tank', x = -5, y = 0 }, { monsterId = 'monster_tank', x = -3, y = 0 } })
+    reconciled.uncertain = true
+    observe(reconciled)
+    assert(not s:Unconfirmed() and s:Writable(), 'confirmed read permits continuing while the late-write guard remains')
+
     -- S6: leaving asks; discarding returns to the saved version, continuing keeps everything.
     commands = s:RequestReturnToLobby()
     assert(#commands == 0 and s.ConfirmKind == 'RETURN', 'leaving asks for a decision')
