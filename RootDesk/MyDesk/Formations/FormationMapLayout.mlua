@@ -52,6 +52,20 @@ script FormationMapLayout extends Logic
         return dx * dx + dy * dy + 0.000001 < self.MinimumSeparation * self.MinimumSeparation
     end
 
+    method table CheckPlacement(number x, number y, table others, string mode, any tiles)
+        -- One placement rule for saving, editing, deployment and battle entry; reason is "" when the spot is legal.
+        -- DEPLOY: the player's deployment zone. ARENA: anywhere walkable inside the battlefield. tiles nil = template terrain.
+        if not self:Contains(x, y) then return { reason = "OUT_OF_BOUNDS", conflict = 0 } end
+        if mode == "DEPLOY" and not self:CanDeploy(x, y) then return { reason = "NOT_DEPLOYABLE", conflict = 0 } end
+        if (mode ~= "DEPLOY" or tiles ~= nil) and not self:IsWalkableOn(tiles or self:ReferenceTiles(), x, y) then
+            return { reason = "BLOCKED", conflict = 0 }
+        end
+        for index, other in ipairs(others) do
+            if self:IsTooClose(x, y, other.x, other.y) then return { reason = "TOO_CLOSE", conflict = index } end
+        end
+        return { reason = "", conflict = 0 }
+    end
+
     method number MirrorX(number x)
         -- Share the same x=0.5 reflection for admission, validation and client presentation.
         return 1 - x

@@ -990,11 +990,11 @@ script FormationLobby extends Logic
         -- One rule set serves the mouse preview and the local edit; the server validates again on save.
         local moving = self.SelectedUnit > 0 and self.Draft[self.SelectedUnit] ~= nil
         if not moving and #self.Draft >= 6 then return false end
-        if not _FormationMapLayout:CanDeploy(x, y) then return false end
+        local others = {}
         for index, other in ipairs(self.Draft) do
-            if not (moving and index == self.SelectedUnit) and _FormationMapLayout:IsTooClose(x, y, other.x, other.y) then return false end
+            if not (moving and index == self.SelectedUnit) then table.insert(others, other) end
         end
-        return true
+        return _FormationMapLayout:CheckPlacement(x, y, others, "DEPLOY", nil).reason == ""
     end
 
     @ExecSpace("ClientOnly")

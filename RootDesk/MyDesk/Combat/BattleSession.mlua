@@ -533,6 +533,7 @@ script BattleSession extends Component
             return nil
         end
         local prepared = {}
+        local points = {}
         for _, entry in ipairs(units) do
             if type(entry) ~= "table" then return nil end
             for key, _ in pairs(entry) do
@@ -542,14 +543,14 @@ script BattleSession extends Component
             local profile = self:GetMonsterProfile(entry.monsterId)
             local position = _FormationMapLayout:BattlePosition(entry.x, entry.y, away)
             if profile == nil or position == nil then return nil end
-            if not _FormationMapLayout:IsWalkableOn(tiles, position.x, position.y) then
+            local check = _FormationMapLayout:CheckPlacement(position.x, position.y, points, "ARENA", tiles)
+            if check.reason == "BLOCKED" then
                 self:FailConfiguration("matched formation terrain differs from template")
                 return nil
             end
-            for _, other in ipairs(prepared) do
-                if _FormationMapLayout:IsTooClose(position.x, position.y, other.position.x, other.position.y) then return nil end
-            end
+            if check.reason ~= "" then return nil end
             table.insert(prepared, { profile = profile, position = position })
+            table.insert(points, position)
         end
         return prepared
     end
@@ -611,6 +612,7 @@ script BattleSession extends Component
     method table BuildPlacedRoster()
         -- Read every Maker-placed unit before spawning, so a bad placement cannot create a partial roster.
         local roster = {}
+        local points = {}
         local map = self:GetMapEntity()
         if not isvalid(map) then
             self:FailConfiguration("map unavailable for battle placements")
@@ -651,22 +653,22 @@ script BattleSession extends Component
                 return nil
             end
             local position = entry.position
-            if position == nil or not _FormationMapLayout:Contains(position.x, position.y) then
+            local check = position ~= nil and _FormationMapLayout:CheckPlacement(position.x, position.y, points, "ARENA", tileMap) or nil
+            if check == nil or check.reason == "OUT_OF_BOUNDS" then
                 self:FailConfiguration("battle placement outside arena: " .. sourceName)
                 return nil
             end
-            if not _FormationMapLayout:IsWalkableOn(tileMap, position.x, position.y) then
+            if check.reason == "BLOCKED" then
                 self:FailConfiguration("battle placement on blocked tile: " .. sourceName)
                 return nil
             end
-            for _, prior in ipairs(roster) do
-                if _FormationMapLayout:IsTooClose(position.x, position.y, prior.position.x, prior.position.y) then
-                    self:FailConfiguration("battle placements too close: " .. prior.name .. " and " .. sourceName)
-                    return nil
-                end
+            if check.reason == "TOO_CLOSE" then
+                self:FailConfiguration("battle placements too close: " .. roster[check.conflict].name .. " and " .. sourceName)
+                return nil
             end
             if faction == "PLAYER" then playerCount = playerCount + 1 else enemyCount = enemyCount + 1 end
             table.insert(roster, { source = source, monsterId = monsterId, faction = faction, position = Vector3(position.x, position.y, position.z), name = sourceName })
+            table.insert(points, roster[#roster].position)
         end
         if enemyCount == 0 then
             self:FailConfiguration("map has no ENEMY battle placements")
@@ -761,20 +763,18 @@ script BattleSession extends Component
         if position == nil or position.x ~= position.x or position.y ~= position.y then return false end
         local profile = self:GetMonsterProfile(monsterId)
         if profile == nil or self.PlayerAlive >= self.DeploymentMaxUnits then return false end
-        if not _FormationMapLayout:CanDeploy(position.x, position.y) then return false end
-        local tileMap = self:GetRectTileMapComponent()
-        if not _FormationMapLayout:IsWalkableOn(tileMap, position.x, position.y) then
-            return self:FailConfiguration("deployment terrain differs from template")
-        end
+        local others = {}
         for _, record in ipairs(self._T.units) do
             if isvalid(record.entity) then
                 local transform = record.entity:GetComponent("TransformComponent")
-                if isvalid(transform) then
-                    local current = transform.WorldPosition
-                    if _FormationMapLayout:IsTooClose(position.x, position.y, current.x, current.y) then return false end
-                end
+                if isvalid(transform) then table.insert(others, transform.WorldPosition) end
             end
         end
+        local check = _FormationMapLayout:CheckPlacement(position.x, position.y, others, "DEPLOY", self:GetRectTileMapComponent())
+        if check.reason == "BLOCKED" then
+            return self:FailConfiguration("deployment terrain differs from template")
+        end
+        if check.reason ~= "" then return false end
         self._T.nextPlayerUnitNumber = self._T.nextPlayerUnitNumber + 1
         local entity = self:SpawnMonster(monsterId, "M1_Player_" .. tostring(self._T.nextPlayerUnitNumber), "PLAYER", Vector3(position.x, position.y, 0))
         if not isvalid(entity) then

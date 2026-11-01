@@ -33,10 +33,7 @@ script FormationSchema extends Logic
             if type(entry) ~= "table" or type(entry.monsterId) ~= "string" then return nil end
             if not hasMonster(entry.monsterId) then return nil end
             if not self:IsFinite(entry.x) or not self:IsFinite(entry.y) then return nil end
-            if not _FormationMapLayout:CanDeploy(entry.x, entry.y) then return nil end
-            for _, other in ipairs(units) do
-                if _FormationMapLayout:IsTooClose(entry.x, entry.y, other.x, other.y) then return nil end
-            end
+            if _FormationMapLayout:CheckPlacement(entry.x, entry.y, units, "DEPLOY", nil).reason ~= "" then return nil end
             table.insert(units, { monsterId = entry.monsterId, x = entry.x, y = entry.y })
         end
         return units

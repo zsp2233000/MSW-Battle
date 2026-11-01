@@ -256,8 +256,7 @@ test('#50 mouse preview and local edits share one rule set and keep selection ru
   const input = read('RootDesk/MyDesk/Formations/FormationMapInput.mlua');
   const place = method(lobby, 'CanPlaceAt');
   assert.match(place, /#self\.Draft >= 6/, 'six-unit cap');
-  assert.match(place, /_FormationMapLayout:CanDeploy/, 'left half, walkable and mirrored terrain');
-  assert.match(place, /IsTooClose/, 'shared 0.3 spacing');
+  assert.match(place, /_FormationMapLayout:CheckPlacement\(x, y, others, "DEPLOY", nil\)/, 'deployment zone, terrain and shared 0.3 spacing come from one rule');
   assert.match(place, /moving and index == self\.SelectedUnit/, 'a moving unit is excluded from its own spacing check');
   assert.match(method(input, 'ShowGhost'), /lobby:CanPlaceAt\(x, y\)/, 'preview uses the same rule as the edit');
   assert.match(method(input, 'ShowGhost'), /Color\(1, 0\.25, 0\.25, 0\.55\)/, 'illegal spots turn red');
