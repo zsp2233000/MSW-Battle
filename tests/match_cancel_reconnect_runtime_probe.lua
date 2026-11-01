@@ -1,15 +1,21 @@
 -- server_main, one connected player in formationlobby. Owns unique storage keys and restores them afterwards.
--- A reconnected player's cancel overlaps the disconnect cleanup's native cancellation; neither may strand the lock.
+-- Reconnecting during disconnect cleanup must not strand the lock, unlock an unconfirmed queue, or leave stale state.
 local previousKey, previousTransfer = _FormationService.StorageKey, _FormationHandoff.StorageKey
 local userId, previousSlot
-local function await(predicate)
-    for _ = 1, 150 do if predicate() then return true end wait(0.1) end
+local function await(predicate, tries)
+    for _ = 1, tries or 150 do if predicate() then return true end wait(0.1) end
     return false
+end
+local function reconnect()
+    local event = UserReconnectEvent()
+    event.UserId = userId
+    _UserService:SendEvent(event)
 end
 local ok, detail = pcall(function()
     local users = _UserService.UserEntities.Values
     assert(#users == 1 and users[1].CurrentMapName == 'formationlobby', 'one lobby player')
     userId = users[1].PlayerComponent.UserId
+    local profile = users[1].PlayerComponent.ProfileCode
     assert(not _MatchProbe:IsFormationLocked(userId), 'no live matchmaking attempt')
     _FormationService.StorageKey = 'Reconnect52_' .. _UtilLogic:NewGuid()
     _FormationHandoff.StorageKey = 'Reconnect52Transfer_' .. _UtilLogic:NewGuid()
@@ -22,20 +28,41 @@ local ok, detail = pcall(function()
     assert(await(function() return session.loadState == 'READY' and not session.pending end), 'fixture saved')
     _FormationService:ActivateForUser(userId, 1, session.saved.slots['1'].revision)
     assert(await(function() return session.saved.activeSlot == 1 and not session.pending end), 'fixture active')
+
     _MatchProbe:QueueForUser(userId)
     assert(_MatchProbe:IsFormationLocked(userId), 'queued')
     _MatchProbe:ConfigureMakerCancelFaults(0, 2)
     _TimerService:SetTimerOnce(function() _MatchProbe:Depart(userId) end, 0.1)
     wait(0.5)
-    -- Same effect as HandleUserReconnectEvent, while Depart is still waiting on the cancellation reply.
-    _MatchProbe._T.offline[userId] = nil
+    reconnect()
+    assert(_MatchProbe:Player(userId) ~= nil, 'reconnect event restores availability')
     _MatchProbe:CancelForUser(userId)
     assert(await(function() return not _MatchProbe:IsFormationLocked(userId) end), 'overlapping cancel strands the formation lock')
-    log('[VRF][Reconnect52] PASS overlapping cancel leaves no stuck lock')
+    log('[VRF][Reconnect52] PASS OVERLAP cleanup finishes; no stuck lock')
+    wait(1) -- Let the post-cleanup recovery read settle before the next case.
+
+    -- Server-side cancel with no live record reads the durable ticket and must still release its own lock.
+    _MatchProbe._T.records[userId] = nil
+    _MatchProbe:CancelForUser(userId)
+    assert(_MatchProbe._T.busy[userId] == nil, 'cancel of a durable-only ticket strands busy')
+    log('[VRF][Reconnect52] PASS DURABLE cancel releases busy')
+
+    _MatchProbe:ConfigureMakerCancelFaults(1, 2)
+    _MatchProbe:QueueForUser(userId)
+    assert(_MatchProbe:IsFormationLocked(userId), 'queued again')
+    _TimerService:SetTimerOnce(function() _MatchProbe:Depart(userId) end, 0.1)
+    wait(0.5)
+    reconnect()
+    -- The Maker adapter closes its stale queue on recovery; the native adapter reports QUEUE_OWNER_LOST on this path.
+    assert(await(function()
+        local ticket = _FormationHandoff:Read(profile)
+        return ticket ~= nil and ticket.data ~= nil and ticket.data.state == 'CANCELLED' and not _MatchProbe:IsFormationLocked(userId)
+    end, 60), 'failed cleanup must be recovered after reconnect, not left unlocked over a live queue')
+    log('[VRF][Reconnect52] PASS FAILED_CLEANUP recovered after reconnect')
 end)
 _MatchProbe:ConfigureMakerCancelFaults(0, 0)
 if not ok then log('[VRF][Reconnect52] FAIL ' .. tostring(detail)) end
-if userId ~= nil then _MatchProbe._T.busy[userId] = nil _MatchProbe._T.records[userId] = nil end
+if userId ~= nil then _MatchProbe._T.offline[userId] = nil _MatchProbe._T.busy[userId] = nil _MatchProbe._T.records[userId] = nil end
 _FormationService.StorageKey, _FormationHandoff.StorageKey = previousKey, previousTransfer
 local session = userId ~= nil and _FormationService:GetSession(userId) or nil
 if session ~= nil then

@@ -417,7 +417,7 @@ script MatchProbe extends Logic
 
     @ExecSpace("Server")
     method void RequestCancel(string expectedAttempt)
-        -- Invalidate the local callback before yielding to native cancellation or storage.
+        -- Only the observed attempt can request cancellation; CancelForUser owns the yielding confirmation.
         local ticket = self._T.records[senderUserId]
         if ticket == nil or ticket.data.attempt ~= expectedAttempt then return end
         self:CancelForUser(senderUserId)
@@ -458,8 +458,9 @@ script MatchProbe extends Logic
             ticket = _FormationHandoff:Read(player.PlayerComponent.ProfileCode)
             self._T.busy[userId] = nil
         end
+        if ticket == nil or ticket.data == nil then return end
         -- A reconnected player cannot join Depart's in-flight cancellation; that cleanup owns this ticket.
-        if ticket == nil or ticket.data == nil or ticket.cancelling then return end
+        if ticket.cancelling then log("[VRF][MatchCancel] cleanup owns cancellation") return end
         local state = ticket.data.state
         if state ~= "QUEUED" and state ~= "RENEWING" and state ~= "QUEUE_ERROR" and state ~= "SAVING" and state ~= "CANCELLED" then self:Report(userId, "COMMITTED_USE_RETURN_OR_STATUS") return end
         log("[VRF][MatchCancel] requested state=" .. state)
@@ -469,7 +470,9 @@ script MatchProbe extends Logic
         self:PublishState(userId, "CANCELLING")
         while ticket.submitting do wait(0.1) end
         local cancelled = state == "CANCELLED" or self:CancelMatching(ticket.data.profile)
-        if self._T.records[userId] ~= ticket or self._T.ended then return end
+        -- A durable-only ticket has no live record; only a different live ticket supersedes this cancellation.
+        local current = self._T.records[userId]
+        if self._T.ended or (current ~= nil and current ~= ticket) then self._T.busy[userId] = nil return end
         if not cancelled then
             ticket.cancelling = nil
             self._T.busy[userId] = nil
@@ -500,6 +503,8 @@ script MatchProbe extends Logic
         if player == nil then return end
         if self._T.busy[userId] then self._T.pendingRecover[userId] = true return end
         local current = self._T.records[userId]
+        -- Disconnect cleanup recovers once its cancellation settles; reading now could replace its ticket.
+        if current ~= nil and current.cancelling then return end
         if current ~= nil and (current.data.state == "QUEUED" or current.data.state == "SAVING" or current.data.state == "RENEWING" or current.data.state == "QUEUE_ERROR") then
             local localAdapter = Environment:IsMakerPlay() and (current.data.adapter == "local" or current.data.adapter == nil)
             if not localAdapter then return end
@@ -678,8 +683,9 @@ script MatchProbe extends Logic
     @ExecSpace("ServerOnly")
     @EventSender("Service", "UserService")
     handler HandleUserReconnectEvent(UserReconnectEvent event)
-        -- Native reconnect only restores availability; it does not re-admit an old match.
+        -- Restore availability; a lobby reconnect re-locks durable tickets, and a match room still never re-admits here.
         self._T.offline[event.UserId] = nil
+        if not _RoomService:IsInstanceRoom() then self:Recover(event.UserId) end
     end
 
     @ExecSpace("ServerOnly")
@@ -711,6 +717,8 @@ script MatchProbe extends Logic
         end
         if self._T.records[userId] == ticket then self._T.records[userId] = nil end
         log("[VRF][MatchDisconnect] match=" .. ticket.data.matchKey .. " combatPreserved=true online=false")
+        -- The player reconnected while cancellation yielded; resolve the durable outcome and refresh their client.
+        if self:Player(userId) ~= nil and not _RoomService:IsInstanceRoom() then self:Recover(userId) end
     end
 
     @ExecSpace("ServerOnly")

@@ -8,7 +8,7 @@
 - 送出開始／取消後立即鎖住整備；只有正式 `IDLE` 且沒有在途狀態請求才解鎖。大廳選組、雙擊整備、POC 入口及 local 編輯共用這個條件；配對期間清除尚未完成的整備進場意圖。
 - `MatchProbe.IsFormationLocked` 供伺服器選組、儲存、啟用與移動重驗證，涵蓋請求中的 yield、等待、取消未確認、入場與返回。原有 transfer lock 仍由 FormationService 管理。
 - 原生取消成功後才寫入取消終態。取消或終態寫入失敗都維持鎖定並提供重試；配對預約寫入未確認也保留待取消的票券，不提前呈現可編輯狀態。
-- 取消等待使用票券外的 `cancelling` 旗標，保留真正的排隊／入場階段，對外呈現 `CANCELLING`；原生回覆失敗不再留下假取消終態。取消確認後、取消終態寫入尚未確認時仍呈現 `CANCELLING`，只有持久確認才清掉票券並回到 `IDLE`。
+- 取消等待使用票券外的 `cancelling` 旗標，保留真正的排隊／入場階段，對外呈現 `CANCELLING`；原生回覆失敗不再留下假取消終態。取消確認後、取消終態寫入尚未確認時仍呈現 `CANCELLING`，只有持久確認才清掉票券並回到 `IDLE`；玩家已離線時則放掉記憶體票券，重連後再由持久狀態恢復。
 - 取消期間收到配對成功會暫存，取消失敗後接續同一票券；已在準備中的配對則等取消回覆後才越過 `COMMITTING` 邊界。取消成功會阻止入場，恢復入場時清掉過期的取消錯誤，保留原本的本局隊伍與版本。
 - `CancelMatching` 共用既有原生回覆判斷，供可見取消及 `Depart` 使用；斷線清理收到取消失敗時不再寫入取消終態。Maker 專用的 `ConfigureMakerCancelFaults` 只注入回覆與延遲，不修改正式環境的原生服務路徑。
 - `FormationHandoff.Close` 先驗證原票券與世代，再讀回持久狀態，讓逾時後才完成的預約或取消寫入能由同一取消操作恢復。讀取失敗、較新的票券或已進入交接的狀態仍拒絕取消；已持久完成的相同終態可直接確認，不重寫 payload。
@@ -96,4 +96,18 @@ ENTRY 保留移動故障直到 client 完成可見的取消入場，之後重設
 
 前幾次延遲探針曾在準備階段尚未開始、票券仍寫入或虛擬玩家尚未建立時取值，屬前置狀態不足。已改成等待 StateForUser 的 SAVING、確認寫入完成與實體就緒，最後一輪全部通過。實體操作、真實網路斷線、兩個真實帳號及跨 WorldInstance 原生取消競態仍未驗收。
 
-提交前複查另補兩處。重連後的取消若與 `Depart` 在途的取消重疊，修正前 `match_cancel_reconnect_runtime_probe.lua` 於 23:21:59 失敗，鎖定不會解除；現在由 `Depart` 擁有該票券，新的取消不再重入，23:24:50 PASS。重試取消開始時也清除前次失敗，途中不再顯示失敗文案：`match_cancel_runtime_probe.lua` FAILURE 新增斷言，23:24:38 PASS；這項沒有取得修正前的有效紅燈。同一輪 `match_recovery_runtime_probe.lua` CANCEL 也重跑。此次只重跑上述單人探針，雙人 race、返回存檔與 `Depart` 探針沿用前一輪結果，未在這兩行修正後重跑。
+提交前複查另補兩處。重連後的取消若與 `Depart` 在途的取消重疊，修正前 `match_cancel_reconnect_runtime_probe.lua` 於 23:21:59 失敗，鎖定不會解除；現在由 `Depart` 擁有該票券，新的取消不再重入，23:24:50 PASS。重試取消開始時也清除前次失敗，途中不再顯示失敗文案：`match_cancel_runtime_probe.lua` FAILURE 新增斷言，23:24:38 PASS；這項沒有取得修正前的有效紅燈。同一輪 `match_recovery_runtime_probe.lua` CANCEL 也重跑。
+
+### 雙軸審查後的修正（基線 36dc7b6）
+
+`04d313d...36dc7b6` 的 Standards／Spec 子代理報告都核對過基線，另指出三個問題，均已修正：
+
+- 只有持久票券、沒有 live record 時，`CancelForUser` 會提前返回並留下 `busy`。現在只有另一張 live 票券才算被取代。
+- `Depart` 取消失敗後票券被清掉，重連玩家在原生佇列可能仍存活時已解鎖。現在大廳重連會走 `Recover` 重新鎖定持久票券；對局房間的重連仍不重新入場。
+- 重連時 `Depart` 還在等回覆，client 會停在舊狀態。現在清理結束後由 `Recover` 發布結果。
+
+`match_cancel_reconnect_runtime_probe.lua` 擴充後在修正前重現紅燈（23:33:03，`locked=false` 且持久狀態未到 CANCELLED），修正後 OVERLAP／DURABLE／FAILED_CLEANUP 全數 PASS（23:34:36），client 回到 `IDLE`。這裡用 `UserReconnectEvent` 派送事件，不代表真實網路斷線；Maker adapter 會關閉過期佇列，原生 adapter 的 `QUEUE_OWNER_LOST` 路徑仍未執行。
+
+修正後已重跑：`match_cancel_runtime_probe.lua` FAILURE（23:35:31）、`match_recovery_runtime_probe.lua` CANCEL／RESERVE（23:35:45／23:35:51）、race SUCCESS／SEAL_FAILURE／ENTRY（23:37:50／23:38:22／23:39:06）、client PROGRESS／ENTRY（23:37:59／23:39:10）、`match_cancel_disconnect_runtime_probe.lua`（23:39:22），以及自然戰鬥後的 `matched_battle_return_save_runtime_probe.lua`（23:41:41，隨後 RETURNED）。各 Play 的 runtime 均 0 Error／Warning；contract suite 53/53。腳本內的等待與清理依 Play 狀態調整，核心斷言與探針相同。
+
+保留未改：原生取消回 `AlreadyMatched` 仍視為確認完成。對手可能停在入場狀態直到逾時或手動取消入場，屬既有判斷，須於發布環境以兩個真實帳號確認。
