@@ -26,6 +26,8 @@ The earlier five-slot, empty-return, delayed / failure / relogin and handoff-lat
 
 The two-player battle HUD, own result and return flow are recorded in [Issue #51](../docs/Issue-51-Battle-HUD.md). `matched_battle_result_ui_runtime_probe.lua` runs in `client` and must be dispatched after the player enters the match, because moving rooms resets the client context.
 
+Lobby-only matchmaking, waiting/cancellation locks, five saved groups and the full return flow are recorded in [Issue #52](../docs/Issue-52-Match-Flow.md). `match_flow_runtime_probe.lua` runs in `client`; `match_flow_roundtrip_runtime_probe.lua` runs in `server_main` after the real client's queue is confirmed. The latter retains detached expectations until both players have returned and their formation sessions are initialized. Use the same handoff storage key in every room, isolate formation saves, and reset every injected fault afterwards. Native screenshots and real-mouse / published-instance acceptance limits are listed in that document.
+
 ## Maker runtime procedure
 
 For each combat runtime probe listed below, use a fresh Play test. Stop, clear logs, Refresh, read build logs, then Play and wait until `template` reaches `DEPLOYMENT`. Pass the entire Lua file to `maker_execute_script` with `context=server_main`, except the client probes identified below. A successful script dispatch is not a passing test: read normal logs until that probe's final `PASS` or `FAILURES=...` marker appears. Inspect all build and normal Error / Warning entries. The only expected diagnostic in this suite is the single `unsupported attack profile` message intentionally caused by the first invalid-profile case in `attack_execution_runtime_probe.lua`. Stop after each combat probe.

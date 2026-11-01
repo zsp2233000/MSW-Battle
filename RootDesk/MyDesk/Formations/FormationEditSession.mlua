@@ -167,7 +167,7 @@ script FormationEditSession extends Logic
     method boolean Writable()
         -- Only a confirmed read or a first-use state accepts commands.
         local load = self.Snapshot.loadState
-        return self.Snapshot.saved ~= nil and (load == "READY" or load == "NEW") and not self._T.localUnconfirmed
+        return self.Snapshot.saved ~= nil and (load == "READY" or load == "NEW") and not self._T.localUnconfirmed and _MatchProbeInput:AllowsFormationActions()
     end
 
     @ExecSpace("ClientOnly")
@@ -184,6 +184,7 @@ script FormationEditSession extends Logic
         local load = state.loadState or "LOADING"
         if state.saved == nil or load == "LOADING" or load == "NOT_LOADED" then return "讀取中，完成後才能儲存" end
         if self:Busy() then return "儲存處理中，請稍候" end
+        if not _MatchProbeInput:AllowsFormationActions() then return "配對處理中，取消完成或返回大廳後可繼續整備" end
         if self:Unconfirmed() then return "上次儲存結果尚未確認，請按「確認結果」" end
         if load == "CONFLICT" then return "上次操作失敗，請按「重新讀取」確認後再儲存" end
         if load == "ERROR" then return "讀取失敗，請按「重新讀取」" end
@@ -297,7 +298,7 @@ script FormationEditSession extends Logic
     method any RequestSwitchSlot(integer slotId)
         -- Switching asks first whenever the viewed group holds unsaved changes.
         local state = self.Snapshot
-        if self:Busy() or self.ConfirmKind ~= "" or slotId == state.editSlot or state.saved == nil then return nil end
+        if not _MatchProbeInput:AllowsFormationActions() or self:Busy() or self.ConfirmKind ~= "" or slotId == state.editSlot or state.saved == nil then return nil end
         if self:Unconfirmed() then
             return { { kind = "NOTICE", text = "上次儲存結果尚未確認，確認前無法切換組別" } }
         end
@@ -311,6 +312,7 @@ script FormationEditSession extends Logic
     @ExecSpace("ClientOnly")
     method any RequestReturnToLobby()
         -- Leaving asks first whenever the viewed group holds unsaved changes.
+        if not _MatchProbeInput:AllowsFormationActions() then return nil end
         if self:Busy() or self.ConfirmKind ~= "" then
             return { { kind = "NOTICE", text = "正在儲存，完成後返回大廳…" } }
         end

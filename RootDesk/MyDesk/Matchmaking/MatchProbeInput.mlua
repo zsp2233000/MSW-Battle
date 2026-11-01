@@ -115,9 +115,18 @@ script MatchProbeInput extends Logic
     end
 
     @ExecSpace("ClientOnly")
+    method boolean AllowsFormationActions()
+        -- Only a confirmed idle observation unlocks editing; sending cancel does not unlock it.
+        return self.State == "IDLE" and not self.Busy and not self._T.pending
+    end
+
+    @ExecSpace("ClientOnly")
     method void Click()
         -- Identify start, cancellation and return commands with the observed attempt generation.
         if self.Busy or self._T.pending or self.State == "BATTLE" then return end
+        local player = _UserService.LocalPlayer
+        if not isvalid(player) or (player.CurrentMapName ~= "formationlobby" and player.CurrentMapName ~= "matchprobe") then return end
+        if _FormationEditSession.ConfirmKind ~= "" or _FormationEditSession:Busy() or _FormationEditSession:Unconfirmed() then return end
         if self.State == "IDLE" then
             local formation = _FormationEditSession.Snapshot
             if (formation.loadState ~= "READY" and formation.loadState ~= "NEW") or formation.pending then return end
@@ -128,6 +137,7 @@ script MatchProbeInput extends Logic
         end
         self._T.pending = true
         self._T.pendingSeconds = 0
+        _FormationLobby:Render()
         if self.Message == "READINESS_FAILED" then
             _MatchProbe:RequestStatus()
         elseif self.State == "QUEUED" or self.State == "SAVING" or self.State == "RENEWING" or self.State == "QUEUE_ERROR" or self.State == "CANCELLED" then
@@ -206,16 +216,23 @@ script MatchProbeInput extends Logic
         if self.Message == "RETURN_SAVE_FAILED" or self.Message == "ROOM_MISMATCH_SAVE_FAILED" then text = "返回資料儲存失敗，請重試返回" label = "重試返回" end
         if self.Message == "ROOM_MOVE ok=false" then text = "進入戰場失敗，可取消入場後重新配對" end
         if self.Message == "ROOM_CREATE_FAILED" or self.Message == "ADMISSION_SAVE_FAILED" then text = "戰場建立或入場資料儲存失敗，可取消入場後重試" end
+        if self.Message == "RESERVATION_SAVE_FAILED" then text = "配對資料儲存未完成，請取消後重新配對" end
+        if self.Message == "CANCEL_FAILED" or self.Message == "CANCEL_SAVE_FAILED" then text = "取消尚未完成，請重試取消；完成前暫停整備" end
+        if self.Message == "LOBBY_ONLY" then text = "請先完成編輯並返回大廳，再開始配對" end
         if self.Message == "TRANSFER_EXPIRED" then text = "入場已逾時，正在還原已儲存的隊伍" end
         -- A sent return outranks the previous failure until the server answers.
         if self._T.pending and (self.State == "RETURNING" or string.sub(self.State, 1, 7) == "RESULT_") then
             text = "正在返回大廳…"
             label = "返回中…"
         end
+        if self._T.pending and self.State == "IDLE" then text = "正在確認配對狀態…" label = "處理中…" end
+        if self._T.pending and (self.State == "QUEUED" or self.State == "RENEWING" or self.State == "CANCELLED" or self.State == "QUEUE_ERROR" or self.State == "SAVING") then
+            text = "正在確認取消結果，完成前暫停整備…" label = "取消中…"
+        end
         if self.State == "IDLE" and (self.Message == "RETURNED" or self.Message == "CANCELLED") then text = "已返回或取消，可以重新開始配對" end
         if self.State == "IDLE" then
             local ready = formation.loadState == "READY" or formation.loadState == "NEW"
-            idleBlocked = not ready or formation.pending == true
+            idleBlocked = not ready or _FormationEditSession:Busy() or _FormationEditSession:Unconfirmed() or _FormationEditSession.ConfirmKind ~= ""
             if not ready then
                 text = "正在載入隊伍；若持續沒有回應，請按「重新讀取」。"
                 label = "等待讀取"
@@ -235,12 +252,12 @@ script MatchProbeInput extends Logic
             local active = formation.saved ~= nil and formation.saved.activeSlot or 0
             local ready = formation.loadState == "READY" or formation.loadState == "NEW"
             local activeLabel = not ready and "出戰未確認" or (active > 0 and ("出戰第 " .. tostring(active) .. " 組") or "尚未設定出戰")
-            title.TextGUIRendererComponent.Text = (self.State == "IDLE" and "對戰指令｜" or "後續配對｜") .. activeLabel
+            title.TextGUIRendererComponent.Text = (self.State == "IDLE" and "對戰指令｜" or "配對狀態｜") .. activeLabel
         end
         self.status.TextGUIRendererComponent.Text = self._T.screen == "BattleResult" and text or (mode .. "\n" .. text)
         local summary = self._T.panel:GetChildByName("FixedSummary", false)
         if isvalid(summary) then
-            summary.TextGUIRendererComponent.Text = self.FixedSummary ~= "" and ("本局隊伍：" .. self.FixedSummary .. "\n本局隊伍已固定；儲存與出戰設定於下次配對生效。") or "本局隊伍：尚未開始"
+            summary.TextGUIRendererComponent.Text = self.FixedSummary ~= "" and ("本局隊伍：" .. self.FixedSummary .. "\n本局已固定；取消配對後可重新整備。") or "本局隊伍：尚未開始"
         end
         self.action.TextGUIRendererComponent.Text = label
         self.action.ButtonComponent.Enable = self.State ~= "BATTLE" and not self.Busy and not self._T.pending and not idleBlocked

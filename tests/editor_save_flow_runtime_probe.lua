@@ -18,8 +18,9 @@ local function click(path)
     return true
 end
 local function dialogOpen() return node('ExitConfirm').Enable end
-local function inEditor() return _UserService.LocalPlayer.CurrentMapName == 'formationsim' and _FormationEditSession.DraftSlot == _FormationEditSession.Snapshot.editSlot end
+local function inEditor() return _UserService.LocalPlayer.CurrentMapName == 'formationsim' and node('Editor').EnabledInHierarchy and _FormationEditSession.DraftSlot == _FormationEditSession.Snapshot.editSlot and _MatchProbeInput:AllowsFormationActions() end
 local function openEditor()
+    assert(await(function() return node('Lobby/Edit').EnabledInHierarchy and enabled('Lobby/Edit') end), 'lobby status confirmed before editing')
     assert(click('Lobby/Edit'), 'edit button enabled')
     assert(await(inEditor), 'editor entered')
     wait(0.4)

@@ -21,7 +21,7 @@ local function click(path)
 end
 local function dialogOpen() return node('ExitConfirm').Enable end
 local function map() return _UserService.LocalPlayer.CurrentMapName end
-local function inEditor() return map() == 'formationsim' and _FormationEditSession.DraftSlot == _FormationEditSession.Snapshot.editSlot end
+local function inEditor() return map() == 'formationsim' and node('Editor').EnabledInHierarchy and _FormationEditSession.DraftSlot == _FormationEditSession.Snapshot.editSlot and _MatchProbeInput:AllowsFormationActions() end
 local function resultIs(status) return _FormationEditSession.Snapshot.result ~= nil and _FormationEditSession.Snapshot.result.status == status end
 
 local ok, detail = pcall(function()
@@ -44,7 +44,7 @@ local ok, detail = pcall(function()
             assert(map() == 'formationsim' and #_FormationEditSession.Draft == 1 and _FormationEditSession:IsDirty(), 'content and marker kept, stayed in the group')
             assert(#_FormationEditSession.Snapshot.saved.slots['1'].units == before, 'saved content untouched')
             assert(not enabled('Editor/Save') and has(_FormationEditSession:SaveBlockReason(), '重新讀取'), 'save disabled with a readable reason')
-            assert(has(label('EditorControls/Retry'), '重新讀取') and node('EditorControls/Retry').Enable, 'manual retry is offered')
+            assert(await(function() return has(label('EditorControls/Retry'), '重新讀取') and node('EditorControls/Retry').EnabledInHierarchy end), 'manual retry is offered')
             assert(not _FormationEditSession:Unconfirmed(), 'an explicit failure is not an unconfirmed write')
             wait(2)
             assert(_FormationEditSession.Snapshot.result.status == 'FAILED' and not _FormationEditSession.Snapshot.pending, 'no automatic resend')

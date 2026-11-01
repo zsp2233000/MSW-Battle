@@ -37,17 +37,19 @@ local ok, detail = pcall(function()
     _MatchProbe:QueueForUser(firstId)
     _MatchProbe:CancelForUser(firstId)
     _MatchProbe:QueueForUser(firstId)
-    -- Change and save the active formation AFTER queuing. This must affect only a future match.
-    setup(firstId, one)
+    -- Waiting locks mutation; replacing the roster requires cancel, save, then queue again (#52).
+    local waiting = _FormationService:GetSession(firstId)
+    _FormationService:SaveForUser(firstId, one, waiting.editSlot, waiting.saved.slots[tostring(waiting.editSlot)].revision, _UtilLogic:NewGuid())
+    assert(waiting.result.status == 'REJECTED', 'saving is rejected while queued')
     local nextSession = _FormationService:GetSession(firstId)
     local nextMatch = nextSession.saved.slots[tostring(nextSession.saved.activeSlot)].units
-    assert(#nextMatch == 1, "later saved formation has one unit")
+    assert(#nextMatch == 6, "queued saved formation remains six units")
     local expected = {}
     for _, userId in ipairs({firstId, secondId}) do
         local session = _FormationService:GetSession(userId)
         expected[userId] = { saved = _FormationSchema:CopyDocument(session.saved), editSlot = session.editSlot, player = _UserService:GetUserEntityByUserId(userId) }
     end
-    log("[VRF][MatchedQueue] queued six; later confirmed save one; cancel/requeue passed")
+    log("[VRF][MatchedQueue] queued six; waiting rejects saves; cancel/requeue passed")
     _MatchProbe:QueueForUser(secondId)
     log("[VRF][MatchedQueue] PASS participants=2")
     -- Keep detached expectations in this coroutine while the room probe drives battle and return.

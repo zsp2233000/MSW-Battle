@@ -98,7 +98,7 @@ script MatchProbe extends Logic
         local summary = ticket ~= nil and ticket.data.summary or ""
         local attempt = ticket ~= nil and ticket.data.attempt or ""
         local failure = self._T.failures[userId]
-        if failure ~= nil and failure.attempt == attempt and state ~= "IDLE" and state ~= "BATTLE" and string.sub(state, 1, 7) ~= "RESULT_" then
+        if failure ~= nil and failure.attempt == attempt and state ~= "IDLE" and state ~= "BATTLE" then
             message = failure.message
         end
         self._T.presentationSequence[userId] = (self._T.presentationSequence[userId] or 0) + 1
@@ -156,11 +156,17 @@ script MatchProbe extends Logic
     end
 
     @ExecSpace("ServerOnly")
+    method boolean IsFormationLocked(string userId)
+        -- A request owns editing until cancellation or return is confirmed, including storage yields.
+        return self._T.busy[userId] == true or self._T.records[userId] ~= nil
+    end
+
+    @ExecSpace("ServerOnly")
     method void QueueForUser(string userId)
         -- Share the authenticated entry path with server-driven Maker verification.
         local player = self:Player(userId)
         if player == nil then self:Report(userId, "DISABLED_OR_NOT_PUBLISHED") return end
-        if player.CurrentMapName ~= "formationlobby" and player.CurrentMapName ~= "formationsim" then return end
+        if player.CurrentMapName ~= "formationlobby" then self:Report(userId, "LOBBY_ONLY") return end
         if not Environment:IsMakerPlay() and self.LeaderboardId == "" then self:Report(userId, "MATCHMAKING_NOT_CONFIGURED") return end
         if _RoomService:IsInstanceRoom() or self._T.busy[userId] or self._T.records[userId] ~= nil then return end
         self._T.busy[userId] = true
@@ -180,7 +186,11 @@ script MatchProbe extends Logic
         ticket.data = { schema = 1, profile = profile, attempt = _UtilLogic:NewGuid(), requestId = _UtilLogic:NewGuid(), source = _WorldInstanceService.WorldInstanceId, adapter = Environment:IsMakerPlay() and "local" or "native", state = "QUEUED", started = DateTime.UtcNow.Elapsed, expires = 0, matchKey = "" }
         self._T.records[userId] = ticket
         if not _FormationHandoff:Reserve(userId, ticket) then
-            self._T.records[userId] = nil
+            if ticket.failure == "RESERVATION_SAVE_FAILED" then
+                ticket.data.state = "QUEUE_ERROR"
+            else
+                self._T.records[userId] = nil
+            end
             self._T.busy[userId] = nil
             self:Report(userId, ticket.failure or "RESERVATION_SAVE_FAILED")
             return
@@ -414,12 +424,17 @@ script MatchProbe extends Logic
         while ticket.submitting do wait(0.1) end
         local code = MatchmakingResultCode.Ok
         if not Environment:IsMakerPlay() then code = _MatchmakingService:CancelMatchingAndWait(ticket.data.profile) end
+        local cancelled = code == MatchmakingResultCode.Ok or code == MatchmakingResultCode.NotMatching or code == MatchmakingResultCode.AlreadyMatched or code == MatchmakingResultCode.RequestNotFound or code == MatchmakingResultCode.MatchingExpired
+        if not cancelled then
+            self._T.busy[userId] = nil
+            self:Report(userId, "CANCEL_FAILED")
+            return
+        end
         local stored = _FormationHandoff:Close(userId, ticket, "CANCELLED")
         self._T.busy[userId] = nil
-        if stored and (code == MatchmakingResultCode.Ok or code == MatchmakingResultCode.NotMatching or code == MatchmakingResultCode.AlreadyMatched or code == MatchmakingResultCode.RequestNotFound or code == MatchmakingResultCode.MatchingExpired) then self._T.records[userId] = nil end
+        if stored then self._T.records[userId] = nil end
         self:Report(userId, "CANCEL code=" .. tostring(code) .. " tombstone=" .. tostring(stored))
-        _FormationHandoff:Release(userId, ticket.id)
-        self:PublishState(userId, "CANCELLED")
+        self:Report(userId, stored and "CANCELLED" or "CANCEL_SAVE_FAILED")
     end
 
     @ExecSpace("ServerOnly")

@@ -157,7 +157,7 @@ script FormationService extends Logic
     method void RequestSelectSlot(integer slotId)
         -- Selecting a group changes only the viewed slot; it never writes storage or changes the active slot.
         local record = self:GetSession(senderUserId)
-        if record == nil or record.transferLocked or record.pending or not record.initialized or slotId < 1 or slotId > 5 then return end
+        if record == nil or record.transferLocked or _MatchProbe:IsFormationLocked(senderUserId) or record.pending or not record.initialized or slotId < 1 or slotId > 5 then return end
         record.editSlot = slotId
         record.message = "已選取第 " .. tostring(slotId) .. " 組"
         self:Publish(record)
@@ -185,7 +185,7 @@ script FormationService extends Logic
         if record == nil then return end
         -- A request that cannot be correlated still gets an answer, so no client waits on silence.
         if type(requestId) ~= "string" or #requestId == 0 or #requestId > 64 then self:Publish(record) return end
-        if record.transferLocked then self:Reject(record, "SAVE", slotId, requestId, "REJECTED", "配對進行中，返回大廳後可繼續編輯") return end
+        if record.transferLocked or _MatchProbe:IsFormationLocked(forUserId) then self:Reject(record, "SAVE", slotId, requestId, "REJECTED", "配對進行中，取消完成或返回大廳後可繼續編輯") return end
         if not record.initialized or (record.loadState ~= "NEW" and record.loadState ~= "READY") then
             self:Reject(record, "SAVE", slotId, requestId, "REJECTED", "必須先成功讀取資料；請重新讀取")
             return
@@ -228,7 +228,7 @@ script FormationService extends Logic
     method void ActivateForUser(string forUserId, integer slotId, integer expectedRevision)
         -- Activation writes only the confirmed slot; it never saves or activates unsaved content implicitly.
         local record = self:GetSession(forUserId)
-        if record == nil or record.pending or record.transferLocked then return end
+        if record == nil or record.pending or record.transferLocked or _MatchProbe:IsFormationLocked(forUserId) then return end
         local slot = record.saved.slots[tostring(slotId)]
         if slot == nil or slotId ~= record.editSlot or slot.revision ~= expectedRevision then self:Publish(record) return end
         if #slot.units == 0 then
@@ -409,7 +409,10 @@ script FormationService extends Logic
         local player = _UserService:GetUserEntityByUserId(senderUserId)
         if not isvalid(player) then return end
         local record = self:GetSession(senderUserId)
-        if record ~= nil and record.transferLocked then self:Publish(record) return end
+        if _MatchProbe:IsFormationLocked(senderUserId) or (record ~= nil and (record.transferLocked or record.pending or record.uncertain ~= nil)) then
+            if record ~= nil then self:Publish(record) end
+            return
+        end
         if player.CurrentMapName == "matchprobe" then return end
         if destination ~= "formationsim" then
             local controller = player:GetComponent("PlayerControllerComponent")
