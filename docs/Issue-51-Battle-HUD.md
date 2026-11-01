@@ -39,9 +39,19 @@
 3. 進房後在 `client` 派送 `matched_battle_result_ui_runtime_probe.lua`；在 `server_instance_*` 執行 `_MatchProbe:ConfigureMakerTransferFaults(0, 1)` 與 `matched_view_swap_runtime_probe.lua`。
 4. 回大廳後在 `client` 派送 `matched_battle_lobby_ui_runtime_probe.lua`。虛擬玩家不會自己返回；要再配對時，先在 `server_instance_*` 對他呼叫 `ReturnForUser`。
 
+## 2026-11-01 使用者畫面回饋
+
+使用者截圖指出 HUD 遮住上方場地，「戰鬥結果」文字也壓在視窗邊框上：
+
+- `matchprobe` 的 `CameraOffset.y` 由 0 改為 0.9。整備（`formationsim`）與 POC（`template`）維持原值，因為整備下方有怪物列表，上移會多蓋住場地。
+- 彈窗素材四周有透明邊，可見上緣比 360px 的矩形低，因此 `Caption` 下移到 y=112，三個結果區塊下移到 y=34。
+
+經使用者同意，以 Maker 原生截圖確認（1920×1080）：戰鬥中 HUD 只蓋到外牆，場地與地圖下緣完整可見；結果視窗的文字與邊框、分隔線都不重疊。
+
 ## 未驗收
 
-- **原生外觀**：HUD、結果視窗與返回面板的材質、切片、半透明與文字可讀性，以及按鈕四種狀態的實體滑鼠操作，都還沒有畫面證據。依專案規則未自行截圖，請在 Maker 目視確認；其中結果面板的按鈕是否實際壓在 Dimmer 之上，也要由實體點擊確認（MatchGroup 的 GroupOrder 6 高於 BattleGroup 的 2）。
+- **原生外觀**：上述截圖只涵蓋參考解析度的戰鬥與勝利畫面。較小視窗、失敗／平手畫面，以及按鈕四種狀態的實體滑鼠操作還沒有畫面證據；其中結果面板的按鈕是否實際壓在 Dimmer 之上，也要由實體點擊確認（MatchGroup 的 GroupOrder 6 高於 BattleGroup 的 2）。
+- `TopAccent` 細線：彈窗的透明邊讓結果視窗這條線浮在可見邊框外；HUD 上方也露出一小段。尚待決定是否移除。
 - **視覺待確認**：`a21e588b…` 不在 #44 列出的素材表內，是目前確認視窗使用的彈窗；木紋 `79ed3b…` 只用在大廳，HUD 與結果面板和既有 `BattleMatch` 一樣沒有木紋。
 - 未重跑：`six_vs_six_ui_runtime_probe.lua`（只改了結果實體的參照來源）。
 - 平手結果未自然發生，由既有的 `ResultForProfile` 與結果實體邏輯涵蓋。

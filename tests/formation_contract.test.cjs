@@ -311,7 +311,9 @@ test('simulation and matched battlefield share the template camera and symmetric
     const map = MapBuilder.read(`map/${name}.map`);
     assert.equal(map.getTileMapMode(), 1);
     for (const component of ['MOD.Core.TransformComponent', 'MOD.Core.CameraComponent']) {
-      const expected = reference.component('BattleCameraAnchor', component);
+      let expected = reference.component('BattleCameraAnchor', component);
+      // The battle view alone lifts its camera so the top HUD clears the field and the map's bottom edge stays on screen.
+      if (name === 'matchprobe' && component === 'MOD.Core.CameraComponent') expected = {...expected, CameraOffset: {x: 0.5, y: 0.9}};
       assert.deepEqual(map.component('BattleCameraAnchor', component), expected);
     }
   }
