@@ -23,7 +23,11 @@ local ok, detail = pcall(function()
     assert(_FormationHandoff:Store(ticket), 'handoff confirmed')
     ticket.data.state = 'RETURNING'
     assert(_FormationHandoff:Store(ticket), 'return confirmed')
+    assert(session.transferLocked == ticket.id, 'locked while the transfer is out')
     assert(_FormationHandoff:Restore(userId, ticket.id), 'confirmed content restored')
+    assert(not session.transferLocked, 'restoring releases the lock')
+    local epoch = session.writeEpoch
+    assert(_FormationHandoff:Restore(userId, ticket.id) and session.writeEpoch == epoch, 'a second restore of the same ticket is acknowledged without applying it again')
     _FormationStorage:ConfigureMakerFaults(0, 1, 0)
     assert(not _FormationHandoff:Close(userId, ticket, 'RETURNED'), 'cleanup failure surfaced')
     assert(_FormationHandoff:Restore(userId, ticket.id), 'restore retry acknowledged')

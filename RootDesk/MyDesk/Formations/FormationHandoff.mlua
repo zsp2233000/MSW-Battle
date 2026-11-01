@@ -70,7 +70,6 @@ script FormationHandoff extends Logic
         local record = previous or { profile = profile, epoch = 0 }
         if record.attempt ~= id then
             if record.attempt ~= nil then self._T.byId[record.attempt] = nil end
-            record.restoredSession = nil
         end
         record.attempt = id
         record.epoch = record.epoch + 1
@@ -117,28 +116,21 @@ script FormationHandoff extends Logic
     @ExecSpace("ServerOnly")
     method boolean Reserve(string forUserId, table ticket)
         -- Freeze only the confirmed active formation and bind the reservation to the authenticated profile.
-        local session = _FormationService:GetSession(forUserId)
+        local formation = _FormationService:ActiveFormation(forUserId)
         local record = self._T.records[ticket.profile]
-        if session == nil or session.profile ~= ticket.profile or record == nil or record.epoch ~= ticket.epoch or record.writing ~= nil then return false end
+        if formation == nil or formation.profile ~= ticket.profile or record == nil or record.epoch ~= ticket.epoch or record.writing ~= nil then return false end
         if record.metadata ~= nil and record.metadata.state ~= "RETURNED" and record.metadata.state ~= "CANCELLED" then return false end
         ticket.failure = "NEED_LOADED_VALID_ACTIVE_FORMATION_AND_NO_PENDING_SAVE"
-        if not session.initialized or session.pending or (session.loadState ~= "READY" and session.loadState ~= "NEW") then return false end
-        local activeSlot = session.saved.slots[tostring(session.saved.activeSlot)]
-        local catalog = _FormationService:GetCatalog()
-        if activeSlot == nil or catalog == nil then return false end
-        local fixed = _FormationSchema:ValidateUnits(activeSlot.units, catalog, false)
+        local fixed = formation.units
         if fixed == nil or type(ticket.data) ~= "table" or ticket.data.state ~= "QUEUED" or type(ticket.data.attempt) ~= "string" then return false end
-        local transfer = self:Capture(forUserId)
+        local transfer = _FormationService:ExportConfirmed(forUserId)
         if transfer == nil then return false end
         transfer.fixed = _HttpService:JSONEncode(fixed)
-        local active = session.saved.activeSlot
-        local slot = session.saved.slots[tostring(active)]
-        ticket.data.summary = "第 " .. tostring(active) .. " 組 · 版本 " .. tostring(slot.revision) .. " · " .. tostring(#slot.units) .. " / 6"
+        ticket.data.summary = "第 " .. tostring(formation.slotId) .. " 組 · 版本 " .. tostring(formation.revision) .. " · " .. tostring(formation.count) .. " / 6"
         if record.attempt ~= "" then self._T.byId[record.attempt] = nil end
         ticket.id = ticket.data.attempt
         record.attempt = ticket.id
         record.transfer = transfer
-        record.restoredSession = nil
         record.sealed = false
         self._T.byId[ticket.id] = record
         ticket.failure = "RESERVATION_SAVE_FAILED"
@@ -157,21 +149,19 @@ script FormationHandoff extends Logic
         end
         if not current() or record.transfer == nil then return false end
         if record.sealed then return true end
-        local latest = self:Capture(forUserId)
+        local latest = _FormationService:ExportConfirmed(forUserId)
         local remaining = 200
         while latest == nil and remaining > 0 do
             wait(0.1)
             if not current() then return false end
             remaining = remaining - 1
-            latest = self:Capture(forUserId)
+            latest = _FormationService:ExportConfirmed(forUserId)
         end
         if latest == nil or not current() then return false end
-        local session = _FormationService:GetSession(forUserId)
-        if session == nil or session.profile ~= ticket.profile then return false end
+        if not _FormationService:LockTransfer(forUserId, ticket.profile, ticket.id) then return false end
         latest.fixed = record.transfer.fixed
         record.transfer = latest
         record.sealed = true
-        session.transferLocked = ticket.id
         log("[VRF][Handoff] sealed confirmed formations; queue roster retained")
         return true
     end
@@ -191,12 +181,11 @@ script FormationHandoff extends Logic
     method boolean Restore(string forUserId, string ticketId)
         -- Apply a login snapshot once; later cleanup retries must preserve new edits in that session.
         local record = self._T.byId[ticketId]
-        local session = _FormationService:GetSession(forUserId)
-        if record == nil or record.transfer == nil or session == nil or session.profile ~= record.profile or record.metadata == nil or record.metadata.state ~= "RETURNING" then return false end
-        if record.restoredSession == session then return true end
-        if not self:ApplyTransfer(forUserId, record.transfer) then return false end
-        record.restoredSession = session
-        return true
+        if record == nil or record.transfer == nil or record.metadata == nil or record.metadata.state ~= "RETURNING" then return false end
+        return _FormationService:ImportConfirmed(forUserId, record.profile, ticketId, record.transfer, function(catalog)
+            local decoded = self:DecodeTransfer(record.transfer, catalog)
+            return decoded ~= nil and decoded.document or nil
+        end)
     end
 
     @ExecSpace("ServerOnly")
@@ -229,17 +218,6 @@ script FormationHandoff extends Logic
     end
 
     @ExecSpace("ServerOnly")
-    method any Capture(string forUserId)
-        -- Carry only confirmed content; unsaved client edits never enter a handoff. The queue owner supplies its frozen roster.
-        local record = _FormationService:GetSession(forUserId)
-        if record == nil or not record.initialized or record.pending or record.loadState == "LOADING" then return nil end
-        local saved = _FormationSchema:EncodeDocument(record.saved)
-        return { coordinateSchema = 2, saved = saved, confirmedRaw = record.raw == saved and "" or record.raw, confirmedMatchesSaved = record.raw == saved,
-            sessionId = record.sessionId, loadState = record.loadState, editSlot = record.editSlot, uncertain = record.uncertain ~= nil, message = record.message }
-    end
-
-
-    @ExecSpace("ServerOnly")
     method any DecodeTransfer(table transfer, any catalog)
         -- Validate the whole handoff before admitting a roster or restoring any login state.
         if transfer.coordinateSchema ~= 2 or type(transfer.saved) ~= "string" or type(transfer.fixed) ~= "string" or type(transfer.confirmedRaw) ~= "string" then return nil end
@@ -257,32 +235,6 @@ script FormationHandoff extends Logic
         if not ok or doc == nil or fixed == nil then return nil end
         return { document = doc, units = fixed }
     end
-
-    @ExecSpace("ServerOnly")
-    method boolean ApplyTransfer(string forUserId, table transfer)
-        -- Restore confirmed content only; the client always reopens a group from its saved version.
-        local record = _FormationService:GetSession(forUserId)
-        local catalog = _FormationService:GetCatalog()
-        if record == nil or record.pending or catalog == nil then return false end
-        local decoded = self:DecodeTransfer(transfer, catalog)
-        if decoded == nil then return false end
-        record.saved = decoded.document
-        record.loadEpoch = (record.loadEpoch or 0) + 1
-        record.writeEpoch = (record.writeEpoch or 0) + 1
-        record.transferLocked = false
-        record.raw = transfer.confirmedMatchesSaved and transfer.saved or transfer.confirmedRaw
-        record.sessionId = transfer.sessionId or record.sessionId
-        record.editSlot = transfer.editSlot
-        record.initialized = true
-        record.loadState = transfer.loadState or "READY"
-        record.uncertain = transfer.uncertain and { expected = record.raw } or nil
-        record.message = transfer.message or "已還原為配對前儲存的隊伍"
-        _FormationService:Publish(record)
-        if record.uncertain ~= nil then _FormationService:Load(record) end
-        log("[VRF][MatchProbe] formations restored; confirmed content only")
-        return true
-    end
-
 
     @ExecSpace("ServerOnly")
     method void OnEndPlay()

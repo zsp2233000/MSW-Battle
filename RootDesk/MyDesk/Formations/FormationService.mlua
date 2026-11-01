@@ -329,6 +329,73 @@ script FormationService extends Logic
     end
 
     @ExecSpace("ServerOnly")
+    method any ActiveFormation(string forUserId)
+        -- The profile of this player's session, plus the validated active group when a match may freeze it.
+        -- units is nil unless the session is loaded, has no save in flight and holds a valid active group.
+        local session = self:GetSession(forUserId)
+        if session == nil then return nil end
+        local formation = { profile = session.profile }
+        if not session.initialized or session.pending or (session.loadState ~= "READY" and session.loadState ~= "NEW") then return formation end
+        local slotId = session.saved.activeSlot
+        local slot = session.saved.slots[tostring(slotId)]
+        local catalog = self:GetCatalog()
+        if slot == nil or catalog == nil then return formation end
+        formation.units = _FormationSchema:ValidateUnits(slot.units, catalog, false)
+        formation.slotId = slotId
+        formation.revision = slot.revision
+        formation.count = #slot.units
+        return formation
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean LockTransfer(string forUserId, string profile, string ticketId)
+        -- Freeze this player's editing for one transfer; only the matching ticket may release it.
+        local session = self:GetSession(forUserId)
+        if session == nil or session.profile ~= profile then return false end
+        session.transferLocked = ticketId
+        return true
+    end
+
+    @ExecSpace("ServerOnly")
+    method any ExportConfirmed(string forUserId)
+        -- Carry only confirmed content; unsaved client edits never enter a handoff.
+        local record = self:GetSession(forUserId)
+        if record == nil or not record.initialized or record.pending or record.loadState == "LOADING" then return nil end
+        local saved = _FormationSchema:EncodeDocument(record.saved)
+        return { coordinateSchema = 2, saved = saved, confirmedRaw = record.raw == saved and "" or record.raw, confirmedMatchesSaved = record.raw == saved,
+            sessionId = record.sessionId, loadState = record.loadState, editSlot = record.editSlot, uncertain = record.uncertain ~= nil, message = record.message }
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean ImportConfirmed(string forUserId, string profile, string ticketId, table transfer, any decode)
+        -- Restore confirmed content once per ticket and session; decode(catalog) validates the transfer and returns its document.
+        local record = self:GetSession(forUserId)
+        if record == nil or record.profile ~= profile then return false end
+        if record.restoredTickets ~= nil and record.restoredTickets[ticketId] then return true end
+        local catalog = self:GetCatalog()
+        if record.pending or catalog == nil then return false end
+        local document = decode(catalog)
+        if document == nil then return false end
+        record.saved = document
+        record.loadEpoch = (record.loadEpoch or 0) + 1
+        record.writeEpoch = (record.writeEpoch or 0) + 1
+        record.transferLocked = false
+        record.raw = transfer.confirmedMatchesSaved and transfer.saved or transfer.confirmedRaw
+        record.sessionId = transfer.sessionId or record.sessionId
+        record.editSlot = transfer.editSlot
+        record.initialized = true
+        record.loadState = transfer.loadState or "READY"
+        record.uncertain = transfer.uncertain and { expected = record.raw } or nil
+        record.message = transfer.message or "已還原為配對前儲存的隊伍"
+        self:Publish(record)
+        if record.uncertain ~= nil then self:Load(record) end
+        record.restoredTickets = record.restoredTickets or {}
+        record.restoredTickets[ticketId] = true
+        log("[VRF][MatchProbe] formations restored; confirmed content only")
+        return true
+    end
+
+    @ExecSpace("ServerOnly")
     method void ReleaseTransfer(string forUserId, string ticketId)
         -- Release only the matching lock without recreating a departed player's session.
         local record = self._T.sessions[forUserId]

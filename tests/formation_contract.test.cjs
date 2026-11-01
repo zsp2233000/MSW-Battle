@@ -363,3 +363,26 @@ test('private formation RPCs accept no player identity or combat statistics', ()
   assert.match(storage, /GetUserDataStorage/);
   assert.doesNotMatch(source, /@Sync/);
 });
+
+test('the handoff reaches formation sessions only through FormationService operations', () => {
+  const handoff = read('RootDesk/MyDesk/Formations/FormationHandoff.mlua');
+  const service = read('RootDesk/MyDesk/Formations/FormationService.mlua');
+  // No session record access: the session shape and its transfer lock belong to FormationService alone.
+  assert.doesNotMatch(handoff, /GetSession|transferLocked|loadEpoch|writeEpoch|restoredSession/, 'handoff holds no session fields');
+  assert.doesNotMatch(handoff, /(session|record)\.(initialized|pending|loadState|saved|sessionId|editSlot|uncertain|message)\b/, 'handoff reads no session state');
+  assert.doesNotMatch(handoff, /_FormationService:(Publish|Load)\(/, 'restoring a session is FormationService work');
+  for (const name of ['ActiveFormation', 'LockTransfer', 'ExportConfirmed', 'ImportConfirmed', 'ReleaseTransfer']) {
+    assert.ok(handoff.includes(`_FormationService:${name}(`), `handoff uses ${name}`);
+    assert.match(service, new RegExp(`method \\w+ ${name}\\(`), `FormationService defines ${name}`);
+  }
+});
+
+test('only FormationService assigns the transfer lock', () => {
+  const offenders = [];
+  for (const dir of ['RootDesk/MyDesk/Formations', 'RootDesk/MyDesk/Matchmaking', 'RootDesk/MyDesk/Combat']) {
+    for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.mlua'))) {
+      if (/\.transferLocked\s*=[^=]/.test(read(`${dir}/${file}`)) && file !== 'FormationService.mlua') offenders.push(file);
+    }
+  }
+  assert.deepEqual(offenders, [], 'transferLocked is written only inside FormationService');
+});
