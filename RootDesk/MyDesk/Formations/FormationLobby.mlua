@@ -2,13 +2,6 @@
 script FormationLobby extends Logic
 
     property Entity root = "e4b13887-3a93-4ded-8a7e-c5793ab473c0"
-    property table Snapshot = {}
-    property integer ObservedSequence = -1
-    property string SelectedMonsterId = ""
-    property integer SelectedUnit = 0
-    property table Draft = {}
-    property integer DraftVersion = 0
-    property integer DraftSlot = 0
 
     @ExecSpace("ClientOnly")
     method void OnBeginPlay()
@@ -27,18 +20,7 @@ script FormationLobby extends Logic
         self._T.identityKey = ""
         self._T.showUnits = false
         self._T.editorCollapsed = false
-        self._T.confirmKind = ""
-        self._T.confirmTarget = 0
-        self._T.awaiting = nil
         self._T.savingNoticeText = ""
-        self._T.localUnconfirmed = false
-        self._T.reconcileRequested = false
-        self._T.draftReset = true
-        self._T.baseUnits = {}
-        self.ObservedSequence = -1
-        self.Draft = {}
-        self.DraftVersion = 0
-        self.DraftSlot = 0
         for _, path in ipairs({ "Lobby", "Editor", "EditorControls", "Editor/Catalog/Template", "SavingNotice" }) do
             self:SetEnabled(path, false)
         end
@@ -75,7 +57,7 @@ script FormationLobby extends Logic
             self._T.identityElapsed = 0
             self:UpdateIdentity()
         end
-        self:UpdateAwaiting(delta)
+        self:Run(_FormationEditSession:Tick(delta))
         if player.CurrentMapName == "matchprobe" then
             self.root:SetEnable(false)
             return
@@ -84,34 +66,34 @@ script FormationLobby extends Logic
         if not self._T.bound then
             self._T.bound = true
             self:Bind("Lobby/Edit", function()
-                local slotId = self._T.lastLobbySlot > 0 and self._T.lastLobbySlot or (self.Snapshot.editSlot or 1)
+                local slotId = self._T.lastLobbySlot > 0 and self._T.lastLobbySlot or (_FormationEditSession.Snapshot.editSlot or 1)
                 self:SelectLobbySlot(slotId, true)
             end)
             self:Bind("Lobby/Legacy", function() self:Travel("template") end)
-            self:Bind("Editor/Back", function() self:RequestReturnToLobby() end)
-            self:Bind("ReturnLobby", function() self:RequestReturnToLobby() end)
+            self:Bind("Editor/Back", function() self:Run(_FormationEditSession:RequestReturnToLobby()) end)
+            self:Bind("ReturnLobby", function() self:Run(_FormationEditSession:RequestReturnToLobby()) end)
             self:Bind("EditorControls/Toggle", function()
                 self._T.editorCollapsed = not self._T.editorCollapsed
                 self:Render()
                 log("[VRF][FormationUI] editor collapsed=" .. tostring(self._T.editorCollapsed))
             end)
-            self:Bind("ExitConfirm/Window/SaveAndReturn", function() self:ConfirmSave() end)
-            self:Bind("ExitConfirm/Window/ReturnWithoutSave", function() self:ConfirmDiscard() end)
-            self:Bind("ExitConfirm/Window/ContinueEditing", function() self:ContinueEditing() end)
-            self:Bind("Retry", function() self:RequestReconcile() end)
-            self:Bind("EditorControls/Retry", function() self:RequestReconcile() end)
-            self:Bind("Editor/Save", function() self:RequestSaveCurrent() end)
-            self:Bind("Editor/Activate", function() self:RequestActivate() end)
+            self:Bind("ExitConfirm/Window/SaveAndReturn", function() self:Run(_FormationEditSession:ConfirmSave()) end)
+            self:Bind("ExitConfirm/Window/ReturnWithoutSave", function() self:Run(_FormationEditSession:ConfirmDiscard()) end)
+            self:Bind("ExitConfirm/Window/ContinueEditing", function() self:Run(_FormationEditSession:ContinueEditing()) end)
+            self:Bind("Retry", function() self:Run(_FormationEditSession:RequestReconcile()) end)
+            self:Bind("EditorControls/Retry", function() self:Run(_FormationEditSession:RequestReconcile()) end)
+            self:Bind("Editor/Save", function() self:Run(_FormationEditSession:RequestSaveCurrent()) end)
+            self:Bind("Editor/Activate", function() self:Run(_FormationEditSession:RequestActivate()) end)
             self:Bind("Editor/ToggleUnits", function() self._T.showUnits = not self._T.showUnits self:Render() end)
             for index = 1, 5 do
                 local slotId = index
                 self:Bind("Lobby/Slots/Slot" .. tostring(index), function() self:SelectLobbySlot(slotId, false) end)
-                self:Bind("Editor/Slots/Slot" .. tostring(index), function() self:RequestSwitchSlot(slotId) end)
+                self:Bind("Editor/Slots/Slot" .. tostring(index), function() self:Run(_FormationEditSession:RequestSwitchSlot(slotId)) end)
             end
             for index = 1, 6 do
                 local unitIndex = index
                 self:Bind("Editor/Units/Unit" .. tostring(index), function()
-                    self.SelectedUnit = unitIndex
+                    _FormationEditSession.SelectedUnit = unitIndex
                     self:Render()
                 end)
             end
@@ -125,28 +107,9 @@ script FormationLobby extends Logic
             self._T.lastLobbyClick = 0
             self._T.editWhenSelected = 0
             self._T.editorCollapsed = false
-            -- Unsaved content never crosses maps: every arrival reopens the group from its saved version.
-            self._T.awaiting = nil
-            self._T.draftReset = true
-            self:CloseConfirmation()
-            self:SyncDraft()
+            _FormationEditSession:ResetForMap()
             self:Render()
         end
-    end
-
-    @ExecSpace("ClientOnly")
-    method void UpdateAwaiting(number delta)
-        -- A save reply that never arrives leaves the result unconfirmed and writes locked until a read reconciles it.
-        local awaiting = self._T.awaiting
-        if awaiting == nil then return end
-        awaiting.elapsed = awaiting.elapsed + delta
-        if awaiting.elapsed < 15 then return end
-        self._T.awaiting = nil
-        self._T.localUnconfirmed = true
-        self._T.reconcileRequested = false
-        self:CloseConfirmation()
-        self:Render()
-        log("[VRF][FormationSave] unconfirmed locally id=" .. awaiting.id)
     end
 
     @ExecSpace("ClientOnly")
@@ -222,7 +185,7 @@ script FormationLobby extends Logic
     @ExecSpace("ClientOnly")
     method void SelectLobbySlot(integer slotId, boolean openEditor)
         -- Single clicks select; a second click on the same slot opens only after server selection acknowledgement.
-        local state = self.Snapshot
+        local state = _FormationEditSession.Snapshot
         if self._T.mapName ~= "formationlobby" or state.pending
             or (state.loadState ~= "READY" and state.loadState ~= "NEW") then return end
         local now = _UtilLogic.ElapsedSeconds
@@ -235,20 +198,11 @@ script FormationLobby extends Logic
 
     @ExecSpace("ClientOnly")
     method void Observe(table snapshot, integer sequence)
-        -- Ignore out-of-order replies; confirmed content and unsaved client content stay distinct.
-        if sequence <= self.ObservedSequence then return end
-        self.ObservedSequence = sequence
-        self.Snapshot = snapshot
-        local load = snapshot.loadState
-        if self._T.localUnconfirmed and self._T.reconcileRequested and not snapshot.pending and (load == "READY" or load == "NEW") then
-            self._T.localUnconfirmed = false
-            self._T.reconcileRequested = false
-        end
-        self:SyncDraft()
+        -- The edit session ignores out-of-order replies (nil); this screen then rebuilds cards and redraws.
+        local commands = _FormationEditSession:Observe(snapshot, sequence)
+        if commands == nil then return end
         self:BuildOptions(snapshot.options or {})
-        self:ResolveResult(snapshot)
-        if self.SelectedUnit > #self.Draft then self.SelectedUnit = 0 end
-        self:Render()
+        self:Run(commands)
         local player = _UserService.LocalPlayer
         if self._T.editWhenSelected == snapshot.editSlot and isvalid(player) and player.CurrentMapName == "formationlobby"
             and _UtilLogic.ElapsedSeconds - self._T.lastLobbyClick <= 5
@@ -257,275 +211,31 @@ script FormationLobby extends Logic
             self:Travel("formationsim")
             log("[VRF][LobbyEdit] opening selected slot=" .. tostring(snapshot.editSlot))
         end
-        log("[VRF][FormationUI] slot=" .. tostring(snapshot.editSlot) .. " load=" .. snapshot.loadState .. " pending=" .. tostring(snapshot.pending) .. " dirty=" .. tostring(self:IsDirty()))
     end
 
     @ExecSpace("ClientOnly")
-    method boolean UnitsEqual(table left, table right)
-        -- Compare content, not identity; JSON round trips may differ in the last float digits.
-        if #left ~= #right then return false end
-        for index, unit in ipairs(left) do
-            local other = right[index]
-            if unit.monsterId ~= other.monsterId or math.abs(unit.x - other.x) > 0.000001 or math.abs(unit.y - other.y) > 0.000001 then return false end
-        end
-        return true
-    end
-
-    @ExecSpace("ClientOnly")
-    method table CurrentSavedUnits()
-        -- The confirmed content of the viewed group, the only baseline unsaved changes are measured against.
-        local saved = self.Snapshot.saved
-        local slot = saved ~= nil and saved.slots[tostring(self.Snapshot.editSlot or 1)] or nil
-        return slot ~= nil and slot.units or {}
-    end
-
-    @ExecSpace("ClientOnly")
-    method void LoadDraft(table units)
-        -- Open the viewed group from confirmed content; this client copy is never sent anywhere until saved.
-        self.Draft = _FormationSchema:CopyUnits(units)
-        self._T.baseUnits = _FormationSchema:CopyUnits(units)
-        self.DraftSlot = self.Snapshot.editSlot or 1
-        self.DraftVersion = self.DraftVersion + 1
-        self.SelectedUnit = 0
-    end
-
-    @ExecSpace("ClientOnly")
-    method void SyncDraft()
-        -- Follow confirmed content only while there are no local changes; local changes are never overwritten.
-        if self.Snapshot.saved == nil then return end
-        local confirmed = self:CurrentSavedUnits()
-        if self._T.draftReset or self.DraftSlot ~= self.Snapshot.editSlot then
-            self._T.draftReset = false
-            self:LoadDraft(confirmed)
-            return
-        end
-        if self:UnitsEqual(self.Draft, self._T.baseUnits) and not self:UnitsEqual(confirmed, self._T.baseUnits) then
-            self:LoadDraft(confirmed)
-        elseif self:UnitsEqual(self.Draft, confirmed) then
-            self._T.baseUnits = _FormationSchema:CopyUnits(confirmed)
-        end
-    end
-
-    @ExecSpace("ClientOnly")
-    method boolean IsDirty()
-        -- A group has unsaved changes exactly when its content differs from the saved version.
-        if self.Snapshot.saved == nil or self.DraftSlot ~= self.Snapshot.editSlot then return false end
-        return not self:UnitsEqual(self.Draft, self:CurrentSavedUnits())
-    end
-
-    @ExecSpace("ClientOnly")
-    method boolean HasOption(string monsterId)
-        -- Client-side shape checks use the same published catalog the cards show.
-        for _, option in ipairs(self.Snapshot.options or {}) do
-            if option[1] == monsterId then return true end
-        end
-        return false
-    end
-
-    @ExecSpace("ClientOnly")
-    method string DraftInvalidReason()
-        -- Explain unsaveable content in plain words; an empty group can be shown but never saved.
-        if #self.Draft == 0 then return "空隊伍無法儲存，請至少放置一個單位" end
-        if _FormationSchema:ValidateShape(self.Draft, function(monsterId) return self:HasOption(monsterId) end, false) == nil then
-            return "有單位無法放在目前位置，請調整後再儲存"
-        end
-        return ""
-    end
-
-    @ExecSpace("ClientOnly")
-    method boolean Busy()
-        -- A request is outstanding either in this client or in the server's durable write.
-        return self._T.awaiting ~= nil or self.Snapshot.pending == true
-    end
-
-    @ExecSpace("ClientOnly")
-    method boolean Writable()
-        -- Only a confirmed read or a first-use state accepts commands.
-        local load = self.Snapshot.loadState
-        return self.Snapshot.saved ~= nil and (load == "READY" or load == "NEW") and not self._T.localUnconfirmed
-    end
-
-    @ExecSpace("ClientOnly")
-    method boolean Unconfirmed()
-        -- An earlier write may still have committed; writes, switching and leaving wait until a read settles it.
-        -- The server keeps its own late-reply guard after that read, but the player may then continue.
-        return (self.Snapshot.loadState == "CONFLICT" and self.Snapshot.uncertain == true) or self._T.localUnconfirmed == true
-    end
-
-    @ExecSpace("ClientOnly")
-    method string SaveBlockReason()
-        -- The first reason found explains the disabled primary save button; empty means it may be pressed.
-        local state = self.Snapshot
-        local load = state.loadState or "LOADING"
-        if state.saved == nil or load == "LOADING" or load == "NOT_LOADED" then return "讀取中，完成後才能儲存" end
-        if self:Busy() then return "儲存處理中，請稍候" end
-        if self:Unconfirmed() then return "上次儲存結果尚未確認，請按「確認結果」" end
-        if load == "CONFLICT" then return "上次操作失敗，請按「重新讀取」確認後再儲存" end
-        if load == "ERROR" then return "讀取失敗，請按「重新讀取」" end
-        if not self:IsDirty() then return "沒有變更" end
-        return self:DraftInvalidReason()
-    end
-
-    @ExecSpace("ClientOnly")
-    method string ActivateBlockReason()
-        -- Activation applies only to the saved content of a non-active group with no pending changes.
-        local state = self.Snapshot
-        if state.saved == nil then return "讀取中，完成後才能設為出戰" end
-        if not self:Writable() then return "隊伍資料尚未確認，無法設為出戰" end
-        if self:Busy() then return "處理中，請稍候" end
-        local slotId = state.editSlot or 1
-        if state.saved.activeSlot == slotId then return "此組已是出戰隊伍" end
-        if self:IsDirty() then return "請先成功儲存這組的變更，才能設為出戰" end
-        if #state.saved.slots[tostring(slotId)].units == 0 then return "請先儲存第 " .. tostring(slotId) .. " 組隊伍" end
-        local info = state.slots and state.slots[tostring(slotId)] or nil
-        if info == nil or not info.savedValid then return "已儲存的位置需要調整，請修正並儲存" end
-        return ""
-    end
-
-    @ExecSpace("ClientOnly")
-    method void RequestReconcile()
-        -- Read the durable content again; this is the only way to settle a failed or unconfirmed write.
-        if self.Snapshot.pending then return end
-        if self._T.localUnconfirmed then self._T.reconcileRequested = true end
-        _FormationService:RequestRetryLoad()
-    end
-
-    @ExecSpace("ClientOnly")
-    method void RequestSaveCurrent()
-        -- The primary button saves only the viewed group, and only when it is valid and changed.
-        local reason = self:SaveBlockReason()
-        if reason ~= "" then
-            self:SetStatus(reason)
-            return
-        end
-        self:BeginSave(nil)
-    end
-
-    @ExecSpace("ClientOnly")
-    method void BeginSave(any action)
-        -- Send this group's content once; follow-up switching or leaving waits for the exact reply.
-        local state = self.Snapshot
-        local slotId = state.editSlot
-        local id = _UtilLogic:NewGuid()
-        self._T.awaiting = { id = id, slot = slotId, elapsed = 0, action = action }
-        _FormationService:RequestSave(_FormationSchema:CopyUnits(self.Draft), slotId, state.saved.slots[tostring(slotId)].revision, id)
-        self:Render()
-        log("[VRF][FormationSave] requested slot=" .. tostring(slotId) .. " units=" .. tostring(#self.Draft) .. " id=" .. id)
-    end
-
-    @ExecSpace("ClientOnly")
-    method void ResolveResult(table snapshot)
-        -- Only the reply to the outstanding request settles it; a stale or late reply never runs a dropped action.
-        local awaiting = self._T.awaiting
-        local result = snapshot.result
-        if awaiting == nil or result == nil or result.requestId ~= awaiting.id then return end
-        self._T.awaiting = nil
-        log("[VRF][FormationSave] reply status=" .. result.status .. " slot=" .. tostring(result.slotId) .. " id=" .. result.requestId)
-        if result.status == "OK" then
-            if awaiting.action ~= nil then self:CompleteAction(awaiting.action) end
-            return
-        end
-        self:CloseConfirmation()
-    end
-
-    @ExecSpace("ClientOnly")
-    method void CompleteAction(table action)
-        -- Run the switch or return the player asked for, now that its save is durably confirmed.
-        self:CloseConfirmation()
-        if action.kind == "SWITCH" then
-            _FormationService:RequestSelectSlot(action.target)
-        elseif action.kind == "RETURN" then
-            self:Travel("formationlobby")
-        end
-    end
-
-    @ExecSpace("ClientOnly")
-    method void RequestSwitchSlot(integer slotId)
-        -- Switching asks first whenever the viewed group holds unsaved changes.
-        local state = self.Snapshot
-        if self:Busy() or self._T.confirmKind ~= "" or slotId == state.editSlot or state.saved == nil then return end
-        if self:Unconfirmed() then
-            self:SetStatus("上次儲存結果尚未確認，確認前無法切換組別")
-            return
-        end
-        if self:IsDirty() then
-            self:OpenConfirmation("SWITCH", slotId)
-            return
-        end
-        _FormationService:RequestSelectSlot(slotId)
-    end
-
-    @ExecSpace("ClientOnly")
-    method void RequestReturnToLobby()
-        -- Leaving asks first whenever the viewed group holds unsaved changes.
-        local state = self.Snapshot
-        if self:Busy() or self._T.confirmKind ~= "" then
-            self:SetStatus("正在儲存，完成後返回大廳…")
-            return
-        end
-        if self:Unconfirmed() then
-            self:SetStatus("上次儲存結果尚未確認，確認前無法返回大廳")
-            return
-        end
-        if self:IsDirty() then
-            self:OpenConfirmation("RETURN", 0)
-            return
-        end
-        log("[VRF][FormationExit] no unsaved changes; returning directly")
-        self:Travel("formationlobby")
-    end
-
-    @ExecSpace("ClientOnly")
-    method void OpenConfirmation(string kind, integer target)
-        -- Show the three-way choice for the pending switch or return without choosing for the player.
-        self._T.confirmKind = kind
-        self._T.confirmTarget = target
-        self._T.hoverCard = nil
-        self:SetEnabled("CardTooltip", false)
-        self:SetEnabled("ExitConfirm", true)
-        self:Render()
-        log("[VRF][FormationExit] confirmation kind=" .. kind .. " target=" .. tostring(target))
-    end
-
-    @ExecSpace("ClientOnly")
-    method void CloseConfirmation()
-        -- Hide the authored modal without changing any content or storage state.
-        self._T.confirmKind = ""
-        self._T.confirmTarget = 0
-        self:SetEnabled("ExitConfirm", false)
-    end
-
-    @ExecSpace("ClientOnly")
-    method void ConfirmSave()
-        -- Save only the viewed group; the switch or return happens after the durable reply.
-        local kind = self._T.confirmKind
-        if kind == "" or self:SaveBlockReason() ~= "" then return end
-        self:BeginSave({ kind = kind, target = self._T.confirmTarget })
-    end
-
-    @ExecSpace("ClientOnly")
-    method void ConfirmDiscard()
-        -- Dropping changes reopens the group from its saved version before the switch or return continues.
-        local kind, target = self._T.confirmKind, self._T.confirmTarget
-        -- The server ignores a group switch while a write is pending, so never drop the changes in that case.
-        if kind == "" or self:Busy() then return end
-        self:LoadDraft(self:CurrentSavedUnits())
-        self:CloseConfirmation()
-        log("[VRF][FormationExit] discarded unsaved changes kind=" .. kind)
-        if kind == "SWITCH" then
-            _FormationService:RequestSelectSlot(target)
-        else
-            self:Travel("formationlobby")
+    method void Run(any commands)
+        -- Carry out what the edit session asked for, then redraw; nil means the input was ignored.
+        if commands == nil then return end
+        local notices = {}
+        for _, command in ipairs(commands) do
+            if command.kind == "SAVE" then
+                _FormationService:RequestSave(command.units, command.slotId, command.revision, command.requestId)
+            elseif command.kind == "SELECT_SLOT" then
+                _FormationService:RequestSelectSlot(command.slotId)
+            elseif command.kind == "ACTIVATE" then
+                _FormationService:RequestActivate(command.slotId, command.revision)
+            elseif command.kind == "RELOAD" then
+                _FormationService:RequestRetryLoad()
+            elseif command.kind == "TRAVEL" then
+                self:Travel(command.destination)
+            elseif command.kind == "NOTICE" then
+                table.insert(notices, command.text)
+            end
         end
         self:Render()
-    end
-
-    @ExecSpace("ClientOnly")
-    method void ContinueEditing()
-        -- Stay in the group with every change intact; unavailable while a save is outstanding.
-        if self._T.awaiting ~= nil then return end
-        self:CloseConfirmation()
-        self:Render()
+        -- A notice explains why an input did nothing, so it must outlast the redraw's own status line.
+        for _, text in ipairs(notices) do self:SetStatus(text) end
     end
 
     @ExecSpace("ClientOnly")
@@ -537,7 +247,7 @@ script FormationLobby extends Logic
             local fields = {}
             for _, value in ipairs(option) do table.insert(fields, tostring(value)) end
             table.insert(parts, table.concat(fields, "|"))
-            if option[1] == self.SelectedMonsterId then foundSelection = true end
+            if option[1] == _FormationEditSession.SelectedMonsterId then foundSelection = true end
         end
         local key = table.concat(parts, "\n")
         if key == self._T.optionsKey then return end
@@ -546,7 +256,7 @@ script FormationLobby extends Logic
         local template = self:Ui("Editor/Catalog/Template")
         if not isvalid(template) then return end
         self._T.optionsKey = key
-        if not foundSelection then self.SelectedMonsterId = #options > 0 and options[1][1] or "" end
+        if not foundSelection then _FormationEditSession.SelectedMonsterId = #options > 0 and options[1][1] or "" end
         for _, card in ipairs(self._T.cards) do
             if isvalid(card.entity) then
                 card.entity:DisconnectEvent(ButtonClickEvent, card.callback)
@@ -587,8 +297,8 @@ script FormationLobby extends Logic
             end
             -- Selection follows MonsterId; hovering only previews and never selects.
             local callback = card:ConnectEvent(ButtonClickEvent, function()
-                self.SelectedMonsterId = monsterId
-                self.SelectedUnit = 0
+                _FormationEditSession.SelectedMonsterId = monsterId
+                _FormationEditSession.SelectedUnit = 0
                 self:Render()
             end)
             local enterCallback = card:ConnectEvent(UITouchEnterEvent, function()
@@ -606,7 +316,7 @@ script FormationLobby extends Logic
                 exitCallback = exitCallback, monsterId = monsterId, glow = glow, frame = frame })
             card:SetEnable(true)
         end
-        if self.SelectedMonsterId == "" and #options > 0 then self.SelectedMonsterId = options[1][1] end
+        if _FormationEditSession.SelectedMonsterId == "" and #options > 0 then _FormationEditSession.SelectedMonsterId = options[1][1] end
         local catalog = self:Ui("Editor/Catalog")
         if isvalid(catalog) then
             local layout = catalog:GetComponent("ScrollLayoutGroupComponent")
@@ -618,10 +328,10 @@ script FormationLobby extends Logic
     @ExecSpace("ClientOnly")
     method void RenderIntel()
         -- A selected world unit takes precedence over the placement card; statistics never enter save commands.
-        local unit = self.Draft[self.SelectedUnit]
-        local monsterId = unit ~= nil and unit.monsterId or self.SelectedMonsterId
+        local unit = _FormationEditSession.Draft[_FormationEditSession.SelectedUnit]
+        local monsterId = unit ~= nil and unit.monsterId or _FormationEditSession.SelectedMonsterId
         local option = nil
-        for _, entry in ipairs(self.Snapshot.options or {}) do
+        for _, entry in ipairs(_FormationEditSession.Snapshot.options or {}) do
             if entry[1] == monsterId then option = entry break end
         end
         self:RenderMonsterInfo("Editor/Intel", option)
@@ -650,7 +360,7 @@ script FormationLobby extends Logic
         local player = _UserService.LocalPlayer
         if not isvalid(card) or not card.EnabledInHierarchy or not isvalid(player)
             or player.CurrentMapName ~= "formationsim" or self._T.editorCollapsed
-            or self._T.confirmKind ~= "" or self.Snapshot.pending then
+            or _FormationEditSession.ConfirmKind ~= "" or _FormationEditSession.Snapshot.pending then
             self._T.hoverCard = nil
             self:SetEnabled("CardTooltip", false)
             return
@@ -673,7 +383,7 @@ script FormationLobby extends Logic
     @ExecSpace("ClientOnly")
     method string MonsterName(string monsterId)
         -- Display the formal catalog name while retaining stable IDs in save commands.
-        for _, option in ipairs(self.Snapshot.options or {}) do if option[1] == monsterId then return option[2] end end
+        for _, option in ipairs(_FormationEditSession.Snapshot.options or {}) do if option[1] == monsterId then return option[2] end end
         return monsterId
     end
 
@@ -706,20 +416,13 @@ script FormationLobby extends Logic
     end
 
     @ExecSpace("ClientOnly")
-    method boolean Saving()
-        -- A save is in flight while this client awaits its reply or the server reports a pending save.
-        return self._T.awaiting ~= nil or (self.Snapshot.pending == true and self.Snapshot.pendingKind == "SAVE")
-    end
-
-    @ExecSpace("ClientOnly")
-    method void RenderConfirmation()
+    method void RenderConfirmation(table view)
         -- Describe the pending switch or return and which of its three choices are currently possible.
-        local kind = self._T.confirmKind
-        local state = self.Snapshot
+        local state = _FormationEditSession.Snapshot
         local slotId = state.editSlot or 1
-        local awaiting = self._T.awaiting ~= nil
-        local switching = kind == "SWITCH"
-        local reason = self:SaveBlockReason()
+        local awaiting = view.awaiting
+        local switching = view.confirmKind == "SWITCH"
+        local reason = view.saveReason
         if awaiting then
             self:SetText("ExitConfirm/Window/Title", "儲存中…")
             self:SetText("ExitConfirm/Window/Message", "正在等待第 " .. tostring(slotId) .. " 組的儲存確認，完成前無法切換或離開。")
@@ -727,7 +430,7 @@ script FormationLobby extends Logic
             self:SetText("ExitConfirm/Window/Title", "要儲存變更嗎？")
             local message = "第 " .. tostring(slotId) .. " 組有尚未儲存的變更。"
             if reason ~= "" then message = message .. "\n" .. reason end
-            message = message .. (switching and ("\n選擇「不儲存切換」會捨棄這些變更，改看第 " .. tostring(self._T.confirmTarget) .. " 組。")
+            message = message .. (switching and ("\n選擇「不儲存切換」會捨棄這些變更，改看第 " .. tostring(view.confirmTarget) .. " 組。")
                 or "\n選擇「不儲存返回」會捨棄這些變更。")
             self:SetText("ExitConfirm/Window/Message", message)
         end
@@ -735,14 +438,14 @@ script FormationLobby extends Logic
         self:SetText("ExitConfirm/Window/ReturnWithoutSave", switching and "不儲存切換" or "不儲存返回")
         self:SetText("ExitConfirm/Window/ContinueEditing", "繼續編輯")
         self:SetButton("ExitConfirm/Window/SaveAndReturn", not awaiting and reason == "")
-        self:SetButton("ExitConfirm/Window/ReturnWithoutSave", not self:Busy())
+        self:SetButton("ExitConfirm/Window/ReturnWithoutSave", not view.busy)
         self:SetButton("ExitConfirm/Window/ContinueEditing", not awaiting)
     end
 
     @ExecSpace("ClientOnly")
-    method void RenderSavingNotice()
+    method void RenderSavingNotice(table view)
         -- A plain save blocks the screen with a small notice whose window hugs its text; confirmations keep their own modal.
-        local show = self:Saving() and self._T.confirmKind == ""
+        local show = view.saving and view.confirmKind == ""
         self:SetEnabled("SavingNotice", show)
         if not show then return end
         local message = "儲存中…"
@@ -765,11 +468,12 @@ script FormationLobby extends Logic
     method void Render()
         -- Present unsaved content, confirmed content and save state in both lobby and editor.
         if not isvalid(self.root) then return end
+        local view = _FormationEditSession:View()
         local mapName = self._T.mapName
         local inLobby = mapName == "formationlobby"
         local inEditor = mapName == "formationsim"
-        self:SetEnabled("ExitConfirm", self._T.confirmKind ~= "")
-        self:RenderSavingNotice()
+        self:SetEnabled("ExitConfirm", view.confirmKind ~= "")
+        self:RenderSavingNotice(view)
         self:SetEnabled("Lobby", inLobby)
         self:SetEnabled("Editor", inEditor and not self._T.editorCollapsed)
         self:SetEnabled("EditorControls", inEditor)
@@ -786,23 +490,23 @@ script FormationLobby extends Logic
         self:SetEnabled("ReturnLobby", not inLobby and not inEditor)
         self:SetText("EditorControls/Toggle", self._T.editorCollapsed and "展開面板" or "收合面板")
         self:SetEnabled("Status", inLobby)
-        local state = self.Snapshot
-        local load = state.loadState or "LOADING"
-        local writable = self:Writable()
-        local busy = self:Busy()
-        local dirty = self:IsDirty()
+        local state = _FormationEditSession.Snapshot
+        local load = view.loadState
+        local writable = view.writable
+        local busy = view.busy
+        local dirty = view.dirty
         local edit = self:Ui("Lobby/Edit")
         if isvalid(edit) then edit.ButtonComponent.Enable = writable and not state.pending end
-        local needsRetry = load == "ERROR" or load == "CONFLICT" or self._T.localUnconfirmed == true
-        local retryLabel = self:Unconfirmed() and "確認結果" or "重新讀取"
+        local needsRetry = view.needsRetry
+        local retryLabel = view.unconfirmed and "確認結果" or "重新讀取"
         for _, path in ipairs({ "Retry", "EditorControls/Retry" }) do
             self:SetText(path, retryLabel)
             self:SetButton(path, not state.pending)
         end
         self:SetEnabled("Retry", inLobby and needsRetry)
         self:SetEnabled("EditorControls/Retry", inEditor and needsRetry)
-        local saveReason = self:SaveBlockReason()
-        local activateReason = self:ActivateBlockReason()
+        local saveReason = view.saveReason
+        local activateReason = view.activateReason
         local text = "已儲存"
         if load == "LOADING" or load == "NOT_LOADED" then text = "讀取中" end
         if needsRetry then text = "需確認" end
@@ -813,8 +517,8 @@ script FormationLobby extends Logic
         -- Surface why the primary save is unavailable whenever it matters; "no change" needs no explanation.
         if inEditor and saveReason ~= "" and saveReason ~= "沒有變更" and (dirty or needsRetry or load ~= "READY") then note = saveReason end
         self:SetStatus(text .. "    " .. note)
-        self:RenderConfirmation()
-        local units = self.Draft
+        self:RenderConfirmation(view)
+        local units = _FormationEditSession.Draft
         local saved = state.saved
         local editSlot = state.editSlot or 1
         local summary = "尚未儲存任何隊伍"
@@ -855,41 +559,32 @@ script FormationLobby extends Logic
             local entry = units[index]
             local label = tostring(index) .. ". 空位"
             if entry ~= nil then label = tostring(index) .. ". " .. self:MonsterName(entry.monsterId) .. string.format("  (%.2f, %.2f)", entry.x, entry.y) end
-            if self.SelectedUnit == index then label = "> " .. label end
+            if _FormationEditSession.SelectedUnit == index then label = "> " .. label end
             self:SetText("Editor/Units/Unit" .. tostring(index), label)
-            self:SetButton("Editor/Units/Unit" .. tostring(index), self:CanEdit() and entry ~= nil)
+            self:SetButton("Editor/Units/Unit" .. tostring(index), view.canEdit and entry ~= nil)
         end
-        self:SetText("Editor/Save", self:Saving() and "儲存中…" or "儲存隊伍")
+        self:SetText("Editor/Save", view.saving and "儲存中…" or "儲存隊伍")
         self:SetText("Editor/Activate", "設為出戰")
-        local canSave = saveReason == "" and self._T.confirmKind == ""
+        local canSave = saveReason == "" and view.confirmKind == ""
         self:SetButton("Editor/Save", canSave)
         -- Usable save is gold; the native sprite swap still supplies hover, pressed and disabled looks.
         local saveButton = self:Ui("Editor/Save")
         if isvalid(saveButton) then saveButton.SpriteGUIRendererComponent.Color = canSave and Color(1, 0.86, 0.5, 1) or Color(1, 1, 1, 1) end
         -- 圖片由 Maker 調整，只切換顯示，不覆寫素材、大小或位置。
         self:SetEnabled("Editor/Save/SaveHint", canSave)
-        self:SetButton("Editor/Activate", activateReason == "" and self._T.confirmKind == "")
+        self:SetButton("Editor/Activate", activateReason == "" and view.confirmKind == "")
         for _, card in ipairs(self._T.cards or {}) do
-            local selected = card.monsterId == self.SelectedMonsterId
-            if isvalid(card.entity) then card.entity.ButtonComponent.Enable = self:CanEdit() or (writable and not busy) end
+            local selected = card.monsterId == _FormationEditSession.SelectedMonsterId
+            if isvalid(card.entity) then card.entity.ButtonComponent.Enable = view.canEdit or (writable and not busy) end
             if isvalid(card.frame) then card.frame:SetEnable(selected) end
             if isvalid(card.glow) then card.glow:SetEnable(selected) end
         end
     end
 
     @ExecSpace("ClientOnly")
-    method boolean HasValidActive()
-        -- Only confirmed server validity can enable a new queue request, regardless of the viewed group.
-        local state = self.Snapshot
-        local saved = state.saved
-        local info = saved ~= nil and state.slots ~= nil and state.slots[tostring(saved.activeSlot)] or nil
-        return (state.loadState == "READY" or state.loadState == "NEW") and info ~= nil and info.savedValid == true
-    end
-
-    @ExecSpace("ClientOnly")
     method void RenderLobbyPreview()
         -- Preview the viewed saved group while activation remains an independent server-owned choice.
-        local state = self.Snapshot
+        local state = _FormationEditSession.Snapshot
         local saved = state.saved
         local active = saved ~= nil and saved.activeSlot or 0
         local selected = state.editSlot or 1
@@ -956,73 +651,6 @@ script FormationLobby extends Logic
         end
         log("[VRF][LobbyPreview] active=" .. tostring(active) .. " savedCount=" .. tostring(#units) .. " editSlot=" .. tostring(state.editSlot) .. " ready=" .. tostring(ready)
             .. " scale=" .. tostring(scale) .. " portraitSize=" .. tostring(portraitSize))
-    end
-
-    @ExecSpace("ClientOnly")
-    method void RequestActivate()
-        -- Activation is a separate explicit action on the viewed group's saved content.
-        local reason = self:ActivateBlockReason()
-        if reason ~= "" then
-            self:SetStatus(reason)
-            return
-        end
-        local state = self.Snapshot
-        _FormationService:RequestActivate(state.editSlot, state.saved.slots[tostring(state.editSlot)].revision)
-    end
-
-    @ExecSpace("ClientOnly")
-    method boolean CanEdit()
-        -- World edits need a confirmed read, no outstanding request and no open confirmation.
-        return self:Writable() and not self:Busy() and self._T.confirmKind == "" and self.DraftSlot == self.Snapshot.editSlot
-    end
-
-    @ExecSpace("ClientOnly")
-    method string PreviewMode()
-        -- A mouse preview exists while a unit is being moved or a monster card is armed for placement.
-        if not self:CanEdit() then return "" end
-        if self.SelectedUnit > 0 and self.Draft[self.SelectedUnit] ~= nil then return "MOVE" end
-        if self.SelectedMonsterId ~= "" and self:HasOption(self.SelectedMonsterId) then return "PLACE" end
-        return ""
-    end
-
-    @ExecSpace("ClientOnly")
-    method boolean CanPlaceAt(number x, number y)
-        -- One rule set serves the mouse preview and the local edit; the server validates again on save.
-        local moving = self.SelectedUnit > 0 and self.Draft[self.SelectedUnit] ~= nil
-        if not moving and #self.Draft >= 6 then return false end
-        local others = {}
-        for index, other in ipairs(self.Draft) do
-            if not (moving and index == self.SelectedUnit) then table.insert(others, other) end
-        end
-        return _FormationMapLayout:CheckPlacement(x, y, others, "DEPLOY", nil).reason == ""
-    end
-
-    @ExecSpace("ClientOnly")
-    method boolean Place(number x, number y)
-        -- Add the armed monster or move the selected unit in the local copy only; nothing is sent to the server.
-        local mode = self:PreviewMode()
-        if mode == "" or not self:CanPlaceAt(x, y) then return false end
-        if mode == "MOVE" then
-            local unit = self.Draft[self.SelectedUnit]
-            if unit.x == x and unit.y == y then return true end
-            unit.x = x
-            unit.y = y
-        else
-            table.insert(self.Draft, { monsterId = self.SelectedMonsterId, x = x, y = y })
-        end
-        self.DraftVersion = self.DraftVersion + 1
-        self:Render()
-        return true
-    end
-
-    @ExecSpace("ClientOnly")
-    method void RemoveSelected()
-        -- Removing a unit changes only the local copy until an explicit successful save.
-        if not self:CanEdit() or self.SelectedUnit < 1 or self.SelectedUnit > #self.Draft then return end
-        table.remove(self.Draft, self.SelectedUnit)
-        self.SelectedUnit = 0
-        self.DraftVersion = self.DraftVersion + 1
-        self:Render()
     end
 
     @ExecSpace("ClientOnly")

@@ -25,12 +25,12 @@ local function assertAuthored()
     end
 end
 local ok, detail = pcall(function()
-    assert(await(function() return #(l.Snapshot.options or {}) > 0 and m._T.panel ~= nil
+    assert(await(function() return #(_FormationEditSession.Snapshot.options or {}) > 0 and m._T.panel ~= nil
         and not m._T.pending and not m.Busy end), 'catalog and screen ready')
     assert(_UserService.LocalPlayer.CurrentMapName == 'formationlobby', 'start in lobby')
     assert(l:Ui('Lobby').EnabledInHierarchy and not l:Ui('Editor').Enable
         and not l:Ui('EditorControls').Enable and not l:Ui('Editor/Catalog/Template').Enable, 'authoring preview hidden in play')
-    assert(#l._T.cards == #l.Snapshot.options, 'template is excluded from runtime cards')
+    assert(#l._T.cards == #_FormationEditSession.Snapshot.options, 'template is excluded from runtime cards')
     for _, path in ipairs({'Status','Retry','ReturnLobby','EditorControls/Status','EditorControls/Retry','EditorControls/Toggle'}) do
         keepAuthored(l:Ui(path))
     end
@@ -42,7 +42,7 @@ local ok, detail = pcall(function()
     end
     nameTemplate.TextGUIRendererComponent.FontSize = originalFont + 3
     l._T.optionsKey = ''
-    l:BuildOptions(l.Snapshot.options)
+    l:BuildOptions(_FormationEditSession.Snapshot.options)
     click('Lobby/Edit')
     assert(await(function() return _UserService.LocalPlayer.CurrentMapName == 'formationsim'
         and m._T.panel == nil and not m.root.Enable end), 'matchmaking hidden in the editor on map transition')
@@ -85,7 +85,7 @@ for _, entry in ipairs(changed) do
 end
 nameTemplate.TextGUIRendererComponent.FontSize = originalFont
 l._T.optionsKey = ''
-l:BuildOptions(l.Snapshot.options)
+l:BuildOptions(_FormationEditSession.Snapshot.options)
 m.State, m.FixedSummary, m.Message = originalState, originalSummary, originalMessage
 m:SelectScreen(_UserService.LocalPlayer.CurrentMapName)
 l:Render()

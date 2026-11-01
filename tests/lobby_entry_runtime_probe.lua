@@ -23,7 +23,7 @@ assert(not player.PlayerControllerComponent.Enable, "simulation retains spectato
 assert(_FormationLobby:Ui("Editor").EnabledInHierarchy, "editor UI")
 log("[VRF][LobbyEntryProbe] simulation travel/visibility/control PASS")
 
-_FormationLobby:RequestReturnToLobby()
+_FormationLobby:Run(_FormationEditSession:RequestReturnToLobby())
 wait(2)
 assert(player.CurrentMapName == "formationlobby", "return to lobby")
 assert(not player.Visible and not player.PlayerControllerComponent.Enable, "lobby state restored")

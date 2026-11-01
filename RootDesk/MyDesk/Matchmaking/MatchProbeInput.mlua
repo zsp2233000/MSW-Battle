@@ -107,9 +107,9 @@ script MatchProbeInput extends Logic
         -- Identify start, cancellation and return commands with the observed attempt generation.
         if self.Busy or self._T.pending or self.State == "BATTLE" then return end
         if self.State == "IDLE" then
-            local formation = _FormationLobby.Snapshot
+            local formation = _FormationEditSession.Snapshot
             if (formation.loadState ~= "READY" and formation.loadState ~= "NEW") or formation.pending then return end
-            if not _FormationLobby:HasValidActive() then
+            if not _FormationEditSession:HasValidActive() then
                 if _UserService.LocalPlayer.CurrentMapName == "formationlobby" then _FormationLobby:Travel("formationsim") end
                 return
             end
@@ -138,7 +138,7 @@ script MatchProbeInput extends Logic
         local elapsed = self.Started > 0 and math.max(0, math.floor((DateTime.UtcNow.Elapsed - self.Started) / 1000)) or 0
         local text = "選好已儲存的出戰隊伍後，即可開始配對"
         local label = "開始配對"
-        local formation = _FormationLobby.Snapshot
+        local formation = _FormationEditSession.Snapshot
         local idleBlocked = false
         if self.State == "QUEUED" then
             text = "正在尋找對手 · 已等候 " .. tostring(elapsed) .. " 秒"
@@ -206,7 +206,7 @@ script MatchProbeInput extends Logic
             elseif formation.pending then
                 text = "正在儲存或設定出戰，請稍候。"
                 label = "處理中…"
-            elseif not _FormationLobby:HasValidActive() then
+            elseif not _FormationEditSession:HasValidActive() then
                 text = "請先放置 1～6 個單位，儲存後設為出戰。"
                 local inLobby = _UserService.LocalPlayer.CurrentMapName == "formationlobby"
                 label = inLobby and "前往整備" or "請先儲存並設為出戰"

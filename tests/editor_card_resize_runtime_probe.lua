@@ -4,7 +4,7 @@ for _ = 1, 100 do if #(l._T.cards or {}) > 0 then break end wait(.1) end
 local layout = l:Ui('Editor/Catalog').ScrollLayoutGroupComponent
 local original = layout.CellSize
 local map = _UserService.LocalPlayer.CurrentMapName
-local selected = l.SelectedMonsterId
+local selected = _FormationEditSession.SelectedMonsterId
 local function close(a,b) return math.abs(a-b)<.05 end
 local ok, detail = pcall(function()
     l:Travel('formationsim')
@@ -47,17 +47,17 @@ local ok, detail = pcall(function()
     end
     local card = l._T.cards[1]
     card.entity:SendEvent(ButtonClickEvent())
-    assert(l.SelectedMonsterId==card.monsterId,'selection works')
+    assert(_FormationEditSession.SelectedMonsterId==card.monsterId,'selection works')
     layout.CellSize = Vector2(181,263)
     l._T.optionsKey = ''
-    l:BuildOptions(l.Snapshot.options)
+    l:BuildOptions(_FormationEditSession.Snapshot.options)
     wait(.3)
     l._T.cards[1].entity:GetChildByName('MonsterName').UITransformComponent:GetWorldCorners()
     assert(close(layout.CellSize.x,181),'rebuild preserves authored cell size')
     assert(close(l._T.cards[1].entity:GetChildByName('MonsterName').UITransformComponent.RectSize.x,157),'rebuilt content fits')
 end)
 layout.CellSize = original
-l.SelectedMonsterId = selected
+_FormationEditSession.SelectedMonsterId = selected
 l:Render()
 if _UserService.LocalPlayer.CurrentMapName ~= map then l:Travel(map) end
 log(ok and '[VRF][CardResize] PASS 149x216 through 213x309, readable art, separated labels, selection and rebuild'

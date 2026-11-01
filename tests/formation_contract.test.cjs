@@ -110,10 +110,13 @@ test('#50 unsaved content lives only in the client, never in server sessions, st
   assert.doesNotMatch(handoff, /drafts|autoSave|\.notice/i, 'handoffs carry confirmed content only');
   assert.doesNotMatch(read('RootDesk/MyDesk/Matchmaking/MatchProbe.mlua'), /autoSave|ticket\.notice/i);
   assert.doesNotMatch(read('RootDesk/MyDesk/Matchmaking/MatchProbeInput.mlua'), /AutoSaveNotice|EditorMatch|formationsim = /, 'no editor matchmaking screen');
-  assert.match(lobby, /property table Draft = \{\}/, 'the client holds its own copy');
-  assert.doesNotMatch(lobby, /_FormationService:RequestDraft|_DataStorageService/, 'edits never reach the server before an explicit save');
+  const session = read('RootDesk/MyDesk/Formations/FormationEditSession.mlua');
+  assert.match(session, /property table Draft = \{\}/, 'the client holds its own copy');
+  for (const source of [lobby, session]) assert.doesNotMatch(source, /_FormationService:RequestDraft|_DataStorageService/, 'edits never reach the server before an explicit save');
+  // The edit session never calls a service; it only returns the commands the lobby carries out.
+  assert.doesNotMatch(session, /_FormationService|_DataStorageService/, 'the edit session stays free of server calls');
   // Local edits must not call any service: Place and RemoveSelected stay inside the client.
-  for (const name of ['Place', 'RemoveSelected']) assert.doesNotMatch(method(lobby, name), /_FormationService/, name);
+  for (const name of ['Place', 'RemoveSelected']) assert.doesNotMatch(method(session, name), /_FormationService/, name);
 });
 
 test('#50 saving submits one group with identity from the RPC sender and a version condition', () => {
@@ -131,22 +134,23 @@ test('#50 saving submits one group with identity from the RPC sender and a versi
 
 test('#50 client states: dirty by content comparison, three-way confirmation, no stale actions', () => {
   const lobby = read('RootDesk/MyDesk/Formations/FormationLobby.mlua');
-  assert.match(method(lobby, 'IsDirty'), /UnitsEqual\(self\.Draft, self:CurrentSavedUnits\(\)\)/, 'exact restoration clears the marker');
-  assert.match(method(lobby, 'SaveBlockReason'), /沒有變更/);
-  assert.match(method(lobby, 'DraftInvalidReason'), /空隊伍無法儲存/);
+  const session = read('RootDesk/MyDesk/Formations/FormationEditSession.mlua');
+  assert.match(method(session, 'IsDirty'), /UnitsEqual\(self\.Draft, self:CurrentSavedUnits\(\)\)/, 'exact restoration clears the marker');
+  assert.match(method(session, 'SaveBlockReason'), /沒有變更/);
+  assert.match(method(session, 'DraftInvalidReason'), /空隊伍無法儲存/);
   // Only the reply carrying the outstanding request id may run the deferred switch or return.
-  const resolve = method(lobby, 'ResolveResult');
+  const resolve = method(session, 'ResolveResult');
   assert.match(resolve, /result\.requestId ~= awaiting\.id/);
   assert.match(resolve, /result\.status == "OK"[\s\S]*CompleteAction/);
-  assert.match(method(lobby, 'UpdateAwaiting'), /self\._T\.awaiting = nil/, 'a lost reply drops the pending action');
+  assert.match(method(session, 'Tick'), /self\._T\.awaiting = nil/, 'a lost reply drops the pending action');
   const confirm = method(lobby, 'RenderConfirmation');
   for (const label of ['儲存並切換', '不儲存切換', '儲存並返回', '不儲存返回', '繼續編輯', '儲存中…']) assert.ok(confirm.includes(label), label);
-  assert.match(method(lobby, 'RequestSwitchSlot'), /Unconfirmed\(\)/, 'no switching while a write is unconfirmed');
-  assert.match(method(lobby, 'RequestReturnToLobby'), /Unconfirmed\(\)/, 'no leaving while a write is unconfirmed');
+  assert.match(method(session, 'RequestSwitchSlot'), /Unconfirmed\(\)/, 'no switching while a write is unconfirmed');
+  assert.match(method(session, 'RequestReturnToLobby'), /Unconfirmed\(\)/, 'no leaving while a write is unconfirmed');
 });
 
 test('#50 player-facing text never says draft or currently-editing', () => {
-  for (const file of ['FormationLobby', 'FormationService', 'FormationHandoff']) {
+  for (const file of ['FormationLobby', 'FormationEditSession', 'FormationService', 'FormationHandoff']) {
     const strings = [...read(`RootDesk/MyDesk/Formations/${file}.mlua`).matchAll(/"([^"\n]*[一-鿿][^"\n]*)"/g)].map(m => m[1]);
     for (const text of strings) assert.doesNotMatch(text, /草稿|正在編輯/, `${file}: ${text}`);
   }
@@ -229,8 +233,9 @@ test('#50 review fixes: no silent drops while a request is outstanding', () => {
   const lobby = read('RootDesk/MyDesk/Formations/FormationLobby.mlua');
   const service = read('RootDesk/MyDesk/Formations/FormationService.mlua');
   // The server ignores a group switch while a write is pending, so discarding must not run then.
-  assert.match(method(lobby, 'ConfirmDiscard'), /self:Busy\(\)\s*then return end/);
-  assert.match(method(lobby, 'RenderConfirmation'), /ReturnWithoutSave", not self:Busy\(\)/);
+  const session = read('RootDesk/MyDesk/Formations/FormationEditSession.mlua');
+  assert.match(method(session, 'ConfirmDiscard'), /self:Busy\(\)\s*then return nil end/);
+  assert.match(method(lobby, 'RenderConfirmation'), /ReturnWithoutSave", not view\.busy/);
   // A request that cannot be correlated is answered, not dropped.
   assert.match(method(service, 'SaveForUser'), /#requestId > 64 then self:Publish\(record\) return end/);
 });
@@ -254,18 +259,19 @@ test('#50 card frame looks are authored in the template, not hard-coded by Rende
 test('#50 mouse preview and local edits share one rule set and keep selection rules', () => {
   const lobby = read('RootDesk/MyDesk/Formations/FormationLobby.mlua');
   const input = read('RootDesk/MyDesk/Formations/FormationMapInput.mlua');
-  const place = method(lobby, 'CanPlaceAt');
+  const session = read('RootDesk/MyDesk/Formations/FormationEditSession.mlua');
+  const place = method(session, 'CanPlaceAt');
   assert.match(place, /#self\.Draft >= 6/, 'six-unit cap');
   assert.match(place, /_FormationMapLayout:CheckPlacement\(x, y, others, "DEPLOY", nil\)/, 'deployment zone, terrain and shared 0.3 spacing come from one rule');
   assert.match(place, /moving and index == self\.SelectedUnit/, 'a moving unit is excluded from its own spacing check');
-  assert.match(method(input, 'ShowGhost'), /lobby:CanPlaceAt\(x, y\)/, 'preview uses the same rule as the edit');
+  assert.match(method(input, 'ShowGhost'), /_FormationEditSession:CanPlaceAt\(x, y\)/, 'preview uses the same rule as the edit');
   assert.match(method(input, 'ShowGhost'), /Color\(1, 0\.25, 0\.25, 0\.55\)/, 'illegal spots turn red');
   assert.match(method(input, 'ShowGhost'), /Color\(1, 1, 1, 0\.55\)/, 'legal spots keep the original colour');
   assert.match(method(input, 'UpdateGhost'), /IsPointerOverUI\(\)/, 'hidden over UI');
   // An armed preview owns the click: it must never fall through to selecting a nearby unit.
   const click = method(input, 'HandleWorldClick');
-  assert.ok(click.indexOf('lobby:Place') < click.indexOf('UnitAt'), 'placement is attempted before any selection');
-  assert.match(click, /PreviewMode\(\) ~= ""\s*then\s*lobby:Place\([^)]*\)\s*return\s*end/);
+  assert.ok(click.indexOf('_FormationEditSession:Place') < click.indexOf('UnitAt'), 'placement is attempted before any selection');
+  assert.match(click, /PreviewMode\(\) ~= ""\s*then\s*if _FormationEditSession:Place\([^)]*\) then lobby:Render\(\) end\s*return\s*end/);
   // Right-click cancels only the preview; removal needs no preview.
   const right = method(input, 'RightClick');
   assert.match(right, /mode == "MOVE"[\s\S]*return[\s\S]*mode == "PLACE"[\s\S]*return[\s\S]*HandleWorldRemoval/);
@@ -276,7 +282,7 @@ test('#50 mouse preview and local edits share one rule set and keep selection ru
   assert.match(hover, /Scale = Vector3\(1, 1, 1\)/, 'the previous unit is restored');
   assert.match(method(input, 'HandleRightClick'), /IsPointerOverUI\(\)\s*then return end/, 'a click on UI never reaches the world');
   assert.match(method(input, 'HandleWorldRemoval'), /PreviewMode\(\) ~= ""/);
-  assert.match(method(lobby, 'PreviewMode'), /CanEdit\(\)/, 'no preview while pending, confirming or unconfirmed');
+  assert.match(method(session, 'PreviewMode'), /CanEdit\(\)/, 'no preview while pending, confirming or unconfirmed');
   const model = require('../.agents/skills/msw-general/scripts/model/msw_model_builder.cjs').ModelBuilder.snapshot('RootDesk/MyDesk/Models/MapObjects/FormationPreview.model');
   assert.ok(model.components.every(c => !/Trigger|Collider|Body|TouchReceive/.test(c)), 'the preview model cannot be a target or collide');
 });

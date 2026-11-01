@@ -46,14 +46,13 @@ script FormationMapInput extends Component
         end
         self._T.inMap = true
         self:LockSpectator()
-        local lobby = _FormationLobby
-        local snapshot = lobby.Snapshot
-        if snapshot.saved == nil or lobby.DraftSlot ~= snapshot.editSlot then
+        local snapshot = _FormationEditSession.Snapshot
+        if snapshot.saved == nil or _FormationEditSession.DraftSlot ~= snapshot.editSlot then
             self:HideGhost()
             return
         end
-        if self._T.previewSlot ~= lobby.DraftSlot or self.PreviewVersion ~= lobby.DraftVersion or self.PreviewCount ~= #lobby.Draft or self._T.optionCount ~= #(snapshot.options or {}) then self:SyncPreviews() end
-        local selected = lobby.SelectedUnit
+        if self._T.previewSlot ~= _FormationEditSession.DraftSlot or self.PreviewVersion ~= _FormationEditSession.DraftVersion or self.PreviewCount ~= #_FormationEditSession.Draft or self._T.optionCount ~= #(snapshot.options or {}) then self:SyncPreviews() end
+        local selected = _FormationEditSession.SelectedUnit
         if self._T.selected ~= selected then
             self:ClearSelectionEffect()
             self._T.selected = selected
@@ -70,9 +69,8 @@ script FormationMapInput extends Component
     @ExecSpace("ClientOnly")
     method void UpdateHover()
         -- The unit under the cursor brightens and grows slightly; the cursor never reaches a unit through the UI.
-        local lobby = _FormationLobby
         local index = 0
-        if lobby:CanEdit() and not _InputService:IsPointerOverUI() then
+        if _FormationEditSession:CanEdit() and not _InputService:IsPointerOverUI() then
             local world = _UILogic:ScreenToWorldPosition(_InputService:GetCursorPosition())
             index = self:UnitAt(Vector3(world.x, world.y, 0))
         end
@@ -82,7 +80,7 @@ script FormationMapInput extends Component
     @ExecSpace("ClientOnly")
     method void ApplyHover(integer index)
         -- Clicks while placing never select a unit, so every hover path must clear the selection cue.
-        if _FormationLobby:PreviewMode() == "PLACE" then index = 0 end
+        if _FormationEditSession:PreviewMode() == "PLACE" then index = 0 end
         local previous = self._T.hoverIndex or 0
         if previous == index then return end
         local old = self._T.previews[previous]
@@ -141,14 +139,13 @@ script FormationMapInput extends Component
     @ExecSpace("ClientOnly")
     method void SyncPreviews()
         -- Upsert local sprites at exact world positions from the client's current content.
-        local lobby = _FormationLobby
-        local draft = lobby.Draft
-        local options = lobby.Snapshot.options or {}
+        local draft = _FormationEditSession.Draft
+        local options = _FormationEditSession.Snapshot.options or {}
         self:ClearSelectionEffect()
         -- Entities may be reused or removed below; the next frame re-applies the hover.
         self:ApplyHover(0)
-        self.PreviewVersion = lobby.DraftVersion
-        self._T.previewSlot = lobby.DraftSlot
+        self.PreviewVersion = _FormationEditSession.DraftVersion
+        self._T.previewSlot = _FormationEditSession.DraftSlot
         self._T.optionCount = #options
         for index, unit in ipairs(draft) do
             local entity = self._T.previews[index]
@@ -192,7 +189,7 @@ script FormationMapInput extends Component
     @ExecSpace("ClientOnly")
     method void UpdateGhost()
         -- Show the armed monster at the cursor: original colour when the spot is legal, red when it is not.
-        local mode = _FormationLobby:PreviewMode()
+        local mode = _FormationEditSession:PreviewMode()
         if mode == "" or _InputService:IsPointerOverUI() then
             self:HideGhost()
             return
@@ -205,18 +202,17 @@ script FormationMapInput extends Component
     method any ShowGhost(string mode, number x, number y)
         -- Place the preview at a world position; the cursor path and the verification probes share this.
         -- The result is read inside the same call, so a probe never races the per-frame cursor update.
-        local lobby = _FormationLobby
-        local monsterId = lobby.SelectedMonsterId
-        if mode == "MOVE" and lobby.Draft[lobby.SelectedUnit] ~= nil then monsterId = lobby.Draft[lobby.SelectedUnit].monsterId end
+        local monsterId = _FormationEditSession.SelectedMonsterId
+        if mode == "MOVE" and _FormationEditSession.Draft[_FormationEditSession.SelectedUnit] ~= nil then monsterId = _FormationEditSession.Draft[_FormationEditSession.SelectedUnit].monsterId end
         local ruid = nil
-        for _, option in ipairs(lobby.Snapshot.options or {}) do
+        for _, option in ipairs(_FormationEditSession.Snapshot.options or {}) do
             if option[1] == monsterId then ruid = option[3] end
         end
         if ruid == nil then
             self:HideGhost()
             return { visible = false, legal = false, mode = "" }
         end
-        local legal = lobby:CanPlaceAt(x, y)
+        local legal = _FormationEditSession:CanPlaceAt(x, y)
         local ghost = self._T.ghost
         if not isvalid(ghost) then
             -- A separate entity from the placed previews, so it never counts as a unit, collider or target.
@@ -252,7 +248,7 @@ script FormationMapInput extends Component
         -- Pick the nearest unit within a small world-space click radius.
         local nearest = 0
         local distance = 0.25
-        for index, unit in ipairs(_FormationLobby.Draft) do
+        for index, unit in ipairs(_FormationEditSession.Draft) do
             local squared = (unit.x - position.x)^2 + (unit.y - position.y)^2
             if squared <= distance then distance = squared nearest = index end
         end
@@ -264,14 +260,14 @@ script FormationMapInput extends Component
         -- An armed preview owns the click; only without one may a click select a unit on the field.
         if not self:IsEditing() or position == nil then return end
         local lobby = _FormationLobby
-        if not lobby:CanEdit() then return end
-        if lobby:PreviewMode() ~= "" then
-            lobby:Place(position.x, position.y)
+        if not _FormationEditSession:CanEdit() then return end
+        if _FormationEditSession:PreviewMode() ~= "" then
+            if _FormationEditSession:Place(position.x, position.y) then lobby:Render() end
             return
         end
         local index = self:UnitAt(position)
         if index > 0 then
-            lobby.SelectedUnit = index
+            _FormationEditSession.SelectedUnit = index
             lobby:Render()
         end
     end
@@ -281,11 +277,11 @@ script FormationMapInput extends Component
         -- Right-click removal applies only when no preview is armed.
         if not self:IsEditing() or position == nil then return end
         local lobby = _FormationLobby
-        if not lobby:CanEdit() or lobby:PreviewMode() ~= "" then return end
+        if not _FormationEditSession:CanEdit() or _FormationEditSession:PreviewMode() ~= "" then return end
         local index = self:UnitAt(position)
         if index < 1 then return end
-        lobby.SelectedUnit = index
-        lobby:RemoveSelected()
+        _FormationEditSession.SelectedUnit = index
+        if _FormationEditSession:RemoveSelected() then lobby:Render() end
     end
 
     @ExecSpace("ClientOnly")
@@ -310,9 +306,9 @@ script FormationMapInput extends Component
     method void RightClick(number x, number y)
         -- The right-click rule at a world position, shared by the real handler and the verification probes.
         local lobby = _FormationLobby
-        local mode = lobby:PreviewMode()
+        local mode = _FormationEditSession:PreviewMode()
         if mode == "MOVE" then
-            lobby.SelectedUnit = 0
+            _FormationEditSession.SelectedUnit = 0
             self._T.selected = 0
             self:ClearSelectionEffect()
             lobby:Render()
@@ -320,7 +316,7 @@ script FormationMapInput extends Component
             return
         end
         if mode == "PLACE" then
-            lobby.SelectedMonsterId = ""
+            _FormationEditSession.SelectedMonsterId = ""
             lobby:Render()
             self:HideGhost()
             log("[VRF][FormationSelection] cancelled=right-click place")

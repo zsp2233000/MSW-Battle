@@ -6,7 +6,7 @@ local function await(predicate)
 end
 local function click(path) l:Ui(path):SendEvent(ButtonClickEvent()) end
 local ok, detail = pcall(function()
-    assert(await(function() return #(l.Snapshot.options or {}) > 0 end), 'catalog loaded')
+    assert(await(function() return #(_FormationEditSession.Snapshot.options or {}) > 0 end), 'catalog loaded')
     if _UserService.LocalPlayer.CurrentMapName == 'formationlobby' then click('Lobby/Edit') end
     assert(await(function() return _UserService.LocalPlayer.CurrentMapName == 'formationsim' end), 'formal editor entered')
     wait(0.3)
@@ -18,10 +18,10 @@ local ok, detail = pcall(function()
             and -rect.anchoredPosition.y + rect.RectSize.y <= 1080, path..' remains inside the reference screen')
     end
     local kinds = { TANK='坦克', ASSAULT='戰士', SHOOTER='射手' }
-    for index, option in ipairs(l.Snapshot.options) do
+    for index, option in ipairs(_FormationEditSession.Snapshot.options) do
         click('Editor/Catalog/Monster' .. tostring(index))
-        assert(l.SelectedMonsterId == option[1] and l.SelectedUnit == 0, 'card selects stable MonsterId')
-        for otherIndex, other in ipairs(l.Snapshot.options) do
+        assert(_FormationEditSession.SelectedMonsterId == option[1] and _FormationEditSession.SelectedUnit == 0, 'card selects stable MonsterId')
+        for otherIndex, other in ipairs(_FormationEditSession.Snapshot.options) do
             local card = l:Ui('Editor/Catalog/Monster' .. tostring(otherIndex))
             local selected = other[1] == option[1]
             assert(card.SpriteGUIRendererComponent.ImageRUID.DataId == (selected and '359082ed43c44cc1a597b00b61bafa36' or 'dc14abffdb9f400e819f61b9ab7e6805'), 'only selected card uses the gold base frame')
@@ -45,11 +45,11 @@ local ok, detail = pcall(function()
         'compact intel omits portrait and heading')
     assert(l:Ui('Editor/Intel').UITransformComponent.RectSize.y <= 160, 'compact intel height')
     assert(l:Ui('Editor/Catalog').ScrollLayoutGroupComponent.ConstraintCount == 4, 'four catalog columns')
-    local units = l.Draft
+    local units = _FormationEditSession.Draft
     if #units > 0 then
         local unit = units[1]
         _UserService.LocalPlayer.CurrentMap:GetComponent('FormationMapInput'):HandleWorldClick(Vector3(unit.x, unit.y, 0))
-        assert(l.SelectedUnit == 1, 'world unit selection')
+        assert(_FormationEditSession.SelectedUnit == 1, 'world unit selection')
         assert(l:Ui('Editor/Intel/Name').TextGUIRendererComponent.Text == l:MonsterName(unit.monsterId), 'intel follows selected unit')
     end
     assert(not l:Ui('Editor/Units').Enable, 'technical coordinates start collapsed')

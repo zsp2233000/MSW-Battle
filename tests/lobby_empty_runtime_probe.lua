@@ -6,9 +6,9 @@ end
 local l = _FormationLobby
 local ok, detail = pcall(function()
     _FormationService:RequestRetryLoad()
-    assert(await(function() return l.Snapshot.loadState == 'NEW' end), 'missing data is a new player')
+    assert(await(function() return _FormationEditSession.Snapshot.loadState == 'NEW' end), 'missing data is a new player')
     wait(0.2)
-    assert(l.Snapshot.saved.activeSlot == 0, 'no active formation')
+    assert(_FormationEditSession.Snapshot.saved.activeSlot == 0, 'no active formation')
     assert(_MatchProbeInput.action.TextGUIRendererComponent.Text == '前往整備' and _MatchProbeInput.action.ButtonComponent.Enable, 'new player main action')
     assert(l:Ui('Lobby/Command/Field/Empty').EnabledInHierarchy, 'empty preview explains preparation')
     for index = 1, 6 do assert(not l:Ui('Lobby/Command/Field/Unit'..tostring(index)).Enable, 'no fake roster') end

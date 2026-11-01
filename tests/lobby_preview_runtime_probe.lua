@@ -6,13 +6,13 @@ end
 local lobby = _FormationLobby
 local function click(path) lobby:Ui(path):SendEvent(ButtonClickEvent()) end
 local ok, detail = pcall(function()
-    assert(await(function() return lobby.Snapshot.loadState == 'READY' or lobby.Snapshot.loadState == 'NEW' end), 'formation load')
+    assert(await(function() return _FormationEditSession.Snapshot.loadState == 'READY' or _FormationEditSession.Snapshot.loadState == 'NEW' end), 'formation load')
     assert(_UserService.LocalPlayer.CurrentMapName == 'formationlobby', 'start in lobby')
     local field = lobby:Ui('Lobby/Command/Field')
     assert(isvalid(field) and field.EnabledInHierarchy, 'saved active formation preview is visible')
-    local originalSlot = lobby.Snapshot.editSlot
-    local active = lobby.Snapshot.saved.activeSlot
-    local expected = lobby.Snapshot.saved.slots[tostring(originalSlot)].units
+    local originalSlot = _FormationEditSession.Snapshot.editSlot
+    local active = _FormationEditSession.Snapshot.saved.activeSlot
+    local expected = _FormationEditSession.Snapshot.saved.slots[tostring(originalSlot)].units
     for index = 1, 6 do
         local marker = lobby:Ui('Lobby/Command/Field/Unit' .. tostring(index))
         assert(isvalid(marker), 'authored preview marker')
@@ -37,9 +37,9 @@ local ok, detail = pcall(function()
     end
     for slot = 1, 5 do
         click('Lobby/Slots/Slot' .. tostring(slot))
-        assert(await(function() return lobby.Snapshot.editSlot == slot end), 'connected selector')
-        assert(lobby.Snapshot.saved.activeSlot == active, 'selection never activates')
-        local selectedUnits = lobby.Snapshot.saved.slots[tostring(slot)].units
+        assert(await(function() return _FormationEditSession.Snapshot.editSlot == slot end), 'connected selector')
+        assert(_FormationEditSession.Snapshot.saved.activeSlot == active, 'selection never activates')
+        local selectedUnits = _FormationEditSession.Snapshot.saved.slots[tostring(slot)].units
         assert(string.find(lobby:Ui('Lobby/Summary').TextGUIRendererComponent.Text, '第 ' .. tostring(slot) .. ' 組'), 'preview identifies selected group')
         local label = lobby:Ui('Lobby/Slots/Slot' .. tostring(slot)).TextGUIRendererComponent.Text
         assert(string.find(label, '編輯'), 'editing label')
@@ -47,7 +47,7 @@ local ok, detail = pcall(function()
             local marker = lobby:Ui('Lobby/Command/Field/Unit' .. tostring(index))
             assert(marker.Enable == (selectedUnits[index] ~= nil), 'selection changes preview to that group')
             if selectedUnits[index] ~= nil then
-                for _, option in ipairs(lobby.Snapshot.options) do
+                for _, option in ipairs(_FormationEditSession.Snapshot.options) do
                     if option[1] == selectedUnits[index].monsterId then
                         assert(marker:GetChildByName('Portrait', false).SpriteGUIRendererComponent.ImageRUID.DataId == 'thumbnail://' .. option[3], 'selected group monster identity')
                     end
@@ -62,7 +62,7 @@ local ok, detail = pcall(function()
     end
     wait(0.4) -- This is a single selection, not the new double-click shortcut.
     click('Lobby/Slots/Slot' .. tostring(originalSlot))
-    assert(await(function() return lobby.Snapshot.editSlot == originalSlot end), 'restore selection')
+    assert(await(function() return _FormationEditSession.Snapshot.editSlot == originalSlot end), 'restore selection')
     click('Lobby/Edit')
     assert(await(function() return _UserService.LocalPlayer.CurrentMapName == 'formationsim' end), 'connected preparation entry')
     assert(not field.EnabledInHierarchy, 'lobby preview hidden in simulation')
