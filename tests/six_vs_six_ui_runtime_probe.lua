@@ -152,8 +152,8 @@ local function boot(attempt)
     for index, card in ipairs(adapter.optionCards) do
         local option = adapter.optionData[index]
         cards[card.monsterId] = card
-        check(card.entity:GetChildByName("MonsterName", true).TextGUIRendererComponent.Text == option[2]
-            and card.monsterId == option[1], "displayed name and MonsterId come from the same catalog row")
+        check(card.entity:GetChildByName("MonsterName", true).TextGUIRendererComponent.Text == option.monsterName
+            and card.monsterId == option.monsterId, "displayed name and MonsterId come from the same catalog row")
     end
     check(adapter.session.Phase == "DEPLOYMENT" and adapter.session.PlayerAlive == 0, "UI flow begins with zero deployed units")
     adapter.startButton:SendEvent(ButtonClickEvent(adapter.startButton))

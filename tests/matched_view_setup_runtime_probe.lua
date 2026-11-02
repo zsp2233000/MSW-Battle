@@ -9,7 +9,7 @@ local ok, detail = pcall(function()
         local slot = record.saved.slots[tostring(record.saved.activeSlot)]
         assert(slot ~= nil and #slot.units == 6, "save and activate a six-unit formation first")
     end
-    for _, user in ipairs(users) do _MatchProbe:QueueForUser(user.PlayerComponent.UserId) end
+    for _, user in ipairs(users) do _MatchFlow:QueueForUser(user.PlayerComponent.UserId) end
     log("[VRF][BattleView] SETUP_DISPATCHED verify admission and RESULT_PASS in the matched instance")
 end)
 if not ok then log("[VRF][BattleView] SETUP_FAIL " .. tostring(detail)) end

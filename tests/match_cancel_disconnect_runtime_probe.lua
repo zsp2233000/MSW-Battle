@@ -7,16 +7,16 @@ local ok, detail = pcall(function()
     end
     assert(isvalid(peer) and peer.CurrentMapName == 'formationlobby', 'dedicated peer in lobby')
     local id, profile = peer.PlayerComponent.UserId, peer.PlayerComponent.ProfileCode
-    _MatchProbe:QueueForUser(id)
-    _MatchProbe:ConfigureMakerCancelFaults(1, 0)
-    _MatchProbe:Depart(id)
+    _MatchFlow:QueueForUser(id)
+    _MatchFlow:ConfigureMakerCancelFaults(1, 0)
+    _MatchFlow:Depart(id)
     local ticket = _FormationHandoff:Read(profile)
     assert(ticket ~= nil and ticket.data.state == 'QUEUED', 'failed disconnect cancellation cannot persist a cancelled tombstone')
-    assert(_MatchProbe:Player(id) == nil, 'departed participant is unavailable')
+    assert(_MatchFlow:Player(id) == nil, 'departed participant is unavailable')
     -- Finish the isolated fixture only after a confirmed retry at the same cancellation boundary.
-    assert(_MatchProbe:CancelMatching(profile), 'cleanup cancellation confirmed')
+    assert(_MatchFlow:CancelMatching(profile), 'cleanup cancellation confirmed')
     assert(_FormationHandoff:Close(id, ticket, 'CANCELLED'), 'cleanup tombstone confirmed')
     log('[VRF][Cancel52Disconnect] PASS failed cancellation preserves durable queue; confirmed cleanup')
 end)
-_MatchProbe:ConfigureMakerCancelFaults(0, 0)
+_MatchFlow:ConfigureMakerCancelFaults(0, 0)
 if not ok then log('[VRF][Cancel52Disconnect] FAIL ' .. tostring(detail)) end

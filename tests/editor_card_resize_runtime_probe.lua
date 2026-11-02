@@ -1,6 +1,6 @@
 -- Client: native grid dimensions drive the authored card subtree without runtime resizing code.
 local l = _FormationLobby
-for _ = 1, 100 do if #(l._T.cards or {}) > 0 then break end wait(.1) end
+for _ = 1, 100 do if #(_FormationCatalogCards._T.cards or {}) > 0 then break end wait(.1) end
 local layout = l:Ui('Editor/Catalog').ScrollLayoutGroupComponent
 local original = layout.CellSize
 local map = _UserService.LocalPlayer.CurrentMapName
@@ -14,14 +14,14 @@ local ok, detail = pcall(function()
         layout.CellSize = size
         for _ = 1, 30 do
             local ready = true
-            for _, entry in ipairs(l._T.cards) do
+            for _, entry in ipairs(_FormationCatalogCards._T.cards) do
                 entry.entity.UITransformComponent:GetWorldCorners()
                 if not close(entry.entity.UITransformComponent.RectSize.x,size.x) then ready = false end
             end
             if ready then break end
             wait(.1)
         end
-        for _, entry in ipairs(l._T.cards) do
+        for _, entry in ipairs(_FormationCatalogCards._T.cards) do
             local card = entry.entity
             card:GetChildByName('CardSign').UITransformComponent:GetWorldCorners()
             card:GetChildByName('MonsterName').UITransformComponent:GetWorldCorners()
@@ -45,16 +45,16 @@ local ok, detail = pcall(function()
             assert(card:GetChildByName('MonsterName').TextGUIRendererComponent.BestFit,'name auto fits')
         end
     end
-    local card = l._T.cards[1]
+    local card = _FormationCatalogCards._T.cards[1]
     card.entity:SendEvent(ButtonClickEvent())
     assert(_FormationEditSession.SelectedMonsterId==card.monsterId,'selection works')
     layout.CellSize = Vector2(181,263)
-    l._T.optionsKey = ''
-    l:BuildOptions(_FormationEditSession.Snapshot.options)
+    _FormationCatalogCards._T.optionsKey = ''
+    _FormationCatalogCards:BuildOptions(_FormationEditSession.Snapshot.options)
     wait(.3)
-    l._T.cards[1].entity:GetChildByName('MonsterName').UITransformComponent:GetWorldCorners()
+    _FormationCatalogCards._T.cards[1].entity:GetChildByName('MonsterName').UITransformComponent:GetWorldCorners()
     assert(close(layout.CellSize.x,181),'rebuild preserves authored cell size')
-    assert(close(l._T.cards[1].entity:GetChildByName('MonsterName').UITransformComponent.RectSize.x,157),'rebuilt content fits')
+    assert(close(_FormationCatalogCards._T.cards[1].entity:GetChildByName('MonsterName').UITransformComponent.RectSize.x,157),'rebuilt content fits')
 end)
 layout.CellSize = original
 _FormationEditSession.SelectedMonsterId = selected

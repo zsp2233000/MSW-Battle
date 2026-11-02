@@ -66,10 +66,10 @@ test("#51 one owner resolves the viewer's result and the battle screen leaves th
   assert.match(controller, /initialPlayer, initialEnemy = initialEnemy, initialPlayer/);
   const input = fs.readFileSync("RootDesk/MyDesk/Combat/BattleDeploymentInput.mlua", "utf8");
   assert.doesNotMatch(input, /SetResultEntities|resultPlayerText/, "the POC adapter no longer draws results");
-  const match = fs.readFileSync("RootDesk/MyDesk/Matchmaking/MatchProbeInput.mlua", "utf8");
+  const match = fs.readFileSync("RootDesk/MyDesk/Matchmaking/MatchFlowInput.mlua", "utf8");
   assert.match(match, /_BattleUIController\.OwnResult/);
   assert.match(match, /self\.State == "BATTLE"/);
-  assert.match(match, /_MatchProbe:RequestReturn\(self\.Attempt\)/, "the formal return request stays");
+  assert.match(match, /_MatchFlow:RequestReturn\(self\.Attempt\)/, "the formal return request stays");
 });
 
 test("matched battlefield owns the formal viewer presentation", () => {

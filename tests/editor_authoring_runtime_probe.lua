@@ -1,5 +1,5 @@
 -- Client from formationlobby: authoring values survive renders and map changes; no storage writes.
-local l, m = _FormationLobby, _MatchProbeInput
+local l, m = _FormationLobby, _MatchFlowInput
 local function await(predicate)
     for _ = 1, 100 do if predicate() then return true end wait(.1) end
     return false
@@ -30,7 +30,7 @@ local ok, detail = pcall(function()
     assert(_UserService.LocalPlayer.CurrentMapName == 'formationlobby', 'start in lobby')
     assert(l:Ui('Lobby').EnabledInHierarchy and not l:Ui('Editor').Enable
         and not l:Ui('EditorControls').Enable and not l:Ui('Editor/Catalog/Template').Enable, 'authoring preview hidden in play')
-    assert(#l._T.cards == #_FormationEditSession.Snapshot.options, 'template is excluded from runtime cards')
+    assert(#_FormationCatalogCards._T.cards == #_FormationEditSession.Snapshot.options, 'template is excluded from runtime cards')
     for _, path in ipairs({'Status','Retry','ReturnLobby','EditorControls/Status','EditorControls/Retry','EditorControls/Toggle'}) do
         keepAuthored(l:Ui(path))
     end
@@ -41,13 +41,13 @@ local ok, detail = pcall(function()
         for _, child in ipairs({'Action','Status','FixedSummary'}) do keepAuthored(panel:GetChildByName(child)) end
     end
     nameTemplate.TextGUIRendererComponent.FontSize = originalFont + 3
-    l._T.optionsKey = ''
-    l:BuildOptions(_FormationEditSession.Snapshot.options)
+    _FormationCatalogCards._T.optionsKey = ''
+    _FormationCatalogCards:BuildOptions(_FormationEditSession.Snapshot.options)
     click('Lobby/Edit')
     assert(await(function() return _UserService.LocalPlayer.CurrentMapName == 'formationsim'
         and m._T.panel == nil and not m.root.Enable end), 'matchmaking hidden in the editor on map transition')
     wait(.3)
-    for _, card in ipairs(l._T.cards) do
+    for _, card in ipairs(_FormationCatalogCards._T.cards) do
         assert(card.entity:GetChildByName('MonsterName').TextGUIRendererComponent.FontSize == originalFont + 3,
             'generated card inherits authored template font')
     end
@@ -84,8 +84,8 @@ for _, entry in ipairs(changed) do
     entry.entity.UITransformComponent.RectSize = entry.size
 end
 nameTemplate.TextGUIRendererComponent.FontSize = originalFont
-l._T.optionsKey = ''
-l:BuildOptions(_FormationEditSession.Snapshot.options)
+_FormationCatalogCards._T.optionsKey = ''
+_FormationCatalogCards:BuildOptions(_FormationEditSession.Snapshot.options)
 m.State, m.FixedSummary, m.Message = originalState, originalSummary, originalMessage
 m:SelectScreen(_UserService.LocalPlayer.CurrentMapName)
 l:Render()

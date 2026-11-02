@@ -8,38 +8,11 @@ script FormationLobby extends Logic
         -- Wait for the local player and authored UI before wiring all five formation selectors once.
         self._T.bound = false
         self._T.bindings = {}
-        self._T.cards = {}
-        self._T.hoverCard = nil
-        self:SetEnabled("CardTooltip", false)
-        self._T.optionsKey = ""
         self._T.mapName = ""
         self._T.lastLobbySlot = 0
         self._T.lastLobbyClick = 0
         self._T.editWhenSelected = 0
-        self._T.identityElapsed = 0
-        self._T.identityKey = ""
         self._T.showUnits = false
-        self._T.editorCollapsed = false
-        self._T.editorSlide = 0
-        self._T.editorSlideOrigins = {}
-        self._T.editorSlideItems = {
-            { "Editor/Catalog", 1, 0 },
-            { "Editor/CatalogDock", 1, 0 },
-            { "Editor/Intel", 1, 0 },
-            { "Editor/Slots", 1, 0 },
-            { "EditorControls/Retry", 1, 0 },
-            { "Editor/Header", 0, 1 },
-            { "Editor/Title", 0, 1 },
-            { "Editor/Summary", 0, 1 },
-            { "Editor/Roster", 0, 1 },
-            { "Editor/Units", 0, 1 },
-            { "Editor/Activate", 0, -1 },
-            { "Editor/Back", 0, -1 },
-            { "Editor/Save", 0, -1 },
-            { "Editor/ToggleUnits", 0, -1 },
-            { "Editor/Help", 0, -1 },
-            { "EditorControls/Status", 0, -1 },
-        }
         self._T.savingNoticeText = ""
         for _, path in ipairs({ "Lobby", "Editor", "EditorControls", "Editor/Catalog/Template", "SavingNotice" }) do
             self:SetEnabled(path, false)
@@ -66,24 +39,16 @@ script FormationLobby extends Logic
     method void OnUpdate(number delta)
         -- Follow actual map transitions without polling storage or resetting confirmed content.
         local player = _UserService.LocalPlayer
-        self:UpdateLobbyPlayer(player)
         if not isvalid(player) or not isvalid(self.root) then return end
-        local matchLocked = not _MatchProbeInput:AllowsFormationActions()
+        local matchLocked = not _MatchFlowInput:AllowsFormationActions()
         if matchLocked then self._T.editWhenSelected = 0 end
         if self._T.matchLocked ~= matchLocked then
             self._T.matchLocked = matchLocked
             self:Render()
             log("[VRF][FormationUI] matchLocked=" .. tostring(matchLocked))
         end
-        self:UpdateEditorSlide(delta)
-        self:UpdateCardTooltip()
         if player.CurrentMapName ~= "formationlobby" or _UtilLogic.ElapsedSeconds - self._T.lastLobbyClick > 5 then
             self._T.editWhenSelected = 0
-        end
-        self._T.identityElapsed = self._T.identityElapsed + delta
-        if player.CurrentMapName == "formationlobby" and self._T.identityElapsed >= 0.5 then
-            self._T.identityElapsed = 0
-            self:UpdateIdentity()
         end
         self:Run(_FormationEditSession:Tick(delta))
         if player.CurrentMapName == "matchprobe" then
@@ -101,9 +66,8 @@ script FormationLobby extends Logic
             self:Bind("Editor/Back", function() self:Run(_FormationEditSession:RequestReturnToLobby()) end)
             self:Bind("ReturnLobby", function() self:Run(_FormationEditSession:RequestReturnToLobby()) end)
             self:Bind("EditorControls/Toggle", function()
-                self._T.editorCollapsed = not self._T.editorCollapsed
+                _FormationEditorSlide:Toggle()
                 self:Render()
-                log("[VRF][FormationUI] editor collapsed=" .. tostring(self._T.editorCollapsed))
             end)
             self:Bind("ExitConfirm/Window/SaveAndReturn", function() self:Run(_FormationEditSession:ConfirmSave()) end)
             self:Bind("ExitConfirm/Window/ReturnWithoutSave", function() self:Run(_FormationEditSession:ConfirmDiscard()) end)
@@ -121,7 +85,7 @@ script FormationLobby extends Logic
             for index = 1, 6 do
                 local unitIndex = index
                 self:Bind("Editor/Units/Unit" .. tostring(index), function()
-                    _FormationEditSession.SelectedUnit = unitIndex
+                    _FormationEditSession:SelectUnit(unitIndex)
                     self:Render()
                 end)
             end
@@ -134,118 +98,16 @@ script FormationLobby extends Logic
             self._T.lastLobbySlot = 0
             self._T.lastLobbyClick = 0
             self._T.editWhenSelected = 0
-            self._T.editorCollapsed = false
+            _FormationEditorSlide:Expand()
             _FormationEditSession:ResetForMap()
             self:Render()
         end
     end
 
     @ExecSpace("ClientOnly")
-    method void UpdateEditorSlide(number delta)
-        -- 沿用每幀更新，反向時從目前進度滑回，並保留各 UI 原始位置。
-        local previous = self._T.editorSlide
-        local target = self._T.editorCollapsed and 1 or 0
-        local inEditor = _UserService.LocalPlayer.CurrentMapName == "formationsim"
-        local progress = math.max(0, math.min(1, previous + (target == 1 and 1 or -1) * delta / 0.6))
-        if not inEditor then progress = 0 end
-        if progress == previous then return end
-        self._T.editorSlide = progress
-        local eased = progress * progress * (3 - 2 * progress)
-        local horizontalOffset = (self.root.UITransformComponent.RectSize.x + 32) * eased
-        local verticalOffset = (self.root.UITransformComponent.RectSize.y + 32) * eased
-        for _, item in ipairs(self._T.editorSlideItems) do
-            local path = item[1]
-            local entity = self:Ui(path)
-            if isvalid(entity) then
-                local transform = entity.UITransformComponent
-                local origin = self._T.editorSlideOrigins[path]
-                if origin == nil then
-                    origin = transform.anchoredPosition
-                    self._T.editorSlideOrigins[path] = origin
-                end
-                transform.anchoredPosition = Vector2(
-                    origin.x + item[2] * horizontalOffset,
-                    origin.y + item[3] * verticalOffset
-                )
-            end
-        end
-        if progress == target or not inEditor then
-            self:SetEnabled("Editor", inEditor and not self._T.editorCollapsed)
-            log("[VRF][EditorSlide] settled=" .. tostring(progress)
-                .. " right=" .. tostring(horizontalOffset)
-                .. " up=" .. tostring(verticalOffset)
-                .. " down=" .. tostring(-verticalOffset))
-        end
-    end
-
-    @ExecSpace("ClientOnly")
-    method void UpdateLobbyPlayer(Entity player)
-        -- Keep the world avatar alive for identity and travel while the lobby shows only UI.
-        local inLobby = isvalid(player) and player.CurrentMapName == "formationlobby"
-        local previous = self._T.lobbyPlayer
-        if previous ~= player or not inLobby then
-            if isvalid(previous) then
-                previous:SetVisible(self._T.lobbyVisible, false, false)
-                local controller = previous.PlayerControllerComponent
-                if isvalid(controller) then controller.Enable = self._T.lobbyControllerEnabled end
-                log("[VRF][LobbyScene] restored player on exit")
-            end
-            self._T.lobbyPlayer = nil
-        end
-        if not inLobby then return end
-        local controller = player.PlayerControllerComponent
-        if self._T.lobbyPlayer == nil then
-            self._T.lobbyPlayer = player
-            self._T.lobbyVisible = player.Visible
-            self._T.lobbyControllerEnabled = isvalid(controller) and controller.Enable
-            log("[VRF][LobbyScene] UI-only lobby entered")
-        end
-        player:SetVisible(false, false, false)
-        if isvalid(controller) then controller.Enable = false end
-        local movement = player.MovementComponent
-        if isvalid(movement) then movement:Stop() end
-    end
-
-    @ExecSpace("ClientOnly")
-    method void UpdateIdentity()
-        -- Mirror this window's local avatar and identity; shared room player order never chooses the portrait.
-        local player = _UserService.LocalPlayer
-        local avatar = self:Ui("Lobby/Identity/Avatar")
-        if not isvalid(player) or not isvalid(player.PlayerComponent) or not isvalid(avatar) then return end
-        local identity = player.PlayerComponent
-        self:SetText("Lobby/Identity/Name", identity.Nickname ~= "" and identity.Nickname or "目前玩家")
-        self:SetText("Lobby/Identity/Profile", "玩家代碼：" .. identity.ProfileCode)
-        local source = player.CostumeManagerComponent
-        local costume = avatar.CostumeManagerComponent
-        if not isvalid(source) or not isvalid(costume) then return end
-        local categories = {
-            MapleAvatarItemCategory.Body, MapleAvatarItemCategory.Hair, MapleAvatarItemCategory.Face,
-            MapleAvatarItemCategory.Cap, MapleAvatarItemCategory.Cape, MapleAvatarItemCategory.Coat,
-            MapleAvatarItemCategory.Longcoat, MapleAvatarItemCategory.Pants, MapleAvatarItemCategory.Glove,
-            MapleAvatarItemCategory.Shoes, MapleAvatarItemCategory.OneHandedWeapon, MapleAvatarItemCategory.TwoHandedWeapon,
-            MapleAvatarItemCategory.SubWeapon, MapleAvatarItemCategory.FaceAccessory, MapleAvatarItemCategory.EyeAccessory,
-            MapleAvatarItemCategory.EarAccessory, MapleAvatarItemCategory.Ear
-        }
-        local equipment = {}
-        local parts = { identity.UserId }
-        for index, category in ipairs(categories) do
-            equipment[index] = source:GetEquip(category)
-            table.insert(parts, equipment[index])
-        end
-        -- The source avatar can finish loading after the lobby has already opened.
-        if equipment[1] == "" then return end
-        local key = table.concat(parts, "|")
-        if self._T.identityKey == key then return end
-        costume.UseCustomEquipOnly = true
-        for index, category in ipairs(categories) do costume:SetEquip(category, equipment[index]) end
-        self._T.identityKey = key
-        log("[VRF][LobbyIdentity] bound local player=" .. identity.UserId .. " profile=" .. identity.ProfileCode .. " nickname=" .. identity.Nickname)
-    end
-
-    @ExecSpace("ClientOnly")
     method void Travel(string destination)
         -- Let the server choose the traveller; the client never supplies another player's identity.
-        if not _MatchProbeInput:AllowsFormationActions() or _FormationEditSession:Busy() or _FormationEditSession:Unconfirmed() or _FormationEditSession.ConfirmKind ~= "" then return end
+        if not _MatchFlowInput:AllowsFormationActions() or _FormationEditSession:Busy() or _FormationEditSession:Unconfirmed() or _FormationEditSession.ConfirmKind ~= "" then return end
         _FormationService:RequestTravel(destination)
     end
 
@@ -253,9 +115,9 @@ script FormationLobby extends Logic
     method void SelectLobbySlot(integer slotId, boolean openEditor)
         -- Single clicks select; a second click on the same slot opens only after server selection acknowledgement.
         local state = _FormationEditSession.Snapshot
-        if not _MatchProbeInput:AllowsFormationActions() or _FormationEditSession:Busy() or _FormationEditSession:Unconfirmed() or _FormationEditSession.ConfirmKind ~= "" then return end
+        if not _MatchFlowInput:AllowsFormationActions() or _FormationEditSession:Busy() or _FormationEditSession:Unconfirmed() or _FormationEditSession.ConfirmKind ~= "" then return end
         if self._T.mapName ~= "formationlobby" or state.pending
-            or (state.loadState ~= "READY" and state.loadState ~= "NEW") then return end
+            or not _FormationSchema:IsLoadConfirmed(state.loadState) then return end
         local now = _UtilLogic.ElapsedSeconds
         local doubleClick = self._T.lastLobbySlot == slotId and now - self._T.lastLobbyClick <= 0.35
         self._T.lastLobbySlot = slotId
@@ -269,12 +131,12 @@ script FormationLobby extends Logic
         -- The edit session ignores out-of-order replies (nil); this screen then rebuilds cards and redraws.
         local commands = _FormationEditSession:Observe(snapshot, sequence)
         if commands == nil then return end
-        self:BuildOptions(snapshot.options or {})
+        _FormationCatalogCards:BuildOptions(snapshot.options or {})
         self:Run(commands)
         local player = _UserService.LocalPlayer
-        if _MatchProbeInput:AllowsFormationActions() and self._T.editWhenSelected == snapshot.editSlot and isvalid(player) and player.CurrentMapName == "formationlobby"
+        if _MatchFlowInput:AllowsFormationActions() and self._T.editWhenSelected == snapshot.editSlot and isvalid(player) and player.CurrentMapName == "formationlobby"
             and _UtilLogic.ElapsedSeconds - self._T.lastLobbyClick <= 5
-            and not snapshot.pending and (snapshot.loadState == "READY" or snapshot.loadState == "NEW") then
+            and not snapshot.pending and _FormationSchema:IsLoadConfirmed(snapshot.loadState) then
             self._T.editWhenSelected = 0
             self:Travel("formationsim")
             log("[VRF][LobbyEdit] opening selected slot=" .. tostring(snapshot.editSlot))
@@ -304,155 +166,6 @@ script FormationLobby extends Logic
         self:Render()
         -- A notice explains why an input did nothing, so it must outlast the redraw's own status line.
         for _, text in ipairs(notices) do self:SetStatus(text) end
-    end
-
-    @ExecSpace("ClientOnly")
-    method void BuildOptions(table options)
-        -- Rebuild catalog cards only when server-published identity, art or intelligence changes.
-        local parts = {}
-        local foundSelection = false
-        for _, option in ipairs(options) do
-            local fields = {}
-            for _, value in ipairs(option) do table.insert(fields, tostring(value)) end
-            table.insert(parts, table.concat(fields, "|"))
-            if option[1] == _FormationEditSession.SelectedMonsterId then foundSelection = true end
-        end
-        local key = table.concat(parts, "\n")
-        if key == self._T.optionsKey then return end
-        self._T.hoverCard = nil
-        self:SetEnabled("CardTooltip", false)
-        local template = self:Ui("Editor/Catalog/Template")
-        if not isvalid(template) then return end
-        self._T.optionsKey = key
-        if not foundSelection then _FormationEditSession.SelectedMonsterId = #options > 0 and options[1][1] or "" end
-        for _, card in ipairs(self._T.cards) do
-            if isvalid(card.entity) then
-                card.entity:DisconnectEvent(ButtonClickEvent, card.callback)
-                card.entity:DisconnectEvent(UITouchEnterEvent, card.enterCallback)
-                card.entity:DisconnectEvent(UITouchExitEvent, card.exitCallback)
-                card.entity:Destroy()
-            end
-        end
-        self._T.cards = {}
-        for index, option in ipairs(options) do
-            local monsterId = option[1]
-            local card = template:Clone("Monster" .. tostring(index))
-            local name = card:GetChildByName("MonsterName", true)
-            if isvalid(name) then
-                local label = name:GetComponent("TextGUIRendererComponent")
-                if isvalid(label) then label.Text = option[2] end
-                local labelSprite = name:GetComponent("SpriteGUIRendererComponent")
-                if isvalid(labelSprite) then labelSprite.RaycastTarget = false end
-            end
-            local portrait = card:GetChildByName("Portrait", true)
-            if isvalid(portrait) then
-                portrait.SpriteGUIRendererComponent.ImageRUID = DataRef("thumbnail://" .. option[3])
-                portrait.SpriteGUIRendererComponent.Color = Color.white
-                portrait.SpriteGUIRendererComponent.RaycastTarget = false
-            end
-            -- The authored template owns both frame looks; Render only switches which one is shown.
-            local frame = card:GetChildByName("SelectedFrame", true)
-            local glow = card:GetChildByName("SelectedGlow", true)
-            if isvalid(frame) then frame.SpriteGUIRendererComponent.RaycastTarget = false end
-            if isvalid(glow) then
-                local check = glow:GetChildByName("Check", true)
-                if isvalid(check) then check.SpriteGUIRendererComponent.RaycastTarget = false end
-            end
-            local identity = card:GetChildByName("Identity", true)
-            if isvalid(identity) then
-                local kinds = { TANK = "坦克", ASSAULT = "戰士", SHOOTER = "射手" }
-                identity.TextGUIRendererComponent.Text = kinds[option[4]] or ""
-            end
-            -- Selection follows MonsterId; hovering only previews and never selects.
-            local callback = card:ConnectEvent(ButtonClickEvent, function()
-                _FormationEditSession.SelectedMonsterId = monsterId
-                _FormationEditSession.SelectedUnit = 0
-                self:Render()
-            end)
-            local enterCallback = card:ConnectEvent(UITouchEnterEvent, function()
-                self._T.hoverCard = card
-                self:RenderMonsterInfo("CardTooltip", option)
-                self:UpdateCardTooltip()
-            end)
-            local exitCallback = card:ConnectEvent(UITouchExitEvent, function()
-                if self._T.hoverCard == card then
-                    self._T.hoverCard = nil
-                    self:SetEnabled("CardTooltip", false)
-                end
-            end)
-            table.insert(self._T.cards, { entity = card, callback = callback, enterCallback = enterCallback,
-                exitCallback = exitCallback, monsterId = monsterId, glow = glow, frame = frame })
-            card:SetEnable(true)
-        end
-        if _FormationEditSession.SelectedMonsterId == "" and #options > 0 then _FormationEditSession.SelectedMonsterId = options[1][1] end
-        local catalog = self:Ui("Editor/Catalog")
-        if isvalid(catalog) then
-            local layout = catalog:GetComponent("ScrollLayoutGroupComponent")
-            if isvalid(layout) then layout:ResetScrollPosition(UITransformAxis.Vertical) end
-        end
-        log("[VRF][FormationUI] cards=" .. tostring(#options) .. " scroll=vertical")
-    end
-
-    @ExecSpace("ClientOnly")
-    method void RenderIntel()
-        -- A selected world unit takes precedence over the placement card; statistics never enter save commands.
-        local unit = _FormationEditSession.Draft[_FormationEditSession.SelectedUnit]
-        local monsterId = unit ~= nil and unit.monsterId or _FormationEditSession.SelectedMonsterId
-        local option = nil
-        for _, entry in ipairs(_FormationEditSession.Snapshot.options or {}) do
-            if entry[1] == monsterId then option = entry break end
-        end
-        self:RenderMonsterInfo("Editor/Intel", option)
-        self:SetText("Editor/Units/Detail", "MonsterId：" .. monsterId .. (unit ~= nil and string.format("\n相對站位 (%.2f, %.2f)", unit.x, unit.y) or "\n尚未選取場上單位"))
-    end
-
-    @ExecSpace("ClientOnly")
-    method void RenderMonsterInfo(string target, table option)
-        -- Share the same catalog values between selected intelligence and hover previews.
-        self:SetText(target .. "/Name", option ~= nil and option[2] or "等待怪物目錄")
-        local kinds = { TANK = "坦克", ASSAULT = "戰士", SHOOTER = "射手" }
-        self:SetText(target .. "/Kind", option ~= nil and (kinds[option[4]] or "—") or "")
-        local fields = { "Health", "Damage", "Interval", "Range" }
-        for index, field in ipairs(fields) do
-            local path = target .. "/Stats/" .. field
-            self:SetEnabled(path, option ~= nil)
-            self:SetText(path .. "/Value", option ~= nil and (tostring(option[index + 4]) .. (field == "Interval" and " 秒" or "")) or "")
-        end
-        self:SetText(target .. "/Stats", option == nil and "正在載入怪物資料…" or "")
-    end
-
-    @ExecSpace("ClientOnly")
-    method void UpdateCardTooltip()
-        -- Follow the cursor while keeping the authored popup inside the reference canvas.
-        local card = self._T.hoverCard
-        local player = _UserService.LocalPlayer
-        if not isvalid(card) or not card.EnabledInHierarchy or not isvalid(player)
-            or player.CurrentMapName ~= "formationsim" or self._T.editorCollapsed
-            or _FormationEditSession.ConfirmKind ~= "" or _FormationEditSession.Snapshot.pending then
-            self._T.hoverCard = nil
-            self:SetEnabled("CardTooltip", false)
-            return
-        end
-        local popup = self:Ui("CardTooltip")
-        if not isvalid(popup) then return end
-        local cursor = _UILogic:ScreenToUIPosition(_InputService:GetCursorPosition())
-        local size = popup.UITransformComponent.RectSize
-        local canvas = self.root.UITransformComponent.RectSize
-        local halfWidth, halfHeight = canvas.x / 2, canvas.y / 2
-        local x, y = cursor.x + 24, cursor.y - 24
-        if x + size.x > halfWidth - 12 then x = cursor.x - size.x - 24 end
-        if y - size.y < -halfHeight + 12 then y = cursor.y + size.y + 24 end
-        popup.UITransformComponent.anchoredPosition = Vector2(
-            math.max(-halfWidth + 12, math.min(x, halfWidth - size.x - 12)),
-            math.max(-halfHeight + size.y + 12, math.min(y, halfHeight - 12)))
-        popup:SetEnable(true)
-    end
-
-    @ExecSpace("ClientOnly")
-    method string MonsterName(string monsterId)
-        -- Display the formal catalog name while retaining stable IDs in save commands.
-        for _, option in ipairs(_FormationEditSession.Snapshot.options or {}) do if option[1] == monsterId then return option[2] end end
-        return monsterId
     end
 
     @ExecSpace("ClientOnly")
@@ -543,7 +256,7 @@ script FormationLobby extends Logic
         self:SetEnabled("ExitConfirm", view.confirmKind ~= "")
         self:RenderSavingNotice(view)
         self:SetEnabled("Lobby", inLobby)
-        self:SetEnabled("Editor", inEditor and (not self._T.editorCollapsed or self._T.editorSlide < 1))
+        self:SetEnabled("Editor", inEditor and _FormationEditorSlide:PanelsVisible())
         self:SetEnabled("EditorControls", inEditor)
         self:SetEnabled("Editor/Units", inEditor and self._T.showUnits)
         if inEditor then
@@ -556,7 +269,7 @@ script FormationLobby extends Logic
             if isvalid(details) then _UILogic:SetSiblingIndex(details.UITransformComponent, #details.Parent.Children:ToTable()) end
         end
         self:SetEnabled("ReturnLobby", not inLobby and not inEditor)
-        self:SetText("EditorControls/Toggle", self._T.editorCollapsed and "展開面板" or "收合面板")
+        self:SetText("EditorControls/Toggle", _FormationEditorSlide.Collapsed and "展開面板" or "收合面板")
         self:SetEnabled("Status", inLobby)
         local state = _FormationEditSession.Snapshot
         local load = view.loadState
@@ -585,7 +298,7 @@ script FormationLobby extends Logic
         local note = state.message or "正在讀取個人隊伍"
         -- Surface why the primary save is unavailable whenever it matters; "no change" needs no explanation.
         if inEditor and saveReason ~= "" and saveReason ~= "沒有變更" and (dirty or needsRetry or load ~= "READY") then note = saveReason end
-        if not _MatchProbeInput:AllowsFormationActions() then note = "配對處理中；取消完成或返回大廳後可繼續整備" end
+        if not _MatchFlowInput:AllowsFormationActions() then note = "配對處理中；取消完成或返回大廳後可繼續整備" end
         self:SetStatus(text .. "    " .. note)
         self:RenderConfirmation(view)
         local units = _FormationEditSession.Draft
@@ -596,7 +309,7 @@ script FormationLobby extends Logic
             summary = "第 " .. tostring(editSlot) .. " 組 · 已儲存 " .. tostring(#saved.slots[tostring(editSlot)].units) .. " / 6"
                 .. "    出戰隊伍：" .. (saved.activeSlot > 0 and ("第 " .. tostring(saved.activeSlot) .. " 組") or "尚未選定")
         end
-        self:RenderLobbyPreview()
+        _FormationLobbyPreview:Render()
         self:SetText("Editor/Summary", summary)
         for index = 1, 5 do
             local key = tostring(index)
@@ -623,12 +336,12 @@ script FormationLobby extends Logic
             self:SetButton("Lobby/Slots/Slot" .. key, writable)
             self:SetButton("Editor/Slots/Slot" .. key, writable)
         end
-        self:RenderIntel()
+        _FormationCatalogCards:RenderIntel()
         self:SetText("Editor/Roster", "隊伍 " .. tostring(#units) .. " / 6 · 可重複部署")
         for index = 1, 6 do
             local entry = units[index]
             local label = tostring(index) .. ". 空位"
-            if entry ~= nil then label = tostring(index) .. ". " .. self:MonsterName(entry.monsterId) .. string.format("  (%.2f, %.2f)", entry.x, entry.y) end
+            if entry ~= nil then label = tostring(index) .. ". " .. _FormationEditSession:MonsterName(entry.monsterId) .. string.format("  (%.2f, %.2f)", entry.x, entry.y) end
             if _FormationEditSession.SelectedUnit == index then label = "> " .. label end
             self:SetText("Editor/Units/Unit" .. tostring(index), label)
             self:SetButton("Editor/Units/Unit" .. tostring(index), view.canEdit and entry ~= nil)
@@ -643,107 +356,14 @@ script FormationLobby extends Logic
         -- 圖片由 Maker 調整，只切換顯示，不覆寫素材、大小或位置。
         self:SetEnabled("Editor/Save/SaveHint", canSave)
         self:SetButton("Editor/Activate", activateReason == "" and view.confirmKind == "")
-        for _, card in ipairs(self._T.cards or {}) do
-            local selected = card.monsterId == _FormationEditSession.SelectedMonsterId
-            if isvalid(card.entity) then card.entity.ButtonComponent.Enable = view.canEdit or (writable and not busy) end
-            if isvalid(card.frame) then card.frame:SetEnable(selected) end
-            if isvalid(card.glow) then card.glow:SetEnable(selected) end
-        end
-    end
-
-    @ExecSpace("ClientOnly")
-    method void RenderLobbyPreview()
-        -- Preview the viewed saved group while activation remains an independent server-owned choice.
-        local state = _FormationEditSession.Snapshot
-        local saved = state.saved
-        local active = saved ~= nil and saved.activeSlot or 0
-        local selected = state.editSlot or 1
-        local slot = saved ~= nil and saved.slots[tostring(selected)] or nil
-        local info = state.slots ~= nil and state.slots[tostring(selected)] or nil
-        local units = slot ~= nil and slot.units or {}
-        local ready = state.loadState == "READY" or state.loadState == "NEW"
-        local summary = "第 " .. tostring(selected) .. " 組 · 已儲存 " .. tostring(#units) .. " / 6"
-        local empty = "本組尚未儲存隊伍，雙擊組別或點「編輯隊伍」開始配置"
-        if not ready then
-            summary = "隊伍預覽 · 等待資料確認"
-            empty = (state.loadState == "ERROR" or state.loadState == "CONFLICT")
-                and "讀取未完成，請按「重新讀取」；已儲存的內容仍保留" or "正在讀取隊伍資料…"
-        else
-            summary = summary .. (selected == active and " · 出戰" or " · 預覽")
-            if #units > 0 and info ~= nil and not info.savedValid then summary = summary .. " · 需至整備修正" end
-        end
-        self:SetText("Lobby/Summary", summary)
-        self:SetText("Lobby/Command/Field/Empty", empty)
-        self:SetEnabled("Lobby/Command/Field/Empty", not ready or #units == 0)
-        local field = self:Ui("Lobby/Command/Field").UITransformComponent.RectSize
-        local minX, maxX, minY, maxY = 0, 0, 0, 0
-        local nearest = math.huge
-        for index, entry in ipairs(units) do
-            if index == 1 then minX, maxX, minY, maxY = entry.x, entry.x, entry.y, entry.y end
-            minX, maxX = math.min(minX, entry.x), math.max(maxX, entry.x)
-            minY, maxY = math.min(minY, entry.y), math.max(maxY, entry.y)
-            for other = 1, index - 1 do
-                -- Square portrait bounds overlap only when both axis gaps are smaller than their size.
-                nearest = math.min(nearest, math.max(math.abs(entry.x - units[other].x), math.abs(entry.y - units[other].y)))
-            end
-        end
-        local centerX, centerY = (minX + maxX) / 2, (minY + maxY) / 2
-        local scale = 1
-        if #units > 1 then
-            scale = math.min((field.x - 192) / math.max(0.001, maxX - minX), (field.y - 208) / math.max(0.001, maxY - minY))
-        end
-        local portraitSize = math.min(56, nearest * scale * 0.8)
-        for index = 1, 6 do
-            local path = "Lobby/Command/Field/Unit" .. tostring(index)
-            local marker = self:Ui(path)
-            local entry = ready and units[index] or nil
-            if isvalid(marker) then
-                marker:SetEnable(entry ~= nil)
-                if entry ~= nil then
-                    local position = Vector2((entry.x - centerX) * scale, (entry.y - centerY) * scale + 8)
-                    marker.UITransformComponent.anchoredPosition = position
-                    self:SetText(path .. "/Name", tostring(index))
-                    local label = self:Ui(path .. "/Name")
-                    label:SetEnable(portraitSize >= 32)
-                    label.UITransformComponent.anchoredPosition = Vector2(portraitSize / 2 - 10, -portraitSize / 2 + 10)
-                    local portrait = self:Ui(path .. "/Portrait")
-                    portrait.UITransformComponent.RectSize = Vector2(portraitSize, portraitSize)
-                    portrait:SetEnable(false)
-                    for _, option in ipairs(state.options or {}) do
-                        if option[1] == entry.monsterId then
-                            portrait.SpriteGUIRendererComponent.ImageRUID = DataRef("thumbnail://" .. option[3])
-                            portrait:SetEnable(true)
-                            break
-                        end
-                    end
-                end
-            end
-        end
-        log("[VRF][LobbyPreview] active=" .. tostring(active) .. " savedCount=" .. tostring(#units) .. " editSlot=" .. tostring(state.editSlot) .. " ready=" .. tostring(ready)
-            .. " scale=" .. tostring(scale) .. " portraitSize=" .. tostring(portraitSize))
+        _FormationCatalogCards:Render(view)
     end
 
     @ExecSpace("ClientOnly")
     method void OnEndPlay()
-        -- Release authored and cloned button subscriptions at world session shutdown.
-        -- 結束測試時還原位置，避免下次 Play 把滑出位置當成起點。
-        for path, origin in pairs(self._T.editorSlideOrigins or {}) do
-            local entity = self:Ui(path)
-            if isvalid(entity) then entity.UITransformComponent.anchoredPosition = origin end
-        end
-        self._T.hoverCard = nil
-        self:SetEnabled("CardTooltip", false)
-        self:UpdateLobbyPlayer(nil)
+        -- Release authored button subscriptions at world session shutdown.
         for _, binding in ipairs(self._T.bindings or {}) do
             if isvalid(binding.entity) then binding.entity:DisconnectEvent(ButtonClickEvent, binding.callback) end
-        end
-        for _, card in ipairs(self._T.cards or {}) do
-            if isvalid(card.entity) then
-                card.entity:DisconnectEvent(ButtonClickEvent, card.callback)
-                card.entity:DisconnectEvent(UITouchEnterEvent, card.enterCallback)
-                card.entity:DisconnectEvent(UITouchExitEvent, card.exitCallback)
-                card.entity:Destroy()
-            end
         end
     end
 end

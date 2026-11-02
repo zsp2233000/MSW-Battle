@@ -37,7 +37,7 @@ local ok, detail = pcall(function()
     previousResult, previousMessage = record.result, record.message
     captured = true
     local catalog = service:GetCatalog()
-    local monsterId = catalog:GetDeploymentOptions()[1][1]
+    local monsterId = catalog:GetDeploymentOptions()[1].monsterId
     local revision = record.saved.slots[tostring(record.editSlot)].revision
     local units = {{monsterId = monsterId, x = -5, y = 0}}
     assert(_FormationSchema:ValidateUnits(units, catalog, false) ~= nil, '單位夾具合法')

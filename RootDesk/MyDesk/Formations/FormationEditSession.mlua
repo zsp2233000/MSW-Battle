@@ -43,7 +43,7 @@ script FormationEditSession extends Logic
         self.ObservedSequence = sequence
         self.Snapshot = snapshot
         local load = snapshot.loadState
-        if self._T.localUnconfirmed and self._T.reconcileRequested and not snapshot.pending and (load == "READY" or load == "NEW") then
+        if self._T.localUnconfirmed and self._T.reconcileRequested and not snapshot.pending and _FormationSchema:IsLoadConfirmed(load) then
             self._T.localUnconfirmed = false
             self._T.reconcileRequested = false
         end
@@ -133,12 +133,73 @@ script FormationEditSession extends Logic
     end
 
     @ExecSpace("ClientOnly")
+    method any Option(string monsterId)
+        -- Look up the published catalog entry the cards show; nil when the catalog lacks it.
+        for _, option in ipairs(self.Snapshot.options or {}) do
+            if option.monsterId == monsterId then return option end
+        end
+        return nil
+    end
+
+    @ExecSpace("ClientOnly")
     method boolean HasOption(string monsterId)
         -- Client-side shape checks use the same published catalog the cards show.
-        for _, option in ipairs(self.Snapshot.options or {}) do
-            if option[1] == monsterId then return true end
+        return self:Option(monsterId) ~= nil
+    end
+
+    @ExecSpace("ClientOnly")
+    method string MonsterName(string monsterId)
+        -- Display the formal catalog name while retaining stable IDs in save commands.
+        local option = self:Option(monsterId)
+        return option ~= nil and option.monsterName or monsterId
+    end
+
+    @ExecSpace("ClientOnly")
+    method void SelectUnit(integer index)
+        -- Choose a placed unit; zero leaves the field with no selection.
+        self.SelectedUnit = index
+    end
+
+    @ExecSpace("ClientOnly")
+    method void SelectMonster(string monsterId)
+        -- Arm a catalog monster for placement, which ends any unit selection.
+        self.SelectedMonsterId = monsterId
+        self.SelectedUnit = 0
+    end
+
+    @ExecSpace("ClientOnly")
+    method void EnsureMonsterSelected(table options)
+        -- Keep a selection the new catalog still offers; otherwise fall back to its first monster.
+        for _, option in ipairs(options) do
+            if option.monsterId == self.SelectedMonsterId then return end
         end
-        return false
+        self.SelectedMonsterId = #options > 0 and options[1].monsterId or ""
+    end
+
+    @ExecSpace("ClientOnly")
+    method any SelectedDraftUnit()
+        -- The placed unit currently selected, or nil when none is.
+        return self.Draft[self.SelectedUnit]
+    end
+
+    @ExecSpace("ClientOnly")
+    method string PreviewMonsterId(string mode)
+        -- The monster a cursor preview shows: the moved unit, or the armed card.
+        local unit = self:SelectedDraftUnit()
+        if mode == "MOVE" and unit ~= nil then return unit.monsterId end
+        return self.SelectedMonsterId
+    end
+
+    @ExecSpace("ClientOnly")
+    method boolean HasLoadedDraft()
+        -- The local copy matches the viewed group only after a read and before a switch lands.
+        return self.Snapshot.saved ~= nil and self.DraftSlot == self.Snapshot.editSlot
+    end
+
+    @ExecSpace("ClientOnly")
+    method string DraftStamp()
+        -- Changes whenever world previews must be rebuilt from the local copy and catalog.
+        return tostring(self.DraftSlot) .. "|" .. tostring(self.DraftVersion) .. "|" .. tostring(#self.Draft) .. "|" .. tostring(#(self.Snapshot.options or {}))
     end
 
     @ExecSpace("ClientOnly")
@@ -167,7 +228,7 @@ script FormationEditSession extends Logic
     method boolean Writable()
         -- Only a confirmed read or a first-use state accepts commands.
         local load = self.Snapshot.loadState
-        return self.Snapshot.saved ~= nil and (load == "READY" or load == "NEW") and not self._T.localUnconfirmed and _MatchProbeInput:AllowsFormationActions()
+        return self.Snapshot.saved ~= nil and _FormationSchema:IsLoadConfirmed(load) and not self._T.localUnconfirmed and _MatchFlowInput:AllowsFormationActions()
     end
 
     @ExecSpace("ClientOnly")
@@ -175,7 +236,7 @@ script FormationEditSession extends Logic
         -- An earlier write may still have committed; writes, switching and leaving wait until a read settles it.
         -- The server keeps its own late-reply guard after that read, but the player may then continue.
         local load = self.Snapshot.loadState
-        return (self.Snapshot.uncertain == true and load ~= "READY" and load ~= "NEW") or self._T.localUnconfirmed == true
+        return (self.Snapshot.uncertain == true and not _FormationSchema:IsLoadConfirmed(load)) or self._T.localUnconfirmed == true
     end
 
     @ExecSpace("ClientOnly")
@@ -185,7 +246,7 @@ script FormationEditSession extends Logic
         local load = state.loadState or "LOADING"
         if state.saved == nil or load == "LOADING" or load == "NOT_LOADED" then return "讀取中，完成後才能儲存" end
         if self:Busy() then return "儲存處理中，請稍候" end
-        if not _MatchProbeInput:AllowsFormationActions() then return "配對處理中，取消完成或返回大廳後可繼續整備" end
+        if not _MatchFlowInput:AllowsFormationActions() then return "配對處理中，取消完成或返回大廳後可繼續整備" end
         if self:Unconfirmed() then return "上次儲存結果尚未確認，請按「確認結果」" end
         if load == "CONFLICT" then return "上次操作失敗，請按「重新讀取」確認後再儲存" end
         if load == "ERROR" then return "讀取失敗，請按「重新讀取」" end
@@ -215,7 +276,7 @@ script FormationEditSession extends Logic
         local state = self.Snapshot
         local saved = state.saved
         local info = saved ~= nil and state.slots ~= nil and state.slots[tostring(saved.activeSlot)] or nil
-        return (state.loadState == "READY" or state.loadState == "NEW") and info ~= nil and info.savedValid == true
+        return _FormationSchema:IsLoadConfirmed(state.loadState) and info ~= nil and info.savedValid == true
     end
 
     @ExecSpace("ClientOnly")
@@ -299,7 +360,7 @@ script FormationEditSession extends Logic
     method any RequestSwitchSlot(integer slotId)
         -- Switching asks first whenever the viewed group holds unsaved changes.
         local state = self.Snapshot
-        if not _MatchProbeInput:AllowsFormationActions() or self:Busy() or self.ConfirmKind ~= "" or slotId == state.editSlot or state.saved == nil then return nil end
+        if not _MatchFlowInput:AllowsFormationActions() or self:Busy() or self.ConfirmKind ~= "" or slotId == state.editSlot or state.saved == nil then return nil end
         if self:Unconfirmed() then
             return { { kind = "NOTICE", text = "上次儲存結果尚未確認，確認前無法切換組別" } }
         end
@@ -313,7 +374,7 @@ script FormationEditSession extends Logic
     @ExecSpace("ClientOnly")
     method any RequestReturnToLobby()
         -- Leaving asks first whenever the viewed group holds unsaved changes.
-        if not _MatchProbeInput:AllowsFormationActions() then return nil end
+        if not _MatchFlowInput:AllowsFormationActions() then return nil end
         if self:Busy() or self.ConfirmKind ~= "" then
             return { { kind = "NOTICE", text = "正在儲存，完成後返回大廳…" } }
         end

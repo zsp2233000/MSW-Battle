@@ -16,7 +16,7 @@
 
 - `FormationService.RequestSave(units, slotId, expectedRevision, requestId)`：取代 `RequestDraft`／`RequestSave(version, slot)`。伺服器以 RPC 傳送者決定身分，驗證怪物、一至六個單位、站位與間距（`ValidateUnits`，與 client 共用 `ValidateShape`），要求 `expectedRevision` 等於目前已儲存版本，只改該組並以 CAS 寫入。儲存非出戰組不會啟用它。
 - 回覆走快照的 `result = { requestId, kind, slotId, status, code }`，`status` 為 `OK`／`REJECTED`／`FAILED`／`UNCONFIRMED`。明確失敗與拒絕都有真實原因文字；逾時為 `UNCONFIRMED`（寫入可能已提交），進入 `CONFLICT` 並保留延遲回覆防護。
-- 已移除：`RequestDraft`、`UpdateDraftForUser`、`AutoSaveForMatch`、`drafts`／`draftVersion`／`savedDraftVersion`／`saveState` 等快照欄位、`MatchProbe.ReceiveState` 與 `MatchProbeInput.Observe` 的自動儲存提示參數、MatchGroup 的 `EditorMatch` 面板。
+- 已移除：`RequestDraft`、`UpdateDraftForUser`、`AutoSaveForMatch`、`drafts`／`draftVersion`／`savedDraftVersion`／`saveState` 等快照欄位、`MatchFlow.ReceiveState` 與 `MatchFlowInput.Observe` 的自動儲存提示參數、MatchGroup 的 `EditorMatch` 面板。
 - 交接（`FormationHandoff`）只含已儲存編隊、出戰選擇、本局編隊、版本與必要配對狀態；`Seal` 不再儲存，`Capture` 不含草稿。舊的在途紀錄若仍帶 `drafts`，驗證時不再要求、讀取時忽略。
 
 ## client 行為

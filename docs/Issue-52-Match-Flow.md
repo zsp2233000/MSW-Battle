@@ -6,7 +6,7 @@
 
 - 配對只從 `formationlobby` 開始。client 入口與伺服器 `QueueForUser` 都檢查地圖；整備內的舊事件或直接 RPC 不會排隊。
 - 送出開始／取消後立即鎖住整備；只有正式 `IDLE` 且沒有在途狀態請求才解鎖。大廳選組、雙擊整備、POC 入口及 local 編輯共用這個條件；配對期間清除尚未完成的整備進場意圖。
-- `MatchProbe.IsFormationLocked` 供伺服器選組、儲存、啟用與移動重驗證，涵蓋請求中的 yield、等待、取消未確認、入場與返回。原有 transfer lock 仍由 FormationService 管理。
+- `MatchFlow.IsFormationLocked` 供伺服器選組、儲存、啟用與移動重驗證，涵蓋請求中的 yield、等待、取消未確認、入場與返回。原有 transfer lock 仍由 FormationService 管理。
 - 原生取消成功後才寫入取消終態。取消或終態寫入失敗都維持鎖定並提供重試；配對預約寫入未確認也保留待取消的票券，不提前呈現可編輯狀態。
 - 取消等待使用票券外的 `cancelling` 旗標，保留真正的排隊／入場階段，對外呈現 `CANCELLING`；原生回覆失敗不再留下假取消終態。取消確認後、取消終態寫入尚未確認時仍呈現 `CANCELLING`，只有持久確認才清掉票券並回到 `IDLE`；玩家已離線時則放掉記憶體票券，重連後再由持久狀態恢復。
 - 取消期間收到配對成功會暫存，取消失敗後接續同一票券；已在準備中的配對則等取消回覆後才越過 `COMMITTING` 邊界。取消成功會阻止入場，恢復入場時清掉過期的取消錯誤，保留原本的本局隊伍與版本。
@@ -26,7 +26,7 @@
 | 完整 contract suite | `node --test tests/*.test.cjs`：53/53 |
 | UIBuilder lint | FormationGroup、MatchGroup、BattleGroup、BattleConfigErrorGroup：0 error；保留既有 3／0／2／0 warning |
 | Maker build | 0 Error；`IsPCPlatform` 舊 API warning，以及 16:43 的既有 BattleViewAvatar warning |
-| client 腳本 LSP | FormationLobby、FormationEditSession、MatchProbeInput：0 error／warning。另兩個 server 腳本仍有本機原生事件定義缺失的既有診斷，以 Maker build 與 runtime 核對 |
+| client 腳本 LSP | FormationLobby、FormationEditSession、MatchFlowInput：0 error／warning。另兩個 server 腳本仍有本機原生事件定義缺失的既有診斷，以 Maker build 與 runtime 核對 |
 | 單組儲存、切組／返回三選擇、空組與不合法站位、捨棄後重開 | `editor_save_flow_runtime_probe.lua`：`[VRF][Save50] PASS`，含 S1–S10 |
 | 五組保存、第三組啟用、更新其版本後返回 | `match_flow_runtime_probe.lua` PREPARE：`PREPARE PASS five saved groups; explicit active choice; updated active version; clean lobby return` |
 | 預覽組獨立、舊入口被擋、等待超過六十秒 | 同探針 QUEUE：`QUEUE PASS ... real wait >60s`；實際等候 63 秒，未修改顯示時鐘 |

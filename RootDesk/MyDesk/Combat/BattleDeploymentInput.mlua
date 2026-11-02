@@ -229,9 +229,9 @@ script BattleDeploymentInput extends Component
             displayOptions = {}
             for index = 1, math.max(#options, math.min(60, self.PreviewCardCount)) do
                 local source = options[(index - 1) % #options + 1]
-                local name = source[2]
+                local name = source.monsterName
                 if index > #options then name = name .. " " .. tostring(index) end
-                table.insert(displayOptions, { source[1], name, source[3] })
+                table.insert(displayOptions, { monsterId = source.monsterId, monsterName = name, standRuid = source.standRuid })
             end
         end
         self.optionData = displayOptions
@@ -240,9 +240,9 @@ script BattleDeploymentInput extends Component
         -- Keep the authored dock position and size stable as the catalog grows.
         for index, option in ipairs(displayOptions) do
             if buildSerial ~= self._T.optionBuildSerial or not self:IsDeploymentEnabled() or generation ~= self.session.SessionGeneration then self.optionsReady = false self.optionsBuilding = false return end
-            local monsterId = option[1]
-            local monsterName = option[2]
-            local standRUID = option[3]
+            local monsterId = option.monsterId
+            local monsterName = option.monsterName
+            local standRUID = option.standRuid
             local card = self.optionTemplate:Clone("MonsterOption_" .. tostring(index))
             if buildSerial ~= self._T.optionBuildSerial or not isvalid(self.session) or generation ~= self.session.SessionGeneration then
                 if isvalid(card) then card:Destroy() end

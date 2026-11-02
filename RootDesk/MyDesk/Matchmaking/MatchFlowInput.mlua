@@ -1,5 +1,5 @@
 @Logic
-script MatchProbeInput extends Logic
+script MatchFlowInput extends Logic
 
     property Entity root = "e81b5c52-278b-4bd8-95ca-59375028073f"
     property Entity status = "d5a3a2c6-453c-478a-a20e-3fc77c3156d6"
@@ -46,7 +46,7 @@ script MatchProbeInput extends Logic
             self._T.pendingSeconds = self._T.pendingSeconds + delta
             if self._T.pendingSeconds >= 10 then
                 self._T.pendingSeconds = 0
-                _MatchProbe:RequestStatus()
+                _MatchFlow:RequestStatus()
             end
         end
         local confirming = isvalid(self.exitConfirmation) and self.exitConfirmation.Enable
@@ -56,7 +56,7 @@ script MatchProbeInput extends Logic
             self._T.map = player.CurrentMapName
             self._T.pending = true
             self._T.pendingSeconds = 0
-            _MatchProbe:RequestStatus()
+            _MatchFlow:RequestStatus()
         end
         local screen = self:ScreenFor(map)
         if screen ~= self._T.screen then self:SelectScreen(screen) end
@@ -129,7 +129,7 @@ script MatchProbeInput extends Logic
         if _FormationEditSession.ConfirmKind ~= "" or _FormationEditSession:Busy() or _FormationEditSession:Unconfirmed() then return end
         if self.State == "IDLE" then
             local formation = _FormationEditSession.Snapshot
-            if (formation.loadState ~= "READY" and formation.loadState ~= "NEW") or formation.pending then return end
+            if not _FormationSchema:IsLoadConfirmed(formation.loadState) or formation.pending then return end
             if not _FormationEditSession:HasValidActive() then
                 if _UserService.LocalPlayer.CurrentMapName == "formationlobby" then _FormationLobby:Travel("formationsim") end
                 return
@@ -139,16 +139,16 @@ script MatchProbeInput extends Logic
         self._T.pendingSeconds = 0
         _FormationLobby:Render()
         if self.Message == "READINESS_FAILED" then
-            _MatchProbe:RequestStatus()
+            _MatchFlow:RequestStatus()
         elseif self.State == "QUEUED" or self.State == "SAVING" or self.State == "RENEWING" or self.State == "QUEUE_ERROR" or self.State == "CANCELLING" or self.State == "CANCELLED" then
-            _MatchProbe:RequestCancel(self.Attempt)
+            _MatchFlow:RequestCancel(self.Attempt)
         elseif self.State == "IN_ROOM" or self.State == "TRANSFER" or self.State == "COMMITTING" or self.State == "RETURNING"
             or self.State == "ROOM_MISMATCH" or self.State == "WAITING" or self.State == "ENTRY_FAILED" or self.State == "ABORTED" or string.sub(self.State, 1, 7) == "RESULT_" then
-            _MatchProbe:RequestReturn(self.Attempt)
+            _MatchFlow:RequestReturn(self.Attempt)
         elseif self.State == "BATTLE" then
             return
         elseif self.State ~= "RETURNING" then
-            _MatchProbe:RequestQueue(_UtilLogic:NewGuid())
+            _MatchFlow:RequestQueue(_UtilLogic:NewGuid())
         end
         self:Render()
     end
@@ -232,7 +232,7 @@ script MatchProbeInput extends Logic
         end
         if self.State == "IDLE" and (self.Message == "RETURNED" or self.Message == "CANCELLED") then text = "已返回或取消，可以重新開始配對" end
         if self.State == "IDLE" then
-            local ready = formation.loadState == "READY" or formation.loadState == "NEW"
+            local ready = _FormationSchema:IsLoadConfirmed(formation.loadState)
             idleBlocked = not ready or _FormationEditSession:Busy() or _FormationEditSession:Unconfirmed() or _FormationEditSession.ConfirmKind ~= ""
             if not ready then
                 text = "正在載入隊伍；若持續沒有回應，請按「重新讀取」。"
@@ -251,7 +251,7 @@ script MatchProbeInput extends Logic
         local title = self._T.panel:GetChildByName("Title", false)
         if isvalid(title) then
             local active = formation.saved ~= nil and formation.saved.activeSlot or 0
-            local ready = formation.loadState == "READY" or formation.loadState == "NEW"
+            local ready = _FormationSchema:IsLoadConfirmed(formation.loadState)
             local activeLabel = not ready and "出戰未確認" or (active > 0 and ("出戰第 " .. tostring(active) .. " 組") or "尚未設定出戰")
             title.TextGUIRendererComponent.Text = (self.State == "IDLE" and "對戰指令｜" or "配對狀態｜") .. activeLabel
         end

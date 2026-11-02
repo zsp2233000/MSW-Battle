@@ -28,7 +28,7 @@ script MatchedBattle extends Component
         local battle = self.Entity.CurrentMap:GetComponent("script.BattleSession")
         if not isvalid(battle) then return end
         if not self._T.started and not self.AdmissionFailed then
-            local admission = _MatchProbe:RoomBattleAdmission()
+            local admission = _MatchFlow:RoomBattleAdmission()
             if admission ~= nil and battle.Phase == "WAITING" then
                 local homeUnits = _FormationHandoff:Roster(admission.homeTicket)
                 local awayUnits = _FormationHandoff:Roster(admission.awayTicket)
@@ -38,7 +38,7 @@ script MatchedBattle extends Component
                 self.AdmissionFailed = true
             end
             if self._T.started or self.AdmissionFailed then
-                for _, user in ipairs(users) do _MatchProbe:PublishState(user.PlayerComponent.UserId, self.AdmissionFailed and "ENTRY_FAILED" or "BATTLE_STARTED") end
+                for _, user in ipairs(users) do _MatchFlow:PublishState(user.PlayerComponent.UserId, self.AdmissionFailed and "ENTRY_FAILED" or "BATTLE_STARTED") end
                 log("[VRF][MatchedBattle] admission started=" .. tostring(self._T.started) .. " failed=" .. tostring(self.AdmissionFailed))
             end
         end
@@ -47,7 +47,7 @@ script MatchedBattle extends Component
             for _, user in ipairs(users) do
                 local profile = user.PlayerComponent.ProfileCode
                 local result = battle:ResultForProfile(profile)
-                if result ~= "" then _MatchProbe:PublishState(user.PlayerComponent.UserId, "RESULT_" .. result) end
+                if result ~= "" then _MatchFlow:PublishState(user.PlayerComponent.UserId, "RESULT_" .. result) end
             end
             log("[VRF][MatchedBattle] result published once match=" .. self._T.matchKey .. " home=" .. battle:ResultForProfile(battle.HomeProfile) .. " away=" .. battle:ResultForProfile(battle.AwayProfile))
         end

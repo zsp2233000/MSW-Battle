@@ -1,0 +1,186 @@
+@Logic
+script FormationCatalogCards extends Logic
+
+    @ExecSpace("ClientOnly")
+    method void OnBeginPlay()
+        -- Own the runtime monster cards, their hover tooltip and the intelligence panel.
+        self._T.cards = {}
+        self._T.hoverCard = nil
+        self._T.optionsKey = ""
+        _FormationLobby:SetEnabled("CardTooltip", false)
+        log("[VRF][CatalogCards] ready")
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnUpdate(number delta)
+        -- The tooltip follows the cursor and closes as soon as its card stops being usable.
+        self:UpdateCardTooltip()
+    end
+
+    @ExecSpace("ClientOnly")
+    method string KindLabel(string monsterType)
+        -- One player-facing name per combat type; unknown types return an empty label.
+        local kinds = { TANK = "坦克", ASSAULT = "戰士", SHOOTER = "射手" }
+        return kinds[monsterType] or ""
+    end
+
+    @ExecSpace("ClientOnly")
+    method void DestroyCards()
+        -- Release every card's subscriptions before its entity goes away.
+        for _, card in ipairs(self._T.cards or {}) do
+            if isvalid(card.entity) then
+                card.entity:DisconnectEvent(ButtonClickEvent, card.callback)
+                card.entity:DisconnectEvent(UITouchEnterEvent, card.enterCallback)
+                card.entity:DisconnectEvent(UITouchExitEvent, card.exitCallback)
+                card.entity:Destroy()
+            end
+        end
+        self._T.cards = {}
+    end
+
+    @ExecSpace("ClientOnly")
+    method void BuildOptions(table options)
+        -- Rebuild catalog cards only when server-published identity, art or intelligence changes.
+        local parts = {}
+        for _, option in ipairs(options) do
+            table.insert(parts, table.concat({ option.monsterId, option.monsterName, option.standRuid, option.monsterType,
+                tostring(option.maxHp), tostring(option.attackDamage), tostring(option.attackInterval), tostring(option.attackRange) }, "|"))
+        end
+        local key = table.concat(parts, "\n")
+        if key == self._T.optionsKey then return end
+        self._T.hoverCard = nil
+        _FormationLobby:SetEnabled("CardTooltip", false)
+        local template = _FormationLobby:Ui("Editor/Catalog/Template")
+        if not isvalid(template) then return end
+        self._T.optionsKey = key
+        _FormationEditSession:EnsureMonsterSelected(options)
+        self:DestroyCards()
+        for index, option in ipairs(options) do
+            local monsterId = option.monsterId
+            local card = template:Clone("Monster" .. tostring(index))
+            local name = card:GetChildByName("MonsterName", true)
+            if isvalid(name) then
+                local label = name:GetComponent("TextGUIRendererComponent")
+                if isvalid(label) then label.Text = option.monsterName end
+                local labelSprite = name:GetComponent("SpriteGUIRendererComponent")
+                if isvalid(labelSprite) then labelSprite.RaycastTarget = false end
+            end
+            local portrait = card:GetChildByName("Portrait", true)
+            if isvalid(portrait) then
+                portrait.SpriteGUIRendererComponent.ImageRUID = DataRef("thumbnail://" .. option.standRuid)
+                portrait.SpriteGUIRendererComponent.Color = Color.white
+                portrait.SpriteGUIRendererComponent.RaycastTarget = false
+            end
+            -- The authored template owns both frame looks; Render only switches which one is shown.
+            local frame = card:GetChildByName("SelectedFrame", true)
+            local glow = card:GetChildByName("SelectedGlow", true)
+            if isvalid(frame) then frame.SpriteGUIRendererComponent.RaycastTarget = false end
+            if isvalid(glow) then
+                local check = glow:GetChildByName("Check", true)
+                if isvalid(check) then check.SpriteGUIRendererComponent.RaycastTarget = false end
+            end
+            local identity = card:GetChildByName("Identity", true)
+            if isvalid(identity) then identity.TextGUIRendererComponent.Text = self:KindLabel(option.monsterType) end
+            -- Selection follows MonsterId; hovering only previews and never selects.
+            local callback = card:ConnectEvent(ButtonClickEvent, function()
+                _FormationEditSession:SelectMonster(monsterId)
+                _FormationLobby:Render()
+            end)
+            local enterCallback = card:ConnectEvent(UITouchEnterEvent, function()
+                self._T.hoverCard = card
+                self:RenderMonsterInfo("CardTooltip", option)
+                self:UpdateCardTooltip()
+            end)
+            local exitCallback = card:ConnectEvent(UITouchExitEvent, function()
+                if self._T.hoverCard == card then
+                    self._T.hoverCard = nil
+                    _FormationLobby:SetEnabled("CardTooltip", false)
+                end
+            end)
+            table.insert(self._T.cards, { entity = card, callback = callback, enterCallback = enterCallback,
+                exitCallback = exitCallback, monsterId = monsterId, glow = glow, frame = frame })
+            card:SetEnable(true)
+        end
+        local catalog = _FormationLobby:Ui("Editor/Catalog")
+        if isvalid(catalog) then
+            local layout = catalog:GetComponent("ScrollLayoutGroupComponent")
+            if isvalid(layout) then layout:ResetScrollPosition(UITransformAxis.Vertical) end
+        end
+        log("[VRF][FormationUI] cards=" .. tostring(#options) .. " scroll=vertical")
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Render(table view)
+        -- Cards are usable only while editing is, and their frames follow the selected MonsterId.
+        for _, card in ipairs(self._T.cards or {}) do
+            local selected = card.monsterId == _FormationEditSession.SelectedMonsterId
+            if isvalid(card.entity) then card.entity.ButtonComponent.Enable = view.canEdit or (view.writable and not view.busy) end
+            if isvalid(card.frame) then card.frame:SetEnable(selected) end
+            if isvalid(card.glow) then card.glow:SetEnable(selected) end
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void RenderIntel()
+        -- A selected world unit takes precedence over the placement card; statistics never enter save commands.
+        local unit = _FormationEditSession:SelectedDraftUnit()
+        local monsterId = unit ~= nil and unit.monsterId or _FormationEditSession.SelectedMonsterId
+        self:RenderMonsterInfo("Editor/Intel", _FormationEditSession:Option(monsterId))
+        _FormationLobby:SetText("Editor/Units/Detail", "MonsterId：" .. monsterId .. (unit ~= nil and string.format("\n相對站位 (%.2f, %.2f)", unit.x, unit.y) or "\n尚未選取場上單位"))
+    end
+
+    @ExecSpace("ClientOnly")
+    method void RenderMonsterInfo(string target, table option)
+        -- Share the same catalog values between selected intelligence and hover previews.
+        _FormationLobby:SetText(target .. "/Name", option ~= nil and option.monsterName or "等待怪物目錄")
+        local kind = option ~= nil and self:KindLabel(option.monsterType) or ""
+        _FormationLobby:SetText(target .. "/Kind", (option ~= nil and kind == "") and "—" or kind)
+        local stats = {
+            { "Health", "maxHp", "" },
+            { "Damage", "attackDamage", "" },
+            { "Interval", "attackInterval", " 秒" },
+            { "Range", "attackRange", "" },
+        }
+        for _, stat in ipairs(stats) do
+            local path = target .. "/Stats/" .. stat[1]
+            _FormationLobby:SetEnabled(path, option ~= nil)
+            _FormationLobby:SetText(path .. "/Value", option ~= nil and (tostring(option[stat[2]]) .. stat[3]) or "")
+        end
+        _FormationLobby:SetText(target .. "/Stats", option == nil and "正在載入怪物資料…" or "")
+    end
+
+    @ExecSpace("ClientOnly")
+    method void UpdateCardTooltip()
+        -- Follow the cursor while keeping the authored popup inside the reference canvas.
+        local card = self._T.hoverCard
+        local player = _UserService.LocalPlayer
+        if not isvalid(card) or not card.EnabledInHierarchy or not isvalid(player)
+            or player.CurrentMapName ~= "formationsim" or _FormationEditorSlide.Collapsed
+            or _FormationEditSession.ConfirmKind ~= "" or _FormationEditSession.Snapshot.pending then
+            self._T.hoverCard = nil
+            _FormationLobby:SetEnabled("CardTooltip", false)
+            return
+        end
+        local popup = _FormationLobby:Ui("CardTooltip")
+        if not isvalid(popup) then return end
+        local cursor = _UILogic:ScreenToUIPosition(_InputService:GetCursorPosition())
+        local size = popup.UITransformComponent.RectSize
+        local canvas = _FormationLobby.root.UITransformComponent.RectSize
+        local halfWidth, halfHeight = canvas.x / 2, canvas.y / 2
+        local x, y = cursor.x + 24, cursor.y - 24
+        if x + size.x > halfWidth - 12 then x = cursor.x - size.x - 24 end
+        if y - size.y < -halfHeight + 12 then y = cursor.y + size.y + 24 end
+        popup.UITransformComponent.anchoredPosition = Vector2(
+            math.max(-halfWidth + 12, math.min(x, halfWidth - size.x - 12)),
+            math.max(-halfHeight + size.y + 12, math.min(y, halfHeight - 12)))
+        popup:SetEnable(true)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnEndPlay()
+        -- Release cloned card subscriptions and the tooltip at world session shutdown.
+        self._T.hoverCard = nil
+        _FormationLobby:SetEnabled("CardTooltip", false)
+        self:DestroyCards()
+    end
+end

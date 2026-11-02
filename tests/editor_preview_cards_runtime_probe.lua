@@ -26,7 +26,7 @@ local ok, detail = pcall(function()
     local input = _UserService.LocalPlayer.CurrentMap:GetComponent('FormationMapInput')
 
     -- Cards: selection follows MonsterId; frames come from the template; hover never selects.
-    local cards = l._T.cards
+    local cards = _FormationCatalogCards._T.cards
     assert(#cards >= 3, 'formal catalog cards')
     click('Editor/Catalog/Monster1')
     for index, card in ipairs(cards) do
@@ -51,13 +51,13 @@ local ok, detail = pcall(function()
     local old = {}
     for index, card in ipairs(cards) do old[index] = card.entity end
     cards[1].entity:SendEvent(UITouchEnterEvent())
-    l._T.optionsKey = ''
-    l:BuildOptions(_FormationEditSession.Snapshot.options)
+    _FormationCatalogCards._T.optionsKey = ''
+    _FormationCatalogCards:BuildOptions(_FormationEditSession.Snapshot.options)
     l:Render()
     wait(0.3)
     for index, entity in ipairs(old) do assert(not isvalid(entity), 'old card ' .. index .. ' destroyed') end
-    assert(#l._T.cards == #cards and _FormationEditSession.SelectedMonsterId == selected, 'rebuilt cards keep the selection by MonsterId')
-    for _, card in ipairs(l._T.cards) do assert(card.frame.Enable == (card.monsterId == selected), 'frames follow MonsterId after a rebuild') end
+    assert(#_FormationCatalogCards._T.cards == #cards and _FormationEditSession.SelectedMonsterId == selected, 'rebuilt cards keep the selection by MonsterId')
+    for _, card in ipairs(_FormationCatalogCards._T.cards) do assert(card.frame.Enable == (card.monsterId == selected), 'frames follow MonsterId after a rebuild') end
     assert(not node('CardTooltip').Enable, 'a rebuild clears the hover tooltip')
     log('[VRF][Preview50] rebuild ok')
 

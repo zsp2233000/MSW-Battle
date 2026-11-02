@@ -34,9 +34,9 @@ local ok, detail = pcall(function()
     local one = {{monsterId = "monster_tank", x = -3.25, y = -1.25}}
     setup(firstId, six)
     setup(secondId, one)
-    _MatchProbe:QueueForUser(firstId)
-    _MatchProbe:CancelForUser(firstId)
-    _MatchProbe:QueueForUser(firstId)
+    _MatchFlow:QueueForUser(firstId)
+    _MatchFlow:CancelForUser(firstId)
+    _MatchFlow:QueueForUser(firstId)
     -- Waiting locks mutation; replacing the roster requires cancel, save, then queue again (#52).
     local waiting = _FormationService:GetSession(firstId)
     _FormationService:SaveForUser(firstId, one, waiting.editSlot, waiting.saved.slots[tostring(waiting.editSlot)].revision, _UtilLogic:NewGuid())
@@ -50,7 +50,7 @@ local ok, detail = pcall(function()
         expected[userId] = { saved = _FormationSchema:CopyDocument(session.saved), editSlot = session.editSlot, player = _UserService:GetUserEntityByUserId(userId) }
     end
     log("[VRF][MatchedQueue] queued six; waiting rejects saves; cancel/requeue passed")
-    _MatchProbe:QueueForUser(secondId)
+    _MatchFlow:QueueForUser(secondId)
     log("[VRF][MatchedQueue] PASS participants=2")
     -- Keep detached expectations in this coroutine while the room probe drives battle and return.
     wait(0.2)

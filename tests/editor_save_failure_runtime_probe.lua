@@ -24,7 +24,7 @@ local function click(path)
 end
 local function dialogOpen() return node('ExitConfirm').Enable end
 local function map() return _UserService.LocalPlayer.CurrentMapName end
-local function inEditor() return map() == 'formationsim' and node('Editor').EnabledInHierarchy and _FormationEditSession.DraftSlot == _FormationEditSession.Snapshot.editSlot and _MatchProbeInput:AllowsFormationActions() end
+local function inEditor() return map() == 'formationsim' and node('Editor').EnabledInHierarchy and _FormationEditSession.DraftSlot == _FormationEditSession.Snapshot.editSlot and _MatchFlowInput:AllowsFormationActions() end
 local function resultIs(status) return _FormationEditSession.Snapshot.result ~= nil and _FormationEditSession.Snapshot.result.status == status end
 
 local ok, detail = pcall(function()

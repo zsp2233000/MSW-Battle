@@ -157,7 +157,7 @@ script FormationService extends Logic
     method void RequestSelectSlot(integer slotId)
         -- Selecting a group changes only the viewed slot; it never writes storage or changes the active slot.
         local record = self:GetSession(senderUserId)
-        if record == nil or record.transferLocked or _MatchProbe:IsFormationLocked(senderUserId) or record.pending or not record.initialized or slotId < 1 or slotId > 5 then return end
+        if record == nil or record.transferLocked or _MatchFlow:IsFormationLocked(senderUserId) or record.pending or not record.initialized or slotId < 1 or slotId > 5 then return end
         record.editSlot = slotId
         record.message = "已選取第 " .. tostring(slotId) .. " 組"
         self:Publish(record)
@@ -185,8 +185,8 @@ script FormationService extends Logic
         if record == nil then return end
         -- A request that cannot be correlated still gets an answer, so no client waits on silence.
         if type(requestId) ~= "string" or #requestId == 0 or #requestId > 64 then self:Publish(record) return end
-        if record.transferLocked or _MatchProbe:IsFormationLocked(forUserId) then self:Reject(record, "SAVE", slotId, requestId, "REJECTED", "配對進行中，取消完成或返回大廳後可繼續編輯") return end
-        if not record.initialized or (record.loadState ~= "NEW" and record.loadState ~= "READY") then
+        if record.transferLocked or _MatchFlow:IsFormationLocked(forUserId) then self:Reject(record, "SAVE", slotId, requestId, "REJECTED", "配對進行中，取消完成或返回大廳後可繼續編輯") return end
+        if not record.initialized or not _FormationSchema:IsLoadConfirmed(record.loadState) then
             self:Reject(record, "SAVE", slotId, requestId, "REJECTED", "必須先成功讀取資料；請重新讀取")
             return
         end
@@ -228,7 +228,7 @@ script FormationService extends Logic
     method void ActivateForUser(string forUserId, integer slotId, integer expectedRevision)
         -- Activation writes only the confirmed slot; it never saves or activates unsaved content implicitly.
         local record = self:GetSession(forUserId)
-        if record == nil or record.pending or record.transferLocked or _MatchProbe:IsFormationLocked(forUserId) then return end
+        if record == nil or record.pending or record.transferLocked or _MatchFlow:IsFormationLocked(forUserId) then return end
         local slot = record.saved.slots[tostring(slotId)]
         if slot == nil or slotId ~= record.editSlot or slot.revision ~= expectedRevision then self:Publish(record) return end
         if #slot.units == 0 then
@@ -251,7 +251,7 @@ script FormationService extends Logic
     @ExecSpace("ServerOnly")
     method void Write(table record, table doc, string kind, integer slotId, string requestId)
         -- Serialize per profile and compare existing bytes so delayed old writers cannot replace newer saves.
-        if record.loadState ~= "NEW" and record.loadState ~= "READY" then
+        if not _FormationSchema:IsLoadConfirmed(record.loadState) then
             self:Reject(record, kind, slotId, requestId, "REJECTED", "必須先成功讀取資料；請重新讀取")
             return
         end
@@ -335,7 +335,7 @@ script FormationService extends Logic
         local session = self:GetSession(forUserId)
         if session == nil then return nil end
         local formation = { profile = session.profile }
-        if not session.initialized or session.pending or (session.loadState ~= "READY" and session.loadState ~= "NEW") then return formation end
+        if not session.initialized or session.pending or not _FormationSchema:IsLoadConfirmed(session.loadState) then return formation end
         local slotId = session.saved.activeSlot
         local slot = session.saved.slots[tostring(slotId)]
         local catalog = self:GetCatalog()
@@ -391,7 +391,7 @@ script FormationService extends Logic
         if record.uncertain ~= nil then self:Load(record) end
         record.restoredTickets = record.restoredTickets or {}
         record.restoredTickets[ticketId] = true
-        log("[VRF][MatchProbe] formations restored; confirmed content only")
+        log("[VRF][MatchFlow] formations restored; confirmed content only")
         return true
     end
 
@@ -409,8 +409,8 @@ script FormationService extends Logic
         local player = _UserService:GetUserEntityByUserId(senderUserId)
         if not isvalid(player) then return end
         local record = self:GetSession(senderUserId)
-        local reconciled = record ~= nil and (record.loadState == "READY" or record.loadState == "NEW")
-        if _MatchProbe:IsFormationLocked(senderUserId) or (record ~= nil and (record.transferLocked or record.pending or (record.uncertain ~= nil and not reconciled))) then
+        local reconciled = record ~= nil and _FormationSchema:IsLoadConfirmed(record.loadState)
+        if _MatchFlow:IsFormationLocked(senderUserId) or (record ~= nil and (record.transferLocked or record.pending or (record.uncertain ~= nil and not reconciled))) then
             if record ~= nil then self:Publish(record) end
             return
         end

@@ -22,8 +22,8 @@ local ok, detail = pcall(function()
         end
         assert(session ~= nil and session.initialized, "saved active formation restored")
         assert(#session.saved.slots[tostring(session.saved.activeSlot)].units == 1, "latest confirmed save preserved")
-        _MatchProbe:QueueForUser(userId)
-        _MatchProbe:CancelForUser(userId)
+        _MatchFlow:QueueForUser(userId)
+        _MatchFlow:CancelForUser(userId)
     end
     log("[VRF][MatchedReturn] PASS both lobby; saved active formations retained; requeue/cancel")
 end)

@@ -16,7 +16,7 @@ test('lobby hides its scene background and UI binding does not force travel', ()
   const lobby = MapBuilder.read('map/formationlobby.map');
   assert.equal(lobby.find('Background').jsonString.enable, false);
   const source = fs.readFileSync('RootDesk/MyDesk/Formations/FormationLobby.mlua', 'utf8');
-  const update = source.slice(source.indexOf('method void OnUpdate('), source.indexOf('method void UpdateLobbyPlayer('));
+  const update = source.slice(source.indexOf('method void OnUpdate('), source.indexOf('method void Travel('));
   assert.doesNotMatch(update, /self:Travel\("formationlobby"\)/);
   assert.match(update, /_FormationService:RequestOpen\(\)/);
 });
@@ -108,8 +108,8 @@ test('#50 unsaved content lives only in the client, never in server sessions, st
     assert.ok(!service.includes(removed), `FormationService no longer has ${removed}`);
   }
   assert.doesNotMatch(handoff, /drafts|autoSave|\.notice/i, 'handoffs carry confirmed content only');
-  assert.doesNotMatch(read('RootDesk/MyDesk/Matchmaking/MatchProbe.mlua'), /autoSave|ticket\.notice/i);
-  assert.doesNotMatch(read('RootDesk/MyDesk/Matchmaking/MatchProbeInput.mlua'), /AutoSaveNotice|EditorMatch|formationsim = /, 'no editor matchmaking screen');
+  assert.doesNotMatch(read('RootDesk/MyDesk/Matchmaking/MatchFlow.mlua'), /autoSave|ticket\.notice/i);
+  assert.doesNotMatch(read('RootDesk/MyDesk/Matchmaking/MatchFlowInput.mlua'), /AutoSaveNotice|EditorMatch|formationsim = /, 'no editor matchmaking screen');
   const session = read('RootDesk/MyDesk/Formations/FormationEditSession.mlua');
   assert.match(session, /property table Draft = \{\}/, 'the client holds its own copy');
   for (const source of [lobby, session]) assert.doesNotMatch(source, /_FormationService:RequestDraft|_DataStorageService/, 'edits never reach the server before an explicit save');
@@ -150,11 +150,11 @@ test('#50 client states: dirty by content comparison, three-way confirmation, no
 });
 
 test('#50 player-facing text never says draft or currently-editing', () => {
-  for (const file of ['FormationLobby', 'FormationEditSession', 'FormationService', 'FormationHandoff']) {
+  for (const file of ['FormationLobby', 'FormationEditSession', 'FormationService', 'FormationHandoff', 'FormationCatalogCards', 'FormationLobbyPreview', 'FormationLobbyIdentity']) {
     const strings = [...read(`RootDesk/MyDesk/Formations/${file}.mlua`).matchAll(/"([^"\n]*[一-鿿][^"\n]*)"/g)].map(m => m[1]);
     for (const text of strings) assert.doesNotMatch(text, /草稿|正在編輯/, `${file}: ${text}`);
   }
-  const strings = [...read('RootDesk/MyDesk/Matchmaking/MatchProbeInput.mlua').matchAll(/"([^"\n]*[一-鿿][^"\n]*)"/g)].map(m => m[1]);
+  const strings = [...read('RootDesk/MyDesk/Matchmaking/MatchFlowInput.mlua').matchAll(/"([^"\n]*[一-鿿][^"\n]*)"/g)].map(m => m[1]);
   for (const text of strings) assert.doesNotMatch(text, /草稿|正在編輯/, text);
   for (const file of ['FormationGroup', 'MatchGroup']) {
     const ui = UIBuilder.read(`ui/${file}.ui`);
@@ -251,9 +251,11 @@ test('#50 card frame looks are authored in the template, not hard-coded by Rende
   assert.ok(normal.r < 0.9, 'unselected frames are dimmed by the template');
   assert.ok(ui.find(`${template}/SelectedGlow/Check`), 'selected cards keep a check mark');
   const lobby = read('RootDesk/MyDesk/Formations/FormationLobby.mlua');
-  assert.doesNotMatch(lobby, /359082ed43c44cc1a597b00b61bafa36|dc14abffdb9f400e819f61b9ab7e6805/, 'no second copy of the frame art in code');
+  const cards = read('RootDesk/MyDesk/Formations/FormationCatalogCards.mlua');
+  assert.doesNotMatch(cards, /359082ed43c44cc1a597b00b61bafa36|dc14abffdb9f400e819f61b9ab7e6805/, 'no second copy of the frame art in code');
   assert.doesNotMatch(method(lobby, 'Render'), /ImageRUID/, 'Render never overrides template art');
-  assert.match(lobby, /card\.frame:SetEnable\(selected\)/);
+  assert.doesNotMatch(method(cards, 'Render'), /ImageRUID/, 'card Render never overrides template art');
+  assert.match(method(cards, 'Render'), /card\.frame:SetEnable\(selected\)/);
 });
 
 test('#50 mouse preview and local edits share one rule set and keep selection rules', () => {
@@ -377,6 +379,20 @@ test('the handoff reaches formation sessions only through FormationService opera
     assert.ok(handoff.includes(`_FormationService:${name}(`), `handoff uses ${name}`);
     assert.match(service, new RegExp(`method \\w+ ${name}\\(`), `FormationService defines ${name}`);
   }
+});
+
+test('catalog options use named fields and one rule decides a confirmed read', () => {
+  const scripts = [];
+  for (const dir of ['RootDesk/MyDesk/Formations', 'RootDesk/MyDesk/Matchmaking', 'RootDesk/MyDesk/Combat']) {
+    for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.mlua'))) scripts.push({file, source: read(`${dir}/${file}`)});
+  }
+  for (const {file, source} of scripts) {
+    assert.doesNotMatch(source, /\b(option|source)\[\d|options\[\d+\]\[/, `${file}: no positional catalog access`);
+    if (file !== 'FormationSchema.mlua') {
+      assert.doesNotMatch(source, /(\w+) [=~]= "READY" (or|and) \1 [=~]= "NEW"|(\w+) [=~]= "NEW" (or|and) \3 [=~]= "READY"/, `${file}: uses IsLoadConfirmed`);
+    }
+  }
+  assert.match(read('RootDesk/MyDesk/Combat/MonsterCatalog.mlua'), /monsterId = profile\.MonsterId, monsterName = profile\.MonsterName, standRuid = profile\.StandAnimationRUID/);
 });
 
 test('only FormationService assigns the transfer lock', () => {

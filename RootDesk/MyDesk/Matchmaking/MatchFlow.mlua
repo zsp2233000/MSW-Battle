@@ -1,5 +1,5 @@
 @Logic
-script MatchProbe extends Logic
+script MatchFlow extends Logic
 
     property boolean Enabled = true
     property string TestProfileA = ""
@@ -29,7 +29,7 @@ script MatchProbe extends Logic
         self._T.progressTimers = {}
         self._T.closedMatches = {}
         self._T.ended = false
-        log("[VRF][MatchProbe] ready enabled=" .. tostring(self.Enabled) .. " room=" .. _RoomService.RoomKey)
+        log("[VRF][MatchFlow] ready enabled=" .. tostring(self.Enabled) .. " room=" .. _RoomService.RoomKey)
     end
 
     @ExecSpace("ServerOnly")
@@ -47,7 +47,7 @@ script MatchProbe extends Logic
     @ExecSpace("ServerOnly")
     method void Report(string userId, string message)
         -- Observations contain service codes and public location identifiers, never capsule contents.
-        log("[VRF][MatchProbe] " .. message)
+        log("[VRF][MatchFlow] " .. message)
         if self:Player(userId) == nil then return end
         local ticket = self._T.records[userId]
         local attempt = ticket ~= nil and ticket.data.attempt or ""
@@ -68,7 +68,7 @@ script MatchProbe extends Logic
         elseif message == "MATCHMAKING_NOT_CONFIGURED" then
             _UIToast:ShowMessage("線上配對服務尚未設定")
         end
-        log("[VRF][MatchProbeUI] status received")
+        log("[VRF][MatchFlowUI] status received")
     end
 
     @ExecSpace("ServerOnly")
@@ -120,7 +120,7 @@ script MatchProbe extends Logic
         if sourceRoom ~= _RoomService.RoomKey then return end
         local player = _UserService.LocalPlayer
         if isvalid(player) and (player.CurrentMapName == "matchprobe") ~= (sourceRoom ~= "__main__") then return end
-        _MatchProbeInput:Observe(state, message, started, count, busy, summary, attempt, sequenceKey, sequence)
+        _MatchFlowInput:Observe(state, message, started, count, busy, summary, attempt, sequenceKey, sequence)
     end
 
     @ExecSpace("ServerOnly")
@@ -553,7 +553,7 @@ script MatchProbe extends Logic
                 if _FormationHandoff:Close(userId, ticket, "CANCELLED") then
                     self._T.records[userId] = nil
                     _FormationHandoff:Release(userId, ticket.id)
-                    log("[VRF][MatchProbe] stale local queue cancelled=true")
+                    log("[VRF][MatchFlow] stale local queue cancelled=true")
                     self:Report(userId, "CANCELLED")
                 else
                     data.state = staleState
@@ -726,7 +726,7 @@ script MatchProbe extends Logic
                 stored = _FormationHandoff:Close(userId, ticket, "CANCELLED")
             end
             ticket.cancelling = nil
-            log("[VRF][MatchProbe] leave cancel=" .. tostring(cancelled) .. " tombstone=" .. tostring(stored))
+            log("[VRF][MatchFlow] leave cancel=" .. tostring(cancelled) .. " tombstone=" .. tostring(stored))
             if not cancelled then
                 -- The native queue may still be live: keep the ticket locked and its callback owned for a retry.
                 if self:Player(userId) ~= nil then

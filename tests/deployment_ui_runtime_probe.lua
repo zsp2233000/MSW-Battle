@@ -43,9 +43,9 @@ for index, option in ipairs(adapter.optionData) do
     local portraitEntity = card.entity:GetChildByName("Portrait", true)
     local label = isvalid(nameEntity) and nameEntity:GetComponent("TextGUIRendererComponent") or nil
     local portrait = isvalid(portraitEntity) and portraitEntity:GetComponent("SpriteGUIRendererComponent") or nil
-    check(card.monsterId == option[1] and isvalid(label) and label.Text == option[2],
+    check(card.monsterId == option.monsterId and isvalid(label) and label.Text == option.monsterName,
         "card " .. tostring(index) .. " keeps MonsterId and MonsterName from one row")
-    check(isvalid(portrait) and portrait.ImageRUID ~= nil and portrait.ImageRUID.DataId == option[3],
+    check(isvalid(portrait) and portrait.ImageRUID ~= nil and portrait.ImageRUID.DataId == option.standRuid,
         "card " .. tostring(index) .. " uses its row's StandAnimationRUID")
     check(type(card.clickAction) == "function", "card " .. tostring(index) .. " retains its connected click action")
     card.clickAction()
@@ -53,7 +53,7 @@ for index, option in ipairs(adapter.optionData) do
     for _, candidate in ipairs(adapter.optionCards) do
         if isvalid(candidate.glow) and candidate.glow.Enable == true then enabledGlows = enabledGlows + 1 end
     end
-    check(adapter.selectedMonsterId == option[1] and enabledGlows == 1 and isvalid(card.glow) and card.glow.Enable == true,
+    check(adapter.selectedMonsterId == option.monsterId and enabledGlows == 1 and isvalid(card.glow) and card.glow.Enable == true,
         "click action selects card " .. tostring(index) .. " and moves the persistent glow")
 end
 

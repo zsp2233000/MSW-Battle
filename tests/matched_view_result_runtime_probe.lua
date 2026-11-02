@@ -15,7 +15,7 @@ local ok, detail = pcall(function()
     assert(battle.EventSerial == serial and battle.Phase == "RESULT", "terminal state changed")
     local ids = {}
     for _, user in ipairs(_UserService.UserEntities.Values) do table.insert(ids, user.PlayerComponent.UserId) end
-    for _, userId in ipairs(ids) do _MatchProbe:ReturnForUser(userId) end
+    for _, userId in ipairs(ids) do _MatchFlow:ReturnForUser(userId) end
     log("[VRF][BattleView] RESULT_PASS home=" .. home .. " away=" .. away .. " events=" .. tostring(serial))
 end)
 if not ok then log("[VRF][BattleView] RESULT_FAIL " .. tostring(detail)) end

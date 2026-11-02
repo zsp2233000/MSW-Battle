@@ -31,7 +31,7 @@ local ok, detail = pcall(function()
     local own = _FormationService:GetSession(ownerId)
     assert(own.saved.activeSlot == 3 and own.saved.slots['3'].revision == 2, 'updated third group is active')
     for index = 1, 5 do assert(#own.saved.slots[tostring(index)].units > 0, 'five saved groups before battle') end
-    assert(_MatchProbe:IsFormationLocked(ownerId), 'real client started matching')
+    assert(_MatchFlow:IsFormationLocked(ownerId), 'real client started matching')
     local ticket = _FormationHandoff:Read(owner.PlayerComponent.ProfileCode)
     assert(ticket ~= nil and ticket.data.state == 'QUEUED', 'queue reservation confirmed')
     local fixed = _FormationHandoff:Roster(ticket.id)
@@ -47,7 +47,7 @@ local ok, detail = pcall(function()
     transfer.drafts = { ['3'] = {{monsterId='monster_tank',x=-1,y=0}} }
     local legacy = _FormationHandoff:DecodeTransfer(transfer, _FormationService:GetCatalog())
     assert(legacy ~= nil and _FormationSchema:EncodeDocument(legacy.document) == saved and legacy.units[1].x == -7, 'legacy unsaved content is ignored')
-    _MatchProbe:QueueForUser(peerId)
+    _MatchFlow:QueueForUser(peerId)
     log('[VRF][Flow52Roundtrip] ENTERING fixed slot=3 revision=2; confirmed-only DB; legacy content ignored')
     for _, id in ipairs({ownerId, peerId}) do
         assert(await(function() return not isvalid(_UserService:GetUserEntityByUserId(id)) end), 'participant left main room')
@@ -55,7 +55,7 @@ local ok, detail = pcall(function()
     for _, id in ipairs({ownerId, peerId}) do
         assert(await(function()
             local p = _UserService:GetUserEntityByUserId(id)
-            if not isvalid(p) or p.CurrentMapName ~= 'formationlobby' or _MatchProbe:IsFormationLocked(id) then return false end
+            if not isvalid(p) or p.CurrentMapName ~= 'formationlobby' or _MatchFlow:IsFormationLocked(id) then return false end
             local s = _FormationService:GetSession(id)
             return s.initialized and not s.pending and (s.loadState == 'READY' or s.loadState == 'NEW')
         end, 1800), 'participant returned and restoration confirmed')

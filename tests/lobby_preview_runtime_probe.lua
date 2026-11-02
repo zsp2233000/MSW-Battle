@@ -48,15 +48,15 @@ local ok, detail = pcall(function()
             assert(marker.Enable == (selectedUnits[index] ~= nil), 'selection changes preview to that group')
             if selectedUnits[index] ~= nil then
                 for _, option in ipairs(_FormationEditSession.Snapshot.options) do
-                    if option[1] == selectedUnits[index].monsterId then
-                        assert(marker:GetChildByName('Portrait', false).SpriteGUIRendererComponent.ImageRUID.DataId == 'thumbnail://' .. option[3], 'selected group monster identity')
+                    if option.monsterId == selectedUnits[index].monsterId then
+                        assert(marker:GetChildByName('Portrait', false).SpriteGUIRendererComponent.ImageRUID.DataId == 'thumbnail://' .. option.standRuid, 'selected group monster identity')
                     end
                 end
             end
         end
         assert(lobby:Ui('Lobby/Command/Field/Empty').Enable == (#selectedUnits == 0), 'empty group clears previous portraits')
         if active > 0 then
-            local title = _MatchProbeInput.root:GetChildByName('Title', true)
+            local title = _MatchFlowInput.root:GetChildByName('Title', true)
             assert(await(function() return string.find(title.TextGUIRendererComponent.Text, '出戰第 ' .. tostring(active) .. ' 組') end), 'match title retains actual active group')
         end
     end

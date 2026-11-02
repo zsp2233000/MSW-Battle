@@ -2,7 +2,7 @@
 -- Run QUEUE, then set ConfigureMakerFaults(0, 1, 0) on server_main and run CANCEL_FAILURE.
 -- Reset faults to (0, 0, 0), then run CANCEL_RECOVER. No original player data is written.
 local PHASE = 'QUEUE'
-local l, m, s = _FormationLobby, _MatchProbeInput, _FormationEditSession
+local l, m, s = _FormationLobby, _MatchFlowInput, _FormationEditSession
 local function await(predicate, tries)
     for _ = 1, tries or 150 do if predicate() then return true end wait(0.1) end
     return false
@@ -95,7 +95,7 @@ local ok, detail = pcall(function()
         assert(await(function() return _UserService.LocalPlayer.CurrentMapName == 'formationsim' and s:CanEdit() end), 'editor usable after cancellation')
         assert(not m.root.Enable, 'editor has no matchmaking screen')
         m:Click()
-        _MatchProbe:RequestQueue(_UtilLogic:NewGuid())
+        _MatchFlow:RequestQueue(_UtilLogic:NewGuid())
         wait(0.6)
         assert(m.State == 'IDLE' and not m._T.pending, 'stale binding and server queue request rejected in editor')
         click('Editor/Back')

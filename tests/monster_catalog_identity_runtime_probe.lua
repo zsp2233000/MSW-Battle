@@ -40,7 +40,7 @@ local runOk, runDetail = pcall(function()
 
     local optionsById = {}
     local options = catalog:GetDeploymentOptions()
-    for _, option in ipairs(options) do optionsById[option[1]] = option[2] end
+    for _, option in ipairs(options) do optionsById[option.monsterId] = option.monsterName end
     check(#options == 4 and optionsById.monster_tank == "RenamedTank"
         and optionsById.probe_tank_variant == "VariantTank",
         "official deployment options expose both names as separate catalog identities")

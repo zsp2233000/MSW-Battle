@@ -6,28 +6,28 @@ local ok, detail = pcall(function()
     for _=1,100 do if _UserService.LocalPlayer.CurrentMapName == 'formationsim' then break end wait(.1) end
     wait(.3)
     local selected, unit = _FormationEditSession.SelectedMonsterId, _FormationEditSession.SelectedUnit
-    local first, second = l._T.cards[1].entity, l._T.cards[2].entity
+    local first, second = _FormationCatalogCards._T.cards[1].entity, _FormationCatalogCards._T.cards[2].entity
     local popup = l:Ui('CardTooltip')
     assert(not popup.Enable, 'hidden before hover')
     first:SendEvent(UITouchEnterEvent())
     assert(popup.EnabledInHierarchy, 'enter shows tooltip')
-    assert(l:Ui('CardTooltip/Name').TextGUIRendererComponent.Text == _FormationEditSession.Snapshot.options[1][2], 'hovered name')
+    assert(l:Ui('CardTooltip/Name').TextGUIRendererComponent.Text == _FormationEditSession.Snapshot.options[1].monsterName, 'hovered name')
     for index, field in ipairs({'Health','Damage','Interval','Range'}) do
         local value = l:Ui('CardTooltip/Stats/'..field..'/Value').TextGUIRendererComponent.Text
-        assert(string.find(value,tostring(_FormationEditSession.Snapshot.options[1][index+4]),1,true), 'hovered value '..field)
+        assert(string.find(value,tostring(_FormationEditSession.Snapshot.options[1][({'maxHp','attackDamage','attackInterval','attackRange'})[index]]),1,true), 'hovered value '..field)
     end
     assert(_FormationEditSession.SelectedMonsterId == selected and _FormationEditSession.SelectedUnit == unit, 'hover preserves selection')
     second:SendEvent(UITouchEnterEvent())
     first:SendEvent(UITouchExitEvent())
-    assert(popup.Enable and l._T.hoverCard == second, 'late exit cannot hide next card')
+    assert(popup.Enable and _FormationCatalogCards._T.hoverCard == second, 'late exit cannot hide next card')
     second:SendEvent(UITouchExitEvent())
     assert(not popup.Enable, 'exit hides tooltip')
     first:SendEvent(UITouchEnterEvent())
-    l._T.editorCollapsed = true
+    _FormationEditorSlide.Collapsed = true
     l:Render()
-    l:UpdateCardTooltip()
+    _FormationCatalogCards:UpdateCardTooltip()
     assert(not popup.Enable, 'collapse hides tooltip')
-    l._T.editorCollapsed = false
+    _FormationEditorSlide.Collapsed = false
     l:Render()
     first:SendEvent(UITouchEnterEvent())
     local p,s = popup.UITransformComponent.anchoredPosition,popup.UITransformComponent.RectSize
@@ -35,12 +35,12 @@ local ok, detail = pcall(function()
     assert(p.x >= -canvas.x/2 and p.x+s.x <= canvas.x/2
         and p.y <= canvas.y/2 and p.y-s.y >= -canvas.y/2, 'popup stays inside canvas')
     assert(not popup.CanvasGroupComponent.BlocksRaycasts, 'popup cannot intercept pointer')
-    l._T.optionsKey = ''
-    l:BuildOptions(_FormationEditSession.Snapshot.options)
-    assert(not popup.Enable and l._T.hoverCard == nil, 'rebuild clears stale hover')
+    _FormationCatalogCards._T.optionsKey = ''
+    _FormationCatalogCards:BuildOptions(_FormationEditSession.Snapshot.options)
+    assert(not popup.Enable and _FormationCatalogCards._T.hoverCard == nil, 'rebuild clears stale hover')
 end)
-l._T.editorCollapsed = false
-l._T.hoverCard = nil
+_FormationEditorSlide.Collapsed = false
+_FormationCatalogCards._T.hoverCard = nil
 l:SetEnabled('CardTooltip', false)
 l:Render()
 log(ok and '[VRF][CardTooltip] PASS hover data, independent selection, exit, collapse, bounds and rebuild'

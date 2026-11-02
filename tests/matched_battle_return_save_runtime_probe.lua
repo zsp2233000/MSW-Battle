@@ -5,7 +5,7 @@ local function await(predicate)
     return false
 end
 local ok, detail = pcall(function()
-    local player, m, ui = _UserService.LocalPlayer, _MatchProbeInput, _BattleUIController
+    local player, m, ui = _UserService.LocalPlayer, _MatchFlowInput, _BattleUIController
     assert(player.CurrentMapName == 'matchprobe', 'admitted match room')
     assert(await(function()
         return string.sub(m.State, 1, 7) == 'RESULT_' and ui.result.Enable and isvalid(m.action)

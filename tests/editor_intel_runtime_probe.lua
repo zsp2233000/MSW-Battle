@@ -20,10 +20,10 @@ local ok, detail = pcall(function()
     local kinds = { TANK='坦克', ASSAULT='戰士', SHOOTER='射手' }
     for index, option in ipairs(_FormationEditSession.Snapshot.options) do
         click('Editor/Catalog/Monster' .. tostring(index))
-        assert(_FormationEditSession.SelectedMonsterId == option[1] and _FormationEditSession.SelectedUnit == 0, 'card selects stable MonsterId')
+        assert(_FormationEditSession.SelectedMonsterId == option.monsterId and _FormationEditSession.SelectedUnit == 0, 'card selects stable MonsterId')
         for otherIndex, other in ipairs(_FormationEditSession.Snapshot.options) do
             local card = l:Ui('Editor/Catalog/Monster' .. tostring(otherIndex))
-            local selected = other[1] == option[1]
+            local selected = other.monsterId == option.monsterId
             assert(card.SpriteGUIRendererComponent.ImageRUID.DataId == (selected and '359082ed43c44cc1a597b00b61bafa36' or 'dc14abffdb9f400e819f61b9ab7e6805'), 'only selected card uses the gold base frame')
             local glow = card:GetChildByName('SelectedGlow')
             assert(glow.Enable == selected, 'check mark follows exclusive selection')
@@ -32,14 +32,14 @@ local ok, detail = pcall(function()
             local sign = card:GetChildByName('CardSign').UITransformComponent.RectSize
             assert(sign.x > frame.x and sign.y > frame.y, 'ornament extends beyond the base frame')
         end
-        assert(string.find(l:Ui('Editor/Intel/Kind').TextGUIRendererComponent.Text, kinds[option[4]], 1, true), 'formal monster kind')
+        assert(string.find(l:Ui('Editor/Intel/Kind').TextGUIRendererComponent.Text, kinds[option.monsterType], 1, true), 'formal monster kind')
         for statIndex, field in ipairs({'Health','Damage','Interval','Range'}) do
-            local value = option[statIndex + 4]
+            local value = option[({'maxHp','attackDamage','attackInterval','attackRange'})[statIndex]]
             local stats = l:Ui('Editor/Intel/Stats/'..field..'/Value').TextGUIRendererComponent.Text
             assert(value ~= nil and string.find(stats, tostring(value), 1, true), 'formal combat statistic shown')
             assert(l:Ui('Editor/Intel/Stats/'..field..'/Icon').EnabledInHierarchy, 'stat icon visible')
         end
-        assert(l:Ui('Editor/Intel/Name').TextGUIRendererComponent.Text == option[2], 'formal name shown')
+        assert(l:Ui('Editor/Intel/Name').TextGUIRendererComponent.Text == option.monsterName, 'formal name shown')
     end
     assert(not isvalid(l:Ui('Editor/Intel/Portrait')) and not isvalid(l:Ui('Editor/Intel/Context')),
         'compact intel omits portrait and heading')
@@ -50,7 +50,7 @@ local ok, detail = pcall(function()
         local unit = units[1]
         _UserService.LocalPlayer.CurrentMap:GetComponent('FormationMapInput'):HandleWorldClick(Vector3(unit.x, unit.y, 0))
         assert(_FormationEditSession.SelectedUnit == 1, 'world unit selection')
-        assert(l:Ui('Editor/Intel/Name').TextGUIRendererComponent.Text == l:MonsterName(unit.monsterId), 'intel follows selected unit')
+        assert(l:Ui('Editor/Intel/Name').TextGUIRendererComponent.Text == _FormationEditSession:MonsterName(unit.monsterId), 'intel follows selected unit')
     end
     assert(not l:Ui('Editor/Units').Enable, 'technical coordinates start collapsed')
     click('Editor/ToggleUnits')

@@ -5,7 +5,7 @@
 ## 行為
 
 - `BattleUIController` 是唯一的結果擁有者：Away 玩家的存活數與出戰數一起交換，配對戰以 `ResultForProfile` 取得自己的結果，POC 用 `session.Result`。`BattleDeploymentInput` 不再繪製結果。
-- `MatchProbeInput` 依狀態選面板：大廳 `Match`；戰鬥中不顯示面板，保留戰場視野；其他房間狀態（等待、失敗、中止）`BattleMatch`；有自身結果時 `BattleResult`，位於結果視窗正下方。按鈕一樣送既有的 `RequestReturn`。送出後到伺服器回覆前顯示「返回中…」，重試也一樣。
+- `MatchFlowInput` 依狀態選面板：大廳 `Match`；戰鬥中不顯示面板，保留戰場視野；其他房間狀態（等待、失敗、中止）`BattleMatch`；有自身結果時 `BattleResult`，位於結果視窗正下方。按鈕一樣送既有的 `RequestReturn`。送出後到伺服器回覆前顯示「返回中…」，重試也一樣。
 - `BattleHud` 不再接收點擊。編隊 UI 在 `matchprobe` 維持停用（既有行為）。
 - `BattleConfigErrorGroup` 已使用與確認視窗相同的彈窗素材，本票沒有修改，只補上契約檢查。POC 的 `DeploymentPanel` 也保持原樣。
 
@@ -36,7 +36,7 @@
 
 1. 全新 Play，在 `server_main` 設定隔離的 `_FormationService.StorageKey`，用 `add_virtual_player` 加第二名玩家。
 2. 兩名玩家都以 `_FormationService:Load` 重新讀取，再存好並啟用不對稱編隊（六隻與一隻），然後 `QueueForUser`。必須重新讀取：本機玩家已在進場時讀過正式鍵，直接寫入隔離鍵會得到 `CONFLICT`。
-3. 進房後在 `client` 派送 `matched_battle_result_ui_runtime_probe.lua`；在 `server_instance_*` 執行 `_MatchProbe:ConfigureMakerTransferFaults(0, 1)` 與 `matched_view_swap_runtime_probe.lua`。
+3. 進房後在 `client` 派送 `matched_battle_result_ui_runtime_probe.lua`；在 `server_instance_*` 執行 `_MatchFlow:ConfigureMakerTransferFaults(0, 1)` 與 `matched_view_swap_runtime_probe.lua`。
 4. 回大廳後在 `client` 派送 `matched_battle_lobby_ui_runtime_probe.lua`。虛擬玩家不會自己返回；要再配對時，先在 `server_instance_*` 對他呼叫 `ReturnForUser`。
 
 ## 2026-11-01 使用者畫面回饋

@@ -11,7 +11,7 @@ local ok, detail = pcall(function()
     wait(.3)
     local byId = {}
     for index, option in ipairs(_FormationEditSession.Snapshot.options) do
-        byId[option[1]] = {index=index,option=option}
+        byId[option.monsterId] = {index=index,option=option}
     end
     for id, expected in pairs({monster_tank={'RenamedTank',300,10,2,.65},probe_tank_variant={'VariantTank',650,25,1.3,.8}}) do
         local row = byId[id]

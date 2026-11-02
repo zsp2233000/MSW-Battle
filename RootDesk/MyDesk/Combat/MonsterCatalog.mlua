@@ -282,13 +282,14 @@ script MonsterCatalog extends Component
     end
 
     method table GetDeploymentOptions()
-        -- Keep identity/image positions stable and append display-only intelligence from the validated profile.
+        -- Publish identity, art and display-only intelligence from the validated profile.
         local options = {}
         for _, profile in pairs(self._T.profilesById or {}) do
-            table.insert(options, { profile.MonsterId, profile.MonsterName, profile.StandAnimationRUID,
-                profile.MonsterType, profile.MaxHp, profile.AttackDamage, profile.AttackIntervalSeconds, profile.AttackRange })
+            table.insert(options, { monsterId = profile.MonsterId, monsterName = profile.MonsterName, standRuid = profile.StandAnimationRUID,
+                monsterType = profile.MonsterType, maxHp = profile.MaxHp, attackDamage = profile.AttackDamage,
+                attackInterval = profile.AttackIntervalSeconds, attackRange = profile.AttackRange })
         end
-        table.sort(options, function(left, right) return left[1] < right[1] end)
+        table.sort(options, function(left, right) return left.monsterId < right.monsterId end)
         return options
     end
 

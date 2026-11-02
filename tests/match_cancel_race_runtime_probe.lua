@@ -5,7 +5,7 @@
 -- MODE SEAL_FAILURE: cancellation fails during sealing; delayed storage leaves time to inspect resumed commit.
 -- MODE RECONNECT_MATCH: disconnect cleanup's cancellation fails after a reconnect and a racing match reply.
 local MODE = 'ENTRY'
-local previousDelay = _MatchProbe.SaveDelaySeconds
+local previousDelay = _MatchFlow.SaveDelaySeconds
 local ok, detail = pcall(function()
     local first, peer
     for _, player in ipairs(_UserService.UserEntities.Values) do
@@ -15,70 +15,70 @@ local ok, detail = pcall(function()
     local firstId, peerId = first.PlayerComponent.UserId, peer.PlayerComponent.UserId
     local profile = first.PlayerComponent.ProfileCode
     assert(first.CurrentMapName == 'formationlobby' and peer.CurrentMapName == 'formationlobby', 'both in lobby')
-    _MatchProbe:QueueForUser(firstId)
+    _MatchFlow:QueueForUser(firstId)
     if MODE == 'ENTRY' then
-        _MatchProbe:ConfigureMakerCancelFaults(1, 2)
-        _MatchProbe:ConfigureMakerTransferFaults(10, 0)
-        _TimerService:SetTimerOnce(function() _MatchProbe:QueueForUser(peerId) end, 0.2)
-        _MatchProbe:CancelForUser(firstId)
+        _MatchFlow:ConfigureMakerCancelFaults(1, 2)
+        _MatchFlow:ConfigureMakerTransferFaults(10, 0)
+        _TimerService:SetTimerOnce(function() _MatchFlow:QueueForUser(peerId) end, 0.2)
+        _MatchFlow:CancelForUser(firstId)
         wait(2)
         local ticket = _FormationHandoff:Read(profile)
         assert(ticket ~= nil and ticket.data ~= nil and ticket.data.state == 'TRANSFER' and ticket.data.matchKey ~= '', 'match result during failed cancellation resumes through entry')
-        assert(_MatchProbe:IsFormationLocked(firstId) and first.CurrentMapName == 'formationlobby', 'failed movement retains the handoff and formation lock')
+        assert(_MatchFlow:IsFormationLocked(firstId) and first.CurrentMapName == 'formationlobby', 'failed movement retains the handoff and formation lock')
         log('[VRF][Cancel52Race] PASS cancellation failed; racing match retained; entry movement failure retryable')
     elseif MODE == 'RECONNECT_MATCH' then
-        _MatchProbe:ConfigureMakerCancelFaults(1, 2)
-        _MatchProbe:ConfigureMakerTransferFaults(10, 0)
-        _TimerService:SetTimerOnce(function() _MatchProbe:Depart(firstId) end, 0.1)
+        _MatchFlow:ConfigureMakerCancelFaults(1, 2)
+        _MatchFlow:ConfigureMakerTransferFaults(10, 0)
+        _TimerService:SetTimerOnce(function() _MatchFlow:Depart(firstId) end, 0.1)
         wait(0.5)
         local event = UserReconnectEvent()
         event.UserId = firstId
         _UserService:SendEvent(event)
         -- A native callback survives Depart; the Maker FIFO needs this entry restored to deliver the same reply.
-        table.insert(_MatchProbe._T.localQueue, firstId)
-        _MatchProbe:QueueForUser(peerId)
+        table.insert(_MatchFlow._T.localQueue, firstId)
+        _MatchFlow:QueueForUser(peerId)
         wait(3)
         local ticket = _FormationHandoff:Read(profile)
         assert(ticket ~= nil and ticket.data ~= nil and ticket.data.state == 'TRANSFER' and ticket.data.matchKey ~= '', 'match reply during failed cleanup resumes for the reconnected player')
-        _MatchProbe:ReturnForUser(firstId)
-        _MatchProbe:ReturnForUser(peerId)
-        assert(not _MatchProbe:IsFormationLocked(peerId), 'peer can recover')
+        _MatchFlow:ReturnForUser(firstId)
+        _MatchFlow:ReturnForUser(peerId)
+        assert(not _MatchFlow:IsFormationLocked(peerId), 'peer can recover')
         log('[VRF][Cancel52Race] PASS reconnected player keeps the match reply when cleanup cancellation fails')
     else
-        _MatchProbe.SaveDelaySeconds = 1
-        _MatchProbe:ConfigureMakerCancelFaults(MODE == 'SEAL_FAILURE' and 1 or 0, 2)
-        if MODE == 'SEAL_FAILURE' then _MatchProbe:ConfigureMakerTransferFaults(10, 0) end
+        _MatchFlow.SaveDelaySeconds = 1
+        _MatchFlow:ConfigureMakerCancelFaults(MODE == 'SEAL_FAILURE' and 1 or 0, 2)
+        if MODE == 'SEAL_FAILURE' then _MatchFlow:ConfigureMakerTransferFaults(10, 0) end
         local done = false
         _TimerService:SetTimerOnce(function()
             for _ = 1, 150 do
-                if _MatchProbe:StateForUser(firstId) == 'SAVING' then break end
+                if _MatchFlow:StateForUser(firstId) == 'SAVING' then break end
                 wait(0.1)
             end
-            assert(_MatchProbe:StateForUser(firstId) == 'SAVING', 'matching reached the sealing phase')
+            assert(_MatchFlow:StateForUser(firstId) == 'SAVING', 'matching reached the sealing phase')
             if MODE == 'SEAL_FAILURE' then _FormationStorage:ConfigureMakerFaults(0, 0, 1) end
-            _MatchProbe:CancelForUser(firstId)
+            _MatchFlow:CancelForUser(firstId)
             done = true
         end, 0.2)
-        _MatchProbe:QueueForUser(peerId)
+        _MatchFlow:QueueForUser(peerId)
         for _ = 1, 150 do if done then break end wait(0.1) end
         assert(done, 'cancellation completed')
         wait(MODE == 'SEAL_FAILURE' and 3 or 0.5)
         local ticket = _FormationHandoff:Read(profile)
         if MODE == 'SEAL_FAILURE' then
             assert(ticket ~= nil and ticket.data.state == 'TRANSFER' and ticket.data.matchKey ~= '', 'failed cancellation resumes the sealing match')
-            _MatchProbe:ReturnForUser(firstId)
+            _MatchFlow:ReturnForUser(firstId)
         else
-            assert(ticket ~= nil and ticket.data.state == 'CANCELLED' and not _MatchProbe:IsFormationLocked(firstId), 'only confirmed cancellation closes the first ticket')
+            assert(ticket ~= nil and ticket.data.state == 'CANCELLED' and not _MatchFlow:IsFormationLocked(firstId), 'only confirmed cancellation closes the first ticket')
         end
         assert(first.CurrentMapName == 'formationlobby' and peer.CurrentMapName == 'formationlobby', 'sealing cannot commit while cancellation is pending')
-        _MatchProbe:ReturnForUser(peerId)
-        assert(not _MatchProbe:IsFormationLocked(peerId), 'peer can recover without entering a cancelled match')
+        _MatchFlow:ReturnForUser(peerId)
+        assert(not _MatchFlow:IsFormationLocked(peerId), 'peer can recover without entering a cancelled match')
         log(MODE == 'SEAL_FAILURE' and '[VRF][Cancel52Race] PASS cancellation fails during sealing; match resumes; both can return' or '[VRF][Cancel52Race] PASS cancellation wins during sealing; neither enters; peer returns')
     end
 end)
-_MatchProbe.SaveDelaySeconds = previousDelay
-_MatchProbe:ConfigureMakerCancelFaults(0, 0)
+_MatchFlow.SaveDelaySeconds = previousDelay
+_MatchFlow:ConfigureMakerCancelFaults(0, 0)
 _FormationStorage:ConfigureMakerFaults(0, 0, 0)
 -- ENTRY keeps movement faults armed until the client exercises the visible abort-entry control.
-if MODE ~= 'ENTRY' then _MatchProbe:ConfigureMakerTransferFaults(0, 0) end
+if MODE ~= 'ENTRY' then _MatchFlow:ConfigureMakerTransferFaults(0, 0) end
 if not ok then log('[VRF][Cancel52Race] FAIL ' .. MODE .. ' ' .. tostring(detail)) end

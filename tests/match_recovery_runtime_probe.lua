@@ -12,7 +12,7 @@ local ok, detail = pcall(function()
     local users = _UserService.UserEntities.Values
     assert(#users == 1 and users[1].CurrentMapName == 'formationlobby', 'one lobby player')
     userId = users[1].PlayerComponent.UserId
-    assert(not _MatchProbe:IsFormationLocked(userId), 'no live matchmaking attempt')
+    assert(not _MatchFlow:IsFormationLocked(userId), 'no live matchmaking attempt')
     _FormationService.StorageKey = 'Recovery52_' .. _UtilLogic:NewGuid()
     _FormationHandoff.StorageKey = 'Recovery52Transfer_' .. _UtilLogic:NewGuid()
     local session = _FormationService:GetSession(userId)
@@ -27,23 +27,23 @@ local ok, detail = pcall(function()
 
     _FormationService.SaveTimeoutSeconds = 1
     if MODE == 'RESERVE' then _FormationStorage:ConfigureMakerFaults(0, 0, 2.5) end
-    _MatchProbe:QueueForUser(userId)
-    assert(_MatchProbe:IsFormationLocked(userId), 'reservation keeps editing locked')
+    _MatchFlow:QueueForUser(userId)
+    assert(_MatchFlow:IsFormationLocked(userId), 'reservation keeps editing locked')
     if MODE == 'CANCEL' then
         _FormationStorage:ConfigureMakerFaults(0, 0, 2.5)
-        _MatchProbe:CancelForUser(userId)
-        assert(_MatchProbe:IsFormationLocked(userId), 'unconfirmed cancellation keeps editing locked')
+        _MatchFlow:CancelForUser(userId)
+        assert(_MatchFlow:IsFormationLocked(userId), 'unconfirmed cancellation keeps editing locked')
     end
     _FormationStorage:ConfigureMakerFaults(0, 0, 0)
     wait(3)
     -- Retry exactly the visible cancel command; no status/relogin/read is allowed to repair the cache first.
-    _MatchProbe:CancelForUser(userId)
-    assert(not _MatchProbe:IsFormationLocked(userId), 'cancellation retry unlocks after the late durable write')
+    _MatchFlow:CancelForUser(userId)
+    assert(not _MatchFlow:IsFormationLocked(userId), 'cancellation retry unlocks after the late durable write')
     assert(session.saved.slots['1'].revision == 1 and session.saved.activeSlot == 1, 'saved formation unchanged')
 end)
 _FormationStorage:ConfigureMakerFaults(0, 0, 0)
 _FormationService.SaveTimeoutSeconds = previousTimeout
-if userId ~= nil and _MatchProbe:IsFormationLocked(userId) then _MatchProbe:Recover(userId) end
+if userId ~= nil and _MatchFlow:IsFormationLocked(userId) then _MatchFlow:Recover(userId) end
 _FormationService.StorageKey, _FormationHandoff.StorageKey = previousKey, previousTransfer
 local session = userId ~= nil and _FormationService:GetSession(userId) or nil
 if session ~= nil then
