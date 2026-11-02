@@ -20,6 +20,26 @@ script FormationLobby extends Logic
         self._T.identityKey = ""
         self._T.showUnits = false
         self._T.editorCollapsed = false
+        self._T.editorSlide = 0
+        self._T.editorSlideOrigins = {}
+        self._T.editorSlideItems = {
+            { "Editor/Catalog", 1, 0 },
+            { "Editor/CatalogDock", 1, 0 },
+            { "Editor/Intel", 1, 0 },
+            { "Editor/Slots", 1, 0 },
+            { "EditorControls/Retry", 1, 0 },
+            { "Editor/Header", 0, 1 },
+            { "Editor/Title", 0, 1 },
+            { "Editor/Summary", 0, 1 },
+            { "Editor/Roster", 0, 1 },
+            { "Editor/Units", 0, 1 },
+            { "Editor/Activate", 0, -1 },
+            { "Editor/Back", 0, -1 },
+            { "Editor/Save", 0, -1 },
+            { "Editor/ToggleUnits", 0, -1 },
+            { "Editor/Help", 0, -1 },
+            { "EditorControls/Status", 0, -1 },
+        }
         self._T.savingNoticeText = ""
         for _, path in ipairs({ "Lobby", "Editor", "EditorControls", "Editor/Catalog/Template", "SavingNotice" }) do
             self:SetEnabled(path, false)
@@ -55,6 +75,7 @@ script FormationLobby extends Logic
             self:Render()
             log("[VRF][FormationUI] matchLocked=" .. tostring(matchLocked))
         end
+        self:UpdateEditorSlide(delta)
         self:UpdateCardTooltip()
         if player.CurrentMapName ~= "formationlobby" or _UtilLogic.ElapsedSeconds - self._T.lastLobbyClick > 5 then
             self._T.editWhenSelected = 0
@@ -116,6 +137,44 @@ script FormationLobby extends Logic
             self._T.editorCollapsed = false
             _FormationEditSession:ResetForMap()
             self:Render()
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void UpdateEditorSlide(number delta)
+        -- 沿用每幀更新，反向時從目前進度滑回，並保留各 UI 原始位置。
+        local previous = self._T.editorSlide
+        local target = self._T.editorCollapsed and 1 or 0
+        local inEditor = _UserService.LocalPlayer.CurrentMapName == "formationsim"
+        local progress = math.max(0, math.min(1, previous + (target == 1 and 1 or -1) * delta / 0.6))
+        if not inEditor then progress = 0 end
+        if progress == previous then return end
+        self._T.editorSlide = progress
+        local eased = progress * progress * (3 - 2 * progress)
+        local horizontalOffset = (self.root.UITransformComponent.RectSize.x + 32) * eased
+        local verticalOffset = (self.root.UITransformComponent.RectSize.y + 32) * eased
+        for _, item in ipairs(self._T.editorSlideItems) do
+            local path = item[1]
+            local entity = self:Ui(path)
+            if isvalid(entity) then
+                local transform = entity.UITransformComponent
+                local origin = self._T.editorSlideOrigins[path]
+                if origin == nil then
+                    origin = transform.anchoredPosition
+                    self._T.editorSlideOrigins[path] = origin
+                end
+                transform.anchoredPosition = Vector2(
+                    origin.x + item[2] * horizontalOffset,
+                    origin.y + item[3] * verticalOffset
+                )
+            end
+        end
+        if progress == target or not inEditor then
+            self:SetEnabled("Editor", inEditor and not self._T.editorCollapsed)
+            log("[VRF][EditorSlide] settled=" .. tostring(progress)
+                .. " right=" .. tostring(horizontalOffset)
+                .. " up=" .. tostring(verticalOffset)
+                .. " down=" .. tostring(-verticalOffset))
         end
     end
 
@@ -484,7 +543,7 @@ script FormationLobby extends Logic
         self:SetEnabled("ExitConfirm", view.confirmKind ~= "")
         self:RenderSavingNotice(view)
         self:SetEnabled("Lobby", inLobby)
-        self:SetEnabled("Editor", inEditor and not self._T.editorCollapsed)
+        self:SetEnabled("Editor", inEditor and (not self._T.editorCollapsed or self._T.editorSlide < 1))
         self:SetEnabled("EditorControls", inEditor)
         self:SetEnabled("Editor/Units", inEditor and self._T.showUnits)
         if inEditor then
@@ -667,6 +726,11 @@ script FormationLobby extends Logic
     @ExecSpace("ClientOnly")
     method void OnEndPlay()
         -- Release authored and cloned button subscriptions at world session shutdown.
+        -- 結束測試時還原位置，避免下次 Play 把滑出位置當成起點。
+        for path, origin in pairs(self._T.editorSlideOrigins or {}) do
+            local entity = self:Ui(path)
+            if isvalid(entity) then entity.UITransformComponent.anchoredPosition = origin end
+        end
         self._T.hoverCard = nil
         self:SetEnabled("CardTooltip", false)
         self:UpdateLobbyPlayer(nil)
