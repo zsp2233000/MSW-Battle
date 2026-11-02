@@ -253,7 +253,7 @@ script MatchProbe extends Logic
             self:Report(userId, "QUEUE_RENEWING")
             self._T.queueTimers[userId] = _TimerService:SetTimerOnce(function()
                 if self._T.records[userId] ~= ticket or ticket.data.state ~= "RENEWING" then return end
-                while ticket.submitting or self._T.busy[userId] do
+                while ticket.submitting or ticket.cancelling or self._T.busy[userId] do
                     wait(0.1)
                     if self._T.records[userId] ~= ticket or ticket.data.state ~= "RENEWING" then return end
                 end
@@ -448,6 +448,16 @@ script MatchProbe extends Logic
     end
 
     @ExecSpace("ServerOnly")
+    method void ResumeDeferredMatch(string userId, table ticket)
+        -- A failed cancellation leaves the native match valid, so its deferred reply continues on the same ticket.
+        if not ticket.matchPending or ticket.data.state ~= "SAVING" then return end
+        ticket.matchPending = nil
+        ticket.data.state = "QUEUED"
+        log("[VRF][MatchCancel] resume pending match")
+        self:Matched(userId, ticket)
+    end
+
+    @ExecSpace("ServerOnly")
     method void CancelForUser(string userId)
         -- Cancel the actual selected adapter while preserving the common attempt and tombstone guards.
         local player = self:Player(userId)
@@ -472,18 +482,16 @@ script MatchProbe extends Logic
         local cancelled = state == "CANCELLED" or self:CancelMatching(ticket.data.profile)
         -- A durable-only ticket has no live record; only a different live ticket supersedes this cancellation.
         local current = self._T.records[userId]
-        if self._T.ended or (current ~= nil and current ~= ticket) then self._T.busy[userId] = nil return end
+        if self._T.ended or (current ~= nil and current ~= ticket) then
+            log("[VRF][MatchCancel] superseded by a newer ticket")
+            self._T.busy[userId] = nil
+            return
+        end
         if not cancelled then
             ticket.cancelling = nil
             self._T.busy[userId] = nil
             self:Report(userId, "CANCEL_FAILED")
-            if self:Player(userId) == nil then self._T.records[userId] = nil return end
-            if ticket.matchPending and ticket.data.state == "SAVING" then
-                ticket.matchPending = nil
-                ticket.data.state = "QUEUED"
-                log("[VRF][MatchCancel] resume pending match")
-                self:Matched(userId, ticket)
-            end
+            if self:Player(userId) ~= nil then self:ResumeDeferredMatch(userId, ticket) end
             return
         end
         ticket.matchPending = nil
@@ -498,13 +506,15 @@ script MatchProbe extends Logic
 
     @ExecSpace("ServerOnly")
     method void Recover(string userId)
-        -- Resolve server-persisted tickets after native warp and after entering a room.
+        -- Resolve server-persisted tickets after native warp, room entry, lobby reconnect and disconnect cleanup.
         local player = self:Player(userId)
         if player == nil then return end
         if self._T.busy[userId] then self._T.pendingRecover[userId] = true return end
         local current = self._T.records[userId]
         -- Disconnect cleanup recovers once its cancellation settles; reading now could replace its ticket.
-        if current ~= nil and current.cancelling then return end
+        if current ~= nil and current.cancelling then log("[VRF][MatchCancel] recovery waits for cleanup") return end
+        -- A reply deferred while offline continues now that its failed cancellation left the match valid.
+        if current ~= nil and current.matchPending then self:ResumeDeferredMatch(userId, current) return end
         if current ~= nil and (current.data.state == "QUEUED" or current.data.state == "SAVING" or current.data.state == "RENEWING" or current.data.state == "QUEUE_ERROR") then
             local localAdapter = Environment:IsMakerPlay() and (current.data.adapter == "local" or current.data.adapter == nil)
             if not localAdapter then return end
@@ -685,12 +695,15 @@ script MatchProbe extends Logic
     handler HandleUserReconnectEvent(UserReconnectEvent event)
         -- Restore availability; a lobby reconnect re-locks durable tickets, and a match room still never re-admits here.
         self._T.offline[event.UserId] = nil
-        if not _RoomService:IsInstanceRoom() then self:Recover(event.UserId) end
+        if _RoomService:IsInstanceRoom() then return end
+        log("[VRF][MatchDisconnect] lobby reconnect recovers ticket")
+        self:Recover(event.UserId)
+        self:PublishState(event.UserId, "STATUS")
     end
 
     @ExecSpace("ServerOnly")
     method void Depart(string userId)
-        -- Invalidate callbacks before yielding; combat actors remain owned by BattleSession.
+        -- Invalidate callbacks before yielding, then settle queue cleanup; combat actors remain owned by BattleSession.
         self._T.offline[userId] = true
         for _, timers in ipairs({ self._T.arrivalTimers, self._T.recoveryTimers, self._T.queueTimers }) do
             if timers[userId] ~= nil then _TimerService:ClearTimer(timers[userId]) timers[userId] = nil end
@@ -714,11 +727,20 @@ script MatchProbe extends Logic
             end
             ticket.cancelling = nil
             log("[VRF][MatchProbe] leave cancel=" .. tostring(cancelled) .. " tombstone=" .. tostring(stored))
+            if not cancelled then
+                -- The native queue may still be live: keep the ticket locked and its callback owned for a retry.
+                if self:Player(userId) ~= nil then
+                    self:Report(userId, "CANCEL_FAILED")
+                    self:ResumeDeferredMatch(userId, ticket)
+                end
+                return
+            end
         end
         if self._T.records[userId] == ticket then self._T.records[userId] = nil end
-        log("[VRF][MatchDisconnect] match=" .. ticket.data.matchKey .. " combatPreserved=true online=false")
+        local online = self:Player(userId) ~= nil
+        log("[VRF][MatchDisconnect] match=" .. ticket.data.matchKey .. " combatPreserved=true online=" .. tostring(online))
         -- The player reconnected while cancellation yielded; resolve the durable outcome and refresh their client.
-        if self:Player(userId) ~= nil and not _RoomService:IsInstanceRoom() then self:Recover(userId) end
+        if online and not _RoomService:IsInstanceRoom() then self:Recover(userId) end
     end
 
     @ExecSpace("ServerOnly")

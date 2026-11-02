@@ -1,5 +1,6 @@
 -- server_main, one connected player in formationlobby. Owns unique storage keys and restores them afterwards.
 -- Reconnecting during disconnect cleanup must not strand the lock, unlock an unconfirmed queue, or leave stale state.
+-- Then in client, log _MatchProbeInput.State, Busy and AllowsFormationActions(): a settled run shows IDLE, false, true.
 local previousKey, previousTransfer = _FormationService.StorageKey, _FormationHandoff.StorageKey
 local userId, previousSlot
 local function await(predicate, tries)
@@ -47,18 +48,32 @@ local ok, detail = pcall(function()
     assert(_MatchProbe._T.busy[userId] == nil, 'cancel of a durable-only ticket strands busy')
     log('[VRF][Reconnect52] PASS DURABLE cancel releases busy')
 
+    -- Reconnected while the failing cancellation is in flight: the queue stays live and locked, and a retry can finish it.
     _MatchProbe:ConfigureMakerCancelFaults(1, 2)
     _MatchProbe:QueueForUser(userId)
     assert(_MatchProbe:IsFormationLocked(userId), 'queued again')
     _TimerService:SetTimerOnce(function() _MatchProbe:Depart(userId) end, 0.1)
     wait(0.5)
     reconnect()
-    -- The Maker adapter closes its stale queue on recovery; the native adapter reports QUEUE_OWNER_LOST on this path.
+    wait(2.5)
+    assert(_MatchProbe:IsFormationLocked(userId) and _MatchProbe:StateForUser(userId) == 'QUEUED', 'failed cleanup keeps an online player locked on the live queue')
+    _MatchProbe:ConfigureMakerCancelFaults(0, 0)
+    _MatchProbe:CancelForUser(userId)
+    assert(not _MatchProbe:IsFormationLocked(userId), 'retry after failed cleanup unlocks')
+    log('[VRF][Reconnect52] PASS FAILED_ONLINE queue retained; retry confirmed')
+
+    -- Failed while still offline: the ticket stays locked until the reconnect resolves it.
+    _MatchProbe:ConfigureMakerCancelFaults(1, 0)
+    _MatchProbe:QueueForUser(userId)
+    _MatchProbe:Depart(userId)
+    assert(_MatchProbe:IsFormationLocked(userId), 'failed offline cleanup keeps the ticket locked')
+    reconnect()
+    -- The Maker adapter closes its stale queue here; the native adapter keeps the ticket for a visible cancel.
     assert(await(function()
         local ticket = _FormationHandoff:Read(profile)
         return ticket ~= nil and ticket.data ~= nil and ticket.data.state == 'CANCELLED' and not _MatchProbe:IsFormationLocked(userId)
-    end, 60), 'failed cleanup must be recovered after reconnect, not left unlocked over a live queue')
-    log('[VRF][Reconnect52] PASS FAILED_CLEANUP recovered after reconnect')
+    end, 60), 'reconnect resolves the retained ticket')
+    log('[VRF][Reconnect52] PASS FAILED_OFFLINE locked until reconnect recovery')
 end)
 _MatchProbe:ConfigureMakerCancelFaults(0, 0)
 if not ok then log('[VRF][Reconnect52] FAIL ' .. tostring(detail)) end

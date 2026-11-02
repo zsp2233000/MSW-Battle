@@ -3,6 +3,7 @@
 -- MODE ENTRY: fail cancellation while the peer queues; then fail the first native room movement.
 -- MODE SUCCESS: cancellation wins while a match is already sealing; neither participant may enter.
 -- MODE SEAL_FAILURE: cancellation fails during sealing; delayed storage leaves time to inspect resumed commit.
+-- MODE RECONNECT_MATCH: disconnect cleanup's cancellation fails after a reconnect and a racing match reply.
 local MODE = 'ENTRY'
 local previousDelay = _MatchProbe.SaveDelaySeconds
 local ok, detail = pcall(function()
@@ -25,6 +26,24 @@ local ok, detail = pcall(function()
         assert(ticket ~= nil and ticket.data ~= nil and ticket.data.state == 'TRANSFER' and ticket.data.matchKey ~= '', 'match result during failed cancellation resumes through entry')
         assert(_MatchProbe:IsFormationLocked(firstId) and first.CurrentMapName == 'formationlobby', 'failed movement retains the handoff and formation lock')
         log('[VRF][Cancel52Race] PASS cancellation failed; racing match retained; entry movement failure retryable')
+    elseif MODE == 'RECONNECT_MATCH' then
+        _MatchProbe:ConfigureMakerCancelFaults(1, 2)
+        _MatchProbe:ConfigureMakerTransferFaults(10, 0)
+        _TimerService:SetTimerOnce(function() _MatchProbe:Depart(firstId) end, 0.1)
+        wait(0.5)
+        local event = UserReconnectEvent()
+        event.UserId = firstId
+        _UserService:SendEvent(event)
+        -- A native callback survives Depart; the Maker FIFO needs this entry restored to deliver the same reply.
+        table.insert(_MatchProbe._T.localQueue, firstId)
+        _MatchProbe:QueueForUser(peerId)
+        wait(3)
+        local ticket = _FormationHandoff:Read(profile)
+        assert(ticket ~= nil and ticket.data ~= nil and ticket.data.state == 'TRANSFER' and ticket.data.matchKey ~= '', 'match reply during failed cleanup resumes for the reconnected player')
+        _MatchProbe:ReturnForUser(firstId)
+        _MatchProbe:ReturnForUser(peerId)
+        assert(not _MatchProbe:IsFormationLocked(peerId), 'peer can recover')
+        log('[VRF][Cancel52Race] PASS reconnected player keeps the match reply when cleanup cancellation fails')
     else
         _MatchProbe.SaveDelaySeconds = 1
         _MatchProbe:ConfigureMakerCancelFaults(MODE == 'SEAL_FAILURE' and 1 or 0, 2)
