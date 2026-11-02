@@ -36,10 +36,8 @@ script FormationService extends Logic
         if record ~= nil and record.owner == player then return record end
         local profile = player.PlayerComponent.ProfileCode
         if profile == nil or profile == "" then return nil end
-        record = { userId = forUserId, profile = profile, owner = player, sessionId = _UtilLogic:NewGuid(), loadState = "NOT_LOADED", editSlot = 1, drafts = {}, sequence = 0, pending = false, pendingSlot = 0, pendingKind = "", initialized = false, raw = "", saved = _FormationSchema:EmptyDocument(), message = "" }
-        for index = 1, 5 do
-            record.drafts[tostring(index)] = { units = {}, version = 0, savedVersion = -1, saveState = "UNSAVED" }
-        end
+        -- Unsaved edits live only in the owning client; the server keeps confirmed content and the selection.
+        record = { userId = forUserId, profile = profile, owner = player, sessionId = _UtilLogic:NewGuid(), loadState = "NOT_LOADED", editSlot = 1, sequence = 0, pending = false, pendingSlot = 0, pendingKind = "", initialized = false, raw = "", saved = _FormationSchema:EmptyDocument(), message = "", result = nil }
         self._T.sessions[forUserId] = record
         return record
     end
@@ -52,15 +50,17 @@ script FormationService extends Logic
         local catalog = self:GetCatalog()
         local options = {}
         if catalog ~= nil then options = catalog:GetDeploymentOptions() end
-        local draft = record.drafts[tostring(record.editSlot)]
         local slots = {}
         for index = 1, 5 do
             local key = tostring(index)
-            local entry = record.drafts[key]
             local saved = record.saved.slots[key]
-            slots[key] = { saveState = entry.saveState, dirty = entry.savedVersion ~= entry.version and #entry.units > 0 or (#saved.units > 0 and entry.savedVersion ~= entry.version), savedValid = catalog ~= nil and _FormationSchema:ValidateUnits(saved.units, catalog, false) ~= nil }
+            slots[key] = { revision = saved.revision, savedValid = catalog ~= nil and _FormationSchema:ValidateUnits(saved.units, catalog, false) ~= nil }
         end
-        local snapshot = { loadState = record.loadState, editSlot = record.editSlot, slots = slots, saveState = draft.saveState, draft = _FormationSchema:CopyUnits(draft.units), draftVersion = draft.version, savedDraftVersion = draft.savedVersion, saved = _FormationSchema:CopyDocument(record.saved), message = record.message, options = options, pending = record.pending, pendingSlot = record.pendingSlot, pendingKind = record.pendingKind, draftValid = catalog ~= nil and _FormationSchema:ValidateUnits(draft.units, catalog, false) ~= nil }
+        local result = nil
+        if record.result ~= nil then
+            result = { requestId = record.result.requestId, kind = record.result.kind, slotId = record.result.slotId, status = record.result.status, code = record.result.code }
+        end
+        local snapshot = { loadState = record.loadState, editSlot = record.editSlot, slots = slots, saved = _FormationSchema:CopyDocument(record.saved), message = record.message, options = options, pending = record.pending, pendingSlot = record.pendingSlot, pendingKind = record.pendingKind, uncertain = record.uncertain ~= nil, result = result }
         self:Receive(snapshot, record.sequence, record.userId)
     end
 
@@ -72,7 +72,7 @@ script FormationService extends Logic
 
     @ExecSpace("Server")
     method void RequestOpen()
-        -- A client can load only its own session; repeated opens never discard a draft.
+        -- A client can load only its own session; repeated opens never discard confirmed content.
         local record = self:GetSession(senderUserId)
         if record == nil then return end
         if record.loadState == "NOT_LOADED" then self:Load(record) else self:Publish(record) end
@@ -80,7 +80,7 @@ script FormationService extends Logic
 
     @ExecSpace("Server")
     method void RequestRetryLoad()
-        -- Explicitly reconcile failed or conflicting reads while retaining an existing login draft.
+        -- Explicitly reconcile failed or unconfirmed writes by reading the durable content again.
         local record = self:GetSession(senderUserId)
         if record == nil or record.transferLocked or record.pending or record.loadState == "LOADING" then return end
         self:Load(record)
@@ -94,7 +94,7 @@ script FormationService extends Logic
         local epoch = record.loadEpoch
         if self._T.writers[record.profile] ~= nil then
             record.loadState = "ERROR"
-            record.message = "上一筆儲存尚未完成，請稍後重試讀取"
+            record.message = "上一筆儲存尚未完成，請稍後重新讀取"
             self:Publish(record)
             return
         end
@@ -114,7 +114,7 @@ script FormationService extends Logic
             if self._T.sessions[record.userId] ~= record or record.loadEpoch ~= epoch then return end
             record.loadEpoch = record.loadEpoch + 1
             record.loadState = "ERROR"
-            record.message = "讀取逾時；草稿保留，可重試讀取"
+            record.message = "讀取逾時；可重新讀取"
             self:Publish(record)
         end, math.max(1, math.min(10, self.SaveTimeoutSeconds)))
         self._T.saveTimers[readTimeout] = true
@@ -133,31 +133,19 @@ script FormationService extends Logic
             end
             if doc == nil then
                 record.loadState = "ERROR"
-                record.message = "讀取失敗，原資料未變更；請重試讀取"
+                record.message = "讀取失敗，原資料未變更；請重新讀取"
             else
                 local uncertain = record.uncertain
-                local previous = record.saved
                 record.saved = doc
                 record.raw = raw or ""
                 record.loadState = missing and "NEW" or "READY"
-                for index = 1, 5 do
-                    local key = tostring(index)
-                    local draft = record.drafts[key]
-                    if not record.initialized then draft.units = _FormationSchema:CopyUnits(doc.slots[key].units) end
-                    if not record.initialized or previous.slots[key].revision ~= doc.slots[key].revision
-                        or not _FormationSchema:SameUnits(previous.slots[key].units, doc.slots[key].units) then draft.savedVersion = -1 end
-                    -- Durable per-slot stamps identify the exact login draft, regardless of JSON key order.
-                    if doc.slots[key].savedSession == record.sessionId then draft.savedVersion = doc.slots[key].savedVersion end
-                    if not record.initialized and #draft.units > 0 and _FormationSchema:SameUnits(draft.units, doc.slots[key].units) then draft.savedVersion = draft.version end
-                    draft.saveState = draft.savedVersion == draft.version and "SAVED" or "UNSAVED"
-                end
                 record.initialized = true
                 -- An older read does not prove a timed-out CAS can no longer commit.
                 if uncertain == nil or (raw or "") ~= uncertain.expected then record.uncertain = nil end
-                record.message = missing and "首次使用，尚無預存編隊" or "已讀取預存編隊；草稿只在本次登入保留"
-                local draft = record.drafts[tostring(record.editSlot)]
-                if #draft.units > 0 and _FormationSchema:ValidateUnits(draft.units, catalog, false) == nil then
-                    record.message = "既有站位需調整至可行走地形；原保存內容保留，調整完成後再儲存"
+                record.message = missing and "尚未儲存任何隊伍。" or "已讀取已儲存的隊伍"
+                local slot = record.saved.slots[tostring(record.editSlot)]
+                if #slot.units > 0 and _FormationSchema:ValidateUnits(slot.units, catalog, false) == nil then
+                    record.message = "既有站位需調整至可行走地形；已儲存的內容保留，調整完成後再儲存"
                 end
             end
             log("[VRF][Formations] load=" .. record.loadState)
@@ -167,71 +155,67 @@ script FormationService extends Logic
 
     @ExecSpace("Server")
     method void RequestSelectSlot(integer slotId)
-        -- Switching retains every login draft and never writes storage or changes the active slot.
+        -- Selecting a group changes only the viewed slot; it never writes storage or changes the active slot.
         local record = self:GetSession(senderUserId)
-        if record == nil or record.transferLocked or not record.initialized or slotId < 1 or slotId > 5 then return end
+        if record == nil or record.transferLocked or _MatchFlow:IsFormationLocked(senderUserId) or record.pending or not record.initialized or slotId < 1 or slotId > 5 then return end
         record.editSlot = slotId
-        record.message = "正在編輯第 " .. tostring(slotId) .. " 組；各組草稿保留至本次登入結束"
+        record.message = "已選取第 " .. tostring(slotId) .. " 組"
         self:Publish(record)
         log("[VRF][Formations] editSlot=" .. tostring(slotId) .. " activeSlot=" .. tostring(record.saved.activeSlot))
     end
 
     @ExecSpace("Server")
-    method void RequestDraft(table units, integer expectedVersion, integer slotId)
-        -- Resolve the RPC caller before sharing the authoritative edit command.
-        self:UpdateDraftForUser(senderUserId, units, expectedVersion, slotId)
+    method void RequestSave(table units, integer slotId, integer expectedRevision, string requestId)
+        -- Resolve the RPC caller before sharing the authoritative single-group save command.
+        self:SaveForUser(senderUserId, units, slotId, expectedRevision, requestId)
     end
 
     @ExecSpace("ServerOnly")
-    method void UpdateDraftForUser(string forUserId, table units, integer expectedVersion, integer slotId)
-        -- Validate an edit atomically and reject stale client commands without overwriting newer edits.
-        local record = self:GetSession(forUserId)
-        if record == nil then return end
-        if record.transferLocked then record.message = "配對交接已封存，返回後可繼續編輯" self:Publish(record) return end
-        local draft = record.drafts[tostring(slotId)]
-        if not record.initialized or draft == nil or slotId ~= record.editSlot or expectedVersion ~= draft.version then self:Publish(record) return end
-        local catalog = self:GetCatalog()
-        local clean = nil
-        if catalog ~= nil then clean = _FormationSchema:ValidateUnits(units, catalog, true) end
-        if clean == nil then
-            record.message = "無法放置：請選擇左半場可行走且鏡射後合法的空地，最多六個單位且不可重疊"
-        else
-            if _FormationSchema:SameUnits(draft.units, clean) then self:Publish(record) return end
-            draft.units = clean
-            draft.version = draft.version + 1
-            if not (record.pending and record.pendingSlot == slotId and record.pendingKind == "SAVE") then draft.saveState = "UNSAVED" end
-            record.message = "草稿尚未保存"
-        end
+    method void Reject(table record, string kind, integer slotId, string requestId, string status, string text)
+        -- Report an explicit refusal so a waiting client never mistakes silence for success.
+        record.result = { requestId = requestId, kind = kind, slotId = slotId, status = status, code = 0 }
+        record.message = text
         self:Publish(record)
     end
 
-    @ExecSpace("Server")
-    method void RequestSave(integer expectedVersion, integer slotId)
-        -- Resolve the RPC caller before sharing the authoritative save command.
-        self:SaveForUser(senderUserId, expectedVersion, slotId)
-    end
-
     @ExecSpace("ServerOnly")
-    method void SaveForUser(string forUserId, integer expectedVersion, integer slotId)
-        -- Freeze this exact draft version; edits remain available while persistence is in flight.
+    method void SaveForUser(string forUserId, table units, integer slotId, integer expectedRevision, string requestId)
+        -- Validate the submitted group and persist only it; other groups and the active choice stay untouched.
         local record = self:GetSession(forUserId)
         if record == nil then return end
-        local draft = record.drafts[tostring(slotId)]
-        if record.transferLocked or draft == nil or slotId ~= record.editSlot or expectedVersion ~= draft.version or record.pending then self:Publish(record) return end
-        local catalog = self:GetCatalog()
-        if catalog == nil then return end
-        local units = _FormationSchema:ValidateUnits(draft.units, catalog, false)
-        if units == nil then
-            draft.saveState = "FAILED"
-            record.message = "請配置一至六個單位，並將全部單位移至可行走地形後再儲存"
-            self:Publish(record)
+        -- A request that cannot be correlated still gets an answer, so no client waits on silence.
+        if type(requestId) ~= "string" or #requestId == 0 or #requestId > 64 then self:Publish(record) return end
+        if record.transferLocked or _MatchFlow:IsFormationLocked(forUserId) then self:Reject(record, "SAVE", slotId, requestId, "REJECTED", "配對進行中，取消完成或返回大廳後可繼續編輯") return end
+        if not record.initialized or not _FormationSchema:IsLoadConfirmed(record.loadState) then
+            self:Reject(record, "SAVE", slotId, requestId, "REJECTED", "必須先成功讀取資料；請重新讀取")
             return
         end
-        if draft.savedVersion == draft.version then self:Publish(record) return end
+        if record.pending then self:Reject(record, "SAVE", slotId, requestId, "REJECTED", "上一筆儲存尚未完成") return end
+        if slotId ~= record.editSlot or slotId < 1 or slotId > 5 then
+            self:Reject(record, "SAVE", slotId, requestId, "REJECTED", "只能儲存目前選取的組別")
+            return
+        end
+        local key = tostring(slotId)
+        local slot = record.saved.slots[key]
+        if slot.revision ~= expectedRevision then
+            self:Reject(record, "SAVE", slotId, requestId, "REJECTED", "已儲存版本已更新；請重新讀取確認後再儲存")
+            return
+        end
+        local catalog = self:GetCatalog()
+        if catalog == nil then self:Reject(record, "SAVE", slotId, requestId, "REJECTED", "怪物目錄尚未就緒，請稍後再試") return end
+        local clean = _FormationSchema:ValidateUnits(units, catalog, false)
+        if clean == nil then
+            self:Reject(record, "SAVE", slotId, requestId, "REJECTED", "請配置一至六個單位，並將全部單位移至可行走地形且保持間距後再儲存")
+            return
+        end
+        if _FormationSchema:SameUnits(slot.units, clean) then
+            self:Reject(record, "SAVE", slotId, requestId, "OK", "第 " .. key .. " 組沒有變更")
+            return
+        end
         local doc = _FormationSchema:CopyDocument(record.saved)
-        doc.slots[tostring(slotId)].units = units
-        doc.slots[tostring(slotId)].revision = doc.slots[tostring(slotId)].revision + 1
-        self:Write(record, doc, draft.version, slotId)
+        doc.slots[key].units = clean
+        doc.slots[key].revision = doc.slots[key].revision + 1
+        self:Write(record, doc, "SAVE", slotId, requestId)
     end
 
     @ExecSpace("Server")
@@ -242,69 +226,63 @@ script FormationService extends Logic
 
     @ExecSpace("ServerOnly")
     method void ActivateForUser(string forUserId, integer slotId, integer expectedRevision)
-        -- Activation writes only the confirmed slot; it never saves or activates a draft implicitly.
+        -- Activation writes only the confirmed slot; it never saves or activates unsaved content implicitly.
         local record = self:GetSession(forUserId)
-        if record == nil or record.pending or record.transferLocked then return end
+        if record == nil or record.pending or record.transferLocked or _MatchFlow:IsFormationLocked(forUserId) then return end
         local slot = record.saved.slots[tostring(slotId)]
         if slot == nil or slotId ~= record.editSlot or slot.revision ~= expectedRevision then self:Publish(record) return end
         if #slot.units == 0 then
-            record.message = "請先成功儲存第 " .. tostring(slotId) .. " 組編隊"
+            record.message = "請先成功儲存第 " .. tostring(slotId) .. " 組隊伍"
             self:Publish(record)
             return
         end
         local catalog = self:GetCatalog()
         if catalog == nil or _FormationSchema:ValidateUnits(slot.units, catalog, false) == nil then
-            record.message = "已保存站位需調整，請修正並儲存後再設為出戰編隊"
+            record.message = "已儲存的位置需要調整，請修正並儲存後再設為出戰隊伍"
             self:Publish(record)
             return
         end
         if record.saved.activeSlot == slotId then self:Publish(record) return end
         local doc = _FormationSchema:CopyDocument(record.saved)
         doc.activeSlot = slotId
-        self:Write(record, doc, -1, slotId)
+        self:Write(record, doc, "ACTIVATE", slotId, "")
     end
 
     @ExecSpace("ServerOnly")
-    method void Write(table record, table doc, integer draftVersion, integer slotId)
+    method void Write(table record, table doc, string kind, integer slotId, string requestId)
         -- Serialize per profile and compare existing bytes so delayed old writers cannot replace newer saves.
-        if record.loadState ~= "NEW" and record.loadState ~= "READY" then
-            record.message = "必須先成功讀取資料；請重試讀取"
-            self:Publish(record)
+        if not _FormationSchema:IsLoadConfirmed(record.loadState) then
+            self:Reject(record, kind, slotId, requestId, "REJECTED", "必須先成功讀取資料；請重新讀取")
             return
         end
-        if self._T.writers[record.profile] ~= nil then return end
+        if self._T.writers[record.profile] ~= nil then
+            self:Reject(record, kind, slotId, requestId, "REJECTED", "上一筆儲存尚未完成")
+            return
+        end
         doc.revision = doc.revision + 1
         doc.writeId = _UtilLogic:NewGuid()
-        if draftVersion >= 0 then
-            doc.slots[tostring(slotId)].savedSession = record.sessionId
-            doc.slots[tostring(slotId)].savedVersion = draftVersion
-        end
         local raw = _FormationSchema:EncodeDocument(doc)
         if #raw > 4000 then
-            record.drafts[tostring(slotId)].saveState = "FAILED"
-            record.message = "編隊資料過大，未儲存"
-            self:Publish(record)
+            self:Reject(record, kind, slotId, requestId, "FAILED", "隊伍資料過大，未儲存")
             return
         end
         local expected = record.raw
         record.writeEpoch = (record.writeEpoch or 0) + 1
         local epoch = record.writeEpoch
-        local draft = record.drafts[tostring(slotId)]
-        local kind = draftVersion >= 0 and "SAVE" or "ACTIVATE"
         local description = "第 " .. tostring(slotId) .. " 組" .. (kind == "SAVE" and "儲存" or "設為出戰")
         record.pending = true
         record.pendingSlot = slotId
         record.pendingKind = kind
-        if kind == "SAVE" then draft.saveState = "SAVING" end
+        record.result = nil
         record.message = description .. "中，等待持久儲存確認"
-        local operation = { raw = raw, expected = expected, slotId = slotId, version = draftVersion }
+        local operation = { raw = raw, expected = expected, slotId = slotId }
         self._T.writers[record.profile] = operation
         self:Publish(record)
         local completed = false
         local timeout = 0
         local complete = function(code)
             if completed then
-                -- Accept a late durable acknowledgement only while this source still owns this exact version.
+                -- Accept a late durable acknowledgement only while this source still owns this exact write.
                 if code ~= 0 or record.uncertain == nil or record.writeEpoch ~= epoch
                     or record.transferLocked or self._T.sessions[record.userId] ~= record then return end
                 if record.raw ~= expected then return end
@@ -321,23 +299,21 @@ script FormationService extends Logic
                 record.raw = raw
                 record.loadState = "READY"
                 record.uncertain = nil
-                if kind == "SAVE" then
-                    draft.savedVersion = draftVersion
-                    draft.saveState = draft.savedVersion == draft.version and "SAVED" or "UNSAVED"
-                end
+                record.result = { requestId = requestId, kind = kind, slotId = slotId, status = "OK", code = 0 }
                 record.message = description .. "成功"
-                if draft.savedVersion ~= draft.version then record.message = record.message .. "；該組草稿仍未保存" end
             else
-                if kind == "SAVE" then draft.saveState = "FAILED" end
-                record.message = description .. "失敗（代碼 " .. tostring(code) .. "），保留已保存編隊、原出戰選擇與所有草稿"
                 -- A timeout may have committed. Reload before another write rather than blind retry.
                 record.loadState = "CONFLICT"
-                if code == 1000004 then
-                    -- One bounded reconciliation marker suffices: durable slot stamps retain every winner's version.
+                local timedOut = code == 1000004
+                if timedOut then
+                    -- One bounded reconciliation marker suffices; the durable bytes decide whether it won.
                     record.uncertain = { expected = expected }
+                    record.message = description .. "逾時，尚未取得持久確認；請按「確認結果」重新讀取"
+                else
+                    log("[Formation] write failed code=" .. tostring(code))
+                    record.message = description .. "失敗，已儲存的隊伍與出戰選擇沒有變更；請重新讀取後再試"
                 end
-                record.message = record.message .. "，先重試讀取"
-                if code == 1000004 then record.message = description .. "逾時，尚未取得持久確認；草稿保留，返回後可重試讀取" end
+                record.result = { requestId = requestId, kind = kind, slotId = slotId, status = timedOut and "UNCONFIRMED" or "FAILED", code = code }
             end
             log("[VRF][Formations] operation=" .. kind .. " slot=" .. tostring(slotId) .. " editSlot=" .. tostring(record.editSlot) .. " activeSlot=" .. tostring(record.saved.activeSlot) .. " revision=" .. tostring(doc.revision) .. " code=" .. tostring(code))
             self:Publish(record)
@@ -353,47 +329,71 @@ script FormationService extends Logic
     end
 
     @ExecSpace("ServerOnly")
-    method string AutoSaveForMatch(string forUserId, any isCurrent)
-        -- Save the matched editor version to its original slot; a bounded wait never changes the fixed roster.
-        local record = self:GetSession(forUserId)
-        if record == nil or not record.initialized then return "無法自動保存：編隊尚未讀取；仍以本局編隊入場" end
-        local slotId = record.editSlot
-        local draft = record.drafts[tostring(slotId)]
-        local version = draft.version
-        local units = _FormationSchema:CopyUnits(draft.units)
-        if draft.savedVersion == version or (#units == 0 and #record.saved.slots[tostring(slotId)].units == 0 and version == 0) then
-            return ""
-        end
-        while record.pending do
-            if isCurrent ~= nil and not isCurrent() then return "" end
-            wait(0.05)
-        end
-        if isCurrent ~= nil and not isCurrent() then return "" end
-        if self._T.sessions[forUserId] ~= record or record.transferLocked then return "自動保存未完成；草稿保留" end
-        if draft.savedVersion >= version then return "自動保存已確認相同或較新版本；仍以本局編隊入場" end
+    method any ActiveFormation(string forUserId)
+        -- The profile of this player's session, plus the validated active group when a match may freeze it.
+        -- units is nil unless the session is loaded, has no save in flight and holds a valid active group.
+        local session = self:GetSession(forUserId)
+        if session == nil then return nil end
+        local formation = { profile = session.profile }
+        if not session.initialized or session.pending or not _FormationSchema:IsLoadConfirmed(session.loadState) then return formation end
+        local slotId = session.saved.activeSlot
+        local slot = session.saved.slots[tostring(slotId)]
         local catalog = self:GetCatalog()
-        local clean = catalog ~= nil and _FormationSchema:ValidateUnits(units, catalog, false) or nil
-        if clean == nil then
-            draft.saveState = "FAILED"
-            record.message = "自動保存失敗：草稿須有一至六個單位及合法站位；草稿保留，仍以本局編隊入場"
-            self:Publish(record)
-            return record.message
-        end
-        if record.loadState ~= "READY" and record.loadState ~= "NEW" then
-            return "自動保存未確認：請返回後重試讀取；草稿保留，仍以本局編隊入場"
-        end
-        local doc = _FormationSchema:CopyDocument(record.saved)
-        doc.slots[tostring(slotId)].units = clean
-        doc.slots[tostring(slotId)].revision = doc.slots[tostring(slotId)].revision + 1
-        self:Write(record, doc, version, slotId)
-        while record.pending do
-            if isCurrent ~= nil and not isCurrent() then return "" end
-            wait(0.05)
-        end
-        log("[VRF][AutoSave] slot=" .. tostring(slotId) .. " version=" .. tostring(version) .. " confirmed=" .. tostring(draft.savedVersion == version))
-        return "自動保存：" .. record.message .. "；仍以本局編隊入場"
+        if slot == nil or catalog == nil then return formation end
+        formation.units = _FormationSchema:ValidateUnits(slot.units, catalog, false)
+        formation.slotId = slotId
+        formation.revision = slot.revision
+        formation.count = #slot.units
+        return formation
     end
 
+    @ExecSpace("ServerOnly")
+    method boolean LockTransfer(string forUserId, string profile, string ticketId)
+        -- Freeze this player's editing for one transfer; only the matching ticket may release it.
+        local session = self:GetSession(forUserId)
+        if session == nil or session.profile ~= profile then return false end
+        session.transferLocked = ticketId
+        return true
+    end
+
+    @ExecSpace("ServerOnly")
+    method any ExportConfirmed(string forUserId)
+        -- Carry only confirmed content; unsaved client edits never enter a handoff.
+        local record = self:GetSession(forUserId)
+        if record == nil or not record.initialized or record.pending or record.loadState == "LOADING" then return nil end
+        local saved = _FormationSchema:EncodeDocument(record.saved)
+        return { coordinateSchema = 2, saved = saved, confirmedRaw = record.raw == saved and "" or record.raw, confirmedMatchesSaved = record.raw == saved,
+            sessionId = record.sessionId, loadState = record.loadState, editSlot = record.editSlot, uncertain = record.uncertain ~= nil, message = record.message }
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean ImportConfirmed(string forUserId, string profile, string ticketId, table transfer, any decode)
+        -- Restore confirmed content once per ticket and session; decode(catalog) validates the transfer and returns its document.
+        local record = self:GetSession(forUserId)
+        if record == nil or record.profile ~= profile then return false end
+        if record.restoredTickets ~= nil and record.restoredTickets[ticketId] then return true end
+        local catalog = self:GetCatalog()
+        if record.pending or catalog == nil then return false end
+        local document = decode(catalog)
+        if document == nil then return false end
+        record.saved = document
+        record.loadEpoch = (record.loadEpoch or 0) + 1
+        record.writeEpoch = (record.writeEpoch or 0) + 1
+        record.transferLocked = false
+        record.raw = transfer.confirmedMatchesSaved and transfer.saved or transfer.confirmedRaw
+        record.sessionId = transfer.sessionId or record.sessionId
+        record.editSlot = transfer.editSlot
+        record.initialized = true
+        record.loadState = transfer.loadState or "READY"
+        record.uncertain = transfer.uncertain and { expected = record.raw } or nil
+        record.message = transfer.message or "已還原為配對前儲存的隊伍"
+        self:Publish(record)
+        if record.uncertain ~= nil then self:Load(record) end
+        record.restoredTickets = record.restoredTickets or {}
+        record.restoredTickets[ticketId] = true
+        log("[VRF][MatchFlow] formations restored; confirmed content only")
+        return true
+    end
 
     @ExecSpace("ServerOnly")
     method void ReleaseTransfer(string forUserId, string ticketId)
@@ -404,12 +404,16 @@ script FormationService extends Logic
 
     @ExecSpace("Server")
     method void RequestTravel(string destination)
-        -- Limit destinations and derive the traveller from the RPC sender, keeping drafts in this session.
+        -- Limit destinations and derive the traveller from the RPC sender.
         if destination ~= "formationlobby" and destination ~= "formationsim" and destination ~= "template" then return end
         local player = _UserService:GetUserEntityByUserId(senderUserId)
         if not isvalid(player) then return end
         local record = self:GetSession(senderUserId)
-        if record ~= nil and record.transferLocked then self:Publish(record) return end
+        local reconciled = record ~= nil and _FormationSchema:IsLoadConfirmed(record.loadState)
+        if _MatchFlow:IsFormationLocked(senderUserId) or (record ~= nil and (record.transferLocked or record.pending or (record.uncertain ~= nil and not reconciled))) then
+            if record ~= nil then self:Publish(record) end
+            return
+        end
         if player.CurrentMapName == "matchprobe" then return end
         if destination ~= "formationsim" then
             local controller = player:GetComponent("PlayerControllerComponent")
@@ -418,6 +422,7 @@ script FormationService extends Logic
             if isvalid(movement) then movement:Stop() end
         end
         _TeleportService:TeleportToMapPosition(player, Vector3(0, 0, 0), destination)
+        if record ~= nil and record.uncertain ~= nil then log("[VRF][Formations] reconciled travel=" .. destination) end
         if record ~= nil then self:Publish(record) end
     end
 

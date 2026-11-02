@@ -17,6 +17,23 @@ local ok, detail = pcall(function()
     assert(not layout:CanDeploy(math.huge, 0) and not layout:CanDeploy(0/0, 0), 'non-finite coordinates are rejected')
     assert(not layout:IsWalkable(15, 0) and not layout:IsWalkableOn(nil, -2, 0), 'bounds and missing terrain fail closed')
 
+    local function reason(x, y, others, mode, tiles) local r = layout:CheckPlacement(x, y, others, mode, tiles) return r.reason, r.conflict end
+    assert(reason(-2, 0, {}, 'DEPLOY', nil) == '', 'DEPLOY accepts a legal spot with no other units')
+    local r, at = reason(-2.1, 0, {{x=-5, y=0}, {x=-2, y=0}}, 'DEPLOY', nil)
+    assert(r == 'TOO_CLOSE' and at == 2, 'spacing reports which existing unit conflicts')
+    assert(reason(-2.3, 0, {{x=-2, y=0}}, 'DEPLOY', nil) == '', 'minimum spacing is accepted')
+    assert(reason(0.5, 0, {}, 'DEPLOY', nil) == 'NOT_DEPLOYABLE', 'DEPLOY refuses the right half')
+    assert(reason(0.5, 0, {}, 'ARENA', nil) == '', 'ARENA accepts the right half')
+    assert(reason(math.huge, 0, {}, 'ARENA', nil) == 'OUT_OF_BOUNDS' and reason(15, 0, {}, 'DEPLOY', nil) == 'OUT_OF_BOUNDS', 'bounds are exclusive at the far edge')
+    assert(reason(-2, 0, {}, 'ARENA', session:GetRectTileMapComponent()) == '', 'battle terrain accepts a walkable spot')
+    assert(layout:CheckPlacement(-2, 0, {}, 'ARENA', nil).reason == '', 'nil tiles falls back to template terrain')
+    local walled = nil
+    for x = -14, -1 do
+        if not layout:IsWalkable(x, 0) then walled = x break end
+    end
+    if walled ~= nil then assert(reason(walled, 0, {}, 'ARENA', nil) == 'BLOCKED', 'a wall tile is BLOCKED in ARENA') end
+    log('[VRF][FormationPlacement] CheckPlacement wall=' .. tostring(walled))
+
     local catalog = _FormationService:GetCatalog()
     assert(isvalid(catalog), 'template catalog is available from the lobby')
     local units = {{monsterId='monster_tank', x=-2, y=0}, {monsterId='monster_tank', x=-2.3, y=0}}
@@ -33,6 +50,15 @@ local ok, detail = pcall(function()
     assert(home.x == -2.25 and away.x == 3.25 and away.y == 0.25 and away.z == 0, 'battle entry preserves fractional positions and mirrors at x=0.5')
     assert(layout:MirrorX(away.x) == home.x, 'away viewing restores the original player-relative position')
     assert(layout:BattlePosition(0.5, 0, true) == nil, 'invalid saved coordinates cannot enter either battle side')
+
+    local pair = {{monsterId='monster_tank', x=-2, y=0}, {monsterId='monster_tank', x=-2.3, y=0}}
+    local homeRoster = session:PrepareMatchedRoster(pair, false)
+    local awayRoster = session:PrepareMatchedRoster(pair, true)
+    assert(homeRoster ~= nil and #homeRoster == 2 and math.abs(homeRoster[2].position.x + 2.3) < 0.0001, 'matched entry keeps the home positions (Vector3 is float32)')
+    assert(awayRoster ~= nil and #awayRoster == 2 and math.abs(awayRoster[1].position.x - 3) < 0.0001, 'matched entry mirrors the away positions')
+    assert(session:PrepareMatchedRoster({{monsterId='monster_tank', x=-2, y=0}, {monsterId='monster_tank', x=-2.15, y=0}}, false) == nil, 'matched entry rejects overlapping units')
+    assert(session:BuildPlacedRoster() ~= nil, 'map-placed roster still validates')
+    log('[VRF][FormationPlacement] matched and placed rosters validated')
 
     assert(session.Phase == 'DEPLOYMENT' and session.PlayerAlive == 0 and session.EnemyAlive == 6, 'template roster is ready')
     deployed = true

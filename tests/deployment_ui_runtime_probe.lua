@@ -43,9 +43,9 @@ for index, option in ipairs(adapter.optionData) do
     local portraitEntity = card.entity:GetChildByName("Portrait", true)
     local label = isvalid(nameEntity) and nameEntity:GetComponent("TextGUIRendererComponent") or nil
     local portrait = isvalid(portraitEntity) and portraitEntity:GetComponent("SpriteGUIRendererComponent") or nil
-    check(card.monsterId == option[1] and isvalid(label) and label.Text == option[2],
+    check(card.monsterId == option.monsterId and isvalid(label) and label.Text == option.monsterName,
         "card " .. tostring(index) .. " keeps MonsterId and MonsterName from one row")
-    check(isvalid(portrait) and portrait.ImageRUID ~= nil and portrait.ImageRUID.DataId == option[3],
+    check(isvalid(portrait) and portrait.ImageRUID ~= nil and portrait.ImageRUID.DataId == option.standRuid,
         "card " .. tostring(index) .. " uses its row's StandAnimationRUID")
     check(type(card.clickAction) == "function", "card " .. tostring(index) .. " retains its connected click action")
     card.clickAction()
@@ -53,7 +53,7 @@ for index, option in ipairs(adapter.optionData) do
     for _, candidate in ipairs(adapter.optionCards) do
         if isvalid(candidate.glow) and candidate.glow.Enable == true then enabledGlows = enabledGlows + 1 end
     end
-    check(adapter.selectedMonsterId == option[1] and enabledGlows == 1 and isvalid(card.glow) and card.glow.Enable == true,
+    check(adapter.selectedMonsterId == option.monsterId and enabledGlows == 1 and isvalid(card.glow) and card.glow.Enable == true,
         "click action selects card " .. tostring(index) .. " and moves the persistent glow")
 end
 
@@ -81,7 +81,8 @@ local function startSingleUnitBattle()
             _TimerService:SetTimerOnce(function()
                 check(adapter.session.Phase == "BATTLE" and adapter.session.InitialPlayerAlive == 1,
                     "start-button action starts a one-unit battle")
-                check(adapter.optionContainer.Enable == false and adapter.startButton.Enable == false,
+                check(not adapter.optionContainer.EnabledInHierarchy and not adapter.startButton.EnabledInHierarchy
+                    and not adapter.startButton.ButtonComponent.Enable,
                     "deployment controls hide and disable after battle starts")
 
                 local function observeResult(elapsed)
@@ -92,9 +93,9 @@ local function startSingleUnitBattle()
                     check(adapter.session.Phase == "RESULT", "natural one-unit battle reaches a result")
                     if adapter.session.Phase == "RESULT" then
                         local result = adapter.session.Result
-                        local win = adapter.resultWin.Enable == true
-                        local lose = adapter.resultLose.Enable == true
-                        local draw = adapter.resultDraw.Enable == true
+                        local win = _BattleUIController.resultWin.Enable == true
+                        local lose = _BattleUIController.resultLose.Enable == true
+                        local draw = _BattleUIController.resultDraw.Enable == true
                         local visible = (win and 1 or 0) + (lose and 1 or 0) + (draw and 1 or 0)
                         local correct = (result == "WIN" and win) or (result == "LOSE" and lose) or (result == "DRAW" and draw)
                         check(visible == 1 and correct, "natural result enables exactly its matching result entity")

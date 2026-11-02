@@ -8,6 +8,8 @@ script FormationMapLayout extends Logic
         -- Instance rooms use their template-verified battlefield when the static template is unavailable.
         local map = _EntityService:GetEntityByPath("/maps/" .. self.ReferenceMapName)
         if not isvalid(map) then map = _EntityService:GetEntityByPath("/maps/matchprobe") end
+        -- A client editing preview may only hold its own map; every map shares the template terrain.
+        if not isvalid(map) then map = _EntityService:GetEntityByPath("/maps/formationsim") end
         if not isvalid(map) then return nil end
         local entity = map:GetChildByName("RectTileMap", true)
         if not isvalid(entity) then return nil end
@@ -48,6 +50,20 @@ script FormationMapLayout extends Logic
         -- Allow the minimum distance despite Vector3 float32 rounding in the battlefield.
         local dx, dy = x - otherX, y - otherY
         return dx * dx + dy * dy + 0.000001 < self.MinimumSeparation * self.MinimumSeparation
+    end
+
+    method table CheckPlacement(number x, number y, table others, string mode, any tiles)
+        -- One placement rule for saving, editing, deployment and battle entry; reason is "" when the spot is legal.
+        -- DEPLOY: the player's deployment zone. ARENA: anywhere walkable inside the battlefield. tiles nil = template terrain.
+        if not self:Contains(x, y) then return { reason = "OUT_OF_BOUNDS", conflict = 0 } end
+        if mode == "DEPLOY" and not self:CanDeploy(x, y) then return { reason = "NOT_DEPLOYABLE", conflict = 0 } end
+        if (mode ~= "DEPLOY" or tiles ~= nil) and not self:IsWalkableOn(tiles or self:ReferenceTiles(), x, y) then
+            return { reason = "BLOCKED", conflict = 0 }
+        end
+        for index, other in ipairs(others) do
+            if self:IsTooClose(x, y, other.x, other.y) then return { reason = "TOO_CLOSE", conflict = index } end
+        end
+        return { reason = "", conflict = 0 }
     end
 
     method number MirrorX(number x)

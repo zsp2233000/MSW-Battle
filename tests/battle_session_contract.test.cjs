@@ -111,7 +111,7 @@ test("Issue #7 keeps deployment authority on the map session and uses IDs for ca
     assert.ok(probe.includes(scenario), `${scenario} runtime assertion missing`);
   }
   assert.match(uiProbe, /#adapter\.optionCards == #adapter\.optionData/);
-  assert.match(uiProbe, /portrait\.ImageRUID\.DataId == option\[3\]/);
+  assert.match(uiProbe, /portrait\.ImageRUID\.DataId == option\.standRuid/);
   assert.match(uiProbe, /enabledGlows == 1/);
   assert.match(input, /method void SyncDeploymentControls\(\)/);
   assert.match(input, /presentation\.ShowDeploymentUI and self\.session\.Phase == "DEPLOYMENT"/);

@@ -91,7 +91,7 @@ local function observeResult(elapsed)
     if adapter.session.Phase ~= "RESULT" then finish(); return end
     later(function()
         local result = adapter.session.Result
-        local win, lose, draw = adapter.resultWin.Enable, adapter.resultLose.Enable, adapter.resultDraw.Enable
+        local win, lose, draw = _BattleUIController.resultWin.Enable, _BattleUIController.resultLose.Enable, _BattleUIController.resultDraw.Enable
         check((win and 1 or 0) + (lose and 1 or 0) + (draw and 1 or 0) == 1
             and ((result == "WIN" and win) or (result == "LOSE" and lose) or (result == "DRAW" and draw)),
             "exactly the matching delivered result entity is enabled")
@@ -152,8 +152,8 @@ local function boot(attempt)
     for index, card in ipairs(adapter.optionCards) do
         local option = adapter.optionData[index]
         cards[card.monsterId] = card
-        check(card.entity:GetChildByName("MonsterName", true).TextGUIRendererComponent.Text == option[2]
-            and card.monsterId == option[1], "displayed name and MonsterId come from the same catalog row")
+        check(card.entity:GetChildByName("MonsterName", true).TextGUIRendererComponent.Text == option.monsterName
+            and card.monsterId == option.monsterId, "displayed name and MonsterId come from the same catalog row")
     end
     check(adapter.session.Phase == "DEPLOYMENT" and adapter.session.PlayerAlive == 0, "UI flow begins with zero deployed units")
     adapter.startButton:SendEvent(ButtonClickEvent(adapter.startButton))

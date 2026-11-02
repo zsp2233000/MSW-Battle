@@ -10,6 +10,12 @@ script BattleUIController extends Logic
     property Entity playerCount = "e0503105-2f34-4b5c-9277-4479fe444482"
     property Entity enemyCount = "74377a90-4118-4205-8354-1545a024002f"
     property Entity configErrorGroup = "b54bf636-0511-441c-9947-d1a0f3c3fe34"
+    property Entity resultWin = "a9f0b63c-5b21-4fae-8c6c-b3ba51c02dfe"
+    property Entity resultLose = "2f8dc490-baa5-4c2c-907d-9559612ea990"
+    property Entity resultDraw = "36bfb65f-5d84-4014-b644-73c4ca3e8f2b"
+    property Entity resultPlayerCount = "506bb73b-00a6-4313-ba14-ba1d3189f3a9"
+    property Entity resultEnemyCount = "585aa74a-1ef0-4897-9885-4b996eb49840"
+    property string OwnResult = ""
 
     @ExecSpace("ClientOnly")
     method void OnBeginPlay()
@@ -93,6 +99,18 @@ script BattleUIController extends Logic
     end
 
     @ExecSpace("ClientOnly")
+    method void SetResult(string result)
+        -- Keep exactly the local viewer's result entity enabled.
+        if self.OwnResult == result then return end
+        self.OwnResult = result
+        self:SetEnabled(self.resultWin, result == "WIN")
+        self:SetEnabled(self.resultLose, result == "LOSE")
+        self:SetEnabled(self.resultDraw, result == "DRAW")
+        self:SetEnabled(self.result, result ~= "")
+        if result ~= "" then log("[VRF][BattleUI] result=" .. result) end
+    end
+
+    @ExecSpace("ClientOnly")
     method void OnUpdate(number delta)
         -- Follow current-map synchronization, map policy and the local player's battle side.
         local player = _UserService.LocalPlayer
@@ -104,7 +122,7 @@ script BattleUIController extends Logic
         if not active then
             self:SetEnabled(self.hud, false)
             self:SetEnabled(self.deployment, false)
-            self:SetEnabled(self.result, false)
+            self:SetResult("")
             self:SetEnabled(self.configErrorGroup, false)
             self._T.hudKey = ""
             return
@@ -115,42 +133,53 @@ script BattleUIController extends Logic
         local poc = not matched and isvalid(map:GetComponent("script.BattleDeploymentInput"))
         self:SetEnabled(self.hud, phase ~= "CONFIG_ERROR")
         self:SetEnabled(self.deployment, showDeployment)
-        self:SetEnabled(self.result, poc and phase == "RESULT" and session.Result ~= "")
         self:SetEnabled(self.configErrorGroup, poc and phase == "CONFIG_ERROR")
 
         local playerAlive, enemyAlive = session.PlayerAlive, session.EnemyAlive
+        local initialPlayer, initialEnemy = session.InitialPlayerAlive, session.InitialEnemyAlive
+        local viewerResult = ""
         local ready = session.SessionGeneration > 0 and (phase == "DEPLOYMENT" or phase == "BATTLE" or phase == "RESULT")
         if matched then
             local profile = isvalid(player.PlayerComponent) and player.PlayerComponent.ProfileCode or ""
             if profile ~= "" and session.AwayProfile == profile then
                 playerAlive, enemyAlive = enemyAlive, playerAlive
+                initialPlayer, initialEnemy = initialEnemy, initialPlayer
             elseif profile == "" or session.HomeProfile ~= profile then
                 ready = false
             end
+            if profile ~= "" then viewerResult = session:ResultForProfile(profile) end
+        elseif poc and phase == "RESULT" then
+            viewerResult = session.Result
         end
+        self:SetResult(viewerResult)
         local own = ready and tostring(playerAlive) or "—"
         local opponent = ready and tostring(enemyAlive) or "—"
-        local key = map.Name .. ":" .. tostring(session.SessionGeneration) .. ":" .. phase .. ":" .. own .. ":" .. opponent .. ":" .. tostring(showDeployment)
+        local key = map.Name .. ":" .. tostring(session.SessionGeneration) .. ":" .. phase .. ":" .. own .. ":" .. opponent .. ":" .. tostring(showDeployment) .. ":" .. tostring(initialPlayer) .. ":" .. tostring(initialEnemy)
         if self._T.hudKey == key then return end
         self._T.hudKey = key
         local title, hint = "準備中", "等待戰場就緒"
         if phase == "DEPLOYMENT" then
-            title, hint = "部署階段", "選擇怪物，組成你的編隊"
+            title, hint = "部署階段", "選擇怪物，組成你的隊伍"
         elseif phase == "BATTLE" then
-            title, hint = "戰鬥進行中", "雙方編隊自動交戰"
+            title, hint = "戰鬥進行中", "雙方隊伍自動交戰"
         elseif phase == "RESULT" then
             title, hint = "戰鬥結束", "本次對戰已結算"
+        elseif phase == "ABORTED" then
+            title, hint = "對局已中止", "請返回大廳重新配對"
         end
         self:SetText(self.phaseText, title)
         self:SetText(self.phaseHint, hint)
         self:SetText(self.playerCount, own)
         self:SetText(self.enemyCount, opponent)
-        log("[VRF][BattlePresentation] map=" .. map.Name .. " phase=" .. phase .. " own=" .. own .. " enemy=" .. opponent .. " deployment=" .. tostring(showDeployment))
+        self:SetText(self.resultPlayerCount, tostring(playerAlive) .. " / " .. tostring(initialPlayer))
+        self:SetText(self.resultEnemyCount, tostring(enemyAlive) .. " / " .. tostring(initialEnemy))
+        log("[VRF][BattlePresentation] map=" .. map.Name .. " phase=" .. phase .. " own=" .. own .. " enemy=" .. opponent .. " deployment=" .. tostring(showDeployment) .. " result=" .. self.OwnResult)
     end
 
     @ExecSpace("ClientOnly")
     method void OnEndPlay()
         -- Release shared presentation when this client session ends.
+        self:SetResult("")
         self:SetEnabled(self.root, false)
         self:SetEnabled(self.configErrorGroup, false)
         self._T.hudKey = ""

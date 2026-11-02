@@ -14,51 +14,25 @@ local ok, detail = pcall(function()
         assert(_FormationHandoff:Reserve(userId, ticket), 'fixture reservation')
         return ticket
     end
-    local function edit(x)
-        local session = _FormationService:GetSession(userId)
-        local slot = session.editSlot
-        _FormationService:UpdateDraftForUser(userId, {{monsterId='monster_tank',x=x,y=-1.25}}, session.drafts[tostring(slot)].version, slot)
-        return session
-    end
+    local session = _FormationService:GetSession(userId)
     local ticket = reserve()
     local original = _FormationHandoff:Roster(ticket.id)[1].x
-    local session = edit(-5.25)
-    _FormationStorage:ConfigureMakerSaveResponse('FAIL', 0)
-    assert(_FormationHandoff:Seal(userId, ticket, function() return true end), 'save failure does not block sealing')
-    _FormationStorage:ConfigureMakerSaveResponse('', 0)
-    assert(_FormationHandoff:Roster(ticket.id)[1].x == original, 'save failure retains the fixed roster')
-    assert(string.find(ticket.notice, '失敗', 1, true), 'failure notice is not success')
+    assert(_FormationHandoff:Seal(userId, ticket, function() return true end), 'sealing needs no save')
+    assert(_FormationHandoff:Roster(ticket.id)[1].x == original, 'the fixed roster is unchanged')
     ticket.data.state = 'TRANSFER'
     assert(_FormationHandoff:Store(ticket), 'handoff confirmed')
     ticket.data.state = 'RETURNING'
     assert(_FormationHandoff:Store(ticket), 'return confirmed')
-    assert(_FormationHandoff:Restore(userId, ticket.id), 'draft restored')
-    session = edit(-6.25)
+    assert(session.transferLocked == ticket.id, 'locked while the transfer is out')
+    assert(_FormationHandoff:Restore(userId, ticket.id), 'confirmed content restored')
+    assert(not session.transferLocked, 'restoring releases the lock')
+    local epoch = session.writeEpoch
+    assert(_FormationHandoff:Restore(userId, ticket.id) and session.writeEpoch == epoch, 'a second restore of the same ticket is acknowledged without applying it again')
     _FormationStorage:ConfigureMakerFaults(0, 1, 0)
     assert(not _FormationHandoff:Close(userId, ticket, 'RETURNED'), 'cleanup failure surfaced')
     assert(_FormationHandoff:Restore(userId, ticket.id), 'restore retry acknowledged')
-    assert(session.drafts[tostring(session.editSlot)].units[1].x == -6.25, 'cleanup retry preserves later edits')
     assert(_FormationHandoff:Close(userId, ticket, 'RETURNED'), 'cleanup retry confirmed')
-    log('[VRF][HandoffFailures] PASS save failure continues; cleanup retries preserve newer drafts')
-    _FormationService:Load(session)
-    for attempt = 1, 200 do if session.loadState == 'READY' and not session.pending then break end wait(0.1) end
-    assert(session.loadState == 'READY', 'failed save reconciled before the next match')
-
-    ticket = reserve()
-    _FormationService.SaveTimeoutSeconds = 1
-    _FormationStorage:ConfigureMakerSaveResponse('LATE', 2)
-    assert(_FormationHandoff:Seal(userId, ticket, function() return true end), 'save timeout still seals')
-    assert(string.find(ticket.notice, '逾時', 1, true), 'timeout reported honestly')
-    local savedRevision = session.saved.revision
-    wait(2.5)
-    assert(session.saved.revision == savedRevision and session.transferLocked == ticket.id, 'late acknowledgement cannot mutate sealed state')
-    _FormationStorage:ConfigureMakerSaveResponse('', 0)
-    _FormationService.SaveTimeoutSeconds = previousTimeout
-    assert(_FormationHandoff:Close(userId, ticket, 'CANCELLED'), 'timeout fixture closed')
-    _FormationService:Load(session)
-    for attempt = 1, 200 do if session.loadState == 'READY' and not session.pending then break end wait(0.1) end
-    assert(session.loadState == 'READY', 'ambiguous save reconciled')
-    log('[VRF][HandoffFailures] PASS save timeout retains drafts; late acknowledgement fenced')
+    log('[VRF][HandoffFailures] PASS cleanup retries restore confirmed content and close once')
 
     local old = reserve()
     _FormationService.SaveTimeoutSeconds = 1

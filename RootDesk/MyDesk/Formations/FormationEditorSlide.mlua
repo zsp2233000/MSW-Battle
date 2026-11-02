@@ -1,0 +1,102 @@
+@Logic
+script FormationEditorSlide extends Logic
+
+    property boolean Collapsed = false
+    property number Progress = 0
+
+    @ExecSpace("ClientOnly")
+    method void OnBeginPlay()
+        -- Own the editor panel's collapse state and each panel's slide direction.
+        self.Collapsed = false
+        self.Progress = 0
+        self._T.origins = {}
+        self._T.items = {
+            { "Editor/Catalog", 1, 0 },
+            { "Editor/CatalogDock", 1, 0 },
+            { "Editor/Intel", 1, 0 },
+            { "Editor/Slots", 1, 0 },
+            { "EditorControls/Retry", 1, 0 },
+            { "Editor/Header", 0, 1 },
+            { "Editor/Title", 0, 1 },
+            { "Editor/Summary", 0, 1 },
+            { "Editor/Roster", 0, 1 },
+            { "Editor/Units", 0, 1 },
+            { "Editor/Activate", 0, -1 },
+            { "Editor/Back", 0, -1 },
+            { "Editor/Save", 0, -1 },
+            { "Editor/ToggleUnits", 0, -1 },
+            { "Editor/Help", 0, -1 },
+            { "EditorControls/Status", 0, -1 },
+        }
+        log("[VRF][EditorSlide] ready items=" .. tostring(#self._T.items))
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Toggle()
+        -- Flip the target; OnUpdate carries the panels there from wherever they are now.
+        self.Collapsed = not self.Collapsed
+        log("[VRF][FormationUI] editor collapsed=" .. tostring(self.Collapsed))
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Expand()
+        -- Every map arrival starts with the editor panels open.
+        self.Collapsed = false
+    end
+
+    @ExecSpace("ClientOnly")
+    method boolean PanelsVisible()
+        -- Panels stay enabled while sliding and hide only once fully collapsed.
+        return not self.Collapsed or self.Progress < 1
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnUpdate(number delta)
+        -- 沿用每幀更新，反向時從目前進度滑回，並保留各 UI 原始位置。
+        local player = _UserService.LocalPlayer
+        local root = _FormationLobby.root
+        if not isvalid(player) or not isvalid(root) then return end
+        local previous = self.Progress
+        local target = self.Collapsed and 1 or 0
+        local inEditor = player.CurrentMapName == "formationsim"
+        local progress = math.max(0, math.min(1, previous + (target == 1 and 1 or -1) * delta / 0.6))
+        if not inEditor then progress = 0 end
+        if progress == previous then return end
+        self.Progress = progress
+        local eased = progress * progress * (3 - 2 * progress)
+        local horizontalOffset = (root.UITransformComponent.RectSize.x + 32) * eased
+        local verticalOffset = (root.UITransformComponent.RectSize.y + 32) * eased
+        for _, item in ipairs(self._T.items) do
+            local path = item[1]
+            local entity = _FormationLobby:Ui(path)
+            if isvalid(entity) then
+                local transform = entity.UITransformComponent
+                local origin = self._T.origins[path]
+                if origin == nil then
+                    origin = transform.anchoredPosition
+                    self._T.origins[path] = origin
+                end
+                transform.anchoredPosition = Vector2(
+                    origin.x + item[2] * horizontalOffset,
+                    origin.y + item[3] * verticalOffset
+                )
+            end
+        end
+        if progress == target or not inEditor then
+            _FormationLobby:SetEnabled("Editor", inEditor and not self.Collapsed)
+            log("[VRF][EditorSlide] settled=" .. tostring(progress)
+                .. " right=" .. tostring(horizontalOffset)
+                .. " up=" .. tostring(verticalOffset)
+                .. " down=" .. tostring(-verticalOffset))
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnEndPlay()
+        -- 結束測試時還原位置，避免下次 Play 把滑出位置當成起點。
+        for path, origin in pairs(self._T.origins or {}) do
+            local entity = _FormationLobby:Ui(path)
+            if isvalid(entity) then entity.UITransformComponent.anchoredPosition = origin end
+        end
+    end
+end

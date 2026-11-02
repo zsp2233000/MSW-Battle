@@ -16,7 +16,7 @@
 | 原生格點轉換 | IsOddGridPosition=false；世界位置以 ToWorldPosition／ToCellPosition 驗證；水平鏡射格點 (-x,y) |
 | 地塊容器 | Transform 保持 (0,0,1000)，未平移、縮放地塊容器 |
 | 地塊素材 | 原有 tileset 的可行走地塊 93、牆壁 47（檔案索引） |
-| 相機 | Anchor=(0,0,0)，CameraOffset=(0.5,0)，ZoomRatio=60；ScreenOffset=(0.5,0.5)、Damping=(0,0)、Cut、blendTime=0 |
+| 相機 | Anchor=(0,0,0)，CameraOffset=(0.5,0)，ZoomRatio=60；ScreenOffset=(0.5,0.5)、Damping=(0,0)、Cut、blendTime=0。例外：正式戰場 `matchprobe` 的 CameraOffset=(0.5,0.9)，讓頂部 HUD 只蓋到外牆，地圖下緣仍在畫面內（#51） |
 
 地塊格線是地形資料，並非布陣槽位。保存 `monsterId`、`x`、`y` 的原始連續世界座標，不取整、吸附、縮放或重排。MSW Vector3 本身具有浮點精度差異；保存值須與收到的座標相同。每組仍為 1–6 個單位、共用 MonsterCatalog、同兵種可重複，最小間距 0.3。
 

@@ -25,33 +25,33 @@ CSV 是方便編輯與檢視的檔案；執行時讀取的是 Maker 中的 UserD
 
 ## 欄位說明
 
-| 欄位 | 用途與驗證 |
-|---|---|
-| `MonsterId` | 穩定、唯一的識別鍵；固定敵軍設定會引用它。 |
-| `MonsterName` | 顯示名稱；可修改，不影響以 `MonsterId` 查找。 |
-| `MonsterType` | `TANK`、`ASSAULT` 或 `SHOOTER`，決定戰鬥行為與攻擊器。 |
-| `ModelId` | 生成時使用的專案 Model ID；不可空白。 |
-| `MaxHp` | 最大生命值；正整數。 |
-| `MoveSpeed` | 移動速度；大於 0。 |
-| `AttackDamage` | 攻擊傷害；正整數。坦克接觸命中也使用此值。 |
-| `AttackIntervalSeconds` | 攻擊間隔秒數；大於 0。 |
-| `AttackRange` | 一般攻擊距離；大於 0。 |
-| `AttackImpactFrame` | 戰士／射手結算命中的影格；正整數。坦克可留空或填 `0`，因坦克沒有一般攻擊。 |
-| `RetargetIntervalSeconds` | 重新尋找目標的間隔秒數；大於 0。 |
-| `HitStopDurationSeconds` | 受擊停頓秒數；大於或等於 0。 |
-| `ContactCooldownSeconds` | 同一目標的坦克接觸攻擊冷卻秒數；坦克必須大於 0，其他種類可填 `0`。 |
-| `ContactSizeX` | 坦克接觸範圍寬度；坦克必須大於 0，其他種類可填 `0`。 |
-| `ContactSizeY` | 坦克接觸範圍高度；坦克必須大於 0，其他種類可填 `0`。 |
-| `KnockbackDistance` | 坦克接觸擊退距離；坦克必須大於 0，其他種類可填 `0`。 |
-| `StandAnimationRUID` | 待機動畫 RUID；必填，也用於怪物選項肖像。 |
-| `MoveAnimationRUID` | 移動動畫 RUID；目前坦克展示會使用。必填。 |
-| `AttackAnimationRUID` | 攻擊動畫 RUID；目前載入器要求非空。 |
-| `HitAnimationRUID` | 受擊動畫 RUID；目前坦克展示會使用。必填。 |
-| `DieAnimationRUID` | 死亡動畫 RUID；目前坦克展示會使用。必填。 |
-| `HitEffectRUID` | 命中特效 RUID；可空白，空白時沿用攻擊器預設值。 |
-| `AttackSoundRUID` | 攻擊音效 RUID；可空白，空白時不播放攻擊音效。 |
-| `OnHitSoundRUID` | 受擊音效 RUID；可空白，空白時不播放受擊音效。 |
-| `DieSoundRUID` | 死亡音效 RUID；可空白，空白時不播放死亡音效。 |
+| 欄位                      | 用途與驗證                                                                 |
+| ------------------------- | -------------------------------------------------------------------------- |
+| `MonsterId`               | 穩定、唯一的識別鍵；固定敵軍設定會引用它。                                 |
+| `MonsterName`             | 顯示名稱；可修改，不影響以 `MonsterId` 查找。                              |
+| `MonsterType`             | `TANK`、`ASSAULT` 或 `SHOOTER`，決定戰鬥行為與攻擊器。                     |
+| `ModelId`                 | 生成時使用的專案 Model ID；不可空白。                                      |
+| `MaxHp`                   | 最大生命值；正整數。                                                       |
+| `MoveSpeed`               | 移動速度；大於 0。                                                         |
+| `AttackDamage`            | 攻擊傷害；正整數。坦克接觸命中也使用此值。                                 |
+| `AttackIntervalSeconds`   | 攻擊間隔秒數；大於 0。                                                     |
+| `AttackRange`             | 一般攻擊距離；大於 0。                                                     |
+| `AttackImpactFrame`       | 戰士／射手結算命中的影格；正整數。坦克可留空或填 `0`，因坦克沒有一般攻擊。 |
+| `RetargetIntervalSeconds` | 重新尋找目標的間隔秒數；大於 0。                                           |
+| `HitStopDurationSeconds`  | 受擊停頓秒數；大於或等於 0。                                               |
+| `ContactCooldownSeconds`  | 同一目標的坦克接觸攻擊冷卻秒數；坦克必須大於 0，其他種類可填 `0`。         |
+| `ContactSizeX`            | 坦克接觸範圍寬度；坦克必須大於 0，其他種類可填 `0`。                       |
+| `ContactSizeY`            | 坦克接觸範圍高度；坦克必須大於 0，其他種類可填 `0`。                       |
+| `KnockbackDistance`       | 坦克接觸擊退距離；坦克必須大於 0，其他種類可填 `0`。                       |
+| `StandAnimationRUID`      | 待機動畫 RUID；必填，也用於怪物選項肖像。                                  |
+| `MoveAnimationRUID`       | 移動動畫 RUID；目前坦克展示會使用。必填。                                  |
+| `AttackAnimationRUID`     | 攻擊動畫 RUID；目前載入器要求非空。                                        |
+| `HitAnimationRUID`        | 受擊動畫 RUID；目前坦克展示會使用。必填。                                  |
+| `DieAnimationRUID`        | 死亡動畫 RUID；目前坦克展示會使用。必填。                                  |
+| `HitEffectRUID`           | 命中特效 RUID；可空白，空白時沿用攻擊器預設值。                            |
+| `AttackSoundRUID`         | 攻擊音效 RUID；可空白，空白時不播放攻擊音效。                              |
+| `OnHitSoundRUID`          | 受擊音效 RUID；可空白，空白時不播放受擊音效。                              |
+| `DieSoundRUID`            | 死亡音效 RUID；可空白，空白時不播放死亡音效。                              |
 
 ## 數值規則摘要
 

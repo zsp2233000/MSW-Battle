@@ -14,7 +14,7 @@ local ok, detail = pcall(function()
     assert(battle.EventSerial == serial, "terminal state stays stable")
     local ids = {}
     for _, user in ipairs(_UserService.UserEntities.Values) do table.insert(ids, user.PlayerComponent.UserId) end
-    for _, userId in ipairs(ids) do _MatchProbe:ReturnForUser(userId) end
+    for _, userId in ipairs(ids) do _MatchFlow:ReturnForUser(userId) end
     log("[VRF][MatchedRoom] PASS immutable 6v1; natural WIN/LOSE; stable terminal; return dispatched")
 end)
 if not ok then log("[VRF][MatchedRoom] FAIL " .. tostring(detail)) end

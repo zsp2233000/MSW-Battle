@@ -21,10 +21,10 @@ local ok, detail = pcall(function()
     local setup = function(userId, units)
         local record = _FormationService:GetSession(userId)
         local slotId = record.editSlot
-        _FormationService:UpdateDraftForUser(userId, units, record.drafts[tostring(slotId)].version, slotId)
-        _FormationService:SaveForUser(userId, record.drafts[tostring(slotId)].version, slotId)
-        for attempt = 1, 200 do if not record.pending then break end wait(0.1) end
-        assert(record.drafts[tostring(slotId)].saveState == "SAVED", "save confirmed")
+        local revision = record.saved.slots[tostring(slotId)].revision
+        _FormationService:SaveForUser(userId, units, slotId, revision, _UtilLogic:NewGuid())
+        for attempt = 1, 200 do if not record.pending and #record.saved.slots[tostring(slotId)].units == #units then break end wait(0.1) end
+        assert(#record.saved.slots[tostring(slotId)].units == #units, "save confirmed")
         _FormationService:ActivateForUser(userId, slotId, record.saved.slots[tostring(slotId)].revision)
         for attempt = 1, 200 do if not record.pending then break end wait(0.1) end
         assert(record.saved.activeSlot == slotId, "saved slot activated")
@@ -34,23 +34,23 @@ local ok, detail = pcall(function()
     local one = {{monsterId = "monster_tank", x = -3.25, y = -1.25}}
     setup(firstId, six)
     setup(secondId, one)
-    _MatchProbe:QueueForUser(firstId)
-    _MatchProbe:CancelForUser(firstId)
-    _MatchProbe:QueueForUser(firstId)
-    -- Change and save the active formation AFTER queuing. This must affect only a future match.
-    setup(firstId, one)
+    _MatchFlow:QueueForUser(firstId)
+    _MatchFlow:CancelForUser(firstId)
+    _MatchFlow:QueueForUser(firstId)
+    -- Waiting locks mutation; replacing the roster requires cancel, save, then queue again (#52).
+    local waiting = _FormationService:GetSession(firstId)
+    _FormationService:SaveForUser(firstId, one, waiting.editSlot, waiting.saved.slots[tostring(waiting.editSlot)].revision, _UtilLogic:NewGuid())
+    assert(waiting.result.status == 'REJECTED', 'saving is rejected while queued')
     local nextSession = _FormationService:GetSession(firstId)
     local nextMatch = nextSession.saved.slots[tostring(nextSession.saved.activeSlot)].units
-    assert(#nextMatch == 1, "later saved formation has one unit")
+    assert(#nextMatch == 6, "queued saved formation remains six units")
     local expected = {}
     for _, userId in ipairs({firstId, secondId}) do
         local session = _FormationService:GetSession(userId)
-        local drafts = {}
-        for index = 1, 5 do drafts[tostring(index)] = _FormationSchema:CopyUnits(session.drafts[tostring(index)].units) end
-        expected[userId] = { saved = _FormationSchema:CopyDocument(session.saved), editSlot = session.editSlot, drafts = drafts, player = _UserService:GetUserEntityByUserId(userId) }
+        expected[userId] = { saved = _FormationSchema:CopyDocument(session.saved), editSlot = session.editSlot, player = _UserService:GetUserEntityByUserId(userId) }
     end
-    log("[VRF][MatchedQueue] queued six; later confirmed save one; cancel/requeue passed")
-    _MatchProbe:QueueForUser(secondId)
+    log("[VRF][MatchedQueue] queued six; waiting rejects saves; cancel/requeue passed")
+    _MatchFlow:QueueForUser(secondId)
     log("[VRF][MatchedQueue] PASS participants=2")
     -- Keep detached expectations in this coroutine while the room probe drives battle and return.
     wait(0.2)
@@ -78,13 +78,8 @@ local ok, detail = pcall(function()
             assert(_FormationSchema:SameUnits(before.slots[key].units, after.slots[key].units), "all five saved formations retained")
         end
         assert(restored.editSlot == expected[userId].editSlot, "editor selection retained")
-        local beforeDrafts = expected[userId].drafts
-        local afterDrafts = restored.drafts
-        for index = 1, 5 do
-            local key = tostring(index)
-            assert(_FormationSchema:SameUnits(beforeDrafts[key], afterDrafts[key].units), "all five login drafts retained")
-        end
+        assert(restored.drafts == nil, "no unsaved content is kept or restored by the server")
     end
-    log("[VRF][MatchedPreservation] PASS five saved slots, active selection, draft contents and editor selection")
+    log("[VRF][MatchedPreservation] PASS five saved slots, active selection and editor selection; no unsaved content restored")
 end)
 if not ok then log("[VRF][MatchedQueue] FAIL " .. tostring(detail)) end

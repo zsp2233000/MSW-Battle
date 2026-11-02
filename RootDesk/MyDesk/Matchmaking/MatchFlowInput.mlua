@@ -1,0 +1,273 @@
+@Logic
+script MatchFlowInput extends Logic
+
+    property Entity root = "e81b5c52-278b-4bd8-95ca-59375028073f"
+    property Entity status = "d5a3a2c6-453c-478a-a20e-3fc77c3156d6"
+    property Entity action = "83089044-fcbf-4bec-9244-f766324f746c"
+    property Entity exitConfirmation = "363cab85-3a2b-4e8f-9e67-35ffb5032083"
+    property string State = "IDLE"
+    property string Message = ""
+    property number Started = 0
+    property integer Players = 0
+    property boolean Busy = false
+    property string FixedSummary = ""
+    property string Attempt = ""
+
+    @ExecSpace("ClientOnly")
+    method void OnBeginPlay()
+        -- One visible action owns queue, cancellation and return in both execution environments.
+        self._T.map = ""
+        self._T.click = nil
+        self._T.panel = nil
+        self._T.screen = ""
+        for _, name in ipairs({ "Match", "BattleMatch", "BattleResult" }) do
+            local panel = self.root:GetChildByName(name, false)
+            if isvalid(panel) then panel:SetEnable(false) end
+        end
+        self.State = "IDLE"
+        self.Message = ""
+        self.Started = 0
+        self.Players = 0
+        self.Busy = false
+        self.FixedSummary = ""
+        self.Attempt = ""
+        self._T.sequences = {}
+        self._T.pending = false
+        self._T.pendingSeconds = 0
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnUpdate(number delta)
+        -- Update the local wait clock; request recovery once per actual map transition.
+        local player = _UserService.LocalPlayer
+        if not isvalid(player) or not isvalid(self.root) then return end
+        local map = player.CurrentMapName
+        if self._T.pending then
+            self._T.pendingSeconds = self._T.pendingSeconds + delta
+            if self._T.pendingSeconds >= 10 then
+                self._T.pendingSeconds = 0
+                _MatchFlow:RequestStatus()
+            end
+        end
+        local confirming = isvalid(self.exitConfirmation) and self.exitConfirmation.Enable
+        -- Matchmaking starts from the lobby only; the formation editor offers no matching entry.
+        self.root:SetEnable((map == "formationlobby" or map == "matchprobe") and not confirming)
+        if player.CurrentMapName ~= self._T.map then
+            self._T.map = player.CurrentMapName
+            self._T.pending = true
+            self._T.pendingSeconds = 0
+            _MatchFlow:RequestStatus()
+        end
+        local screen = self:ScreenFor(map)
+        if screen ~= self._T.screen then self:SelectScreen(screen) end
+        self:Render()
+    end
+
+    @ExecSpace("ClientOnly")
+    method string ScreenFor(string map)
+        -- Battle keeps the field clear; a settled result moves the action under the result window.
+        if map == "formationlobby" then return "Match" end
+        if map ~= "matchprobe" then return "" end
+        if _BattleUIController.OwnResult ~= "" then return "BattleResult" end
+        if self.State == "BATTLE" then return "" end
+        return "BattleMatch"
+    end
+
+    @ExecSpace("ClientOnly")
+    method void SelectScreen(string screen)
+        -- Each screen keeps its authored layout and owns exactly one connected action.
+        if isvalid(self.action) and self._T.click ~= nil then self.action:DisconnectEvent(ButtonClickEvent, self._T.click) end
+        self._T.click = nil
+        self._T.panel = nil
+        self.action = nil
+        self.status = nil
+        self._T.screen = screen
+        for _, name in ipairs({ "Match", "BattleMatch", "BattleResult" }) do
+            local panel = self.root:GetChildByName(name, false)
+            if isvalid(panel) then
+                panel:SetEnable(name == screen)
+                if name == screen then self._T.panel = panel end
+            end
+        end
+        if not isvalid(self._T.panel) then return end
+        self.action = self._T.panel:GetChildByName("Action", false)
+        self.status = self._T.panel:GetChildByName("Status", false)
+        if isvalid(self.action) then
+            self._T.click = self.action:ConnectEvent(ButtonClickEvent, function() self:Click() end)
+            log("[VRF][MatchUI] visible matchmaking button connected screen=" .. screen)
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Observe(string state, string message, number started, integer count, boolean busy, string summary, string attempt, string sourceRoom, integer sequence)
+        -- Retain server observations beyond a short toast lifetime.
+        if sequence <= (self._T.sequences[sourceRoom] or 0) then return end
+        self._T.sequences[sourceRoom] = sequence
+        self.FixedSummary = summary
+        self.Attempt = attempt
+        self._T.pending = false
+        self.State = state
+        self.Message = message
+        self.Started = started
+        self.Players = count
+        self.Busy = busy
+        self:Render()
+    end
+
+    @ExecSpace("ClientOnly")
+    method boolean AllowsFormationActions()
+        -- Only a confirmed idle observation unlocks editing; sending cancel does not unlock it.
+        return self.State == "IDLE" and not self.Busy and not self._T.pending
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Click()
+        -- Identify start, cancellation and return commands with the observed attempt generation.
+        if self.Busy or self._T.pending or self.State == "BATTLE" then return end
+        local player = _UserService.LocalPlayer
+        if not isvalid(player) or (player.CurrentMapName ~= "formationlobby" and player.CurrentMapName ~= "matchprobe") then return end
+        if _FormationEditSession.ConfirmKind ~= "" or _FormationEditSession:Busy() or _FormationEditSession:Unconfirmed() then return end
+        if self.State == "IDLE" then
+            local formation = _FormationEditSession.Snapshot
+            if not _FormationSchema:IsLoadConfirmed(formation.loadState) or formation.pending then return end
+            if not _FormationEditSession:HasValidActive() then
+                if _UserService.LocalPlayer.CurrentMapName == "formationlobby" then _FormationLobby:Travel("formationsim") end
+                return
+            end
+        end
+        self._T.pending = true
+        self._T.pendingSeconds = 0
+        _FormationLobby:Render()
+        if self.Message == "READINESS_FAILED" then
+            _MatchFlow:RequestStatus()
+        elseif self.State == "QUEUED" or self.State == "SAVING" or self.State == "RENEWING" or self.State == "QUEUE_ERROR" or self.State == "CANCELLING" or self.State == "CANCELLED" then
+            _MatchFlow:RequestCancel(self.Attempt)
+        elseif self.State == "IN_ROOM" or self.State == "TRANSFER" or self.State == "COMMITTING" or self.State == "RETURNING"
+            or self.State == "ROOM_MISMATCH" or self.State == "WAITING" or self.State == "ENTRY_FAILED" or self.State == "ABORTED" or string.sub(self.State, 1, 7) == "RESULT_" then
+            _MatchFlow:RequestReturn(self.Attempt)
+        elseif self.State == "BATTLE" then
+            return
+        elseif self.State ~= "RETURNING" then
+            _MatchFlow:RequestQueue(_UtilLogic:NewGuid())
+        end
+        self:Render()
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Render()
+        -- Present the same player flow for local FIFO and published native matchmaking.
+        if not isvalid(self._T.panel) or not isvalid(self.status) or not isvalid(self.action) then return end
+        local elapsed = self.Started > 0 and math.max(0, math.floor((DateTime.UtcNow.Elapsed - self.Started) / 1000)) or 0
+        local text = "選好已儲存的出戰隊伍後，即可開始配對"
+        local label = "開始配對"
+        local formation = _FormationEditSession.Snapshot
+        local idleBlocked = false
+        if self.State == "QUEUED" then
+            text = "正在尋找對手 · 已等候 " .. tostring(elapsed) .. " 秒"
+            label = "取消配對"
+        elseif self.State == "RENEWING" then
+            text = "正在尋找對手 · 已等候 " .. tostring(elapsed) .. " 秒"
+            label = "取消配對"
+        elseif self.State == "QUEUE_ERROR" then
+            text = "配對已停止，請取消後重新配對。"
+            label = "取消配對"
+        elseif self.State == "CANCELLING" or self.State == "CANCELLED" then
+            text = "正在取消配對，請稍候。"
+            label = "重試取消"
+        elseif self.State == "SAVING" then
+            text = "已找到對手，正在確認入場資料"
+            label = "取消配對"
+        elseif self.State == "COMMITTING" or self.State == "TRANSFER" then
+            text = "配對成功，正在進入對局房間"
+            label = "取消入場"
+        elseif self.State == "IN_ROOM" then
+            text = "已進入對局房間 · 玩家 " .. tostring(self.Players) .. " / 2"
+            label = "返回大廳"
+        elseif self.State == "WAITING" then
+            text = "正在確認雙方入場與本局隊伍 · 玩家 " .. tostring(self.Players) .. " / 2"
+            label = "取消入場"
+        elseif self.State == "BATTLE" then
+            text = "自動戰鬥中，戰鬥結束後可返回大廳"
+            label = "戰鬥進行中…"
+        elseif self.State == "RESULT_WIN" or self.State == "RESULT_LOSE" or self.State == "RESULT_DRAW" then
+            text = "可返回大廳繼續整備或再次配對"
+            label = "返回大廳"
+        elseif self.State == "ENTRY_FAILED" then
+            text = "對局入場未完成，請返回大廳重新配對"
+            label = "返回大廳"
+        elseif self.State == "ABORTED" then
+            text = "本場對局已中止，請返回大廳重新配對"
+            label = "返回大廳"
+        elseif self.State == "ROOM_MISMATCH" then
+            text = "對局狀態需要恢復，請返回大廳重試"
+            label = "返回大廳"
+        elseif self.State == "RETURNING" then
+            text = "正在返回大廳並還原已儲存隊伍"
+            label = self.Busy and "返回中…" or "重試返回"
+        end
+        if self.Message == "NEED_LOADED_VALID_ACTIVE_FORMATION_AND_NO_PENDING_SAVE" then text = "請先儲存隊伍並設為出戰，儲存完成後再試。" end
+        if self.Message == "MATCHMAKING_NOT_CONFIGURED" then text = "目前無法配對，請稍後再試。" end
+        if self.Message == "DISABLED_OR_NOT_PUBLISHED" then text = "配對尚未開放，或此帳號未獲授權" end
+        if self.Message == "DUPLICATE_PROFILE" then text = "同一帳號無法互相配對，請使用不同模擬玩家" end
+        if self.Message == "HANDOFF_SAVE_FAILED" or self.Message == "HANDOFF_SEAL_FAILED" then text = "入場資料儲存失敗，可取消入場後重試" end
+        if self.Message == "READINESS_FAILED" then text = "尚未完成入場，請按「重試入場」。" label = "重試入場" end
+        if self.Message == "RESTORE_RETRY_REQUIRED" then text = "隊伍尚未完成還原，請重試返回" end
+        if self.Message == "RETURN_MOVE ok=false" or self.Message == "RETURN_RETRY_MOVE ok=false" or self.Message == "ROOM_MISMATCH_RETURN_FAILED" then text = "返回大廳失敗，已儲存隊伍仍保留；請重試返回" label = "重試返回" end
+        if self.Message == "RETURN_SAVE_FAILED" or self.Message == "ROOM_MISMATCH_SAVE_FAILED" then text = "返回資料儲存失敗，請重試返回" label = "重試返回" end
+        if self.Message == "ROOM_MOVE ok=false" then text = "進入戰場失敗，可取消入場後重新配對" end
+        if self.Message == "ROOM_CREATE_FAILED" or self.Message == "ADMISSION_SAVE_FAILED" then text = "戰場建立或入場資料儲存失敗，可取消入場後重試" end
+        if self.Message == "RESERVATION_SAVE_FAILED" then text = "配對資料儲存未完成，請取消後重新配對" end
+        if self.Message == "CANCEL_FAILED" then text = "取消失敗，請重試取消；完成前暫停整備" label = "重試取消" end
+        if self.Message == "CANCEL_SAVE_FAILED" then text = "取消尚未完成，請重試取消；完成前暫停整備" label = "重試取消" end
+        if self.Message == "LOBBY_ONLY" then text = "請先完成編輯並返回大廳，再開始配對" end
+        if self.Message == "TRANSFER_EXPIRED" then text = "入場已逾時，正在還原已儲存的隊伍" end
+        -- A sent return outranks the previous failure until the server answers.
+        if self._T.pending and (self.State == "RETURNING" or string.sub(self.State, 1, 7) == "RESULT_") then
+            text = "正在返回大廳…"
+            label = "返回中…"
+        end
+        if self._T.pending and self.State == "IDLE" then text = "正在確認配對狀態…" label = "處理中…" end
+        if self._T.pending and (self.State == "QUEUED" or self.State == "RENEWING" or self.State == "CANCELLING" or self.State == "CANCELLED" or self.State == "QUEUE_ERROR" or self.State == "SAVING") then
+            text = "正在確認取消結果，完成前暫停整備…" label = "取消中…"
+        end
+        if self.State == "IDLE" and (self.Message == "RETURNED" or self.Message == "CANCELLED") then text = "已返回或取消，可以重新開始配對" end
+        if self.State == "IDLE" then
+            local ready = _FormationSchema:IsLoadConfirmed(formation.loadState)
+            idleBlocked = not ready or _FormationEditSession:Busy() or _FormationEditSession:Unconfirmed() or _FormationEditSession.ConfirmKind ~= ""
+            if not ready then
+                text = "正在載入隊伍；若持續沒有回應，請按「重新讀取」。"
+                label = "等待讀取"
+            elseif formation.pending then
+                text = "正在儲存或設定出戰，請稍候。"
+                label = "處理中…"
+            elseif not _FormationEditSession:HasValidActive() then
+                text = "請先放置 1～6 個單位，儲存後設為出戰。"
+                local inLobby = _UserService.LocalPlayer.CurrentMapName == "formationlobby"
+                label = inLobby and "前往整備" or "請先儲存並設為出戰"
+                idleBlocked = not inLobby
+            end
+        end
+        local mode = Environment:IsMakerPlay() and "本機配對" or "線上配對"
+        local title = self._T.panel:GetChildByName("Title", false)
+        if isvalid(title) then
+            local active = formation.saved ~= nil and formation.saved.activeSlot or 0
+            local ready = _FormationSchema:IsLoadConfirmed(formation.loadState)
+            local activeLabel = not ready and "出戰未確認" or (active > 0 and ("出戰第 " .. tostring(active) .. " 組") or "尚未設定出戰")
+            title.TextGUIRendererComponent.Text = (self.State == "IDLE" and "對戰指令｜" or "配對狀態｜") .. activeLabel
+        end
+        self.status.TextGUIRendererComponent.Text = self._T.screen == "BattleResult" and text or (mode .. "\n" .. text)
+        local summary = self._T.panel:GetChildByName("FixedSummary", false)
+        if isvalid(summary) then
+            summary.TextGUIRendererComponent.Text = self.FixedSummary ~= "" and ("本局隊伍：" .. self.FixedSummary .. "\n本局已固定；取消配對後可重新整備。") or "本局隊伍：尚未開始"
+        end
+        self.action.TextGUIRendererComponent.Text = label
+        self.action.ButtonComponent.Enable = self.State ~= "BATTLE" and not self.Busy and not self._T.pending and not idleBlocked
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnEndPlay()
+        -- Release the visible button binding between Maker play sessions.
+        if isvalid(self.action) and self._T.click ~= nil then self.action:DisconnectEvent(ButtonClickEvent, self._T.click) end
+        self._T.click = nil
+    end
+end

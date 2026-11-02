@@ -74,7 +74,7 @@ local function verifyOriginalCatalog()
     expect(ui.selectedMonsterId == "", "toggle clears selection")
     for _, entity in ipairs(oldCards) do expect(not isvalid(entity), "old test-card entity is destroyed") end
     for index, card in ipairs(ui.optionCards) do
-        expect(card.entity:GetChildByName("MonsterName", true).TextGUIRendererComponent.Text == ui.catalogOptions[index][2],
+        expect(card.entity:GetChildByName("MonsterName", true).TextGUIRendererComponent.Text == ui.catalogOptions[index].monsterName,
             "original card keeps its unmodified catalog name")
     end
     local layout = ui.optionContainer.ScrollLayoutGroupComponent
@@ -134,10 +134,10 @@ local function verifyCards()
     expect(#ui.catalogOptions == 3 and #ui.optionCards == 18 and #ui.optionData == 18,
         "18 displayed test cards preserve the three-entry server catalog")
     local originals = {}
-    for _, option in ipairs(ui.catalogOptions) do originals[option[1]] = option end
+    for _, option in ipairs(ui.catalogOptions) do originals[option.monsterId] = option end
     for index, card in ipairs(ui.optionCards) do
         local source = originals[card.monsterId]
-        expect(source ~= nil and ui.optionData[index][3] == source[3], "test card reuses an existing identity and portrait")
+        expect(source ~= nil and ui.optionData[index].standRuid == source.standRuid, "test card reuses an existing identity and portrait")
     end
     local first = ui.optionCards[1].entity.UITransformComponent
     local last = ui.optionCards[18].entity.UITransformComponent
