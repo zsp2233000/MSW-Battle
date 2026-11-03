@@ -40,7 +40,7 @@ async function main() {
   try {
     await request("stop", { stage: "before-install" });
     await withTemporaryMonsterCsv(({ signal, ...manifest }) => request("variant-probe", manifest, { signal }), {
-      variantStats: { MaxHp: 650, MoveSpeed: 0.7, AttackDamage: 25, AttackIntervalSeconds: 1.3,
+      variantStats: { MaxHp: 650, MoveSpeed: 0.7, AttackDamageMin: 25, AttackDamageMax: 25, AttackIntervalSeconds: 1.3,
         AttackRange: 0.8, ContactCooldownSeconds: 1.3 },
       lifecycle: {
         stop: details => request("stop", { stage: details.stage }),

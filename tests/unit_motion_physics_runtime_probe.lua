@@ -9,7 +9,7 @@ local function check(condition, message)
     else failures = failures + 1; log_error("[VRF][UnitMotionPhysics][FAIL] " .. message) end
 end
 local function row(id, name, x, y, extra)
-    local profile = { MoveSpeed = 0, AttackDamage = 0, AttackRange = 0,
+    local profile = { MoveSpeed = 0, AttackDamageMin = 0, AttackDamageMax = 0, AttackRange = 0,
         RetargetIntervalSeconds = 0, AttackIntervalSeconds = 100 }
     for key, value in pairs(extra or {}) do profile[key] = value end
     return { monsterId = id, name = name, position = Vector3(x, y, 0), overrides = profile }
@@ -37,7 +37,7 @@ local function position(entity)
 end
 local function configureAttack(entity, id, damage)
     local profile = session:GetMonsterProfile(id)
-    profile.AttackDamage = damage or 0
+    profile.AttackDamageMin = damage or 0; profile.AttackDamageMax = damage or 0
     profile.AttackIntervalSeconds = 100
     profile.ImpactDelaySeconds = 0.01
     if not entity:GetComponent("script.BattleAttackComposition"):Configure(profile, 0) then error("attack configuration rejected") end
@@ -171,7 +171,7 @@ local ok, detail = pcall(function()
     tiles:Reset()
     changedTiles = nil
 
-    prepare({ row("monster_shooter", "PausedReceiver", 0, 0, { AttackRange = 4, AttackDamage = 30,
+    prepare({ row("monster_shooter", "PausedReceiver", 0, 0, { AttackRange = 4, AttackDamageMin = 30, AttackDamageMax = 30,
         ImpactDelaySeconds = 0.04 }) }, {
         row("monster_warrior", "PauseContact", -0.3, 0),
         row("monster_shooter", "PauseHit", 2, 0),

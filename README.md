@@ -33,9 +33,8 @@ CSV 是方便編輯與檢視的檔案；執行時讀取的是 Maker 中的 UserD
 | `ModelId`                 | 生成時使用的專案 Model ID；不可空白。                                      |
 | `MaxHp`                   | 最大生命值；正整數。                                                       |
 | `MoveSpeed`               | 移動速度；大於 0。                                                         |
-| `AttackDamage`            | 攻擊傷害；正整數。坦克接觸命中也使用此值。                                 |
-| `AttackDamageMin`         | 傷害區間下限；新攻擊規則的首批測試值，程式尚未讀取。                       |
-| `AttackDamageMax`         | 傷害區間上限；新攻擊規則的首批測試值，程式尚未讀取。                       |
+| `AttackDamageMin`         | 傷害區間下限；正整數，每個命中目標各自等機率抽取整數，包含上下限。                       |
+| `AttackDamageMax`         | 傷害區間上限；正整數，不可小於下限。                       |
 | `AttackIntervalSeconds`   | 攻擊間隔秒數；大於 0。                                                     |
 | `AttackRange`             | 一般攻擊距離；大於 0。                                                     |
 | `AttackRangeY`            | Y 軸上下各自的容許差；新攻擊規則的首批測試值，程式尚未讀取。               |
@@ -58,8 +57,8 @@ CSV 是方便編輯與檢視的檔案；執行時讀取的是 Maker 中的 UserD
 
 ## 數值規則摘要
 
-- 所有種類：`MaxHp`、`AttackDamage` 為正整數；`MoveSpeed`、`AttackIntervalSeconds`、`AttackRange`、`RetargetIntervalSeconds` 必須大於 0；`HitStopDurationSeconds` 不可小於 0。
-- `TANK`：`ContactCooldownSeconds`、`ContactSizeX`、`ContactSizeY`、`KnockbackDistance` 必須大於 0；接觸命中傷害使用 `AttackDamage`；`AttackImpactFrame` 可空白或為 `0`。
+- 所有種類：`MaxHp`、`AttackDamageMin`、`AttackDamageMax` 為正整數，且 Max ≥ Min；`MoveSpeed`、`AttackIntervalSeconds`、`AttackRange`、`RetargetIntervalSeconds` 必須大於 0；`HitStopDurationSeconds` 不可小於 0。
+- `TANK`：`ContactCooldownSeconds`、`ContactSizeX`、`ContactSizeY`、`KnockbackDistance` 必須大於 0；接觸命中傷害也由傷害區間逐目標抽取；`AttackImpactFrame` 可空白或為 `0`。
 - `ASSAULT`、`SHOOTER`：`AttackImpactFrame` 必須是正整數；坦克接觸設定欄位可填 `0`。
 
 ## 新增或修改資料列

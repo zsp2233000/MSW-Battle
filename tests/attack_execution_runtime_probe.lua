@@ -9,6 +9,11 @@ local function check(condition, message)
 end
 
 local function row(monsterId, name, x, y, overrides)
+    overrides = overrides or {}
+    local damage = ({ monster_tank = 40, monster_warrior = 35, monster_shooter = 30 })[monsterId]
+    if overrides.AttackDamageMin == nil then overrides.AttackDamageMin = damage end
+    if overrides.AttackDamageMax == nil then overrides.AttackDamageMax = damage end
+    if monsterId == "monster_tank" and overrides.MaxHp == nil then overrides.MaxHp = 500 end
     return { monsterId = monsterId, name = name, position = Vector3(x, y, 0), overrides = overrides }
 end
 
@@ -19,7 +24,7 @@ local function activeProfile(impactDelay, attackInterval, attackDamage, maxHp)
         ImpactDelaySeconds = impactDelay,
         AttackIntervalSeconds = attackInterval,
     }
-    if attackDamage ~= nil then result.AttackDamage = attackDamage end
+    if attackDamage ~= nil then result.AttackDamageMin = attackDamage; result.AttackDamageMax = attackDamage end
     if maxHp ~= nil then result.MaxHp = maxHp end
     return result
 end
@@ -27,7 +32,7 @@ end
 local function quietProfile(maxHp)
     local result = {
         MoveSpeed = 0,
-        AttackDamage = 0,
+        AttackDamageMin = 0, AttackDamageMax = 0,
         AttackRange = 0,
         RetargetIntervalSeconds = 0,
         ImpactDelaySeconds = 0.05,
@@ -49,7 +54,9 @@ local function catalogProfile(monsterId)
     local copy = {}
     for key, value in pairs(source) do copy[key] = value end
     -- Pin controlled contact damage independently of the formal catalog's balance.
-    if monsterId == "monster_tank" then copy.AttackDamage = 40 end
+    local damage = ({ monster_tank = 40, monster_warrior = 35, monster_shooter = 30 })[monsterId]
+    copy.AttackDamageMin = damage
+    copy.AttackDamageMax = damage
     return copy
 end
 
@@ -135,6 +142,54 @@ end
 if session.BeginManualSimulation == nil or session.PrepareBattleForTest == nil then
     check(false, "controlled battle and manual clock interfaces are available")
     return
+end
+
+for _, kind in ipairs({ "monster_warrior", "monster_shooter", "monster_tank" }) do
+    local randomProfile = activeProfile(0.01, 0.1, nil, 10000)
+    randomProfile.AttackDamageMin = 8
+    randomProfile.AttackDamageMax = 9
+    if not controlledCase(kind .. " random damage", {
+        row(kind, "RangeActor", -1, 0, randomProfile),
+    }, {
+        row("monster_warrior", "RangeTarget", -0.5, 0, quietProfile(10000)),
+        row("monster_warrior", "RangeDecoy", -0.5, 0.15, quietProfile(10000)),
+    }, function()
+        local actor, unit = getUnit("RangeActor")
+        local targetEntity, target = getUnit("RangeTarget")
+        local decoyEntity, decoy = getUnit("RangeDecoy")
+        -- Hold native physics while the manual clock tests damage independently of tank knockback.
+        targetEntity.KinematicbodyComponent.Enable = false
+        decoyEntity.KinematicbodyComponent.Enable = false
+        local nativeDamage = nil
+        local connection = targetEntity:ConnectEvent(HitEvent, function(event) nativeDamage = event.TotalDamage end)
+        local seen, independent = {}, false
+        for index = 1, 32 do
+            targetEntity.KinematicbodyComponent:SetWorldPosition(Vector2(-0.5, 0))
+            decoyEntity.KinematicbodyComponent:SetWorldPosition(Vector2(-0.5, 0.15))
+            local before, beforeDecoy = target.Hp, decoy.Hp
+            if index > 1 then unit:AdvanceAttack(kind == "monster_tank" and 2.01 or 0.11) end
+            unit:DriveAttack(targetEntity, true)
+            session:AdvanceForTest(0.02)
+            local damage = before - target.Hp
+            local decoyDamage = beforeDecoy - decoy.Hp
+            check(damage >= 8 and damage <= 9 and damage % 1 == 0, kind .. " draws an integer in range")
+            seen[damage] = true
+            check(contains(session.EventHistory, "HIT:" .. actor.Name .. ":RangeTarget:" .. tostring(damage))
+                and contains(session.EventHistory, "DAMAGE:" .. actor.Name .. ":RangeTarget:" .. tostring(damage))
+                and nativeDamage == damage, "native display damage, hit events and HP share the same draw")
+            if kind == "monster_shooter" then
+                check(decoyDamage == 0, "shooter keeps its target lock")
+            else
+                check(decoyDamage >= 8 and decoyDamage <= 9, "area target receives its own in-range damage")
+                if damage ~= decoyDamage then independent = true end
+            end
+        end
+        local count = 0
+        for _ in pairs(seen) do count = count + 1 end
+        check(count > 1 and seen[8] and seen[9], kind .. " draws vary and include both endpoints")
+        check(kind == "monster_shooter" or independent, "area targets do not share a single damage draw")
+        targetEntity:DisconnectEvent(HitEvent, connection)
+    end) then return end
 end
 
 for _, kind in ipairs({ "monster_warrior", "monster_shooter" }) do

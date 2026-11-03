@@ -29,15 +29,16 @@ local tankProfile = session:GetMonsterProfile("monster_tank")
 local secondTankProfile = session:GetMonsterProfile("monster_tank")
 local originalName = tankProfile.MonsterName
 local originalMaxHp = tankProfile.MaxHp
-local originalAttackDamage = tankProfile.AttackDamage
+local originalAttackDamage = tankProfile.AttackDamageMin
+local originalAttackDamageMax = tankProfile.AttackDamageMax
 local originalStandAnimation = tankProfile.StandAnimationRUID
 check(tankProfile ~= secondTankProfile, "profile lookups return distinct outer tables")
 tankProfile.MonsterName = "ProbeMutation"
 tankProfile.MaxHp = -1
-tankProfile.AttackDamage = -1
+tankProfile.AttackDamageMin = -1; tankProfile.AttackDamageMax = -1
 local profileAfterMutation = session:GetMonsterProfile("monster_tank")
 check(profileAfterMutation.MonsterName == originalName and profileAfterMutation.MaxHp == originalMaxHp
-    and profileAfterMutation.AttackDamage == originalAttackDamage,
+    and profileAfterMutation.AttackDamageMin == originalAttackDamage and profileAfterMutation.AttackDamageMax == originalAttackDamageMax,
     "editing a profile copy does not mutate catalog name, health, or attack")
 check(profileAfterMutation.StandAnimationRUID == originalStandAnimation,
     "profile copies retain the catalog animation resource value")
@@ -45,7 +46,8 @@ check(session:TryDeployMonster("monster_tank", Vector3(-5, 1, 0)), "inclusive to
 local first = _EntityService:GetEntityByPath("/maps/template/M1_Player_1")
 local firstUnit = isvalid(first) and first:GetComponent("script.BattleUnit") or nil
 check(isvalid(firstUnit) and firstUnit.MonsterId == "monster_tank" and firstUnit.MonsterName == originalName
-    and firstUnit.MaxHp == originalMaxHp and firstUnit.AttackDamage == originalAttackDamage,
+    and firstUnit.MaxHp == originalMaxHp and firstUnit.AttackDamageMin == originalAttackDamage
+    and firstUnit.AttackDamageMax == originalAttackDamageMax,
     "deployed unit uses the unmodified catalog profile")
 check(not session:TryDeployMonster("monster_tank", Vector3(-4.41, 1, 0)), "distance below 0.6 is rejected")
 check(session:TryDeployMonster("monster_tank", Vector3(-4.4, 1, 0)), "same MonsterId deploys at distance 0.6")

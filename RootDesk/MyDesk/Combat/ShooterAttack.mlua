@@ -1,12 +1,14 @@
 @Component
 script ShooterAttack extends AttackComponent
-    property integer AttackDamage = 30
+    property integer AttackDamageMin = 30
+    property integer AttackDamageMax = 30
     property number AttackRange = 4.0
 
     @ExecSpace("ServerOnly")
     method void Configure(table profile, Component execution)
         -- Receive the native hitscan policy without keeping attack timers.
-        self.AttackDamage = profile.AttackDamage
+        self.AttackDamageMin = profile.AttackDamageMin
+        self.AttackDamageMax = profile.AttackDamageMax
         self.AttackRange = profile.AttackRange
         self._T.execution = execution
         self:ResetTarget()
@@ -44,7 +46,7 @@ script ShooterAttack extends AttackComponent
 
     method integer CalcDamage(Entity attacker, Entity defender, string attackInfo)
         -- Supply configured damage to the native Attack to Hit pipeline.
-        return self.AttackDamage
+        return math.random(self.AttackDamageMin, self.AttackDamageMax)
     end
 
     method boolean IsAttackTarget(Entity defender, string attackInfo)

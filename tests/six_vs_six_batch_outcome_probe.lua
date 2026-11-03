@@ -13,7 +13,7 @@ local function profile(maxHp, attackDamage, attackRange)
     return {
         MaxHp = maxHp,
         MoveSpeed = 0,
-        AttackDamage = attackDamage,
+        AttackDamageMin = attackDamage, AttackDamageMax = attackDamage,
         AttackRange = attackRange,
         RetargetIntervalSeconds = 100,
         ImpactDelaySeconds = 0,

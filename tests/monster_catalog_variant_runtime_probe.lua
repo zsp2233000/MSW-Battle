@@ -15,10 +15,11 @@ local ok, detail = pcall(function()
     local variant = session:GetMonsterProfile("probe_tank_variant")
     check(primary ~= nil and variant ~= nil, "two same-type identities load independently")
     if primary == nil or variant == nil then return end
-    check(primary.MonsterName == "RenamedTank" and primary.MaxHp == 500 and primary.AttackDamage == 40,
+    check(primary.MonsterName == "RenamedTank" and primary.MaxHp == 400
+        and primary.AttackDamageMin == 8 and primary.AttackDamageMax == 12,
         "rename preserves the original ID and combat data")
     check(variant.MonsterName == "VariantTank" and variant.MonsterType == "TANK" and variant.MaxHp == 650
-        and variant.MoveSpeed == 0.7 and variant.AttackDamage == 25 and variant.AttackIntervalSeconds == 1.3
+        and variant.MoveSpeed == 0.7 and variant.AttackDamageMin == 25 and variant.AttackDamageMax == 25 and variant.AttackIntervalSeconds == 1.3
         and variant.AttackRange == 0.8 and variant.ContactCooldownSeconds == 1.3,
         "variant loads independently configured numeric values")
     check(primary.StandAnimationRUID == variant.StandAnimationRUID and primary.DieAnimationRUID == variant.DieAnimationRUID,
@@ -28,17 +29,17 @@ local ok, detail = pcall(function()
         "both identities deploy through the official command")
     local primaryUnit = _EntityService:GetEntityByPath("/maps/template/M1_Player_1"):GetComponent("script.BattleUnit")
     local variantUnit = _EntityService:GetEntityByPath("/maps/template/M1_Player_2"):GetComponent("script.BattleUnit")
-    check(primaryUnit.MaxHp == 500 and primaryUnit.AttackDamage == 40 and variantUnit.MaxHp == 650
-        and variantUnit.AttackDamage == 25 and variantUnit.MoveSpeed == 0.7
+    check(primaryUnit.MaxHp == 400 and primaryUnit.AttackDamageMin == 8 and primaryUnit.AttackDamageMax == 12 and variantUnit.MaxHp == 650
+        and variantUnit.AttackDamageMin == 25 and variantUnit.AttackDamageMax == 25 and variantUnit.MoveSpeed == 0.7
         and variantUnit.AttackInterval == 1.3 and variantUnit.AttackRange == 0.8,
         "deployed same-type units retain distinct numeric values")
     clockOwned = session:BeginManualSimulation()
     check(clockOwned, "probe owns the controlled simulation clock")
     if not clockOwned then return end
     check(session:PrepareBattleForTest({
-        { monsterId = "monster_tank", name = "Primary", position = Vector3(-1, 0, 0) },
+        { monsterId = "monster_tank", name = "Primary", position = Vector3(-1, 0, 0), overrides = { AttackDamageMin = 40, AttackDamageMax = 40 } },
         { monsterId = "probe_tank_variant", name = "Variant", position = Vector3(-1, 0.2, 0) },
-    }, { { monsterId = "monster_tank", name = "SharedIdEnemy", position = Vector3(-0.5, 0.1, 0) } }),
+    }, { { monsterId = "monster_tank", name = "SharedIdEnemy", position = Vector3(-0.5, 0.1, 0), overrides = { MaxHp = 500 } } }),
         "controlled scene uses two player identities and the original ID on the enemy faction")
     local attacker = _EntityService:GetEntityByPath("/maps/template/Primary"):GetComponent("script.BattleUnit")
     local second = _EntityService:GetEntityByPath("/maps/template/Variant"):GetComponent("script.BattleUnit")

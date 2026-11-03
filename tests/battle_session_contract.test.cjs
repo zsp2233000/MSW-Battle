@@ -142,7 +142,7 @@ test("Issue #5 publishes one strict MonsterData dataset for the three initial mo
     "ModelId",
     "MaxHp",
     "MoveSpeed",
-    "AttackDamage",
+    "AttackDamageMin", "AttackDamageMax",
     "AttackIntervalSeconds",
     "AttackRange",
     "AttackImpactFrame",
@@ -178,7 +178,7 @@ test("Issue #5 publishes one strict MonsterData dataset for the three initial mo
   for (const row of rows) {
     assert.ok(value(row, "MonsterName"));
     assert.ok(value(row, "ModelId"));
-    for (const column of ["MaxHp", "MoveSpeed", "AttackDamage", "AttackIntervalSeconds", "AttackRange"]) {
+    for (const column of ["MaxHp", "MoveSpeed", "AttackDamageMin", "AttackDamageMax", "AttackIntervalSeconds", "AttackRange"]) {
       assert.ok(Number(value(row, column)) > 0, `${column} must be positive`);
     }
   }

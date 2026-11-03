@@ -50,7 +50,7 @@ local function prepareScene()
     local prepared = session:PrepareBattleForTest(
         { row("monster_tank", "Issue17_Tank", Vector3(0, 0, 0), {
             MaxHp = 500,
-            AttackDamage = 40,
+            AttackDamageMin = 40, AttackDamageMax = 40,
             MoveSpeed = 0,
             AttackRange = 10,
             RetargetIntervalSeconds = 0,
@@ -59,7 +59,7 @@ local function prepareScene()
             row("monster_warrior", "Issue17_TankTargetA", Vector3(0.2, 0, 0), {
                 MaxHp = 160,
                 MoveSpeed = 0,
-                AttackDamage = 0,
+                AttackDamageMin = 0, AttackDamageMax = 0,
                 AttackRange = 0,
                 RetargetIntervalSeconds = 0,
                 AttackIntervalSeconds = 100,
@@ -67,7 +67,7 @@ local function prepareScene()
             row("monster_warrior", "Issue17_TankTargetB", Vector3(2, 0, 0), {
                 MaxHp = 160,
                 MoveSpeed = 0,
-                AttackDamage = 0,
+                AttackDamageMin = 0, AttackDamageMax = 0,
                 AttackRange = 0,
                 RetargetIntervalSeconds = 0,
                 AttackIntervalSeconds = 100,

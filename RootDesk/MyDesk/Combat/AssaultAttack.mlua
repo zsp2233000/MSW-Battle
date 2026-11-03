@@ -1,12 +1,14 @@
 @Component
 script AssaultAttack extends AttackComponent
-    property integer AttackDamage = 35
+    property integer AttackDamageMin = 35
+    property integer AttackDamageMax = 35
     property number AttackRange = 0.6
 
     @ExecSpace("ServerOnly")
     method void Configure(table profile, Component execution)
         -- Receive the native strike policy without keeping attack timers.
-        self.AttackDamage = profile.AttackDamage
+        self.AttackDamageMin = profile.AttackDamageMin
+        self.AttackDamageMax = profile.AttackDamageMax
         self.AttackRange = profile.AttackRange
         self._T.execution = execution
     end
@@ -40,7 +42,7 @@ script AssaultAttack extends AttackComponent
 
     method integer CalcDamage(Entity attacker, Entity defender, string attackInfo)
         -- Supply configured damage to the native Attack to Hit pipeline.
-        return self.AttackDamage
+        return math.random(self.AttackDamageMin, self.AttackDamageMax)
     end
 
     method boolean IsAttackTarget(Entity defender, string attackInfo)

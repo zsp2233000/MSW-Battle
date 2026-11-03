@@ -14,7 +14,11 @@ local ok, detail = pcall(function()
     assert(l:Ui('CardTooltip/Name').TextGUIRendererComponent.Text == _FormationEditSession.Snapshot.options[1].monsterName, 'hovered name')
     for index, field in ipairs({'Health','Damage','Interval','Range'}) do
         local value = l:Ui('CardTooltip/Stats/'..field..'/Value').TextGUIRendererComponent.Text
-        assert(string.find(value,tostring(_FormationEditSession.Snapshot.options[1][({'maxHp','attackDamage','attackInterval','attackRange'})[index]]),1,true), 'hovered value '..field)
+        local option = _FormationEditSession.Snapshot.options[1]
+        local expected = option[({'maxHp','attackDamageMin','attackInterval','attackRange'})[index]]
+        if field == 'Damage' then expected = string.format('%d～%d', option.attackDamageMin, option.attackDamageMax) end
+        assert(string.find(value,tostring(expected),1,true), 'hovered value '..field)
+        if field == 'Damage' then assert(value == expected, 'complete hovered damage interval') end
     end
     assert(_FormationEditSession.SelectedMonsterId == selected and _FormationEditSession.SelectedUnit == unit, 'hover preserves selection')
     second:SendEvent(UITouchEnterEvent())

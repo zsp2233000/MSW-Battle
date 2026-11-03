@@ -11,6 +11,10 @@ local function check(condition, message)
 end
 
 local function row(monsterId, name, position, overrides)
+    overrides = overrides or {}
+    local damage = ({ monster_tank = 40, monster_warrior = 35, monster_shooter = 30 })[monsterId]
+    if overrides.AttackDamageMin == nil then overrides.AttackDamageMin = damage end
+    if overrides.AttackDamageMax == nil then overrides.AttackDamageMax = damage end
     return { monsterId = monsterId, name = name, position = position, overrides = overrides }
 end
 
@@ -55,7 +59,7 @@ local function prepareScene()
         { row("monster_warrior", "Issue17_ShooterTarget", Vector3(3, 0, 0), {
             MaxHp = 30,
             MoveSpeed = 0,
-            AttackDamage = 0,
+            AttackDamageMin = 0, AttackDamageMax = 0,
             AttackRange = 0,
             RetargetIntervalSeconds = 0,
             AttackIntervalSeconds = 100,

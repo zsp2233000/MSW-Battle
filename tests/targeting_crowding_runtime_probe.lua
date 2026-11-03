@@ -11,6 +11,10 @@ local function check(condition, message)
 end
 
 local function row(monsterId, name, position, overrides)
+    overrides = overrides or {}
+    local damage = ({ monster_tank = 40, monster_warrior = 35, monster_shooter = 30 })[monsterId]
+    if overrides.AttackDamageMin == nil then overrides.AttackDamageMin = damage end
+    if overrides.AttackDamageMax == nil then overrides.AttackDamageMax = damage end
     return { monsterId = monsterId, name = name, position = position, overrides = overrides }
 end
 
@@ -153,7 +157,7 @@ local runOk, runDetail = pcall(function()
     local targetScene = {
         row("monster_warrior", "Issue17_TargetSource", Vector3(0, 0, 0), {
             MoveSpeed = 0,
-            AttackDamage = 0,
+            AttackDamageMin = 0, AttackDamageMax = 0,
             AttackRange = 0,
             RetargetIntervalSeconds = 0,
             AttackIntervalSeconds = 100,
@@ -161,11 +165,11 @@ local runOk, runDetail = pcall(function()
     }
     local targetEnemies = {
         row("monster_warrior", "Issue17_NearestA", Vector3(-2, 0, 0), {
-            MoveSpeed = 0, AttackDamage = 0, AttackRange = 0,
+            MoveSpeed = 0, AttackDamageMin = 0, AttackDamageMax = 0, AttackRange = 0,
             RetargetIntervalSeconds = 0, AttackIntervalSeconds = 100,
         }),
         row("monster_warrior", "Issue17_NearestB", Vector3(2.5, 0, 0), {
-            MoveSpeed = 0, AttackDamage = 0, AttackRange = 0,
+            MoveSpeed = 0, AttackDamageMin = 0, AttackDamageMax = 0, AttackRange = 0,
             RetargetIntervalSeconds = 0, AttackIntervalSeconds = 100,
         }),
     }
@@ -199,7 +203,7 @@ local runOk, runDetail = pcall(function()
     local deadTargetPlayer = row("monster_warrior", "Issue17_DeadTargetSource", Vector3(0, 0, 0), {
         MaxHp = 220,
         MoveSpeed = 0,
-        AttackDamage = 35,
+        AttackDamageMin = 35, AttackDamageMax = 35,
         AttackRange = 1.2,
         RetargetIntervalSeconds = 0,
         ImpactDelaySeconds = 0.1,
@@ -208,14 +212,14 @@ local runOk, runDetail = pcall(function()
     local deadTargetNear = row("monster_warrior", "Issue17_DeadTarget", Vector3(0.5, 0, 0), {
         MaxHp = 35,
         MoveSpeed = 0,
-        AttackDamage = 0,
+        AttackDamageMin = 0, AttackDamageMax = 0,
         AttackRange = 0,
         RetargetIntervalSeconds = 0,
         AttackIntervalSeconds = 100,
     })
     local deadTargetFar = row("monster_warrior", "Issue17_ReplacementTarget", Vector3(3.5, 0, 0), {
         MoveSpeed = 0,
-        AttackDamage = 0,
+        AttackDamageMin = 0, AttackDamageMax = 0,
         AttackRange = 0,
         RetargetIntervalSeconds = 0,
         AttackIntervalSeconds = 100,
@@ -242,14 +246,14 @@ local runOk, runDetail = pcall(function()
     local crowdPlayers = {
         row("monster_warrior", "Issue17_CrowdA", Vector3(boundary - 0.7, 0, 0), {
             MoveSpeed = 1,
-            AttackDamage = 0,
+            AttackDamageMin = 0, AttackDamageMax = 0,
             AttackRange = 0,
             RetargetIntervalSeconds = 0,
             AttackIntervalSeconds = 100,
         }),
         row("monster_warrior", "Issue17_CrowdB", Vector3(boundary - 0.7, 0, 0), {
             MoveSpeed = 1,
-            AttackDamage = 0,
+            AttackDamageMin = 0, AttackDamageMax = 0,
             AttackRange = 0,
             RetargetIntervalSeconds = 0,
             AttackIntervalSeconds = 100,
@@ -257,7 +261,7 @@ local runOk, runDetail = pcall(function()
     }
     local crowdEnemy = row("monster_warrior", "Issue17_CrowdTarget", Vector3(boundary, 0, 0), {
         MoveSpeed = 0,
-        AttackDamage = 0,
+        AttackDamageMin = 0, AttackDamageMax = 0,
         AttackRange = 0,
         RetargetIntervalSeconds = 0,
         AttackIntervalSeconds = 100,
@@ -289,7 +293,7 @@ local runOk, runDetail = pcall(function()
     runTerminalScenario("natural WIN", row("monster_warrior", "Issue17_WinPlayer", Vector3(-0.5, 0, 0), {
         MaxHp = 220,
         MoveSpeed = 0,
-        AttackDamage = 35,
+        AttackDamageMin = 35, AttackDamageMax = 35,
         AttackRange = 1.2,
         RetargetIntervalSeconds = 0,
         ImpactDelaySeconds = 0,
@@ -297,7 +301,7 @@ local runOk, runDetail = pcall(function()
     }), row("monster_warrior", "Issue17_WinEnemy", Vector3(0.5, 0, 0), {
         MaxHp = 35,
         MoveSpeed = 0,
-        AttackDamage = 0,
+        AttackDamageMin = 0, AttackDamageMax = 0,
         AttackRange = 0,
         RetargetIntervalSeconds = 0,
         AttackIntervalSeconds = 100,
@@ -306,14 +310,14 @@ local runOk, runDetail = pcall(function()
     runTerminalScenario("natural LOSE", row("monster_warrior", "Issue17_LosePlayer", Vector3(-0.5, 0, 0), {
         MaxHp = 35,
         MoveSpeed = 0,
-        AttackDamage = 0,
+        AttackDamageMin = 0, AttackDamageMax = 0,
         AttackRange = 0,
         RetargetIntervalSeconds = 0,
         AttackIntervalSeconds = 100,
     }), row("monster_warrior", "Issue17_LoseEnemy", Vector3(0.5, 0, 0), {
         MaxHp = 220,
         MoveSpeed = 0,
-        AttackDamage = 35,
+        AttackDamageMin = 35, AttackDamageMax = 35,
         AttackRange = 1.2,
         RetargetIntervalSeconds = 0,
         ImpactDelaySeconds = 0,
@@ -322,13 +326,13 @@ local runOk, runDetail = pcall(function()
 
     runTerminalScenario("natural same-batch DRAW", row("monster_tank", "Issue17_DrawPlayer", Vector3(0, 0, 0), {
         MaxHp = 40,
-        AttackDamage = 40,
+        AttackDamageMin = 40, AttackDamageMax = 40,
         MoveSpeed = 0,
         AttackRange = 10,
         RetargetIntervalSeconds = 0,
     }), row("monster_tank", "Issue17_DrawEnemy", Vector3(0, 0, 0), {
         MaxHp = 40,
-        AttackDamage = 40,
+        AttackDamageMin = 40, AttackDamageMax = 40,
         MoveSpeed = 0,
         AttackRange = 10,
         RetargetIntervalSeconds = 0,

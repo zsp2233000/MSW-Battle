@@ -15,13 +15,17 @@ check(isvalid(map) and isvalid(session), "map and BattleSession are available")
 if not isvalid(session) then return end
 
 local function row(monsterId, name, position, overrides)
+    overrides = overrides or {}
+    local damage = ({ monster_tank = 40, monster_warrior = 35, monster_shooter = 30 })[monsterId]
+    if overrides.AttackDamageMin == nil then overrides.AttackDamageMin = damage end
+    if overrides.AttackDamageMax == nil then overrides.AttackDamageMax = damage end
     return { monsterId = monsterId, name = name, position = position, overrides = overrides }
 end
 
 local function quietProfile()
     return {
         MoveSpeed = 0,
-        AttackDamage = 0,
+        AttackDamageMin = 0, AttackDamageMax = 0,
         AttackRange = 0,
         RetargetIntervalSeconds = 0,
         ImpactDelaySeconds = 0,
@@ -31,7 +35,7 @@ end
 
 local function tankContactProfile(damage)
     local result = quietProfile()
-    result.AttackDamage = damage
+    result.AttackDamageMin = damage; result.AttackDamageMax = damage
     return result
 end
 
@@ -125,7 +129,7 @@ manualCase("valid 1v1 scene", function()
         { row("monster_warrior", "Issue15_ProfilePlayer", Vector3(-0.5, 0, 0), {
             MonsterName = "Probe Assault",
             MaxHp = 333,
-            AttackDamage = 0,
+            AttackDamageMin = 0, AttackDamageMax = 0,
             MoveSpeed = 0,
             AttackRange = 2,
             RetargetIntervalSeconds = 0,
@@ -135,7 +139,7 @@ manualCase("valid 1v1 scene", function()
         { row("monster_shooter", "Issue15_ProfileEnemy", Vector3(0.5, 0, 0), {
             MonsterName = "Probe Shooter",
             MaxHp = 444,
-            AttackDamage = 0,
+            AttackDamageMin = 0, AttackDamageMax = 0,
             MoveSpeed = 0,
             AttackRange = 2,
             RetargetIntervalSeconds = 0,
@@ -158,21 +162,21 @@ manualCase("valid 1v1 scene", function()
     local enemyUnit = isvalid(enemyEntity) and enemyEntity:GetComponent("script.BattleUnit") or nil
     check(isvalid(playerUnit) and playerUnit.Faction == "PLAYER" and playerUnit.MonsterId == "monster_warrior"
         and playerUnit.UnitKind == playerSource.MonsterType and playerUnit.MonsterName == "Probe Assault"
-        and playerUnit.MaxHp == 333 and playerUnit.Hp == 333 and playerUnit.AttackDamage == 0
+        and playerUnit.MaxHp == 333 and playerUnit.Hp == 333 and playerUnit.AttackDamageMin == 0
         and playerUnit.MoveSpeed == 0 and playerUnit.AttackRange == 2 and playerUnit.RetargetInterval == 0
         and playerUnit.ImpactDelay == 0 and playerUnit.AttackInterval == 2.5
         and playerUnit.StandAnimationRUID == playerSource.StandAnimationRUID,
         "player profile overrides apply while catalog identity and animation data stay authoritative")
     check(isvalid(enemyUnit) and enemyUnit.Faction == "ENEMY" and enemyUnit.MonsterId == "monster_shooter"
         and enemyUnit.UnitKind == enemySource.MonsterType and enemyUnit.MonsterName == "Probe Shooter"
-        and enemyUnit.MaxHp == 444 and enemyUnit.Hp == 444 and enemyUnit.AttackDamage == 0
+        and enemyUnit.MaxHp == 444 and enemyUnit.Hp == 444 and enemyUnit.AttackDamageMin == 0
         and enemyUnit.MoveSpeed == 0 and enemyUnit.AttackRange == 2 and enemyUnit.RetargetInterval == 0
         and enemyUnit.ImpactDelay == 0 and enemyUnit.AttackInterval == 2.5
         and enemyUnit.StandAnimationRUID == enemySource.StandAnimationRUID,
         "enemy faction and profile are selected from its roster")
     local playerAfter = session:GetMonsterProfile("monster_warrior")
     check(playerAfter.MonsterName == playerSource.MonsterName and playerAfter.MaxHp == playerSource.MaxHp
-        and playerAfter.AttackDamage == playerSource.AttackDamage,
+        and playerAfter.AttackDamageMin == playerSource.AttackDamageMin,
         "test overrides do not mutate catalog profiles")
     check(session:TryStartBattle() and session.InitialPlayerAlive == 1 and session.InitialEnemyAlive == 1,
         "TryStartBattle records the prepared 1v1 counts")
@@ -269,8 +273,12 @@ manualCase("invalid input preserves the active public state and pending work", f
         { MaxHp = 0 },
         { MaxHp = 1.5 },
         { MaxHp = math.huge },
-        { AttackDamage = -1 },
-        { AttackDamage = 1.5 },
+        { AttackDamageMin = -1, AttackDamageMax = -1 },
+        { AttackDamageMin = 1.5, AttackDamageMax = 1.5 },
+        { AttackDamageMin = 13, AttackDamageMax = 12 },
+        { AttackDamageMax = -1 },
+        { AttackDamageMax = 1.5 },
+        { AttackDamage = 10 },
         { MoveSpeed = -0.1 },
         { MoveSpeed = 0 / 0 },
         { AttackRange = -1 },

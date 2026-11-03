@@ -133,7 +133,11 @@ script MonsterCatalog extends Component
         }
         profile.MaxHp = self:ReadInteger(row:GetItem("MaxHp"), "MaxHp", monsterId, 1)
         profile.MoveSpeed = self:ReadNumber(row:GetItem("MoveSpeed"), "MoveSpeed", monsterId, 0.0001)
-        profile.AttackDamage = self:ReadInteger(row:GetItem("AttackDamage"), "AttackDamage", monsterId, 1)
+        profile.AttackDamageMin = self:ReadInteger(row:GetItem("AttackDamageMin"), "AttackDamageMin", monsterId, 1)
+        profile.AttackDamageMax = self:ReadInteger(row:GetItem("AttackDamageMax"), "AttackDamageMax", monsterId, 1)
+        if profile.AttackDamageMax < profile.AttackDamageMin then
+            self:SetError("AttackDamageMax is below AttackDamageMin for " .. monsterId)
+        end
         profile.AttackIntervalSeconds = self:ReadNumber(row:GetItem("AttackIntervalSeconds"), "AttackIntervalSeconds", monsterId, 0.0001)
         profile.AttackRange = self:ReadNumber(row:GetItem("AttackRange"), "AttackRange", monsterId, 0.0001)
         local attackImpactFrame = row:GetItem("AttackImpactFrame")
@@ -242,7 +246,7 @@ script MonsterCatalog extends Component
         local dataset = _DataService:GetTable(datasetName)
         if dataset == nil then return self:SetError("MonsterData table unavailable") end
         local requiredColumns = {
-            "MonsterId", "MonsterName", "MonsterType", "ModelId", "MaxHp", "MoveSpeed", "AttackDamage",
+            "MonsterId", "MonsterName", "MonsterType", "ModelId", "MaxHp", "MoveSpeed", "AttackDamageMin", "AttackDamageMax",
             "AttackIntervalSeconds", "AttackRange", "AttackImpactFrame", "RetargetIntervalSeconds",
             "HitStopDurationSeconds", "ContactSizeX", "ContactSizeY",
             "KnockbackDistance", "StandAnimationRUID", "MoveAnimationRUID", "AttackAnimationRUID",
@@ -286,7 +290,8 @@ script MonsterCatalog extends Component
         local options = {}
         for _, profile in pairs(self._T.profilesById or {}) do
             table.insert(options, { monsterId = profile.MonsterId, monsterName = profile.MonsterName, standRuid = profile.StandAnimationRUID,
-                monsterType = profile.MonsterType, maxHp = profile.MaxHp, attackDamage = profile.AttackDamage,
+                monsterType = profile.MonsterType, maxHp = profile.MaxHp,
+                attackDamageMin = profile.AttackDamageMin, attackDamageMax = profile.AttackDamageMax,
                 attackInterval = profile.AttackIntervalSeconds, attackRange = profile.AttackRange })
         end
         table.sort(options, function(left, right) return left.monsterId < right.monsterId end)

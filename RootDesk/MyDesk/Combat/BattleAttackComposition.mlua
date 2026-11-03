@@ -137,8 +137,6 @@ script BattleAttackComposition extends Component
         if self._T.profile.MonsterType == "TANK" then
             self:PublishAttack("TANK_CONTACT_HIT", defender)
             session:QueueKnockback(self.Entity, defender, self._T.profile.KnockbackDistance)
-        else
-            session:EmitPresentation("HIT", self.Entity, defender, self._T.profile.AttackDamage)
         end
     end
 
@@ -152,7 +150,7 @@ script BattleAttackComposition extends Component
         if eventName == "ATTACK_START" then unit:BeginAttackPoise() end
         unit.AttackSerial = unit.AttackSerial + 1
         unit:PlayCombatSound(self._T.profile.AttackSoundRUID)
-        session:EmitPresentation(eventName, self.Entity, target, self._T.profile.AttackDamage)
+        session:EmitPresentation(eventName, self.Entity, target, 0)
     end
 
 end

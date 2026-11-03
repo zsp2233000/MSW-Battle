@@ -1,12 +1,14 @@
 @Component
 script TankContactAttack extends AttackComponent
-    property integer AttackDamage = 40
+    property integer AttackDamageMin = 40
+    property integer AttackDamageMax = 40
     property Vector2 ContactSize = Vector2(1.2, 1.2)
 
     @ExecSpace("ServerOnly")
     method void Configure(table profile, Component execution)
         -- Receive the native contact policy and reset each defender's cooldown.
-        self.AttackDamage = profile.AttackDamage
+        self.AttackDamageMin = profile.AttackDamageMin
+        self.AttackDamageMax = profile.AttackDamageMax
         self.ContactSize = Vector2(profile.ContactSizeX, profile.ContactSizeY)
         self._T.contactCooldownSeconds = profile.ContactCooldownSeconds or 0
         self._T.contactCooldowns = {}
@@ -42,7 +44,7 @@ script TankContactAttack extends AttackComponent
 
     method integer CalcDamage(Entity attacker, Entity defender, string attackInfo)
         -- Supply configured damage through native HitEvent.
-        return self.AttackDamage
+        return math.random(self.AttackDamageMin, self.AttackDamageMax)
     end
 
     method boolean IsAttackTarget(Entity defender, string attackInfo)

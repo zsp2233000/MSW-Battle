@@ -10,6 +10,10 @@ local function check(condition, message)
 end
 
 local function row(monsterId, name, x, y, overrides)
+    overrides = overrides or {}
+    local damage = ({ monster_tank = 40, monster_warrior = 35, monster_shooter = 30 })[monsterId]
+    if overrides.AttackDamageMin == nil then overrides.AttackDamageMin = damage end
+    if overrides.AttackDamageMax == nil then overrides.AttackDamageMax = damage end
     return { monsterId = monsterId, name = name, position = Vector3(x, y, 0), overrides = overrides }
 end
 
@@ -45,7 +49,7 @@ else
             local enemyRoster = {
                 row("monster_warrior", targetName, -0.5, 0, {
                     MoveSpeed = 0,
-                    AttackDamage = 0,
+                    AttackDamageMin = 0, AttackDamageMax = 0,
                     AttackRange = 0,
                     RetargetIntervalSeconds = 0,
                     ImpactDelaySeconds = 0.05,
