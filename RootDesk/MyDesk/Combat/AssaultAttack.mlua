@@ -2,14 +2,12 @@
 script AssaultAttack extends AttackComponent
     property integer AttackDamageMin = 35
     property integer AttackDamageMax = 35
-    property number AttackRange = 0.6
 
     @ExecSpace("ServerOnly")
     method void Configure(table profile, Component execution)
         -- Receive the native strike policy without keeping attack timers.
         self.AttackDamageMin = profile.AttackDamageMin
         self.AttackDamageMax = profile.AttackDamageMax
-        self.AttackRange = profile.AttackRange
         self._T.execution = execution
     end
 
@@ -26,18 +24,15 @@ script AssaultAttack extends AttackComponent
 
     @ExecSpace("ServerOnly")
     method void ResolveImpact(Entity target)
-        -- Resolve an area strike at the current target position with the existing tolerance.
+        -- Resolve the frontal native rectangle using the facing held throughout the animation.
         if not isvalid(target) then return end
         local targetUnit = target:GetComponent("script.BattleUnit")
         local transform = target.TransformComponent
         local sourceTransform = self.Entity.TransformComponent
         if not isvalid(targetUnit) or not targetUnit:IsAlive() or not isvalid(transform) or not isvalid(sourceTransform) then return end
-        local sourcePosition = sourceTransform.WorldPosition
-        local targetPosition = transform.WorldPosition
-        local dx = targetPosition.x - sourcePosition.x
-        local dy = targetPosition.y - sourcePosition.y
-        if dx * dx + dy * dy > (self.AttackRange + 0.05) * (self.AttackRange + 0.05) then return end
-        self:AttackFrom(Vector2(1.2, 1.2), Vector2(targetPosition.x, targetPosition.y), "assault", nil)
+        local direction = sourceTransform.Scale.x < 0 and 1 or -1
+        if not self._T.execution:IsTargetInRange(target, direction, false) then return end
+        self:Attack(self._T.execution:GetAttackShape(direction), "assault", nil)
     end
 
     method integer CalcDamage(Entity attacker, Entity defender, string attackInfo)

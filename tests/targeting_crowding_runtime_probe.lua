@@ -158,18 +158,17 @@ local runOk, runDetail = pcall(function()
         row("monster_warrior", "Issue17_TargetSource", Vector3(0, 0, 0), {
             MoveSpeed = 0,
             AttackDamageMin = 0, AttackDamageMax = 0,
-            AttackRange = 0,
             RetargetIntervalSeconds = 0,
             AttackIntervalSeconds = 100,
         }),
     }
     local targetEnemies = {
         row("monster_warrior", "Issue17_NearestA", Vector3(-2, 0, 0), {
-            MoveSpeed = 0, AttackDamageMin = 0, AttackDamageMax = 0, AttackRange = 0,
+            MoveSpeed = 0, AttackDamageMin = 0, AttackDamageMax = 0,
             RetargetIntervalSeconds = 0, AttackIntervalSeconds = 100,
         }),
         row("monster_warrior", "Issue17_NearestB", Vector3(2.5, 0, 0), {
-            MoveSpeed = 0, AttackDamageMin = 0, AttackDamageMax = 0, AttackRange = 0,
+            MoveSpeed = 0, AttackDamageMin = 0, AttackDamageMax = 0,
             RetargetIntervalSeconds = 0, AttackIntervalSeconds = 100,
         }),
     }
@@ -213,14 +212,12 @@ local runOk, runDetail = pcall(function()
         MaxHp = 35,
         MoveSpeed = 0,
         AttackDamageMin = 0, AttackDamageMax = 0,
-        AttackRange = 0,
         RetargetIntervalSeconds = 0,
         AttackIntervalSeconds = 100,
     })
     local deadTargetFar = row("monster_warrior", "Issue17_ReplacementTarget", Vector3(3.5, 0, 0), {
         MoveSpeed = 0,
         AttackDamageMin = 0, AttackDamageMax = 0,
-        AttackRange = 0,
         RetargetIntervalSeconds = 0,
         AttackIntervalSeconds = 100,
     })
@@ -244,17 +241,15 @@ local runOk, runDetail = pcall(function()
 
     local boundary = session.ArenaMaxX
     local crowdPlayers = {
-        row("monster_warrior", "Issue17_CrowdA", Vector3(boundary - 0.7, 0, 0), {
+        row("monster_warrior", "Issue17_CrowdA", Vector3(boundary - 1.5, 0, 0), {
             MoveSpeed = 1,
             AttackDamageMin = 0, AttackDamageMax = 0,
-            AttackRange = 0,
             RetargetIntervalSeconds = 0,
             AttackIntervalSeconds = 100,
         }),
-        row("monster_warrior", "Issue17_CrowdB", Vector3(boundary - 0.7, 0, 0), {
+        row("monster_warrior", "Issue17_CrowdB", Vector3(boundary - 1.5, 0, 0), {
             MoveSpeed = 1,
             AttackDamageMin = 0, AttackDamageMax = 0,
-            AttackRange = 0,
             RetargetIntervalSeconds = 0,
             AttackIntervalSeconds = 100,
         }),
@@ -262,7 +257,6 @@ local runOk, runDetail = pcall(function()
     local crowdEnemy = row("monster_warrior", "Issue17_CrowdTarget", Vector3(boundary, 0, 0), {
         MoveSpeed = 0,
         AttackDamageMin = 0, AttackDamageMax = 0,
-        AttackRange = 0,
         RetargetIntervalSeconds = 0,
         AttackIntervalSeconds = 100,
     })
@@ -271,14 +265,15 @@ local runOk, runDetail = pcall(function()
     local crowdB = getEntity("Issue17_CrowdB")
     local crowdStartA = getPosition(crowdA)
     local crowdStartB = getPosition(crowdB)
-    wait(0.75)
+    wait(1.4)
     local crowdPositionA = getPosition(crowdA)
     local crowdPositionB = getPosition(crowdB)
     check(crowdPositionA.x > crowdStartA.x + 0.15 and crowdPositionB.x > crowdStartB.x + 0.15,
         "overlapping units both displace toward their target on real physics frames")
     check(crowdPositionA.x <= boundary + 0.001 and crowdPositionB.x <= boundary + 0.001
-        and crowdPositionA.x >= boundary - 0.05 and crowdPositionB.x >= boundary - 0.05,
-        "crowded units approach but remain clamped to the arena edge")
+        and math.abs(crowdPositionA.x - (boundary - 0.825)) < 0.06
+        and math.abs(crowdPositionB.x - (boundary - 0.825)) < 0.06,
+        "crowded units stop at the collider edge and remain inside the arena")
     check(math.abs(crowdPositionA.x - crowdPositionB.x) < 0.05
         and math.abs(crowdPositionA.y - crowdPositionB.y) < 0.05,
         "overlap does not block either unit or create unintended body separation")
@@ -302,7 +297,6 @@ local runOk, runDetail = pcall(function()
         MaxHp = 35,
         MoveSpeed = 0,
         AttackDamageMin = 0, AttackDamageMax = 0,
-        AttackRange = 0,
         RetargetIntervalSeconds = 0,
         AttackIntervalSeconds = 100,
     }), "WIN")
@@ -311,7 +305,6 @@ local runOk, runDetail = pcall(function()
         MaxHp = 35,
         MoveSpeed = 0,
         AttackDamageMin = 0, AttackDamageMax = 0,
-        AttackRange = 0,
         RetargetIntervalSeconds = 0,
         AttackIntervalSeconds = 100,
     }), row("monster_warrior", "Issue17_LoseEnemy", Vector3(0.5, 0, 0), {

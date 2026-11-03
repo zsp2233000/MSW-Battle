@@ -107,6 +107,13 @@ script BattleUnitMotion extends Component
         local session = self._T.session
         self:ConstrainToArena()
 
+        if unit.AttackPoiseActive then
+            local movement = self.Entity.MovementComponent
+            if isvalid(movement) then movement:Stop() end
+            unit.CombatState = "ATTACK"
+            return
+        end
+
         if self._T.hitStopRemaining > 0 then
             self._T.hitStopRemaining = math.max(0, self._T.hitStopRemaining - delta)
             local hitStopMovement = self.Entity:GetComponent("MovementComponent")
@@ -142,9 +149,12 @@ script BattleUnitMotion extends Component
         local targetPosition = targetTransform.WorldPosition
         local dx = targetPosition.x - position.x
         local dy = targetPosition.y - position.y
-        local distanceSquared = dx * dx + dy * dy
-        if distanceSquared > unit.AttackRange * unit.AttackRange then
-            local distance = math.sqrt(distanceSquared)
+        local attack = self.Entity:GetComponent("script.BattleAttackComposition")
+        local direction = attack:GetTargetDirection(target)
+        if not attack:IsTargetInRange(target, direction, false) then
+            if attack:IsTargetInRange(target, direction, true) then dx = 0 end
+            local distance = math.sqrt(dx * dx + dy * dy)
+            if distance <= 0 then return end
             local directionX = dx / distance
             local directionY = dy / distance
             local maximumStep = unit.MoveSpeed * delta

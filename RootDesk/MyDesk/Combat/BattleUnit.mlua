@@ -33,6 +33,7 @@ script BattleUnit extends Component
     property integer AttackDamageMax = 35
     property number AttackInterval = 0.7
     property number AttackRange = 0.6
+    property number AttackRangeY = 0.5
     property number RetargetInterval = 0.5
     property number ImpactDelay = 0.18
     property number HitStopDuration = 0.2
@@ -85,6 +86,7 @@ script BattleUnit extends Component
         local impact = profile.ImpactDelaySeconds
         local deathAnimationRUID = profile.DieAnimationRUID
         local hitStopDuration = profile.HitStopDurationSeconds
+        self:EndAttackPoise()
         self.Faction = faction
         if faction == "PLAYER" then self:FaceDirection(1) else self:FaceDirection(-1) end
         log("[VRF][BattleUnit] DEFAULT_FACING " .. self.Entity.Name .. ", faction=" .. faction
@@ -98,6 +100,7 @@ script BattleUnit extends Component
         self.AttackDamageMax = profile.AttackDamageMax
         self.AttackInterval = interval
         self.AttackRange = range
+        self.AttackRangeY = profile.AttackRangeY
         self.RetargetInterval = retarget
         self.ImpactDelay = impact
         self.DeathAnimationRUID = deathAnimationRUID
@@ -153,13 +156,16 @@ script BattleUnit extends Component
         -- Advance the owned attack execution through the same seam used by live and test loops.
         if not self:HasAttackExecution() then return end
         self._T.attackExecution:Advance(delta)
+        if self.AttackPoiseActive and self._T.attackPoiseRemaining <= 0 then
+            self:EndAttackPoise()
+            log("[VRF][BattleUnit] ATTACK_POISE_END " .. self.Entity.Name)
+        end
     end
 
     @ExecSpace("ServerOnly")
     method void CancelAttack()
         -- Cancel any pending attack work when the unit enters the terminal result state.
-        self.AttackPoiseActive = false
-        self._T.attackPoiseRemaining = 0
+        self:EndAttackPoise()
         if not self:HasAttackExecution() then return end
         self._T.attackExecution:Cancel("ACTOR_STOP")
     end
@@ -172,6 +178,13 @@ script BattleUnit extends Component
         self.AttackPoiseActive = true
         log("[VRF][BattleUnit] ATTACK_POISE_START " .. self.Entity.Name
             .. ", duration=" .. tostring(self.AttackAnimationDuration))
+    end
+
+    @ExecSpace("ServerOnly")
+    method void EndAttackPoise()
+        -- Release the animation and facing lock when an actor stops or is reconfigured.
+        self.AttackPoiseActive = false
+        self._T.attackPoiseRemaining = 0
     end
 
     method boolean IsAlive()
@@ -188,6 +201,7 @@ script BattleUnit extends Component
     @ExecSpace("ServerOnly")
     method void FaceDirection(number directionX)
         -- Maple monster sprites face left; mirror the actor for rightward actions while preserving its size.
+        if self.AttackPoiseActive then return end
         if math.abs(directionX) <= 0.0001 then return end
         local transform = self.Entity.TransformComponent
         if not isvalid(transform) then return end
@@ -221,13 +235,9 @@ script BattleUnit extends Component
 
     @ExecSpace("ServerOnly")
     method void Tick(number delta)
-        -- Advance attack poise before the session advances attack execution.
+        -- Hold facing through this step's impact even when a long frame also ends the animation.
         if self._T.attackPoiseRemaining > 0 then
             self._T.attackPoiseRemaining = math.max(0, self._T.attackPoiseRemaining - delta)
-            if self._T.attackPoiseRemaining == 0 then
-                self.AttackPoiseActive = false
-                log("[VRF][BattleUnit] ATTACK_POISE_END " .. self.Entity.Name)
-            end
         end
         if isvalid(self._T.motion) then self._T.motion:Advance(delta) end
     end

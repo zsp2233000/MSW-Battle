@@ -89,7 +89,7 @@ function createTemporaryFixtureBuffer(originalBytes, variantStats = {}) {
   variantCells[idIndex] = VARIANT_ID;
   variantCells[nameIndex] = "VariantTank";
   const numericFields = new Set([
-    "MaxHp", "MoveSpeed", "AttackDamageMin", "AttackDamageMax", "AttackIntervalSeconds", "AttackRange",
+    "MaxHp", "MoveSpeed", "AttackDamageMin", "AttackDamageMax", "AttackIntervalSeconds", "AttackRange", "AttackRangeY",
     "AttackImpactFrame", "RetargetIntervalSeconds", "HitStopDurationSeconds",
     "ContactCooldownSeconds", "ContactSizeX", "ContactSizeY", "KnockbackDistance",
   ]);

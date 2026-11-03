@@ -37,7 +37,7 @@ local ok, detail = pcall(function()
         check(parse("monster_tank", case[2]) == nil and string.find(catalog.ErrorMessage, case[3], 1, true) ~= nil,
             case[1] .. " is rejected with its diagnostic")
     end
-    for _, field in ipairs({ "MaxHp", "MoveSpeed", "AttackDamageMin", "AttackDamageMax", "AttackIntervalSeconds", "AttackRange",
+    for _, field in ipairs({ "MaxHp", "MoveSpeed", "AttackDamageMin", "AttackDamageMax", "AttackIntervalSeconds", "AttackRange", "AttackRangeY",
         "RetargetIntervalSeconds", "HitStopDurationSeconds", "ContactCooldownSeconds", "ContactSizeX", "ContactSizeY", "KnockbackDistance" }) do
         check(parse("monster_tank", { [field] = "" }) == nil and string.find(catalog.ErrorMessage, field, 1, true) ~= nil,
             "blank required numeric " .. field .. " is rejected")
@@ -55,6 +55,11 @@ local ok, detail = pcall(function()
     check(fixed ~= nil and fixed.AttackDamageMin == 9 and fixed.AttackDamageMax == 9,
         "equal endpoints are a valid fixed-damage interval")
     check(parse("monster_tank", { MoveSpeed = "1e999" }) == nil, "nonfinite speed is rejected")
+    for _, value in ipairs({ "0", "-0.1", "1e999" }) do
+        check(parse("monster_tank", { AttackRangeY = value }) == nil, "AttackRangeY rejects " .. value)
+    end
+    local verticalRange = parse("monster_tank", { AttackRangeY = "0.125" })
+    check(verticalRange ~= nil and verticalRange.AttackRangeY == 0.125, "positive AttackRangeY is preserved")
     for _, id in ipairs({ "monster_warrior", "monster_shooter" }) do
         local profile = parse(id, { AttackImpactFrame = "" })
         check(profile ~= nil and profile.AttackImpactFrame == 1 and profile.ImpactDelaySeconds == 0,

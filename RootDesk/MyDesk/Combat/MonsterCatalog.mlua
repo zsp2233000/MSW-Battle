@@ -140,6 +140,8 @@ script MonsterCatalog extends Component
         end
         profile.AttackIntervalSeconds = self:ReadNumber(row:GetItem("AttackIntervalSeconds"), "AttackIntervalSeconds", monsterId, 0.0001)
         profile.AttackRange = self:ReadNumber(row:GetItem("AttackRange"), "AttackRange", monsterId, 0.0001)
+        profile.AttackRangeY = self:ReadNumber(row:GetItem("AttackRangeY"), "AttackRangeY", monsterId, 0)
+        if profile.AttackRangeY <= 0 then self:SetError("invalid numeric value AttackRangeY for " .. monsterId) end
         local attackImpactFrame = row:GetItem("AttackImpactFrame")
         if monsterType == "TANK" and self:IsBlank(attackImpactFrame) then
             profile.AttackImpactFrame = 0
@@ -247,7 +249,7 @@ script MonsterCatalog extends Component
         if dataset == nil then return self:SetError("MonsterData table unavailable") end
         local requiredColumns = {
             "MonsterId", "MonsterName", "MonsterType", "ModelId", "MaxHp", "MoveSpeed", "AttackDamageMin", "AttackDamageMax",
-            "AttackIntervalSeconds", "AttackRange", "AttackImpactFrame", "RetargetIntervalSeconds",
+            "AttackIntervalSeconds", "AttackRange", "AttackRangeY", "AttackImpactFrame", "RetargetIntervalSeconds",
             "HitStopDurationSeconds", "ContactSizeX", "ContactSizeY",
             "KnockbackDistance", "StandAnimationRUID", "MoveAnimationRUID", "AttackAnimationRUID",
             "HitAnimationRUID", "DieAnimationRUID", "HitEffectRUID", "AttackSoundRUID",

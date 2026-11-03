@@ -50,7 +50,6 @@ else
                 row("monster_warrior", targetName, -0.5, 0, {
                     MoveSpeed = 0,
                     AttackDamageMin = 0, AttackDamageMax = 0,
-                    AttackRange = 0,
                     RetargetIntervalSeconds = 0,
                     ImpactDelaySeconds = 0.05,
                     AttackIntervalSeconds = 100,

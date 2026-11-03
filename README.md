@@ -36,8 +36,8 @@ CSV 是方便編輯與檢視的檔案；執行時讀取的是 Maker 中的 UserD
 | `AttackDamageMin`         | 傷害區間下限；正整數，每個命中目標各自等機率抽取整數，包含上下限。                       |
 | `AttackDamageMax`         | 傷害區間上限；正整數，不可小於下限。                       |
 | `AttackIntervalSeconds`   | 攻擊間隔秒數；大於 0。                                                     |
-| `AttackRange`             | 一般攻擊距離；大於 0。                                                     |
-| `AttackRangeY`            | Y 軸上下各自的容許差；新攻擊規則的首批測試值，程式尚未讀取。               |
+| `AttackRange`             | 從身體中心往前延伸的水平射程，必須大於 0；與目標受擊碰撞框重疊即在範圍內。 |
+| `AttackRangeY`            | 前方攻擊矩形從身體中心往上、往下各延伸的距離，必須大於 0。               |
 | `AttackImpactFrame`       | 戰士／射手結算命中的影格；正整數。坦克可留空或填 `0`，因坦克沒有一般攻擊。 |
 | `RetargetIntervalSeconds` | 重新尋找目標的間隔秒數；大於 0。                                           |
 | `HitStopDurationSeconds`  | 受擊停頓秒數；大於或等於 0。                                               |
@@ -57,9 +57,11 @@ CSV 是方便編輯與檢視的檔案；執行時讀取的是 Maker 中的 UserD
 
 ## 數值規則摘要
 
-- 所有種類：`MaxHp`、`AttackDamageMin`、`AttackDamageMax` 為正整數，且 Max ≥ Min；`MoveSpeed`、`AttackIntervalSeconds`、`AttackRange`、`RetargetIntervalSeconds` 必須大於 0；`HitStopDurationSeconds` 不可小於 0。
+- 所有種類：`MaxHp`、`AttackDamageMin`、`AttackDamageMax` 為正整數，且 Max ≥ Min；`MoveSpeed`、`AttackIntervalSeconds`、`AttackRange`、`AttackRangeY`、`RetargetIntervalSeconds` 必須大於 0；`HitStopDurationSeconds` 不可小於 0。
 - `TANK`：`ContactCooldownSeconds`、`ContactSizeX`、`ContactSizeY`、`KnockbackDistance` 必須大於 0；接觸命中傷害也由傷害區間逐目標抽取；`AttackImpactFrame` 可空白或為 `0`。
 - `ASSAULT`、`SHOOTER`：`AttackImpactFrame` 必須是正整數；坦克接觸設定欄位可填 `0`。
+
+戰士與射手的走位、出手與命中共用前方矩形判定。水平範圍外直線接近，水平已重疊時只上下對齊；進入範圍後站定，出手朝向維持到攻擊動畫結束。命中影格不重新轉向。坦克走位套用同一範圍，接觸傷害仍沿用既有設定。
 
 ## 新增或修改資料列
 

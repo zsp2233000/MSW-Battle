@@ -2,14 +2,12 @@
 script ShooterAttack extends AttackComponent
     property integer AttackDamageMin = 30
     property integer AttackDamageMax = 30
-    property number AttackRange = 4.0
 
     @ExecSpace("ServerOnly")
     method void Configure(table profile, Component execution)
         -- Receive the native hitscan policy without keeping attack timers.
         self.AttackDamageMin = profile.AttackDamageMin
         self.AttackDamageMax = profile.AttackDamageMax
-        self.AttackRange = profile.AttackRange
         self._T.execution = execution
         self:ResetTarget()
     end
@@ -22,17 +20,14 @@ script ShooterAttack extends AttackComponent
 
     @ExecSpace("ServerOnly")
     method boolean CanContinue(Entity target)
-        -- Cancel as soon as a live defender leaves the strict firing range.
+        -- Preserve the existing cancellation policy, now against the shared frontal rectangle.
         if not isvalid(target) then return false end
         local unit = target:GetComponent("script.BattleUnit")
         local sourceTransform = self.Entity.TransformComponent
         local targetTransform = target.TransformComponent
         if not isvalid(unit) or not unit:IsAlive() or not isvalid(sourceTransform) or not isvalid(targetTransform) then return false end
-        local sourcePosition = sourceTransform.WorldPosition
-        local targetPosition = targetTransform.WorldPosition
-        local dx = targetPosition.x - sourcePosition.x
-        local dy = targetPosition.y - sourcePosition.y
-        return dx * dx + dy * dy <= self.AttackRange * self.AttackRange
+        local direction = sourceTransform.Scale.x < 0 and 1 or -1
+        return self._T.execution:IsTargetInRange(target, direction, false)
     end
 
     @ExecSpace("ServerOnly")
@@ -40,8 +35,8 @@ script ShooterAttack extends AttackComponent
         -- Hit only the locked defender at its current native body position.
         if not self:CanContinue(target) then return end
         self._T.impactTarget = target
-        local position = target.TransformComponent.WorldPosition
-        self:AttackFrom(Vector2(0.2, 0.2), Vector2(position.x, position.y), "shooter", nil)
+        local direction = self.Entity.TransformComponent.Scale.x < 0 and 1 or -1
+        self:Attack(self._T.execution:GetAttackShape(direction), "shooter", nil)
     end
 
     method integer CalcDamage(Entity attacker, Entity defender, string attackInfo)

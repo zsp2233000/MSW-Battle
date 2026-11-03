@@ -14,7 +14,7 @@ local function row(id, name, x, y, overrides)
     return { monsterId = id, name = name, position = Vector3(x, y, 0), overrides = overrides }
 end
 local function quiet(extra)
-    local profile = { MoveSpeed = 0, AttackDamageMin = 0, AttackDamageMax = 0, AttackRange = 0,
+    local profile = { MoveSpeed = 0, AttackDamageMin = 0, AttackDamageMax = 0,
         RetargetIntervalSeconds = 0.5, AttackIntervalSeconds = 100 }
     for key, value in pairs(extra or {}) do profile[key] = value end
     return profile
@@ -83,7 +83,7 @@ local ok, detail = pcall(function()
             local source, unit = actor("PauseSource")
             local attackerEntity, attacker = actor("PauseAttacker")
             local nearer = actor("PauseNearer")
-            attacker.AttackRange = 0
+
             attacker:DriveAttack(source, true) -- Consume the enemy opening delay.
             advance(session.EnemyOpeningDelay + 0.02)
             nativeShot(attacker, source)
@@ -118,8 +118,11 @@ local ok, detail = pcall(function()
         check(unit.AttackSerial == 1 and unit.CurrentTargetName == firstEntity.Name, "acquisition hands an in-range attack to composition")
         place(nearerEntity, 1, 0)
         advance(0.31)
-        check(unit.CurrentTargetName == nearerEntity.Name and first.Hp == 190 and nearer.Hp == 220,
-            "retargeting leaves the accepted attack locked to its original target")
+        check(unit.CurrentTargetName == firstEntity.Name and first.Hp == 190 and nearer.Hp == 220,
+            "attack animation holds acquisition and the accepted target lock")
+        advance(unit.AttackAnimationDuration)
+        check(unit.CurrentTargetName == nearerEntity.Name,
+            "acquisition resumes after the attack animation")
     end)
 end)
 if clockOwned and isvalid(session) then

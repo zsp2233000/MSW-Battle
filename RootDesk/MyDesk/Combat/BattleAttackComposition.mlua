@@ -75,7 +75,10 @@ script BattleAttackComposition extends Component
             return
         end
         if targetInRange ~= true or not isvalid(target) then return end
-        if self._T.pendingTarget ~= nil or (self._T.cooldownRemaining or 0) > 0 then return end
+        local unit = self.Entity:GetComponent("script.BattleUnit")
+        if unit.AttackPoiseActive or self._T.pendingTarget ~= nil or (self._T.cooldownRemaining or 0) > 0 then return end
+        local direction = self:GetTargetDirection(target)
+        if not self:IsTargetInRange(target, direction, false) then return end
         if self._T.openingDelayPending == true then
             self._T.openingDelayPending = false
             self._T.cooldownRemaining = self._T.openingDelay
@@ -113,14 +116,16 @@ script BattleAttackComposition extends Component
         if self._T.impactRemaining > 0 then return end
         self._T.pendingTarget = nil
         self._T.impactRemaining = -1
-        local unit = self.Entity:GetComponent("script.BattleUnit")
-        if isvalid(unit) then unit:FaceTarget(target) end
         self._T.adapter:ResolveImpact(target)
     end
 
     @ExecSpace("ServerOnly")
     method void Cancel(string reason)
         -- Discard unaccepted work; session-owned damage batches survive cancellation.
+        if reason == "RECONFIGURE" or reason == "ACTOR_STOP" then
+            local unit = self.Entity:GetComponent("script.BattleUnit")
+            if isvalid(unit) then unit:EndAttackPoise() end
+        end
         self._T.pendingTarget = nil
         self._T.impactRemaining = -1
         if isvalid(self._T.adapter) then self._T.adapter:ResetTarget() end
@@ -151,6 +156,51 @@ script BattleAttackComposition extends Component
         unit.AttackSerial = unit.AttackSerial + 1
         unit:PlayCombatSound(self._T.profile.AttackSoundRUID)
         session:EmitPresentation(eventName, self.Entity, target, 0)
+    end
+
+    @ExecSpace("ServerOnly")
+    method number GetTargetDirection(Entity target)
+        -- Keep the previous facing when the target is almost exactly above or below.
+        local transform = self.Entity.TransformComponent
+        local direction = transform.Scale.x < 0 and 1 or -1
+        if isvalid(target) then
+            local dx = target.TransformComponent.WorldPosition.x - transform.WorldPosition.x
+            if math.abs(dx) > 0.0001 then direction = dx > 0 and 1 or -1 end
+        end
+        return direction
+    end
+
+    @ExecSpace("ServerOnly")
+    method any GetAttackShape(number direction)
+        -- Build the sole frontal rectangle from the actor's actual hit collider center.
+        local transform = self.Entity.TransformComponent
+        local hit = self.Entity.HitComponent
+        local position = transform.WorldPosition
+        local scale = transform.Scale
+        local offset = hit.ColliderOffset
+        local profile = self._T.profile
+        return BoxShape(Vector2(position.x - offset.x * direction * math.abs(scale.x) + direction * profile.AttackRange / 2,
+            position.y + offset.y * scale.y), Vector2(profile.AttackRange, profile.AttackRangeY * 2), 0)
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean IsTargetInRange(Entity target, number direction, boolean horizontalOnly)
+        -- Query the same native collider geometry used for impact, without causing a hit.
+        if not isvalid(target) or self._T.profile == nil then return false end
+        local hit = target.HitComponent
+        if not isvalid(hit) or not hit.EnableInHierarchy then return false end
+        local shape = self:GetAttackShape(direction)
+        if horizontalOnly then
+            -- Project the rectangle across the arena's Y span for vertical-only alignment.
+            local session = self:GetActiveSession()
+            if not isvalid(session) then return false end
+            shape.Size = Vector2(shape.Size.x, 2 * (session.ArenaMaxY - session.ArenaMinY))
+        end
+        local simulator = _CollisionService:GetSimulator(self.Entity)
+        for _, collider in ipairs(simulator:OverlapAll(hit.CollisionGroup, shape)) do
+            if collider == hit then return true end
+        end
+        return false
     end
 
 end

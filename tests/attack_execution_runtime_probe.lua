@@ -33,7 +33,6 @@ local function quietProfile(maxHp)
     local result = {
         MoveSpeed = 0,
         AttackDamageMin = 0, AttackDamageMax = 0,
-        AttackRange = 0,
         RetargetIntervalSeconds = 0,
         ImpactDelaySeconds = 0.05,
         AttackIntervalSeconds = 100,
@@ -44,7 +43,7 @@ end
 
 local function consumeEnemyOpeningDelay(unit, target, label)
     unit:DriveAttack(target, true)
-    session:AdvanceForTest(session.EnemyOpeningDelay + 0.02)
+    unit:AdvanceAttack(session.EnemyOpeningDelay + 0.02)
     check(unit.AttackSerial == 0, label .. " consumes the configured enemy opening delay before attacking")
 end
 
@@ -105,8 +104,7 @@ local function controlledCase(label, playerRoster, enemyRoster, callback)
                 local entity, unit = getUnit(entry.name)
                 check(isvalid(entity) and isvalid(unit), label .. " resolves prepared unit " .. entry.name)
                 if not isvalid(entity) or not isvalid(unit) then return false end
-                -- Keep autonomous acquisition inert; explicit intent still uses the installed adapter.
-                unit.AttackRange = 0
+                -- Long fixture intervals prevent repeated autonomous attacks during observation.
                 local movement = entity:GetComponent("MovementComponent")
                 if isvalid(movement) then movement:Stop() end
             end
@@ -144,8 +142,104 @@ if session.BeginManualSimulation == nil or session.PrepareBattleForTest == nil t
     return
 end
 
+-- Exact binary fractions keep contact/separation cases independent of float rounding.
+for _, kind in ipairs({ "monster_warrior", "monster_shooter" }) do
+    for _, direction in ipairs({ 1, -1 }) do
+        for _, edge in ipairs({
+            { "X touch", 0.75, 0, true }, { "X separated", 0.751, 0, false },
+            { "Y upper touch", 0.5, 0.75, true }, { "Y upper separated", 0.5, 0.751, false },
+            { "Y lower touch", 0.5, -0.75, true }, { "Y lower separated", 0.5, -0.751, false },
+            { "corner touch", 0.75, 0.75, true },
+        }) do
+            local profile = activeProfile(0.015625, 100, 35)
+            profile.AttackRange = 0.625
+            profile.AttackRangeY = 0.5
+            local label = kind .. " " .. tostring(direction) .. " " .. edge[1]
+            if not controlledCase(label, { row(kind, "BoundaryActor", 0, 0, profile) }, {
+                row("monster_warrior", "BoundaryTarget", direction * edge[2], edge[3], quietProfile()),
+            }, function()
+                local source, actor = getUnit("BoundaryActor")
+                local targetEntity, target = getUnit("BoundaryTarget")
+                for _, entity in ipairs({ source, targetEntity }) do
+                    entity.HitComponent.ColliderOffset = Vector2(0.0625, 0.25)
+                    entity.HitComponent.BoxSize = Vector2(0.5, 0.5)
+                    entity.KinematicbodyComponent.Enable = false
+                end
+                target:FaceDirection(-direction)
+                session:AdvanceForTest(0.001)
+                check(actor.AttackSerial == (edge[4] and 1 or 0), label .. " movement and engagement agree")
+                -- Even an explicit in-range hint cannot bypass the shared overlap query.
+                actor:DriveAttack(targetEntity, true)
+                session:AdvanceForTest(0.016)
+                check(target.Hp == (edge[4] and 185 or 220), label .. " agrees with native impact")
+            end) then return end
+        end
+    end
+end
+
+for _, kind in ipairs({ "monster_warrior", "monster_shooter" }) do
+    local profile = activeProfile(0.125, 100, 35)
+    if not controlledCase(kind .. " long frame facing", { row(kind, "HitchActor", 0, 0, profile) }, {
+        row("monster_warrior", "HitchTarget", 0.5, 0, quietProfile()),
+    }, function()
+        local source, actor = getUnit("HitchActor")
+        local targetEntity, target = getUnit("HitchTarget")
+        actor:DriveAttack(targetEntity, true)
+        local facing = source.TransformComponent.Scale.x
+        targetEntity.KinematicbodyComponent:SetWorldPosition(Vector2(-0.5, 0))
+        local elapsed = actor.AttackAnimationDuration + 0.01
+        actor:Tick(elapsed)
+        check(source.TransformComponent.Scale.x == facing,
+            kind .. " long frame holds facing before resolving the crossed impact deadline")
+        actor:AdvanceAttack(elapsed)
+        session:AdvanceForTest(0.001)
+        check(target.Hp == 220 and target.DamageTakenSerial == 0,
+            kind .. " long frame cannot turn a behind-target miss into a hit")
+    end) then return end
+end
+
+for _, kind in ipairs({ "monster_warrior", "monster_shooter" }) do
+    local profile = activeProfile(0.125, 100, 35)
+    if not controlledCase(kind .. " fixed attack facing", { row(kind, "FacingActor", 0, 0, profile) }, {
+        row("monster_warrior", "FacingTarget", 0.5, 0, quietProfile()),
+    }, function()
+        local source, actor = getUnit("FacingActor")
+        local targetEntity, target = getUnit("FacingTarget")
+        session:AdvanceForTest(0.01)
+        local facing = source.TransformComponent.Scale.x
+        local start = source.TransformComponent.WorldPosition
+        targetEntity.KinematicbodyComponent:SetWorldPosition(Vector2(-0.5, 0))
+        actor:FaceTarget(targetEntity)
+        session:AdvanceForTest(0.14)
+        check(actor.AttackSerial == 1 and target.Hp == 220 and source.TransformComponent.Scale.x == facing,
+            kind .. " cannot hit behind or turn at the impact frame")
+        check(samePosition(start, source.TransformComponent.WorldPosition), kind .. " does not pursue during animation")
+        session:AdvanceForTest(actor.AttackAnimationDuration)
+        check(source.TransformComponent.Scale.x == -facing,
+            kind .. " resumes facing the target after animation")
+    end) then return end
+end
+
+-- A target collider reaches beyond its transform point at the front edge.
+for _, kind in ipairs({ "monster_warrior", "monster_shooter" }) do
+    local profile = activeProfile(0.01, 100, 35)
+    profile.AttackRange = 0.6
+    if not controlledCase(kind .. " frontal collider edge", {
+        row(kind, "EdgeActor", -1, 0, profile),
+    }, {
+        row("monster_warrior", "EdgeTarget", -0.185, 0, quietProfile()),
+    }, function()
+        local actorEntity, actor = getUnit("EdgeActor")
+        local targetEntity, target = getUnit("EdgeTarget")
+        actor:DriveAttack(targetEntity, true)
+        session:AdvanceForTest(0.02)
+        check(target.Hp == 185 and target.DamageTakenSerial == 1,
+            kind .. " native hit includes the collider at the frontal edge")
+    end) then return end
+end
+
 for _, kind in ipairs({ "monster_warrior", "monster_shooter", "monster_tank" }) do
-    local randomProfile = activeProfile(0.01, 0.1, nil, 10000)
+    local randomProfile = activeProfile(0.01, 100, nil, 10000)
     randomProfile.AttackDamageMin = 8
     randomProfile.AttackDamageMax = 9
     if not controlledCase(kind .. " random damage", {
@@ -167,7 +261,10 @@ for _, kind in ipairs({ "monster_warrior", "monster_shooter", "monster_tank" }) 
             targetEntity.KinematicbodyComponent:SetWorldPosition(Vector2(-0.5, 0))
             decoyEntity.KinematicbodyComponent:SetWorldPosition(Vector2(-0.5, 0.15))
             local before, beforeDecoy = target.Hp, decoy.Hp
-            if index > 1 then unit:AdvanceAttack(kind == "monster_tank" and 2.01 or 0.11) end
+            if index > 1 then
+                unit:Tick(unit.AttackAnimationDuration + 0.01)
+                unit:AdvanceAttack(101)
+            end
             unit:DriveAttack(targetEntity, true)
             session:AdvanceForTest(0.02)
             local damage = before - target.Hp
@@ -245,7 +342,8 @@ for _, kind in ipairs({ "monster_warrior", "monster_shooter" }) do
         unit:DriveAttack(_EntityService:GetEntityByPath("/maps/template/" .. targetName), true)
         session:AdvanceForTest(0.05)
         unit:CancelAttack()
-        session:AdvanceForTest(0.2)
+        unit:AdvanceAttack(0.2)
+        session:AdvanceForTest(0.001)
         check(target.Hp == 220 and target.DamageTakenSerial == 0,
             suffix .. " cancellation removes an unaccepted hit")
         unit:DriveAttack(_EntityService:GetEntityByPath("/maps/template/" .. targetName), true)
@@ -274,6 +372,8 @@ do
         session:AdvanceForTest(0.2)
         check(target.Hp == 220 and target.DamageTakenSerial == 0,
             "shooter leaving range cancels its unaccepted hit")
+        unit:Tick(unit.AttackAnimationDuration + 0.01)
+        unit:AdvanceAttack(0.001)
         targetEntity.KinematicbodyComponent:SetWorldPosition(Vector2(-0.5, 0))
         unit:DriveAttack(targetEntity, true)
         check(unit.AttackSerial == 2, "shooter can retry after leaving range")
@@ -288,7 +388,7 @@ end
 do
     local actorName = "Issue16_ToleranceActor"
     local targetName = "Issue16_ToleranceTarget"
-    if not controlledCase("warrior impact tolerance", {
+    if not controlledCase("warrior exact frontal boundary", {
         row("monster_warrior", actorName, -1, 0, activeProfile(0.18, 0.8)),
     }, {
         row("monster_warrior", targetName, -0.5, 0, quietProfile()),
@@ -296,10 +396,10 @@ do
         local actor, unit = getUnit(actorName)
         local targetEntity, target = getUnit(targetName)
         unit:DriveAttack(targetEntity, true)
-        targetEntity.KinematicbodyComponent:SetWorldPosition(Vector2(-0.36, 0))
+        targetEntity.KinematicbodyComponent:SetWorldPosition(Vector2(-0.17, 0))
         session:AdvanceForTest(0.2)
-        check(target.Hp == 185 and target.DamageTakenSerial == 1,
-            "warrior keeps the 0.05 impact range tolerance")
+        check(target.Hp == 220 and target.DamageTakenSerial == 0,
+            "warrior rejects a separated collider without the former 0.05 tolerance")
         check(isvalid(actor), "warrior actor remains registered after impact")
     end) then return end
 end
@@ -320,9 +420,10 @@ for _, kind in ipairs({ "monster_warrior", "monster_shooter" }) do
         unit:DriveAttack(targetEntity, true)
         session:AdvanceForTest(0.05)
         check(attack:Configure(data, 0), suffix .. " can reconfigure on its existing actor")
-        session:AdvanceForTest(0.2)
-        check(target.Hp == 220 and unit.AttackSerial == 1,
-            suffix .. " discards pending work without rewinding observations")
+        unit:AdvanceAttack(0.2)
+        session:AdvanceForTest(0.001)
+        check(target.Hp == 220 and unit.AttackSerial == 2,
+            suffix .. " discards pending work and allows a new autonomous attack")
         unit:DriveAttack(targetEntity, true)
         check(unit.AttackSerial == 2, suffix .. " accepts the replacement attack intent")
         session:AdvanceForTest(data.ImpactDelaySeconds + 0.02)
@@ -347,8 +448,9 @@ do
         unit:DriveAttack(targetEntity, true)
         check(attack:Configure(warrior, 0) and unit.UnitKind == "ASSAULT",
             "same actor can replace its shooter adapter with the warrior adapter")
-        session:AdvanceForTest(0.2)
-        check(target.Hp == 220 and unit.AttackSerial == 1,
+        unit:AdvanceAttack(0.2)
+        session:AdvanceForTest(0.001)
+        check(target.Hp == 220 and unit.AttackSerial == 2,
             "adapter replacement cancels the unaccepted shot")
         unit:DriveAttack(targetEntity, true)
         session:AdvanceForTest(warrior.ImpactDelaySeconds + 0.02)
@@ -494,7 +596,7 @@ do
     local recoveryTankName = "Issue16_PoiseRecoveryTank"
     if not controlledCase("attack poise through the full animation", {
         row("monster_tank", firstTankName, 3.4, 1.4, activeProfile(0.18, 2, 40)),
-        row("monster_shooter", shooterName, -1, 0.2, activeProfile(0, 100)),
+        row("monster_shooter", shooterName, 3.4, 1.4, activeProfile(0, 100)),
         row("monster_tank", lateTankName, 3.4, 1.4, activeProfile(0.18, 2, 40)),
         row("monster_tank", recoveryTankName, 3.4, 1.4, activeProfile(0.18, 2, 40)),
     }, {
@@ -505,9 +607,8 @@ do
         local shooterEntity, shooter = getUnit(shooterName)
         local lateTankEntity, lateTank = getUnit(lateTankName)
         local recoveryTankEntity, recoveryTank = getUnit(recoveryTankName)
-        consumeEnemyOpeningDelay(actor, firstTankEntity, "attack poise actor")
         firstTankEntity.KinematicbodyComponent:SetWorldPosition(Vector2(-1, 0))
-        actor.AttackRange = 0.6
+        consumeEnemyOpeningDelay(actor, firstTankEntity, "attack poise actor")
         actor:DriveAttack(firstTankEntity, true)
         check(actor.AttackSerial == 1 and actor.AttackPoiseActive and actor.AttackAnimationDuration > 0,
             "accepted attack starts poise for its full animation")
@@ -522,6 +623,7 @@ do
             and samePosition(startPosition, afterTankHit),
             "tank knockback and hit reaction do not interrupt an active attack")
 
+        shooterEntity.KinematicbodyComponent:SetWorldPosition(Vector2(-1, 0.2))
         shooter:DriveAttack(actorEntity, true)
         session:AdvanceForTest(0.02)
         check(actor.Hp == 150 and actor.DamageTakenSerial == 2 and actor.AttackPoiseActive
@@ -540,7 +642,7 @@ do
         session:AdvanceForTest(0.1)
         check(not actor.AttackPoiseActive and not actor.KnockbackActive,
             "attack poise expires after the complete attack animation without deferred knockback")
-        actor.AttackRange = 0
+
         recoveryTankEntity.KinematicbodyComponent:SetWorldPosition(Vector2(-1, 0))
         recoveryTank:DriveAttack(nil, false)
         session:AdvanceForTest(0.02)
@@ -564,7 +666,6 @@ do
     }, function()
         local actorEntity, actor = getUnit(actorName)
         local tankEntity, tank = getUnit(tankName)
-        actor.AttackRange = 0.6
         actor:DriveAttack(tankEntity, true)
         tank:DriveAttack(nil, false)
         session:AdvanceForTest(0.02)
@@ -592,13 +693,11 @@ do
         local targetEntity, target = getUnit(targetName)
         local hitterEntity, hitter = getUnit(hitterName)
         consumeEnemyOpeningDelay(hitter, actorEntity, "hit-stop enemy shooter")
-        actor.AttackRange = 4
         actor:DriveAttack(targetEntity, true)
         hitter:DriveAttack(actorEntity, true)
         session:AdvanceForTest(0.02)
         check(actor.DamageTakenSerial == 1 and actor.CombatState == "ATTACK" and actor.AttackPoiseActive,
             "opposing native hit applies damage without interrupting attack poise")
-        actor.AttackRange = 4
         session:AdvanceForTest(0.16)
         check(target.Hp == 190 and target.DamageTakenSerial == 1,
             "already pending attack advances through hit stop and applies its HitEvent")

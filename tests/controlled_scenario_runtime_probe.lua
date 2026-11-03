@@ -26,7 +26,6 @@ local function quietProfile()
     return {
         MoveSpeed = 0,
         AttackDamageMin = 0, AttackDamageMax = 0,
-        AttackRange = 0,
         RetargetIntervalSeconds = 0,
         ImpactDelaySeconds = 0,
         AttackIntervalSeconds = 100,

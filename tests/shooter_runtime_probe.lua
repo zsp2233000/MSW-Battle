@@ -60,7 +60,6 @@ local function prepareScene()
             MaxHp = 30,
             MoveSpeed = 0,
             AttackDamageMin = 0, AttackDamageMax = 0,
-            AttackRange = 0,
             RetargetIntervalSeconds = 0,
             AttackIntervalSeconds = 100,
         }) }
@@ -107,8 +106,8 @@ local runOk, runDetail = pcall(function()
     if not attackStarted then return end
     local attackObservedAtMs = DateTime.UtcNow.Elapsed
     local attackStartDistance = distance(position(shooter), position(target))
-    check(attackStartDistance <= actor.AttackRange + 0.001,
-        "attack starts only after the shooter enters its catalog range")
+    check(attackStartDistance > actor.AttackRange and attackStartDistance <= actor.AttackRange + 0.3,
+        "attack starts when the target collider enters the frontal rectangle")
     check(defender.Hp == 30 and defender.DamageTakenSerial == 0,
         "AttackSerial advances before the catalog impact frame reaches the target")
 
