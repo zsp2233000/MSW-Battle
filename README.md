@@ -34,8 +34,11 @@ CSV 是方便編輯與檢視的檔案；執行時讀取的是 Maker 中的 UserD
 | `MaxHp`                   | 最大生命值；正整數。                                                       |
 | `MoveSpeed`               | 移動速度；大於 0。                                                         |
 | `AttackDamage`            | 攻擊傷害；正整數。坦克接觸命中也使用此值。                                 |
+| `AttackDamageMin`         | 傷害區間下限；新攻擊規則的首批測試值，程式尚未讀取。                       |
+| `AttackDamageMax`         | 傷害區間上限；新攻擊規則的首批測試值，程式尚未讀取。                       |
 | `AttackIntervalSeconds`   | 攻擊間隔秒數；大於 0。                                                     |
 | `AttackRange`             | 一般攻擊距離；大於 0。                                                     |
+| `AttackRangeY`            | Y 軸上下各自的容許差；新攻擊規則的首批測試值，程式尚未讀取。               |
 | `AttackImpactFrame`       | 戰士／射手結算命中的影格；正整數。坦克可留空或填 `0`，因坦克沒有一般攻擊。 |
 | `RetargetIntervalSeconds` | 重新尋找目標的間隔秒數；大於 0。                                           |
 | `HitStopDurationSeconds`  | 受擊停頓秒數；大於或等於 0。                                               |
