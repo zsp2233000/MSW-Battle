@@ -4,7 +4,7 @@ script BattleAttackComposition extends Component
     @ExecSpace("ServerOnly")
     method boolean Configure(table profile, number openingDelay)
         -- Replace attack work atomically while preserving the actor's observation counters.
-        self:Cancel("RECONFIGURE")
+        self:Cancel()
         local previousType = self._T.adapterType
         local previousAdapter = nil
         if previousType ~= nil then previousAdapter = self.Entity:GetComponent(previousType) end
@@ -103,35 +103,28 @@ script BattleAttackComposition extends Component
             self._T.adapter:AdvanceContactCooldowns(delta)
         end
         if self._T.pendingTarget == nil then return end
-        local target = self._T.pendingTarget
-        if not isvalid(self:GetActiveSession()) or not isvalid(target) then
-            self:Cancel("INVALID")
-            return
-        end
-        if not self._T.adapter:CanContinue(target) then
-            self:Cancel("INVALID")
+        if not isvalid(self:GetActiveSession()) then
+            self:Cancel()
             return
         end
         self._T.impactRemaining = self._T.impactRemaining - delta
         if self._T.impactRemaining > 0 then return end
+        local target = self._T.pendingTarget
         self._T.pendingTarget = nil
         self._T.impactRemaining = -1
+        -- A departed or dead target is a whiff: the animation and interval have already been committed.
         self._T.adapter:ResolveImpact(target)
     end
 
     @ExecSpace("ServerOnly")
-    method void Cancel(string reason)
-        -- Discard unaccepted work; session-owned damage batches survive cancellation.
-        if reason == "RECONFIGURE" or reason == "ACTOR_STOP" then
-            local unit = self.Entity:GetComponent("script.BattleUnit")
-            if isvalid(unit) then unit:EndAttackPoise() end
-        end
+    method void Cancel()
+        -- Discard unresolved work when the actor stops or is reconfigured; accepted damage batches survive.
+        local unit = self.Entity:GetComponent("script.BattleUnit")
+        if isvalid(unit) then unit:EndAttackPoise() end
         self._T.pendingTarget = nil
         self._T.impactRemaining = -1
         if isvalid(self._T.adapter) then self._T.adapter:ResetTarget() end
-        if reason == "RECONFIGURE" or self._T.profile == nil or self._T.profile.MonsterType ~= "ASSAULT" then
-            self._T.cooldownRemaining = 0
-        end
+        self._T.cooldownRemaining = 0
     end
 
     @ExecSpace("ServerOnly")

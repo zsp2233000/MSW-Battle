@@ -50,12 +50,8 @@ local function contact(attackerEntity, attacker)
             unit:DriveAttack(attackerEntity, true)
             unit:AdvanceAttack(0.2)
             unit:DriveAttack(attackerEntity, true)
-            if unit.UnitKind == "SHOOTER" then
-                unit:Tick(unit.AttackAnimationDuration + 0.01)
-                unit:AdvanceAttack(unit.AttackAnimationDuration + 0.01)
-            else
-                unit:CancelAttack()
-            end
+            unit:Tick(unit.AttackAnimationDuration + 0.01)
+            unit:AdvanceAttack(unit.AttackAnimationDuration + 0.01)
         end
     end
     configureAttack(attackerEntity, "monster_tank", 1)

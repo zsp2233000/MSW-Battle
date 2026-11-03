@@ -9,22 +9,18 @@ script AssaultAttack extends AttackComponent
         self.AttackDamageMin = profile.AttackDamageMin
         self.AttackDamageMax = profile.AttackDamageMax
         self._T.execution = execution
+        self:ResetTarget()
     end
 
     @ExecSpace("ServerOnly")
     method void ResetTarget()
-        -- A warrior has no native target lock to clear.
-    end
-
-    @ExecSpace("ServerOnly")
-    method boolean CanContinue(Entity target)
-        -- Preserve warrior windup until range and defender life are checked at impact.
-        return isvalid(target)
+        -- Clear the native lock on cancellation, reconfiguration, and a new strike.
+        self._T.impactTarget = nil
     end
 
     @ExecSpace("ServerOnly")
     method void ResolveImpact(Entity target)
-        -- Resolve the frontal native rectangle using the facing held throughout the animation.
+        -- Hit only the locked defender, using the facing held throughout the animation.
         if not isvalid(target) then return end
         local targetUnit = target:GetComponent("script.BattleUnit")
         local transform = target.TransformComponent
@@ -32,6 +28,7 @@ script AssaultAttack extends AttackComponent
         if not isvalid(targetUnit) or not targetUnit:IsAlive() or not isvalid(transform) or not isvalid(sourceTransform) then return end
         local direction = sourceTransform.Scale.x < 0 and 1 or -1
         if not self._T.execution:IsTargetInRange(target, direction, false) then return end
+        self._T.impactTarget = target
         self:Attack(self._T.execution:GetAttackShape(direction), "assault", nil)
     end
 
@@ -41,12 +38,13 @@ script AssaultAttack extends AttackComponent
     end
 
     method boolean IsAttackTarget(Entity defender, string attackInfo)
-        -- Preserve the opposing live faction filter and native target rules.
+        -- Filter opposing live defenders to the exact locked target.
         if not isvalid(self._T.execution) or not self._T.execution:IsCurrentAdapter(self) then return false end
         local attackerUnit = self.Entity:GetComponent("script.BattleUnit")
         local defenderUnit = nil
         if isvalid(defender) then defenderUnit = defender:GetComponent("script.BattleUnit") end
         if not isvalid(defenderUnit) or not defenderUnit:IsAlive() or attackerUnit.Faction == defenderUnit.Faction then return false end
+        if defender ~= self._T.impactTarget then return false end
         return __base:IsAttackTarget(defender, attackInfo)
     end
 

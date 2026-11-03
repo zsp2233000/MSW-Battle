@@ -167,7 +167,7 @@ script BattleUnit extends Component
         -- Cancel any pending attack work when the unit enters the terminal result state.
         self:EndAttackPoise()
         if not self:HasAttackExecution() then return end
-        self._T.attackExecution:Cancel("ACTOR_STOP")
+        self._T.attackExecution:Cancel()
     end
 
     @ExecSpace("ServerOnly")

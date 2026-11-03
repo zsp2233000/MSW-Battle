@@ -274,8 +274,8 @@ for _, kind in ipairs({ "monster_warrior", "monster_shooter", "monster_tank" }) 
             check(contains(session.EventHistory, "HIT:" .. actor.Name .. ":RangeTarget:" .. tostring(damage))
                 and contains(session.EventHistory, "DAMAGE:" .. actor.Name .. ":RangeTarget:" .. tostring(damage))
                 and nativeDamage == damage, "native display damage, hit events and HP share the same draw")
-            if kind == "monster_shooter" then
-                check(decoyDamage == 0, "shooter keeps its target lock")
+            if kind ~= "monster_tank" then
+                check(decoyDamage == 0, kind .. " keeps its target lock")
             else
                 check(decoyDamage >= 8 and decoyDamage <= 9, "area target receives its own in-range damage")
                 if damage ~= decoyDamage then independent = true end
@@ -284,7 +284,7 @@ for _, kind in ipairs({ "monster_warrior", "monster_shooter", "monster_tank" }) 
         local count = 0
         for _ in pairs(seen) do count = count + 1 end
         check(count > 1 and seen[8] and seen[9], kind .. " draws vary and include both endpoints")
-        check(kind == "monster_shooter" or independent, "area targets do not share a single damage draw")
+        check(kind ~= "monster_tank" or independent, "area targets do not share a single damage draw")
         targetEntity:DisconnectEvent(HitEvent, connection)
     end) then return end
 end
@@ -313,11 +313,10 @@ for _, kind in ipairs({ "monster_warrior", "monster_shooter" }) do
         check(contains(session.EventHistory, "ATTACK_START:" .. actorEntity.Name), suffix .. " publishes attack start")
         session:AdvanceForTest(0.14)
         local expectedHp = kind == "monster_warrior" and 185 or 190
-        local expectedDecoyHp = kind == "monster_warrior" and 185 or 220
         check(target.Hp == expectedHp and target.DamageTakenSerial == 1,
             suffix .. " applies the configured native HitEvent damage")
-        check(decoy.Hp == expectedDecoyHp,
-            suffix .. " preserves warrior area hits and shooter target lock")
+        check(decoy.Hp == 220 and decoy.DamageTakenSerial == 0,
+            suffix .. " hits only its locked target, not the enemy beside it")
         local hitAt = string.find(session.EventHistory, "HIT:" .. actorEntity.Name .. ":" .. targetName, 1, true)
         local targetHitAt = string.find(session.EventHistory, "TARGET_HIT:" .. actorEntity.Name .. ":" .. targetName, 1, true)
         local damageAt = string.find(session.EventHistory, "DAMAGE:" .. actorEntity.Name .. ":" .. targetName, 1, true)
@@ -347,41 +346,45 @@ for _, kind in ipairs({ "monster_warrior", "monster_shooter" }) do
         check(target.Hp == 220 and target.DamageTakenSerial == 0,
             suffix .. " cancellation removes an unaccepted hit")
         unit:DriveAttack(_EntityService:GetEntityByPath("/maps/template/" .. targetName), true)
-        local expectedSerial = kind == "monster_warrior" and 1 or 2
-        check(unit.AttackSerial == expectedSerial,
-            suffix .. " retains its existing ordinary cancellation cooldown")
+        check(unit.AttackSerial == 2,
+            suffix .. " stopping clears the interval regardless of attack type")
         check(isvalid(actor), suffix .. " remains available after cancelling pending work")
     end) then return end
 end
 
-do
-    local actorName = "Issue16_RangeActor"
-    local targetName = "Issue16_RangeTarget"
-    local reserveName = "Issue16_RangeReserve"
-    if not controlledCase("shooter range cancellation", {
-        row("monster_shooter", actorName, -1, 0, activeProfile(0.18, 0.8)),
+for _, kind in ipairs({ "monster_warrior", "monster_shooter" }) do
+    local suffix = kind == "monster_warrior" and "Assault" or "Shooter"
+    local actorName = "Issue57_LeaveActor_" .. suffix
+    local targetName = "Issue57_LeaveTarget_" .. suffix
+    local decoyName = "Issue57_LeaveDecoy_" .. suffix
+    if not controlledCase(suffix .. " locked target leaves", {
+        row(kind, actorName, -1, 0, activeProfile(0.01, 100)),
     }, {
         row("monster_warrior", targetName, -0.5, 0, quietProfile()),
-        row("monster_warrior", reserveName, 3.4, 1.4, quietProfile()),
+        row("monster_warrior", decoyName, -0.5, 0.15, quietProfile()),
     }, function()
-        local actor, unit = getUnit(actorName)
+        local _, unit = getUnit(actorName)
         local targetEntity, target = getUnit(targetName)
+        local _, decoy = getUnit(decoyName)
         unit:DriveAttack(targetEntity, true)
-        session:AdvanceForTest(0.05)
         targetEntity.KinematicbodyComponent:SetWorldPosition(Vector2(3.5, 0))
-        session:AdvanceForTest(0.2)
+        session:AdvanceForTest(0.03)
         check(target.Hp == 220 and target.DamageTakenSerial == 0,
-            "shooter leaving range cancels its unaccepted hit")
-        unit:Tick(unit.AttackAnimationDuration + 0.01)
-        unit:AdvanceAttack(0.001)
+            suffix .. " whiffs when the locked target left before impact")
+        check(decoy.Hp == 220 and decoy.DamageTakenSerial == 0,
+            suffix .. " does not switch to another enemy still in range")
+        check(unit.AttackSerial == 1 and unit.AttackPoiseActive,
+            suffix .. " whiff keeps one attack playing its animation")
+        session:AdvanceForTest(math.max(0, unit.AttackAnimationDuration - 0.05))
+        check(unit.AttackPoiseActive, suffix .. " whiff holds the attack until just before the animation ends")
+        session:AdvanceForTest(0.03)
+        check(not unit.AttackPoiseActive, suffix .. " whiff releases the attack when the animation ends")
         targetEntity.KinematicbodyComponent:SetWorldPosition(Vector2(-0.5, 0))
         unit:DriveAttack(targetEntity, true)
-        check(unit.AttackSerial == 2, "shooter can retry after leaving range")
-        targetEntity.KinematicbodyComponent:SetWorldPosition(Vector2(3.5, 0))
-        session:AdvanceForTest(0.2)
-        check(target.Hp == 220 and target.DamageTakenSerial == 0,
-            "second out-of-range attempt is cancelled without damaging the living target")
-        check(isvalid(actor) and isvalid(getUnit(reserveName)), "the prepared reserve remains registered")
+        check(unit.AttackSerial == 1, suffix .. " whiff consumes the attack interval")
+        unit:AdvanceAttack(101)
+        unit:DriveAttack(targetEntity, true)
+        check(unit.AttackSerial == 2, suffix .. " attacks again once the interval elapses")
     end) then return end
 end
 
@@ -455,7 +458,7 @@ do
         unit:DriveAttack(targetEntity, true)
         session:AdvanceForTest(warrior.ImpactDelaySeconds + 0.02)
         check(target.Hp == 185 and target.DamageTakenSerial == 1 and unit.AttackSerial == 2,
-            "replacement adapter alone delivers its native area hit")
+            "replacement adapter alone delivers its native hit")
     end) then return end
 end
 
@@ -518,9 +521,9 @@ do
         check(attack:Configure(warrior, 0), "configuration recovers with another native adapter")
         unit:DriveAttack(targetEntity, true)
         session:AdvanceForTest(warrior.ImpactDelaySeconds + 0.02)
-        check(target.Hp == 185 and decoy.Hp == 185
-            and target.DamageTakenSerial == 1 and decoy.DamageTakenSerial == 1,
-            "recovered warrior preserves area hits after rejected shooter configuration")
+        check(target.Hp == 185 and decoy.Hp == 220
+            and target.DamageTakenSerial == 1 and decoy.DamageTakenSerial == 0,
+            "recovered warrior hits its locked target after rejected shooter configuration")
         check(shooter.MonsterType == "SHOOTER", "recovery fixture came from the shooter catalog profile")
     end) then return end
 end
@@ -794,36 +797,37 @@ do
     end) then return end
 end
 
-do
-    local actorName = "Issue16_TargetDeathShooter"
-    local killerName = "Issue16_TargetDeathKiller"
-    local targetName = "Issue16_DyingTarget"
-    local reserveName = "Issue16_DyingTargetReserve"
-    if not controlledCase("target death cancels pending shooter hit", {
-        row("monster_shooter", actorName, -1, 0, activeProfile(0.18, 0.8)),
-        row("monster_warrior", killerName, 0, 0, activeProfile(0.01, 2, 35)),
+for _, kind in ipairs({ "monster_warrior", "monster_shooter" }) do
+    local suffix = kind == "monster_warrior" and "Assault" or "Shooter"
+    local actorName = "Issue16_TargetDeathActor_" .. suffix
+    local killerName = "Issue16_TargetDeathKiller_" .. suffix
+    local targetName = "Issue16_DyingTarget_" .. suffix
+    local reserveName = "Issue16_DyingTargetReserve_" .. suffix
+    if not controlledCase(suffix .. " whiffs when its target dies", {
+        row(kind, actorName, -1, 0, activeProfile(0.18, 100)),
+        row("monster_warrior", killerName, -1, 0.2, activeProfile(0.01, 100, 35)),
     }, {
-        row("monster_warrior", targetName, 0.3, 0, quietProfile(35)),
+        row("monster_warrior", targetName, -0.5, 0, quietProfile(35)),
         row("monster_tank", reserveName, 3.4, 1.4, quietProfile()),
     }, function()
-        local shooterEntity, shooter = getUnit(actorName)
+        local actorEntity, actor = getUnit(actorName)
         local killerEntity, killer = getUnit(killerName)
         local _, target = getUnit(targetName)
         local _, reserve = getUnit(reserveName)
         local targetEntity = _EntityService:GetEntityByPath("/maps/template/" .. targetName)
-        shooter:DriveAttack(targetEntity, true)
+        actor:DriveAttack(targetEntity, true)
         killer:DriveAttack(targetEntity, true)
         session:AdvanceForTest(0.05)
         check(target.IsDead and target.Hp == 0 and target.DamageTakenSerial == 1,
-            "warrior attack kills the selected target before shooter impact")
+            "killer attack kills the locked target before the actor impact")
         check(reserve:IsAlive() and session.Phase == "BATTLE" and session.Result == "",
             "prepared enemy reserve keeps observation in BATTLE after target death")
         check(session.EnemyAlive == 1 and target.CurrentTargetName == "" and target.CombatState == "DEAD",
             "death immediately removes alive eligibility and clears the defender target")
         session:AdvanceForTest(0.2)
-        check(target.DamageTakenSerial == 1 and shooter.AttackSerial == 1,
-            "shooter does not deliver another native hit to the dead target")
-        check(isvalid(shooterEntity) and isvalid(killerEntity)
+        check(target.DamageTakenSerial == 1 and actor.AttackSerial == 1,
+            "actor does not deliver another native hit to the dead target")
+        check(isvalid(actorEntity) and isvalid(killerEntity)
             and contains(session.EventHistory, "DAMAGE:" .. killerEntity.Name .. ":" .. targetName),
             "target death retains its legitimate attack and semantic damage event")
         local history = session.EventHistory
@@ -836,7 +840,7 @@ do
         state:DisconnectHitEvent()
         local delivered = 0
         local observer = targetEntity:ConnectEvent(HitEvent, function(event) delivered = delivered + 1 end)
-        targetEntity:SendEvent(HitEvent(Vector2(0.3, 0), killerEntity, { 999 }, nil,
+        targetEntity:SendEvent(HitEvent(Vector2(-0.5, 0), killerEntity, { 999 }, nil,
             HitFeedbackAction.Default, false, 999))
         session:AdvanceForTest(0.01)
         targetEntity:DisconnectEvent(HitEvent, observer)
@@ -847,6 +851,15 @@ do
             and target.OnHitSoundSerial == soundSerial and target.HitEffectSerial == effectSerial
             and target.AttackSerial == attackSerial and session.EventHistory == history,
             "dead defender rejects a later native HitEvent without damage, sound, effect, or semantic events")
+        local reserveEntity = _EntityService:GetEntityByPath("/maps/template/" .. reserveName)
+        reserveEntity.KinematicbodyComponent:SetWorldPosition(Vector2(-0.5, 0))
+        actor:Tick(actor.AttackAnimationDuration + 0.01)
+        actor:AdvanceAttack(0.001)
+        actor:DriveAttack(reserveEntity, true)
+        check(actor.AttackSerial == 1, suffix .. " whiff on a dead target consumes the attack interval")
+        actor:AdvanceAttack(101)
+        actor:DriveAttack(reserveEntity, true)
+        check(actor.AttackSerial == 2, suffix .. " attacks again once the interval elapses")
     end) then return end
 end
 
