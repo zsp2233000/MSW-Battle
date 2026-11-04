@@ -112,26 +112,41 @@ local runOk, runDetail = pcall(function()
         "formal frame 8 applies one native hit at the configured impact")
 
     -- Use real frames for displacement; the victim keeps its accepted attack and facing.
-    prepare({ row("monster_tank", "PushTank", 0, 0, { AttackDamageMin=1, AttackDamageMax=1,
-        ImpactDelaySeconds=0.01 }) }, { row("monster_warrior", "AttackingVictim", 0.5, 0,
-        { ImpactDelaySeconds=0.5, AttackDamageMin=35, AttackDamageMax=35 }) })
-    tank, unit = actor("PushTank")
-    first, a = actor("AttackingVictim")
-    a:DriveAttack(tank, true)
-    a:AdvanceAttack(session.EnemyOpeningDelay + 0.01)
-    a:DriveAttack(tank, true)
-    local victimFacing = first.TransformComponent.Scale.x
-    local startX = first.TransformComponent.WorldPosition.x
-    unit:DriveAttack(first, true)
-    session:AdvanceForTest(0.02)
-    check(a.AttackPoiseActive and a.KnockbackActive and a.AttackSerial == 1 and a.CombatState == "ATTACK",
-        "tank pushes attacking victims without cancelling their attack or playing hit reaction")
-    session:EndManualSimulation(); clockOwned = false
-    wait(0.12)
-    check(first.TransformComponent.WorldPosition.x > startX + 0.4 and first.TransformComponent.Scale.x == victimFacing,
-        "real body displacement preserves the locked attack facing")
-    wait(0.5)
-    check(unit.Hp == unit.MaxHp and a.AttackSerial == 1, "displaced attack whiffs from its new position")
+    -- Only the victim's reach differs. The landing spot after a manual step is not fixed in Maker, so the long reach
+    -- spans the arena and keeps the tank in range wherever the victim lands.
+    for _, case in ipairs({ { tag = "Short", reach = nil, lands = false },
+        { tag = "Long", reach = session.ArenaMaxX - session.ArenaMinX, lands = true } }) do
+        prepare({ row("monster_tank", case.tag .. "PushTank", 0, 0, { AttackDamageMin=1, AttackDamageMax=1,
+            ImpactDelaySeconds=0.01 }) }, { row("monster_warrior", case.tag .. "AttackingVictim", 0.5, 0,
+            { ImpactDelaySeconds=0.5, AttackDamageMin=35, AttackDamageMax=35, AttackRange=case.reach }) })
+        tank, unit = actor(case.tag .. "PushTank")
+        first, a = actor(case.tag .. "AttackingVictim")
+        a:DriveAttack(tank, true)
+        a:AdvanceAttack(session.EnemyOpeningDelay + 0.01)
+        a:DriveAttack(tank, true)
+        local victimFacing = first.TransformComponent.Scale.x
+        local startX = first.TransformComponent.WorldPosition.x
+        unit:DriveAttack(first, true)
+        session:AdvanceForTest(0.02)
+        check(a.AttackPoiseActive and a.KnockbackActive and a.AttackSerial == 1 and a.CombatState == "ATTACK",
+            case.tag .. " reach: tank pushes attacking victims without cancelling their attack or playing hit reaction")
+        session:EndManualSimulation(); clockOwned = false
+        wait(0.12)
+        check(first.TransformComponent.WorldPosition.x > startX + 0.4 and first.TransformComponent.Scale.x == victimFacing,
+            case.tag .. " reach: real body displacement preserves the locked attack facing")
+        -- The impact precedes the end of the attack animation, so waiting for the animation end proves the impact was evaluated.
+        for _ = 1, 30 do
+            if not a.AttackPoiseActive then break end
+            wait(0.1)
+        end
+        if case.lands then
+            check(not a.AttackPoiseActive and unit.Hp == unit.MaxHp - 35 and a.AttackSerial == 1,
+                "displaced attack still in range hits normally")
+        else
+            check(not a.AttackPoiseActive and unit.Hp == unit.MaxHp and a.AttackSerial == 1,
+                "displaced attack whiffs from its new position")
+        end
+    end
 end)
 if clockOwned and isvalid(session) then session:EndManualSimulation() end
 if not runOk then check(false, "probe raised: " .. tostring(runDetail)) end
