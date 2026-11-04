@@ -74,7 +74,7 @@ local ok, detail = pcall(function()
         "a different identity accepts the same actual resource RUIDs")
     reset()
     for _, expected in ipairs({
-        { "monster_tank", 400, 0.4, 8, 2, 0.65, 12 },
+        { "monster_tank", 400, 0.4, 8, 5, 0.65, 12 },
         { "monster_warrior", 220, 1, 20, 3, 0.6, 30 },
         { "monster_shooter", 120, 0.8, 32, 2, 4, 48 },
     }) do

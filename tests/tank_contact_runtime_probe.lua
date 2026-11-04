@@ -94,7 +94,7 @@ local runOk, runDetail = pcall(function()
     check(a.Hp == 220 and b.Hp == 180 and unit.AttackSerial == 1,
         "sweep evaluates current occupants independently of the selected target")
 
-    -- Exercise the configured final-frame impact through native HitEvent, without overriding its delay.
+    -- Exercise the configured impact through native HitEvent, without overriding its delay.
     prepare({ row("monster_tank", "FormalTank", 0, 0, { AttackDamageMin=40, AttackDamageMax=40 }) },
         { row("monster_warrior", "FormalTarget", 0.5, 0) })
     tank, unit = actor("FormalTank")
@@ -104,12 +104,12 @@ local runOk, runDetail = pcall(function()
     unit:DriveAttack(first, true)
     unit:AdvanceAttack(formal.ImpactDelaySeconds - 0.001)
     session:AdvanceForTest(0.0001)
-    check(formal.AttackImpactFrame == 14 and a.Hp == 220,
-        "formal frame 14 leaves HP unchanged before the configured impact")
+    check(formal.AttackImpactFrame == 8 and a.Hp == 220,
+        "formal frame 8 leaves HP unchanged before the configured impact")
     unit:AdvanceAttack(0.002)
     session:AdvanceForTest(0.0001)
     check(a.Hp == 180 and a.DamageTakenSerial == 1 and unit.AttackSerial == 1,
-        "formal frame 14 applies one native hit at the configured impact")
+        "formal frame 8 applies one native hit at the configured impact")
 
     -- Use real frames for displacement; the victim keeps its accepted attack and facing.
     prepare({ row("monster_tank", "PushTank", 0, 0, { AttackDamageMin=1, AttackDamageMax=1,
