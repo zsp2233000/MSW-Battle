@@ -23,8 +23,8 @@ check(session.Phase == "DEPLOYMENT" and session.PlayerAlive == 0 and session.Ene
 check(not session:TryStartBattle(), "zero player units cannot start")
 check(not session:TryRemoveDeployedUnitAt(Vector3(-5, 1, 0)), "removal with no deployed player unit is rejected")
 check(not session:TryDeployMonster("missing_monster", Vector3(-4, 0, 0)), "unknown MonsterId is rejected")
-check(not session:TryDeployMonster("monster_tank", Vector3(-5.01, 0, 0)), "left of boundary is rejected")
-check(not session:TryDeployMonster("monster_tank", Vector3(-4, 1.01, 0)), "above boundary is rejected")
+check(not session:TryDeployMonster("monster_tank", Vector3(_FormationMapLayout:Bounds().minX - 0.01, 0, 0)), "left of boundary is rejected")
+check(not session:TryDeployMonster("monster_tank", Vector3(-4, _FormationMapLayout:Bounds().maxY + 0.01, 0)), "above boundary is rejected")
 local tankProfile = session:GetMonsterProfile("monster_tank")
 local secondTankProfile = session:GetMonsterProfile("monster_tank")
 local originalName = tankProfile.MonsterName
@@ -42,19 +42,19 @@ check(profileAfterMutation.MonsterName == originalName and profileAfterMutation.
     "editing a profile copy does not mutate catalog name, health, or attack")
 check(profileAfterMutation.StandAnimationRUID == originalStandAnimation,
     "profile copies retain the catalog animation resource value")
-check(session:TryDeployMonster("monster_tank", Vector3(-5, 1, 0)), "inclusive top-left boundary accepts first unit")
+check(session:TryDeployMonster("monster_tank", Vector3(-5, 1, 0)), "legal deployment accepts first unit")
 local first = _EntityService:GetEntityByPath("/maps/template/M1_Player_1")
 local firstUnit = isvalid(first) and first:GetComponent("script.BattleUnit") or nil
 check(isvalid(firstUnit) and firstUnit.MonsterId == "monster_tank" and firstUnit.MonsterName == originalName
     and firstUnit.MaxHp == originalMaxHp and firstUnit.AttackDamageMin == originalAttackDamage
     and firstUnit.AttackDamageMax == originalAttackDamageMax,
     "deployed unit uses the unmodified catalog profile")
-check(not session:TryDeployMonster("monster_tank", Vector3(-4.41, 1, 0)), "distance below 0.6 is rejected")
+check(not session:TryDeployMonster("monster_tank", Vector3(-4.71, 1, 0)), "distance below 0.3 is rejected")
 check(session:TryDeployMonster("monster_tank", Vector3(-4.4, 1, 0)), "same MonsterId deploys at distance 0.6")
 check(session:TryDeployMonster("monster_warrior", Vector3(-3.8, 1, 0)), "different MonsterId deploys")
 check(session:TryDeployMonster("monster_shooter", Vector3(-3.2, 1, 0)), "third type deploys")
 check(session:TryDeployMonster("monster_tank", Vector3(-2.6, 1, 0)), "same MonsterId can repeat")
-check(session:TryDeployMonster("monster_warrior", Vector3(-2, 1, 0)), "inclusive right boundary accepts sixth unit")
+check(session:TryDeployMonster("monster_warrior", Vector3(-2, 1, 0)), "legal deployment accepts sixth unit")
 for playerCount = 1, 6 do
     check(session:CanStartBattleWithPlayerCount(playerCount), "start accepts player count " .. tostring(playerCount))
 end
@@ -69,7 +69,7 @@ check(not session:TryRemoveDeployedUnitAt(Vector3(-1.49, 1, 0)), "removal outsid
 check(session:TryRemoveDeployedUnitAt(Vector3(-2, 1, 0)), "position-based removal selects the deployed unit")
 check(session.PlayerAlive == 5 and string.find(session:GetUnitSnapshots(), "M1_Player_6", 1, true) == nil,
     "removal releases one roster slot and updates the public unit snapshot")
-check(session:TryDeployMonster("monster_shooter", Vector3(-2, -3, 0)), "inclusive bottom boundary accepts replacement")
+check(session:TryDeployMonster("monster_shooter", Vector3(-2, -3, 0)), "legal deployment accepts replacement")
 check(session.PlayerAlive == 6 and string.find(session:GetUnitSnapshots(), "M1_Player_7", 1, true) ~= nil,
     "redeployment registers exactly one replacement unit")
 check(session:TryStartBattle(), "one to six units can start battle")

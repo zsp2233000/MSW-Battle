@@ -2,68 +2,48 @@
 script TankContactAttack extends AttackComponent
     property integer AttackDamageMin = 40
     property integer AttackDamageMax = 40
-    property Vector2 ContactSize = Vector2(1.2, 1.2)
 
     @ExecSpace("ServerOnly")
     method void Configure(table profile, Component execution)
-        -- Receive the native contact policy and reset each defender's cooldown.
+        -- Use the shared strike clock and native damage pipeline.
         self.AttackDamageMin = profile.AttackDamageMin
         self.AttackDamageMax = profile.AttackDamageMax
-        self.ContactSize = Vector2(profile.ContactSizeX, profile.ContactSizeY)
-        self._T.contactCooldownSeconds = profile.ContactCooldownSeconds or 0
-        self._T.contactCooldowns = {}
         self._T.execution = execution
+        self:ResetTarget()
     end
 
     @ExecSpace("ServerOnly")
     method void ResetTarget()
-        -- Native area contact keeps no locked target.
+        -- Clear per-swing deduplication on cancellation or the next attack.
+        self._T.hitTargets = {}
     end
 
     @ExecSpace("ServerOnly")
-    method void ResolveContact()
-        -- Query contact at the actor's current position without a selected-target gate.
-        local transform = self.Entity.TransformComponent
-        if not isvalid(transform) then return end
-        local position = transform.WorldPosition
-        self:AttackFrom(self.ContactSize, Vector2(position.x, position.y), "tank_contact", nil)
-    end
-
-    @ExecSpace("ServerOnly")
-    method void AdvanceContactCooldowns(number delta)
-        -- Age each defender independently on the battle simulation clock.
-        if delta <= 0 then return end
-        for defender, remaining in pairs(self._T.contactCooldowns or {}) do
-            if not isvalid(defender) or remaining <= delta then
-                self._T.contactCooldowns[defender] = nil
-            else
-                self._T.contactCooldowns[defender] = remaining - delta
-            end
-        end
+    method void ResolveImpact(Entity target)
+        -- Sweep the current position using the facing locked at attack start, even if the selected target left.
+        local direction = self.Entity.TransformComponent.Scale.x < 0 and 1 or -1
+        self:Attack(self._T.execution:GetAttackShape(direction), "tank", nil)
     end
 
     method integer CalcDamage(Entity attacker, Entity defender, string attackInfo)
-        -- Supply configured damage through native HitEvent.
+        -- Roll each defender's damage independently through native HitEvent.
         return math.random(self.AttackDamageMin, self.AttackDamageMax)
     end
 
     method boolean IsAttackTarget(Entity defender, string attackInfo)
-        -- Accept opposing live units only after their individual contact cooldown expires.
+        -- Accept each opposing live defender once per swing.
         if not isvalid(self._T.execution) or not self._T.execution:IsCurrentAdapter(self) then return false end
         local attackerUnit = self.Entity:GetComponent("script.BattleUnit")
         local defenderUnit = nil
         if isvalid(defender) then defenderUnit = defender:GetComponent("script.BattleUnit") end
         if not isvalid(defenderUnit) or not defenderUnit:IsAlive() or attackerUnit.Faction == defenderUnit.Faction then return false end
-        if (self._T.contactCooldowns or {})[defender] ~= nil then return false end
+        if self._T.hitTargets[defender] then return false end
         return __base:IsAttackTarget(defender, attackInfo)
     end
 
     method void OnAttack(Entity defender)
-        -- Start this defender's cooldown before another contact query can accept it.
-        if (self._T.contactCooldownSeconds or 0) > 0 then
-            self._T.contactCooldowns = self._T.contactCooldowns or {}
-            self._T.contactCooldowns[defender] = self._T.contactCooldownSeconds
-        end
+        -- Deduplicate this swing and request the normal tank knockback reaction.
+        self._T.hitTargets[defender] = true
         if isvalid(self._T.execution) then self._T.execution:OnNativeHit(self, defender) end
     end
 end

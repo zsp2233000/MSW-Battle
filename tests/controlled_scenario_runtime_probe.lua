@@ -32,7 +32,7 @@ local function quietProfile()
     }
 end
 
-local function tankContactProfile(damage)
+local function tankAttackProfile(damage)
     local result = quietProfile()
     result.AttackDamageMin = damage; result.AttackDamageMax = damage
     return result
@@ -215,7 +215,7 @@ end)
 
 manualCase("invalid input preserves the active public state and pending work", function()
     check(session:PrepareBattleForTest(
-        { row("monster_tank", "Issue15_StablePlayer", Vector3(-0.4, 0, 0), tankContactProfile(9)) },
+        { row("monster_tank", "Issue15_StablePlayer", Vector3(-0.4, 0, 0), tankAttackProfile(9)) },
         { row("monster_warrior", "Issue15_StableEnemy", Vector3(0, 0, 0), quietProfile()) }
     ), "stable baseline scene is prepared")
     check(session:TryStartBattle(), "stable baseline enters battle")
@@ -230,6 +230,7 @@ manualCase("invalid input preserves the active public state and pending work", f
     local damageSerialBeforePendingHit = enemyUnit.DamageTakenSerial
     local playerUnit = playerEntity:GetComponent("script.BattleUnit")
     playerUnit:DriveAttack(enemyEntity, true)
+    playerUnit:AdvanceAttack(0.001)
     check(enemyUnit.Hp == hpBeforePendingHit,
         "native tank contact stages hit-event damage before the next complete session step")
 
@@ -256,7 +257,7 @@ manualCase("invalid input preserves the active public state and pending work", f
         { row("monster_warrior", "Issue15_NanXEnemy", Vector3(0, 0, 0)) })
     rejectUnchanged("infinite arena coordinate", { row("monster_tank", "Issue15_InfY", Vector3(0, math.huge, 0)) },
         { row("monster_warrior", "Issue15_InfYEnemy", Vector3(0, 0, 0)) })
-    rejectUnchanged("out-of-arena coordinate", { row("monster_tank", "Issue15_Outside", Vector3(-5.5001, 0, 0)) },
+    rejectUnchanged("out-of-arena coordinate", { row("monster_tank", "Issue15_Outside", Vector3(session.ArenaMinX - 0.001, 0, 0)) },
         { row("monster_warrior", "Issue15_OutsideEnemy", Vector3(0, 0, 0)) })
     rejectUnchanged("nonzero Z coordinate", { row("monster_tank", "Issue15_BadZ", Vector3(0, 0, 0.001)) },
         { row("monster_warrior", "Issue15_BadZEnemy", Vector3(0, 0, 0)) })
@@ -304,7 +305,7 @@ end)
 
 manualCase("scene switch discards queued old-scene work", function()
     check(session:PrepareBattleForTest(
-        { row("monster_tank", "Issue15_OldPlayer", Vector3(-0.4, 0, 0), tankContactProfile(17)) },
+        { row("monster_tank", "Issue15_OldPlayer", Vector3(-0.4, 0, 0), tankAttackProfile(17)) },
         { row("monster_warrior", "Issue15_OldEnemy", Vector3(0, 0, 0), quietProfile()) }
     ), "old scene is prepared")
     check(session:TryStartBattle(), "old scene starts before work is queued")
@@ -316,6 +317,7 @@ manualCase("scene switch discards queued old-scene work", function()
     local oldEnemyUnit = oldEnemy:GetComponent("script.BattleUnit")
     local oldPlayerUnit = oldPlayer:GetComponent("script.BattleUnit")
     oldPlayerUnit:DriveAttack(oldEnemy, true)
+    oldPlayerUnit:AdvanceAttack(0.001)
     check(oldEnemyUnit.Hp == oldEnemyUnit.MaxHp,
         "native tank HitEvent stages old-scene damage before a complete session step")
     local generation = session.SessionGeneration

@@ -134,7 +134,7 @@ test("Issue #5 publishes one strict MonsterData dataset for the three initial mo
   const dataset = metadata.ContentProto.Json;
   const csvRows = readCsvRows("RootDesk/MyDesk/Data/MonsterData.csv");
   const [header, ...rows] = csvRows;
-  assert.doesNotMatch(header.join(","), /\bContactDamage\b/);
+  assert.doesNotMatch(header.join(","), /\b(ContactDamage|ContactCooldownSeconds|ContactSizeX|ContactSizeY)\b/);
   const requiredColumns = [
     "MonsterId",
     "MonsterName",
@@ -146,9 +146,7 @@ test("Issue #5 publishes one strict MonsterData dataset for the three initial mo
     "AttackIntervalSeconds",
     "AttackRange",
     "AttackImpactFrame",
-    "ContactCooldownSeconds",
-    "ContactSizeX",
-    "ContactSizeY",
+    "AttackRangeY",
     "KnockbackDistance",
     "StandAnimationRUID",
     "MoveAnimationRUID",
@@ -356,10 +354,6 @@ test("Issue #17 combat probes use controlled rosters and natural native outcomes
   const tankProbe = read("tests/tank_contact_runtime_probe.lua");
   const shooterProbe = read("tests/shooter_runtime_probe.lua");
   const targetingProbe = read("tests/targeting_crowding_runtime_probe.lua");
-  assert.match(tankProbe, /DamageTakenSerial == firstSerial \+ 4/,
-    "tank contact must reach lethal damage through repeated native contacts");
-  assert.match(tankProbe, /independently/,
-    "tank contact must distinguish each target's cooldown");
   assert.match(shooterProbe, /actor\.ImpactDelay/,
     "shooter must use its profile impact timing");
   assert.match(shooterProbe, /defender\.DamageTakenSerial > 0/,

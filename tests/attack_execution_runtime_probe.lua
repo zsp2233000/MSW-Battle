@@ -480,10 +480,10 @@ do
         local shooter = catalogProfile("monster_shooter")
         check(attack:Configure(tank, 0) and unit.UnitKind == "TANK",
             "switch to tank updates installed attack classification")
-        unit:DriveAttack(nil, false)
-        session:AdvanceForTest(0.02)
+        unit:DriveAttack(firstTargetEntity, true)
+        session:AdvanceForTest(tank.ImpactDelaySeconds + 0.02)
         check(firstTarget.Hp == 180 and firstTarget.DamageTakenSerial == 1 and firstTarget.KnockbackActive,
-            "reconfigured tank preserves contact damage and native knockback")
+            "reconfigured tank preserves area damage and native knockback")
         check(attack:Configure(shooter, 0) and unit.UnitKind == "SHOOTER",
             "switch from tank restores shooter classification")
         replacementEntity.KinematicbodyComponent:SetWorldPosition(Vector2(-0.5, 0))
@@ -573,12 +573,13 @@ do
         row("monster_warrior", reserveName, 3.4, 1.4, quietProfile()),
     }, function()
         local actor, unit = getUnit(actorName)
-        local _, target = getUnit(targetName)
+        local targetEntity, target = getUnit(targetName)
         local attack = getAttack(actor)
         local shooter = catalogProfile("monster_shooter")
         local shooterEffect = shooter.HitEffectRUID
         unit:SetMonsterIdentity(unit.MonsterId, unit.MonsterName, shooterEffect)
-        unit:DriveAttack(nil, false)
+        unit:DriveAttack(targetEntity, true)
+        unit:AdvanceAttack(0.19)
         check(unit.AttackSerial == 1 and target.Hp == 220,
             "native tank contact is accepted before the session batch is advanced")
         check(attack:Configure(shooter, 0) and unit.UnitKind == "SHOOTER",
@@ -586,8 +587,8 @@ do
         session:AdvanceForTest(0.02)
         check(target.Hp == 180 and target.DamageTakenSerial == 1 and target.KnockbackActive,
             "accepted tank contact retains damage and queued knockback")
-        check(target.HitEffectSerial == 0 and target.CombatState ~= "ON_HIT",
-            "accepted tank contact retains its no-hit-effect and no-hit-stop policy")
+        check(target.HitEffectSerial == 1 and target.LastHitEffectRUID == shooterEffect and target.CombatState ~= "ON_HIT",
+            "accepted tank hit retains its captured effect and no-hit-stop policy")
     end) then return end
 end
 
@@ -598,10 +599,10 @@ do
     local lateTankName = "Issue16_PoiseLateTank"
     local recoveryTankName = "Issue16_PoiseRecoveryTank"
     if not controlledCase("attack poise through the full animation", {
-        row("monster_tank", firstTankName, 3.4, 1.4, activeProfile(0.18, 2, 40)),
+        row("monster_tank", firstTankName, 3.4, 1.4, activeProfile(0.01, 2, 40)),
         row("monster_shooter", shooterName, 3.4, 1.4, activeProfile(0, 100)),
-        row("monster_tank", lateTankName, 3.4, 1.4, activeProfile(0.18, 2, 40)),
-        row("monster_tank", recoveryTankName, 3.4, 1.4, activeProfile(0.18, 2, 40)),
+        row("monster_tank", lateTankName, 3.4, 1.4, activeProfile(0.01, 2, 40)),
+        row("monster_tank", recoveryTankName, 3.4, 1.4, activeProfile(0.01, 2, 40)),
     }, {
         row("monster_warrior", actorName, -0.5, 0, activeProfile(0.18, 100)),
     }, function()
@@ -610,6 +611,8 @@ do
         local shooterEntity, shooter = getUnit(shooterName)
         local lateTankEntity, lateTank = getUnit(lateTankName)
         local recoveryTankEntity, recoveryTank = getUnit(recoveryTankName)
+        -- This case isolates attack timing; TankProbe separately verifies real displacement.
+        actorEntity.KinematicbodyComponent.Enable = false
         firstTankEntity.KinematicbodyComponent:SetWorldPosition(Vector2(-1, 0))
         consumeEnemyOpeningDelay(actor, firstTankEntity, "attack poise actor")
         actor:DriveAttack(firstTankEntity, true)
@@ -617,14 +620,14 @@ do
             "accepted attack starts poise for its full animation")
 
         local startPosition = actorEntity.TransformComponent.WorldPosition
-        firstTank:DriveAttack(nil, false)
+        firstTank:DriveAttack(actorEntity, true)
         session:AdvanceForTest(0.02)
         local afterTankHit = actorEntity.TransformComponent.WorldPosition
         check(actor.Hp == 180 and actor.DamageTakenSerial == 1,
             "tank damage still applies during attack poise")
-        check(actor.AttackPoiseActive and actor.CombatState == "ATTACK" and not actor.KnockbackActive
+        check(actor.AttackPoiseActive and actor.CombatState == "ATTACK" and actor.KnockbackActive
             and samePosition(startPosition, afterTankHit),
-            "tank knockback and hit reaction do not interrupt an active attack")
+            "tank knockback does not interrupt an active attack")
 
         shooterEntity.KinematicbodyComponent:SetWorldPosition(Vector2(-1, 0.2))
         shooter:DriveAttack(actorEntity, true)
@@ -636,18 +639,18 @@ do
         session:AdvanceForTest(math.max(0, actor.AttackAnimationDuration - 0.08))
         local beforeLateHit = actorEntity.TransformComponent.WorldPosition
         lateTankEntity.KinematicbodyComponent:SetWorldPosition(Vector2(-1, 0))
-        lateTank:DriveAttack(nil, false)
+        lateTank:DriveAttack(actorEntity, true)
         session:AdvanceForTest(0.02)
         check(actor.Hp == 110 and actor.DamageTakenSerial == 3 and actor.AttackPoiseActive
-            and not actor.KnockbackActive and samePosition(beforeLateHit, actorEntity.TransformComponent.WorldPosition),
-            "a hit near the end of the attack animation still deals damage without knockback")
+            and actor.KnockbackActive and samePosition(beforeLateHit, actorEntity.TransformComponent.WorldPosition),
+            "a hit near the end of the attack animation still deals damage with knockback")
 
         session:AdvanceForTest(0.1)
         check(not actor.AttackPoiseActive and not actor.KnockbackActive,
             "attack poise expires after the complete attack animation without deferred knockback")
 
         recoveryTankEntity.KinematicbodyComponent:SetWorldPosition(Vector2(-1, 0))
-        recoveryTank:DriveAttack(nil, false)
+        recoveryTank:DriveAttack(actorEntity, true)
         session:AdvanceForTest(0.02)
         check(actor.Hp == 70 and actor.DamageTakenSerial == 4 and actor.KnockbackActive,
             "a new tank hit after recovery applies normal knockback")
@@ -670,7 +673,9 @@ do
         local actorEntity, actor = getUnit(actorName)
         local tankEntity, tank = getUnit(tankName)
         actor:DriveAttack(tankEntity, true)
-        tank:DriveAttack(nil, false)
+        consumeEnemyOpeningDelay(tank, actorEntity, "lethal tank")
+        tank:DriveAttack(actorEntity, true)
+        tank:AdvanceAttack(0.19)
         session:AdvanceForTest(0.02)
         check(actor.Hp == 0 and actor.IsDead and actor.CombatState == "DEAD"
             and actor.DamageTakenSerial == 1,
@@ -868,7 +873,7 @@ do
     local firstName = "Issue16_TankMultiFirst"
     local secondName = "Issue16_TankMultiSecond"
     local thirdName = "Issue16_TankMultiThird"
-    if not controlledCase("tank multi-target contact cooldowns", {
+    if not controlledCase("tank multi-target shared swing interval", {
         row("monster_tank", actorName, -1, 0, activeProfile(0.18, 2, 40)),
     }, {
         row("monster_warrior", firstName, -0.5, 0, quietProfile()),
@@ -876,23 +881,23 @@ do
         row("monster_warrior", thirdName, 3.4, 1.4, quietProfile()),
     }, function()
         local actor, unit = getUnit(actorName)
-        local _, first = getUnit(firstName)
+        local firstEntity, first = getUnit(firstName)
         local _, second = getUnit(secondName)
         local thirdEntity, third = getUnit(thirdName)
-        unit:DriveAttack(nil, false)
-        session:AdvanceForTest(0.02)
+        unit:DriveAttack(firstEntity, true)
+        session:AdvanceForTest(0.19)
         check(first.Hp == 180 and second.Hp == 180 and third.Hp == 220
-            and unit.AttackSerial == 2,
-            "one tank contact announces and damages each in-range defender")
-        unit:DriveAttack(nil, false)
+            and unit.AttackSerial == 1,
+            "one tank swing damages every in-range defender")
+        unit:DriveAttack(firstEntity, true)
         session:AdvanceForTest(0.02)
-        check(first.Hp == 180 and second.Hp == 180 and unit.AttackSerial == 2,
-            "each defender keeps its own contact cooldown")
+        check(first.Hp == 180 and second.Hp == 180 and unit.AttackSerial == 1,
+            "every defender shares the swing interval")
         thirdEntity.KinematicbodyComponent:SetWorldPosition(Vector2(-0.8, 0.2))
-        unit:DriveAttack(nil, false)
+        unit:DriveAttack(firstEntity, true)
         session:AdvanceForTest(0.02)
-        check(third.Hp == 180 and third.DamageTakenSerial == 1 and unit.AttackSerial == 3,
-            "a new defender is not blocked by other targets' cooldowns")
+        check(third.Hp == 220 and third.DamageTakenSerial == 0 and unit.AttackSerial == 1,
+            "a new defender cannot bypass the swing interval")
         check(isvalid(actor), "tank actor remains registered after multiple contacts")
     end) then return end
 end

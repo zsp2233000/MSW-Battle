@@ -20,7 +20,7 @@ local ok, detail = pcall(function()
         "rename preserves the original ID and combat data")
     check(variant.MonsterName == "VariantTank" and variant.MonsterType == "TANK" and variant.MaxHp == 650
         and variant.MoveSpeed == 0.7 and variant.AttackDamageMin == 25 and variant.AttackDamageMax == 25 and variant.AttackIntervalSeconds == 1.3
-        and variant.AttackRange == 0.8 and variant.ContactCooldownSeconds == 1.3,
+        and variant.AttackRange == 0.8 and variant.AttackRangeY == 0.4,
         "variant loads independently configured numeric values")
     check(primary.StandAnimationRUID == variant.StandAnimationRUID and primary.DieAnimationRUID == variant.DieAnimationRUID,
         "same-type monsters reuse actual resources")
@@ -48,9 +48,9 @@ local ok, detail = pcall(function()
     check(session:TryStartBattle(), "controlled variant scene starts")
     attacker:DriveAttack(target, true)
     second:DriveAttack(target, true)
-    session:AdvanceForTest(0.01)
+    session:AdvanceForTest(primary.ImpactDelaySeconds + 0.01)
     check(defender.Hp == 435 and defender.DamageTakenSerial == 2,
-        "native contact hits apply independently configured 40 and 25 damage without modifiers")
+        "native area hits apply independently configured 40 and 25 damage without modifiers")
 end)
 if clockOwned and isvalid(session) then session:EndManualSimulation() end
 if not ok then check(false, "probe raised: " .. tostring(detail)) end

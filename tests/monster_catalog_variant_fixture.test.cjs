@@ -8,7 +8,7 @@ test("same-type catalog fixture varies combat values without changing shared ass
   const source = fs.readFileSync(path.join(__dirname, "../RootDesk/MyDesk/Data/MonsterData.csv"));
   const before = Buffer.from(source);
   const fixture = createTemporaryFixtureBuffer(source, { MaxHp: 650, MoveSpeed: 0.7, AttackDamageMin: 25, AttackDamageMax: 25,
-    AttackIntervalSeconds: 1.3, AttackRange: 0.8, ContactCooldownSeconds: 1.3 });
+    AttackIntervalSeconds: 1.3, AttackRange: 0.8, AttackRangeY: 0.4 });
   const rows = parseMonsterCsv(fixture).records;
   const primary = rows.find(row => row.MonsterId === "monster_tank");
   const variant = rows.find(row => row.MonsterId === "probe_tank_variant");
@@ -20,7 +20,7 @@ test("same-type catalog fixture varies combat values without changing shared ass
   assert.equal(variant.MoveSpeed, "0.7");
   assert.equal(variant.AttackIntervalSeconds, "1.3");
   assert.equal(variant.AttackRange, "0.8");
-  assert.equal(variant.ContactCooldownSeconds, "1.3");
+  assert.equal(variant.AttackRangeY, "0.4");
   assert.equal(primary.MonsterType, variant.MonsterType);
   for (const field of Object.keys(primary).filter(field => field.endsWith("RUID"))) {
     assert.equal(variant[field], primary[field]);

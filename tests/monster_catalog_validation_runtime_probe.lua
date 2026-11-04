@@ -38,7 +38,7 @@ local ok, detail = pcall(function()
             case[1] .. " is rejected with its diagnostic")
     end
     for _, field in ipairs({ "MaxHp", "MoveSpeed", "AttackDamageMin", "AttackDamageMax", "AttackIntervalSeconds", "AttackRange", "AttackRangeY",
-        "RetargetIntervalSeconds", "HitStopDurationSeconds", "ContactCooldownSeconds", "ContactSizeX", "ContactSizeY", "KnockbackDistance" }) do
+        "RetargetIntervalSeconds", "HitStopDurationSeconds", "KnockbackDistance" }) do
         check(parse("monster_tank", { [field] = "" }) == nil and string.find(catalog.ErrorMessage, field, 1, true) ~= nil,
             "blank required numeric " .. field .. " is rejected")
         check(parse("monster_tank", { [field] = "invalid" }) == nil, "nonnumeric " .. field .. " is rejected")
@@ -60,10 +60,9 @@ local ok, detail = pcall(function()
     end
     local verticalRange = parse("monster_tank", { AttackRangeY = "0.125" })
     check(verticalRange ~= nil and verticalRange.AttackRangeY == 0.125, "positive AttackRangeY is preserved")
-    for _, id in ipairs({ "monster_warrior", "monster_shooter" }) do
-        local profile = parse(id, { AttackImpactFrame = "" })
-        check(profile ~= nil and profile.AttackImpactFrame == 1 and profile.ImpactDelaySeconds == 0,
-            id .. " blank impact frame defaults to first-frame impact")
+    for _, id in ipairs({ "monster_tank", "monster_warrior", "monster_shooter" }) do
+        check(parse(id, { AttackImpactFrame = "" }) == nil, id .. " rejects blank impact frame")
+        check(parse(id, { AttackAnimationRUID = "" }) == nil, id .. " rejects blank attack animation")
         check(parse(id, { AttackImpactFrame = "0" }) == nil, id .. " rejects zero impact frame")
         check(parse(id, { AttackImpactFrame = "99999" }) == nil, id .. " rejects an impact frame beyond the actual clip")
     end

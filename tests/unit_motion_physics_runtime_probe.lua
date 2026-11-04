@@ -55,7 +55,12 @@ local function contact(attackerEntity, attacker)
         end
     end
     configureAttack(attackerEntity, "monster_tank", 1)
-    attacker:DriveAttack(nil, false)
+    local target = nil
+    for _, candidate in ipairs(session:GetTargetCandidates()) do
+        if candidate:GetComponent("script.BattleUnit").Faction ~= attacker.Faction then target = candidate; break end
+    end
+    attacker:DriveAttack(target, true)
+    attacker:AdvanceAttack(0.02)
     -- Change future intent while preserving the already accepted contact and knockback batch.
     configureAttack(attackerEntity, "monster_shooter", 0)
     step()

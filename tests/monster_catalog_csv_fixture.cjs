@@ -91,7 +91,7 @@ function createTemporaryFixtureBuffer(originalBytes, variantStats = {}) {
   const numericFields = new Set([
     "MaxHp", "MoveSpeed", "AttackDamageMin", "AttackDamageMax", "AttackIntervalSeconds", "AttackRange", "AttackRangeY",
     "AttackImpactFrame", "RetargetIntervalSeconds", "HitStopDurationSeconds",
-    "ContactCooldownSeconds", "ContactSizeX", "ContactSizeY", "KnockbackDistance",
+    "KnockbackDistance",
   ]);
   for (const [field, value] of Object.entries(variantStats)) {
     const columnIndex = header.indexOf(field);

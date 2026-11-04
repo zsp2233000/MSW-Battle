@@ -355,7 +355,7 @@ script BattleUnit extends Component
         self._T.lastAnimationAttackSerial = self.AttackSerial
 
         if self.AttackPoiseActive == true or attackPresentationActive then
-            if attackChanged and self.UnitKind ~= "TANK" then
+            if attackChanged then
                 self:PlayPresentationAnimation(self.AttackAnimationRUID, "ATTACK", true)
             end
         elseif damageChanged or (self.CombatState == "ON_HIT" and stateChanged) then
@@ -365,7 +365,7 @@ script BattleUnit extends Component
             self._T.lastPresentationState = "ON_HIT"
         elseif self.CombatState == "MOVE" and stateChanged then
             self:PlayPresentationAnimation(self.MoveAnimationRUID, "MOVE", false)
-        elseif self.CombatState == "ATTACK" and self.UnitKind ~= "TANK" and attackChanged then
+        elseif self.CombatState == "ATTACK" and attackChanged then
             self:PlayPresentationAnimation(self.AttackAnimationRUID, "ATTACK", true)
         elseif stateChanged then
             self:PlayPresentationAnimation(self.StandAnimationRUID, "IDLE", false)

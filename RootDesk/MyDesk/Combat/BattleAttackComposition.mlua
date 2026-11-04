@@ -67,13 +67,9 @@ script BattleAttackComposition extends Component
 
     @ExecSpace("ServerOnly")
     method void TryEngage(Entity target, boolean targetInRange)
-        -- Accept a delayed strike or query tank contact without exposing timing policy.
+        -- Accept a delayed strike through the same lifecycle for every monster type.
         if not isvalid(self:GetActiveSession()) then return end
         local profile = self._T.profile
-        if profile.MonsterType == "TANK" then
-            self._T.adapter:ResolveContact()
-            return
-        end
         if targetInRange ~= true or not isvalid(target) then return end
         local unit = self.Entity:GetComponent("script.BattleUnit")
         if unit.AttackPoiseActive or self._T.pendingTarget ~= nil or (self._T.cooldownRemaining or 0) > 0 then return end
@@ -99,9 +95,6 @@ script BattleAttackComposition extends Component
             return
         end
         self._T.cooldownRemaining = math.max(0, (self._T.cooldownRemaining or 0) - delta)
-        if self._T.profile ~= nil and self._T.profile.MonsterType == "TANK" and isvalid(self._T.adapter) then
-            self._T.adapter:AdvanceContactCooldowns(delta)
-        end
         if self._T.pendingTarget == nil then return end
         if not isvalid(self:GetActiveSession()) then
             self:Cancel()
@@ -133,14 +126,13 @@ script BattleAttackComposition extends Component
         if not self:IsCurrentAdapter(adapter) or not isvalid(defender) then return end
         local session = self:GetActiveSession()
         if self._T.profile.MonsterType == "TANK" then
-            self:PublishAttack("TANK_CONTACT_HIT", defender)
             session:QueueKnockback(self.Entity, defender, self._T.profile.KnockbackDistance)
         end
     end
 
     @ExecSpace("ServerOnly")
     method void PublishAttack(string eventName, Entity target)
-        -- Announce one accepted strike or one successful tank contact defender.
+        -- Announce exactly one accepted strike regardless of the number of defenders.
         local unit = self.Entity:GetComponent("script.BattleUnit")
         local session = self:GetActiveSession()
         if not isvalid(unit) or not isvalid(session) then return end

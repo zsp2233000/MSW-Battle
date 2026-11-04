@@ -921,7 +921,7 @@ script BattleSession extends Component
             local attackerUnit = attacker:GetComponent("script.BattleUnit")
             if isvalid(attackerUnit) then
                 attackerKind = attackerUnit.UnitKind
-                if attackerKind ~= "TANK" then hitEffectRUID = attackerUnit:GetHitEffectRUID() or "" end
+                hitEffectRUID = attackerUnit:GetHitEffectRUID() or ""
             end
         end
         table.insert(self._T.pendingDamage, { target = target, amount = amount, attacker = attacker,
