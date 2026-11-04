@@ -8,6 +8,7 @@ script MonsterCatalog extends Component
     method void OnInitialize()
         -- Initialize the map-scoped catalog without exposing server diagnostics to clients.
         self._T.profilesById = {}
+        self._T.bodyOffsets = {}
         self.ErrorMessage = ""
         self.IsLoaded = false
     end
@@ -207,6 +208,24 @@ script MonsterCatalog extends Component
         return profile
     end
 
+    method any MeasureBody(string modelId)
+        -- Read the model's hit box centre once; the editor's range preview must share the combat shape's body centre.
+        local cached = self._T.bodyOffsets[modelId]
+        if cached ~= nil then return cached end
+        local probe = _SpawnService:SpawnByModelId(modelId, "CatalogBodyProbe", Vector3.zero, self.Entity)
+        local hit = isvalid(probe) and probe.HitComponent or nil
+        if not isvalid(hit) then
+            if isvalid(probe) then probe:Destroy() end
+            self:SetError("hit box unavailable for model " .. modelId)
+            return nil
+        end
+        local offset = hit.ColliderOffset
+        cached = { x = offset.x, y = offset.y }
+        probe:Destroy()
+        self._T.bodyOffsets[modelId] = cached
+        return cached
+    end
+
     method boolean ValidateRoster(table roster)
         -- Require every configured enemy ID to exist with its expected combat type.
         for _, entry in ipairs(roster or {}) do
@@ -227,6 +246,7 @@ script MonsterCatalog extends Component
         self.ErrorMessage = ""
         self.IsLoaded = false
         self._T.profilesById = {}
+        self._T.bodyOffsets = self._T.bodyOffsets or {}
         self._T.allowedModelIds = allowedModelIds or {}
         local dataset = _DataService:GetTable(datasetName)
         if dataset == nil then return self:SetError("MonsterData table unavailable") end
@@ -251,6 +271,9 @@ script MonsterCatalog extends Component
             self._T.profilesById[profile.MonsterId] = profile
         end
         if self:ValidateRoster(fixedRoster) == false then return false end
+        for _, profile in pairs(self._T.profilesById) do
+            if self:MeasureBody(profile.ModelId) == nil then return false end
+        end
         self.IsLoaded = true
         log("[M1][MonsterCatalog] loaded and validated rows=" .. tostring(rowCount))
         return true
@@ -274,10 +297,12 @@ script MonsterCatalog extends Component
         -- Publish identity, art and display-only intelligence from the validated profile.
         local options = {}
         for _, profile in pairs(self._T.profilesById or {}) do
+            local body = (self._T.bodyOffsets or {})[profile.ModelId] or {}
             table.insert(options, { monsterId = profile.MonsterId, monsterName = profile.MonsterName, standRuid = profile.StandAnimationRUID,
                 monsterType = profile.MonsterType, maxHp = profile.MaxHp,
                 attackDamageMin = profile.AttackDamageMin, attackDamageMax = profile.AttackDamageMax,
-                attackInterval = profile.AttackIntervalSeconds, attackRange = profile.AttackRange })
+                attackInterval = profile.AttackIntervalSeconds, attackRange = profile.AttackRange,
+                attackRangeY = profile.AttackRangeY, bodyOffsetX = body.x, bodyOffsetY = body.y })
         end
         table.sort(options, function(left, right) return left.monsterId < right.monsterId end)
         return options

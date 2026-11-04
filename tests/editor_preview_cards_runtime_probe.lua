@@ -23,6 +23,8 @@ local ok, detail = pcall(function()
     assert(click('Lobby/Edit'), 'edit button')
     assert(await(inEditor), 'editor entered')
     wait(0.4)
+    -- Cards and the preview only react once editing is allowed; click() skips a disabled button silently.
+    assert(await(function() return _FormationEditSession:CanEdit() end), 'editing is available')
     local input = _UserService.LocalPlayer.CurrentMap:GetComponent('FormationMapInput')
 
     -- Cards: selection follows MonsterId; frames come from the template; hover never selects.
@@ -63,7 +65,9 @@ local ok, detail = pcall(function()
 
     -- Preview: shared rules, colours, and it is never a unit.
     assert(_FormationEditSession:PreviewMode() == 'PLACE', 'an armed card previews placement')
-    -- ShowGhost reports what it applied in the same call; the per-frame cursor update would otherwise race a probe's reads.
+    -- ShowGhost reports what it applied in the same call. The per-frame cursor update would otherwise overwrite the preview
+    -- between a probe's write and read, so it is paused until the range checks end (restored after the pcall as well).
+    input.Enable = false
     input:ShowGhost('PLACE', -5, 2)
     wait(0.1) -- a freshly spawned preview takes its colour on the next frame; the game re-applies it every frame
     local info = input:ShowGhost('PLACE', -5, 2)
@@ -73,6 +77,48 @@ local ok, detail = pcall(function()
     assert(info.visible and not info.legal and near(info.r, 1) and near(info.g, 0.25) and near(info.b, 0.25) and near(info.a, 0.55), 'illegal turns red')
     assert(#_FormationEditSession.Draft == 0 and not _FormationEditSession:IsDirty() and #input._T.previews == 0, 'the preview is not a unit, collider or edit')
     log('[VRF][Preview50] ghost colours ok')
+
+    -- Attack range preview (#60): the combat rectangle, always facing right, from the numbers the catalog publishes.
+    -- The rectangle starts at the body centre (foot position minus the hit box offset), reaches AttackRange to the right
+    -- and spans AttackRangeY above and below; GhostInfo reads it back from its own entity (updates paused, so nothing races).
+    local function rangeMatches(range, option, x, y)
+        return range.visible and near(range.w, option.attackRange) and near(range.h, option.attackRangeY * 2)
+            and near(range.x - range.w / 2, x - option.bodyOffsetX) and near(range.y, y + option.bodyOffsetY)
+    end
+    -- A pixel texture may store 8-bit channels, so colours are compared to the nearest 1/100.
+    local function tone(a, b) return math.abs(a - b) < 0.01 end
+    local function red(range) return tone(range.r, 1) and tone(range.g, 0.25) and tone(range.b, 0.25) and tone(range.a, 0.35) end
+    local armedId = _FormationEditSession.SelectedMonsterId
+    local armed = _FormationEditSession:Option(armedId)
+    assert(armed.attackRangeY ~= nil and armed.bodyOffsetX ~= nil and armed.bodyOffsetY ~= nil, 'the catalog publishes the preview numbers')
+    input:ShowGhost('PLACE', -5, 2)
+    local range = input:GhostInfo().range
+    assert(rangeMatches(range, armed, -5, 2), 'legal: starts at the body centre, reaches AttackRange rightwards, AttackRangeY both ways')
+    assert(range.r < range.b and tone(range.a, 0.35), 'legal: a translucent, non-red rectangle')
+    input:ShowGhost('PLACE', -3, 1)
+    assert(rangeMatches(input:GhostInfo().range, armed, -3, 1), 'the rectangle follows the preview')
+    info = input:ShowGhost('PLACE', 5, 2)
+    range = input:GhostInfo().range
+    assert(not info.legal and rangeMatches(range, armed, 5, 2) and red(range), 'an illegal spot turns the rectangle red with the monster')
+    for _, option in ipairs(_FormationEditSession.Snapshot.options) do
+        _FormationEditSession:SelectMonster(option.monsterId)
+        input:ShowGhost('PLACE', -5, 2)
+        assert(rangeMatches(input:GhostInfo().range, option, -5, 2), option.monsterId .. ' draws its own rectangle size')
+    end
+    -- Without an armed card the per-frame update itself shows nothing (the same gate that hides it over UI).
+    _FormationEditSession:SelectMonster('')
+    input:UpdateGhost()
+    assert(not input:GhostInfo().range.visible, 'no placement or move mode means no rectangle')
+    _FormationEditSession:SelectMonster(armedId)
+    input:ShowGhost('PLACE', -5, 2)
+    local rangeEntity = input._T.range
+    assert(isvalid(rangeEntity) and rangeEntity.HitComponent == nil and rangeEntity.KinematicbodyComponent == nil and rangeEntity.TriggerComponent == nil,
+        'the rectangle has no collider and is not a target')
+    assert(#_FormationEditSession.Draft == 0 and not _FormationEditSession:IsDirty() and #input._T.previews == 0, 'the rectangle is not a unit or an edit')
+    input:HideGhost()
+    assert(not input:GhostInfo().range.visible, 'hiding the preview hides the rectangle')
+    input.Enable = true
+    log('[VRF][Preview50] range preview ok')
 
     -- Right-click: cancels only the preview; with none armed it removes; moving keeps the original spot.
     input:HandleWorldClick(Vector3(-5, 0, 0))
@@ -98,16 +144,33 @@ local ok, detail = pcall(function()
     end)
     input.Enable = true
     assert(hoverOk, tostring(hoverDetail))
+    input:ShowGhost('PLACE', -5, 0)
     input:RightClick(-5, 0)
     assert(_FormationEditSession.SelectedMonsterId == '' and #_FormationEditSession.Draft == 1 and _FormationEditSession:PreviewMode() == '', 'the same right-click cancels the preview and removes nothing')
+    assert(not input:GhostInfo().range.visible, 'cancelling a placement clears the rectangle')
     input:HandleWorldClick(Vector3(-5, 0, 0))
     assert(_FormationEditSession.SelectedUnit == 1 and _FormationEditSession:PreviewMode() == 'MOVE', 'without a preview a click selects the unit')
+    -- Paused again: the per-frame cursor update would move the rectangle between the write and the read-back.
+    input.Enable = false
     info = input:ShowGhost('MOVE', -3, 1)
     assert(info.visible and info.legal and info.mode == 'MOVE', 'a move previews at the cursor')
+    assert(rangeMatches(input:GhostInfo().range, _FormationEditSession:Option(_FormationEditSession.Draft[1].monsterId), -3, 1), 'a move shows the moved unit\'s rectangle')
+    input.Enable = true
     input:RightClick(-3, 1)
     assert(_FormationEditSession.SelectedUnit == 0 and #_FormationEditSession.Draft == 1 and near(_FormationEditSession.Draft[1].x, -5) and near(_FormationEditSession.Draft[1].y, 0), 'cancelling a move keeps content and original spot')
+    assert(not input:GhostInfo().range.visible, 'cancelling a move clears the rectangle')
     input:RightClick(-5, 0)
     assert(#_FormationEditSession.Draft == 0, 'with no preview a right-click removes the unit')
     log('[VRF][Preview50] right-click rules ok')
+
+    -- Leaving the map clears every local preview entity, the rectangle included.
+    local leftover = input._T.range
+    assert(isvalid(leftover), 'a rectangle exists to clear')
+    input:ClearPreviews()
+    wait(0.2)
+    assert(not isvalid(leftover) and input._T.range == nil, 'clearing previews leaves no rectangle behind')
+    log('[VRF][Preview50] range cleared')
 end)
+local mapInput = _UserService.LocalPlayer.CurrentMap:GetComponent('FormationMapInput')
+if isvalid(mapInput) then mapInput.Enable = true end
 log(ok and '[VRF][Preview50] PASS' or '[VRF][Preview50] FAIL ' .. tostring(detail))

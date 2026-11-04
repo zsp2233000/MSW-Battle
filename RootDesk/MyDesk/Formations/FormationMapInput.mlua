@@ -13,6 +13,8 @@ script FormationMapInput extends Component
         self._T.ghostRuid = ""
         self._T.ghostLegal = false
         self._T.ghostMode = ""
+        self._T.range = nil
+        self._T.rangeLook = nil
         self._T.hoverIndex = 0
         self._T.touch = _InputService:ConnectEvent(ScreenTouchEvent, self.HandleTouch)
         self._T.key = _InputService:ConnectEvent(KeyDownEvent, self.HandleRightClick)
@@ -177,7 +179,48 @@ script FormationMapInput extends Component
         -- The cursor preview exists only while a legal edit target could be armed under the mouse.
         local ghost = self._T.ghost
         if isvalid(ghost) then ghost:SetEnable(false) end
+        if isvalid(self._T.range) then self._T.range:SetEnable(false) end
         self._T.ghostMode = ""
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ShowRange(any option, number x, number y, boolean legal)
+        -- Draw the right-facing attack rectangle exactly as BattleAttackComposition:GetAttackShape builds it,
+        -- from the published numbers: the body centre starts the rectangle and it reaches AttackRange forward.
+        -- Like the battle spawn, this assumes a unit scale of 1 (battle units only flip the sign of X).
+        if option.attackRangeY == nil or option.bodyOffsetX == nil or option.bodyOffsetY == nil then
+            if isvalid(self._T.range) then self._T.range:SetEnable(false) end
+            return
+        end
+        local range = self._T.range
+        if not isvalid(range) then
+            range = _SpawnService:SpawnByModelId("formationrangepreview", "FormationRangeGhost", Vector3(x, y, 0), self.Entity)
+            if not isvalid(range) then return end
+            self._T.range = range
+            self._T.rangeLook = nil
+        end
+        -- This runs every frame: colour and size are rewritten only when the monster, its numbers or the legality change.
+        local look = table.concat({ option.monsterId, option.attackRange, option.attackRangeY, tostring(legal) }, "|")
+        if self._T.rangeLook ~= look then
+            local color = legal and Color(0.35, 0.75, 1, 0.35) or Color(1, 0.25, 0.25, 0.35)
+            -- One logical pixel stretched by scale; 1 world unit is 100 px.
+            range.PixelRendererComponent:ResetWithColor(1, 1, color)
+            range.TransformComponent.Scale = Vector3(option.attackRange * 100, option.attackRangeY * 2 * 100, 1)
+            self._T.rangeLook = look
+        end
+        range.TransformComponent.Position = Vector3(x - option.bodyOffsetX + option.attackRange / 2, y + option.bodyOffsetY, 0)
+        if range.Enable ~= true then range:SetEnable(true) end
+    end
+
+    @ExecSpace("ClientOnly")
+    method any RangeInfo()
+        -- Read the rectangle back from its entity: centre, size in world units and colour, as the player sees them.
+        local range = self._T.range
+        if not isvalid(range) or range.Enable ~= true or self._T.ghostMode == "" then return { visible = false } end
+        local position = range.TransformComponent.Position
+        local scale = range.TransformComponent.Scale
+        local tint = range.PixelRendererComponent:GetPixel(1, 1)
+        return { visible = true, x = position.x, y = position.y, w = scale.x / 100, h = scale.y / 100, r = tint.r, g = tint.g, b = tint.b, a = tint.a }
     end
 
     @ExecSpace("ClientOnly")
@@ -221,6 +264,7 @@ script FormationMapInput extends Component
         ghost:SetEnable(true)
         self._T.ghostLegal = legal
         self._T.ghostMode = mode
+        self:ShowRange(option, x, y, legal)
         local tint = ghost.SpriteRendererComponent.Color
         return { visible = true, legal = legal, mode = mode, r = tint.r, g = tint.g, b = tint.b, a = tint.a }
     end
@@ -230,7 +274,7 @@ script FormationMapInput extends Component
         -- Read-only view of the cursor preview for verification; the preview never enters the edit content.
         local ghost = self._T.ghost
         local visible = isvalid(ghost) and ghost.Enable == true and self._T.ghostMode ~= ""
-        return { visible = visible, legal = self._T.ghostLegal, mode = self._T.ghostMode }
+        return { visible = visible, legal = self._T.ghostLegal, mode = self._T.ghostMode, range = self:RangeInfo() }
     end
 
     @ExecSpace("ClientOnly")
@@ -301,6 +345,7 @@ script FormationMapInput extends Component
             _FormationEditSession:SelectUnit(0)
             self._T.selected = 0
             self:ClearSelectionEffect()
+            self:HideGhost()
             lobby:Render()
             log("[VRF][FormationSelection] cancelled=right-click move")
             return
@@ -321,7 +366,10 @@ script FormationMapInput extends Component
         self:ClearSelectionEffect()
         for _, entity in ipairs(self._T.previews or {}) do if isvalid(entity) then entity:Destroy() end end
         if isvalid(self._T.ghost) then self._T.ghost:Destroy() end
+        if isvalid(self._T.range) then self._T.range:Destroy() end
         self._T.ghost = nil
+        self._T.range = nil
+        self._T.rangeLook = nil
         self._T.ghostRuid = ""
         self._T.ghostMode = ""
         self._T.hoverIndex = 0

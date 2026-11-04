@@ -289,6 +289,20 @@ test('#50 mouse preview and local edits share one rule set and keep selection ru
   assert.ok(model.components.every(c => !/Trigger|Collider|Body|TouchReceive/.test(c)), 'the preview model cannot be a target or collide');
 });
 
+test('#60 the attack range preview is drawn with the monster preview, collider-free, and cleared with it', () => {
+  const input = read('RootDesk/MyDesk/Formations/FormationMapInput.mlua');
+  const catalog = read('RootDesk/MyDesk/Combat/MonsterCatalog.mlua');
+  assert.match(method(input, 'ShowGhost'), /self:ShowRange\(option, x, y, legal\)/, 'same call and same legality as the monster preview');
+  assert.match(method(input, 'HideGhost'), /_T\.range:SetEnable\(false\)/, 'hidden whenever the monster preview is');
+  assert.match(method(input, 'UpdateGhost'), /mode == "" or _InputService:IsPointerOverUI\(\) then\s*self:HideGhost\(\)/, 'no mode or a cursor over UI hides both previews');
+  assert.match(method(input, 'RightClick'), /mode == "MOVE"[\s\S]*?self:HideGhost\(\)[\s\S]*?return[\s\S]*mode == "PLACE"[\s\S]*?self:HideGhost\(\)/, 'cancelling a move or a placement hides at once');
+  assert.match(method(input, 'ClearPreviews'), /_T\.range:Destroy\(\)/, 'no entity is left behind');
+  assert.match(catalog, /attackRangeY = profile\.AttackRangeY, bodyOffsetX = body\.x, bodyOffsetY = body\.y/, 'the catalog publishes the preview numbers');
+  assert.match(method(catalog, 'MeasureBody'), /HitComponent[\s\S]*ColliderOffset/, 'the body centre is read from the model\'s real hit box, not stored again');
+  const model = require('../.agents/skills/msw-general/scripts/model/msw_model_builder.cjs').ModelBuilder.snapshot('RootDesk/MyDesk/Models/MapObjects/FormationRangePreview.model');
+  assert.deepEqual(model.components, ['MOD.Core.TransformComponent', 'MOD.Core.PixelRendererComponent'], 'the rectangle model cannot be a target or collide');
+});
+
 test('every map preserves the template formation terrain and coordinate system', () => {
   const reference = MapBuilder.read('map/template.map');
   const terrain = map => {
