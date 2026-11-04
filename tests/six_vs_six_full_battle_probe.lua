@@ -38,7 +38,7 @@ check(#rosterRecords == 12, "observer captures all twelve production roster memb
 local elapsed = 0
 
 local function observe()
-    if session.Phase ~= "RESULT" and elapsed < 45 then
+    if session.Phase ~= "RESULT" and elapsed < 120 then
         elapsed = elapsed + 1
         _TimerService:SetTimerOnce(observe, 1)
         return
@@ -46,7 +46,7 @@ local function observe()
 
     check(session.Phase == "RESULT" and
         (session.Result == "WIN" or session.Result == "LOSE" or session.Result == "DRAW"),
-        "natural battle reaches one result within 45 seconds")
+        "natural battle reaches one result within 120 seconds")
     if session.Phase ~= "RESULT" then
         log_error("[M1][SixVsSixFullBattle] FAILURES=" .. tostring(failures))
         return

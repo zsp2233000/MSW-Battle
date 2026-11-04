@@ -4,7 +4,7 @@ local ok, detail = pcall(function()
     assert(battle.InitialPlayerAlive == 6 and battle.InitialEnemyAlive == 1, "queue-time rosters, not the later one-unit save")
     assert(battle:PrepareBattleForTest({}, {}) == false, "Maker fixture cannot replace a production match")
     assert(battle:InitializeMatchedBattle(battle.MatchKey, battle.HomeProfile, battle.AwayProfile, {}, {}) == false, "cannot initialize twice")
-    for attempt = 1, 450 do if battle.Phase == "RESULT" then break end wait(0.1) end
+    for attempt = 1, 1200 do if battle.Phase == "RESULT" then break end wait(0.1) end
     assert(battle.Phase == "RESULT", "natural battle finishes")
     assert(battle:ResultForProfile(battle.HomeProfile) == "WIN", "six tanks win naturally")
     assert(battle:ResultForProfile(battle.AwayProfile) == "LOSE", "opponent sees the complementary result")

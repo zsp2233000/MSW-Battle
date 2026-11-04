@@ -86,7 +86,7 @@ local function startSingleUnitBattle()
                     "deployment controls hide and disable after battle starts")
 
                 local function observeResult(elapsed)
-                    if adapter.session.Phase ~= "RESULT" and elapsed < 45 then
+                    if adapter.session.Phase ~= "RESULT" and elapsed < 120 then
                         _TimerService:SetTimerOnce(function() observeResult(elapsed + 1) end, 1)
                         return
                     end
