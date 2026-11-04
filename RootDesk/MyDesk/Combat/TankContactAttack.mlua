@@ -21,8 +21,12 @@ script TankContactAttack extends AttackComponent
     @ExecSpace("ServerOnly")
     method void ResolveImpact(Entity target)
         -- Sweep the current position using the facing locked at attack start, even if the selected target left.
-        local direction = self.Entity.TransformComponent.Scale.x < 0 and 1 or -1
-        self:Attack(self._T.execution:GetAttackShape(direction), "tank", nil)
+        if not isvalid(self.Entity) then return end
+        local transform = self.Entity.TransformComponent
+        local execution = self._T.execution
+        if not isvalid(transform) or not isvalid(execution) then return end
+        local direction = transform.Scale.x < 0 and 1 or -1
+        self:Attack(execution:GetAttackShape(direction), "tank", nil)
     end
 
     method integer CalcDamage(Entity attacker, Entity defender, string attackInfo)
