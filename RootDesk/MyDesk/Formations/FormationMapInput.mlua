@@ -217,18 +217,21 @@ script FormationMapInput extends Component
         -- Outline the right-facing attack rectangle exactly as BattleAttackComposition:GetAttackShape builds it,
         -- from the published numbers: the body centre starts the rectangle and it reaches AttackRange forward.
         -- Like the battle spawn, this assumes a unit scale of 1 (battle units only flip the sign of X).
-        if option.attackRangeY == nil or option.bodyOffsetX == nil or option.bodyOffsetY == nil then
+        if option.attackRange == nil or option.attackRangeY == nil or option.bodyOffsetX == nil or option.bodyOffsetY == nil then
             self:SetRangeEnable(false)
             return
         end
         local bars = self._T.range
+        if bars == false then return end
         if bars == nil then
             -- Bars 1..4 are top, bottom, left, right.
             bars = {}
             for index = 1, 4 do
                 local bar = _SpawnService:SpawnByModelId("formationrangepreview", "FormationRangeGhost" .. tostring(index), Vector3(x, y, 0), self.Entity)
                 if not isvalid(bar) then
-                    for _, made in ipairs(bars) do made:Destroy() end
+                    for _, made in ipairs(bars) do if isvalid(made) then made:Destroy() end end
+                    -- false = spawning failed; do not retry every frame until ClearPreviews resets it.
+                    self._T.range = false
                     return
                 end
                 bars[index] = bar
