@@ -8,7 +8,7 @@ local function click(path) l:Ui(path):SendEvent(ButtonClickEvent()) end
 local changed = {}
 local nameTemplate = l:Ui('Editor/Catalog/Template/MonsterName')
 local originalFont = nameTemplate.TextGUIRendererComponent.FontSize
-local originalState, originalSummary, originalMessage = m.State, m.FixedSummary, m.Message
+local originalState, originalSummary, originalMessage = m.Snapshot.state, m.Snapshot.summary, m.Snapshot.reasonCode
 local function keepAuthored(entity)
     local transform = entity.UITransformComponent
     local entry = {entity=entity, pos=transform.anchoredPosition, size=transform.RectSize}
@@ -26,7 +26,7 @@ local function assertAuthored()
 end
 local ok, detail = pcall(function()
     assert(await(function() return #(_FormationEditSession.Snapshot.options or {}) > 0 and m._T.panel ~= nil
-        and not m._T.pending and not m.Busy end), 'catalog and screen ready')
+        and not m._T.pending and not m.Snapshot.busy end), 'catalog and screen ready')
     assert(_UserService.LocalPlayer.CurrentMapName == 'formationlobby', 'start in lobby')
     assert(l:Ui('Lobby').EnabledInHierarchy and not l:Ui('Editor').Enable
         and not l:Ui('EditorControls').Enable and not l:Ui('Editor/Catalog/Template').Enable, 'authoring preview hidden in play')
@@ -58,7 +58,7 @@ local ok, detail = pcall(function()
     assert(l:Ui('Editor').EnabledInHierarchy and not l:Ui('Editor/Catalog/Template').Enable, 'expand shows generated cards only')
     for _, route in ipairs({{'matchprobe','BattleMatch'},{'formationlobby','Match'}}) do
         m:SelectScreen(route[1])
-        m.State, m.FixedSummary, m.Message = 'RESULT_WIN', 'authoring probe', ''
+        m.Snapshot.state, m.Snapshot.summary, m.Snapshot.reasonCode = 'RESULT_WIN', 'authoring probe', ''
         m:Render()
         assert(m._T.panel.Name == route[2] and m.action == m._T.panel:GetChildByName('Action'), 'action belongs to selected screen')
         assert(m.action.TextGUIRendererComponent.Text == '返回大廳', 'selected action receives state')
@@ -68,7 +68,7 @@ local ok, detail = pcall(function()
             assert(m.root:GetChildByName(name).Enable == (name == route[2]), 'exactly one screen enabled')
         end
     end
-    m.State, m.FixedSummary, m.Message = originalState, originalSummary, originalMessage
+    m.Snapshot.state, m.Snapshot.summary, m.Snapshot.reasonCode = originalState, originalSummary, originalMessage
     l:Render()
     m:Render()
     assertAuthored()
@@ -86,7 +86,7 @@ end
 nameTemplate.TextGUIRendererComponent.FontSize = originalFont
 _FormationCatalogCards._T.optionsKey = ''
 _FormationCatalogCards:BuildOptions(_FormationEditSession.Snapshot.options)
-m.State, m.FixedSummary, m.Message = originalState, originalSummary, originalMessage
+m.Snapshot.state, m.Snapshot.summary, m.Snapshot.reasonCode = originalState, originalSummary, originalMessage
 m:SelectScreen(_UserService.LocalPlayer.CurrentMapName)
 l:Render()
 m:Render()

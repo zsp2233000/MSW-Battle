@@ -45,31 +45,17 @@ script MatchFlow extends Logic
     end
 
     @ExecSpace("ServerOnly")
-    method void Report(string userId, string message)
-        -- Observations contain service codes and public location identifiers, never capsule contents.
-        log("[VRF][MatchFlow] " .. message)
+    method void Report(string userId, table event)
+        -- Diagnostic details never participate in state or failure decisions.
+        log("[VRF][MatchFlow] " .. event.code .. " " .. _HttpService:JSONEncode(event.details or {}))
         if self:Player(userId) == nil then return end
         local ticket = self._T.records[userId]
         local attempt = ticket ~= nil and ticket.data.attempt or ""
-        if string.find(message, "FAILED", 1, true) or string.find(message, "ok=false", 1, true) then
-            self._T.failures[userId] = { attempt = attempt, message = message }
-        elseif string.find(message, "ok=true", 1, true) or string.sub(message, 1, 8) == "RETURNED" or message == "CANCELLED" then
-            self._T.failures[userId] = nil
-        end
-        self:Receive(message, userId)
-        self:PublishState(userId, message)
+        self._T.failures[userId] = _MatchFlowState:Failure(self._T.failures[userId], event, attempt)
+        self:PublishState(userId, event.code)
     end
 
-    @ExecSpace("Client")
-    method void Receive(string message)
-        -- Reuse the existing toast; F8 provides repeatable status without exposing private payloads.
-        if message == "NEED_LOADED_VALID_ACTIVE_FORMATION_AND_NO_PENDING_SAVE" then
-            _UIToast:ShowMessage("請先儲存隊伍並設為出戰，儲存完成後再試。")
-        elseif message == "MATCHMAKING_NOT_CONFIGURED" then
-            _UIToast:ShowMessage("線上配對服務尚未設定")
-        end
-        log("[VRF][MatchFlowUI] status received")
-    end
+
 
     @ExecSpace("ServerOnly")
     method string StateForUser(string userId)
@@ -89,38 +75,32 @@ script MatchFlow extends Logic
         local started = ticket ~= nil and ticket.data.started or 0
         local inMatchRoom = ticket ~= nil and state == "IN_ROOM" and _RoomService:IsInstanceRoom() and _RoomService.RoomKey == ticket.data.matchKey
         local count = inMatchRoom and #_UserService.UserEntities.Values or 0
-        if state == "IN_ROOM" and not inMatchRoom then state = "ROOM_MISMATCH" end
-        if _RoomService:IsInstanceRoom() and not inMatchRoom and state ~= "RETURNING" then state = "ENTRY_FAILED" end
-        if inMatchRoom then
-            local map = _EntityService:GetEntityByPath("/maps/matchprobe")
-            local battle = isvalid(map) and map:GetComponent("script.BattleSession") or nil
-            local flow = isvalid(map) and map:GetFirstChildComponentByTypeName("script.MatchedBattle", true) or nil
-            if isvalid(flow) and flow.AdmissionFailed then
-                state = "ENTRY_FAILED"
-            elseif isvalid(battle) then
-                state = battle.Phase
-                if battle.MatchKey ~= "" and (battle.MatchKey ~= ticket.data.matchKey or (ticket.data.profile ~= battle.HomeProfile and ticket.data.profile ~= battle.AwayProfile)) then state = "ENTRY_FAILED" end
-                if state == "RESULT" then state = "RESULT_" .. battle:ResultForProfile(ticket.data.profile) end
-                if state == "CONFIG_ERROR" then state = "ENTRY_FAILED" end
-            end
-        end
+        local map = inMatchRoom and _EntityService:GetEntityByPath("/maps/matchprobe") or nil
+        local battle = isvalid(map) and map:GetComponent("script.BattleSession") or nil
+        local flow = isvalid(map) and map:GetFirstChildComponentByTypeName("script.MatchedBattle", true) or nil
         local summary = ticket ~= nil and ticket.data.summary or ""
         local attempt = ticket ~= nil and ticket.data.attempt or ""
-        local failure = self._T.failures[userId]
-        if failure ~= nil and failure.attempt == attempt and state ~= "IDLE" and state ~= "BATTLE" then
-            message = failure.message
-        end
         self._T.presentationSequence[userId] = (self._T.presentationSequence[userId] or 0) + 1
-        self:ReceiveState(state, message, started, count, _RoomService.RoomKey, self._T.busy[userId] == true, summary, attempt, _WorldInstanceService.WorldInstanceId .. ":" .. _RoomService.RoomKey, self._T.presentationSequence[userId], userId)
+        local snapshot = _MatchFlowState:Resolve({ state = state, inMatchRoom = inMatchRoom,
+            instanceRoom = _RoomService:IsInstanceRoom(), admissionFailed = isvalid(flow) and flow.AdmissionFailed,
+            battlePhase = isvalid(battle) and battle.Phase or "",
+            battleAuthorized = not isvalid(battle) or battle.MatchKey == "" or (battle.MatchKey == ticket.data.matchKey and (ticket.data.profile == battle.HomeProfile or ticket.data.profile == battle.AwayProfile)),
+            result = isvalid(battle) and battle:ResultForProfile(ticket.data.profile) or "",
+            failure = self._T.failures[userId], snapshot = { eventCode = message, reasonCode = message,
+                started = started, players = count, sourceRoom = _RoomService.RoomKey,
+                busy = self._T.busy[userId] == true, summary = summary, attempt = attempt,
+                sequenceKey = _WorldInstanceService.WorldInstanceId .. ":" .. _RoomService.RoomKey,
+                sequence = self._T.presentationSequence[userId] } })
+        self:ReceiveState(snapshot, userId)
     end
 
     @ExecSpace("Client")
-    method void ReceiveState(string state, string message, number started, integer count, string sourceRoom, boolean busy, string summary, string attempt, string sequenceKey, integer sequence)
-        -- Deliver state and in-flight ownership to the visible button controller.
-        if sourceRoom ~= _RoomService.RoomKey then return end
+    method void ReceiveState(table snapshot)
+        -- Reject foreign room observations before they can clear client pending state.
+        if snapshot.sourceRoom ~= _RoomService.RoomKey then return end
         local player = _UserService.LocalPlayer
-        if isvalid(player) and (player.CurrentMapName == "matchprobe") ~= (sourceRoom ~= "__main__") then return end
-        _MatchFlowInput:Observe(state, message, started, count, busy, summary, attempt, sequenceKey, sequence)
+        if isvalid(player) and (player.CurrentMapName == "matchprobe") ~= (snapshot.sourceRoom ~= "__main__") then return end
+        _MatchFlowInput:Observe(snapshot)
     end
 
     @ExecSpace("ServerOnly")
@@ -174,22 +154,22 @@ script MatchFlow extends Logic
     method void QueueForUser(string userId)
         -- Share the authenticated entry path with server-driven Maker verification.
         local player = self:Player(userId)
-        if player == nil then self:Report(userId, "DISABLED_OR_NOT_PUBLISHED") return end
-        if player.CurrentMapName ~= "formationlobby" then self:Report(userId, "LOBBY_ONLY") return end
-        if not Environment:IsMakerPlay() and self.LeaderboardId == "" then self:Report(userId, "MATCHMAKING_NOT_CONFIGURED") return end
+        if player == nil then self:Report(userId, { code = "DISABLED_OR_NOT_PUBLISHED" }) return end
+        if player.CurrentMapName ~= "formationlobby" then self:Report(userId, { code = "LOBBY_ONLY" }) return end
+        if not Environment:IsMakerPlay() and self.LeaderboardId == "" then self:Report(userId, { code = "MATCHMAKING_NOT_CONFIGURED" }) return end
         if _RoomService:IsInstanceRoom() or self._T.busy[userId] or self._T.records[userId] ~= nil then return end
         self._T.busy[userId] = true
         local profile = player.PlayerComponent.ProfileCode
         local ticket = _FormationHandoff:Read(profile)
         if ticket == nil then
             self._T.busy[userId] = nil
-            self:Report(userId, "NEED_LOADED_VALID_ACTIVE_FORMATION_AND_NO_PENDING_SAVE")
+            self:Report(userId, { code = "NEED_LOADED_VALID_ACTIVE_FORMATION_AND_NO_PENDING_SAVE" })
             return
         end
         if ticket.data ~= nil and ticket.data.state ~= "RETURNED" and ticket.data.state ~= "CANCELLED" then
             self._T.busy[userId] = nil
             self:Recover(userId)
-            self:Report(userId, "EXISTING_TICKET_USE_STATUS_OR_CANCEL")
+            self:Report(userId, { code = "EXISTING_TICKET_USE_STATUS_OR_CANCEL" })
             return
         end
         ticket.data = { schema = 1, profile = profile, attempt = _UtilLogic:NewGuid(), requestId = _UtilLogic:NewGuid(), source = _WorldInstanceService.WorldInstanceId, adapter = Environment:IsMakerPlay() and "local" or "native", state = "QUEUED", started = DateTime.UtcNow.Elapsed, expires = 0, matchKey = "" }
@@ -201,14 +181,14 @@ script MatchFlow extends Logic
                 self._T.records[userId] = nil
             end
             self._T.busy[userId] = nil
-            self:Report(userId, ticket.failure or "RESERVATION_SAVE_FAILED")
+            self:Report(userId, { code = ticket.failure or "RESERVATION_SAVE_FAILED" })
             return
         end
         if self._T.records[userId] ~= ticket or self:Player(userId) == nil or ticket.data.state ~= "QUEUED" then self._T.busy[userId] = nil return end
         self._T.busy[userId] = nil
         if Environment:IsMakerPlay() then
             table.insert(self._T.localQueue, userId)
-            self:Report(userId, "QUEUED_LOCAL")
+            self:Report(userId, { code = "QUEUED_LOCAL" })
             self:TryLocalMatch()
             return
         end
@@ -220,14 +200,14 @@ script MatchFlow extends Logic
         -- Own one native registration until it completes; map changes never submit a second request.
         if self._T.records[userId] ~= ticket or ticket.data.state ~= "QUEUED" then return end
         if Environment:IsMakerPlay() then
-            self:Report(userId, "QUEUED_LOCAL")
+            self:Report(userId, { code = "QUEUED_LOCAL" })
             self:TryLocalMatch()
             return
         end
         local requestId = ticket.data.requestId
         local extras = _HttpService:JSONEncode({ schema = 1, attempt = requestId, source = ticket.data.source })
         ticket.submitting = true
-        self:Report(userId, "SUBMITTING")
+        self:Report(userId, { code = "SUBMITTING" })
         local code = _MatchmakingService:RequestMatchingAndWait(self.LeaderboardId, self.QueueName, ticket.data.profile, extras, function(info)
             local result = info ~= nil and tostring(info.ResultCode) or "MISSING"
             self:QueueResult(userId, ticket, requestId, result)
@@ -237,7 +217,7 @@ script MatchFlow extends Logic
         if code ~= MatchmakingResultCode.Ok then
             self:QueueResult(userId, ticket, requestId, tostring(code))
         else
-            self:Report(userId, "QUEUED")
+            self:Report(userId, { code = "QUEUED" })
         end
     end
 
@@ -250,7 +230,7 @@ script MatchFlow extends Logic
         elseif result == tostring(MatchmakingResultCode.MatchingExpired) or result == tostring(MatchmakingResultCode.NotMatched)
             or result == tostring(MatchmakingResultCode.NotMatching) or result == tostring(MatchmakingResultCode.RequestNotFound) then
             ticket.data.state = "RENEWING"
-            self:Report(userId, "QUEUE_RENEWING")
+            self:Report(userId, { code = "QUEUE_RENEWING" })
             self._T.queueTimers[userId] = _TimerService:SetTimerOnce(function()
                 if self._T.records[userId] ~= ticket or ticket.data.state ~= "RENEWING" then return end
                 while ticket.submitting or ticket.cancelling or self._T.busy[userId] do
@@ -262,14 +242,14 @@ script MatchFlow extends Logic
                 ticket.data.requestId = _UtilLogic:NewGuid()
                 local stored = _FormationHandoff:Store(ticket)
                 self._T.busy[userId] = nil
-                if not stored then ticket.data.state = "QUEUE_ERROR" self:Report(userId, "QUEUE_RENEW_SAVE_FAILED") return end
+                if not stored then ticket.data.state = "QUEUE_ERROR" self:Report(userId, { code = "QUEUE_RENEW_SAVE_FAILED" }) return end
                 ticket.data.state = "QUEUED"
                 log("[VRF][Queue] renewed; original clock and fixed formation retained")
                 self:SubmitQueue(userId, ticket)
             end, 1)
         else
             ticket.data.state = "QUEUE_ERROR"
-            self:Report(userId, "QUEUE_SERVICE_FAILED code=" .. result)
+            self:Report(userId, { code = "QUEUE_SERVICE_FAILED", details = { serviceCode = result } })
         end
     end
 
@@ -292,7 +272,7 @@ script MatchFlow extends Logic
             table.insert(self._T.localQueue, firstId)
             second.data.state = "CANCELLED"
             if _FormationHandoff:Close(secondId, second, "CANCELLED") then self._T.records[secondId] = nil end
-            self:Report(secondId, "DUPLICATE_PROFILE")
+            self:Report(secondId, { code = "DUPLICATE_PROFILE" })
             return
         end
         local matched = { key = "local-" .. _UtilLogic:NewGuid(), home = first.data.profile, away = second.data.profile, homeAttempt = first.data.requestId or first.data.attempt, awayAttempt = second.data.requestId or second.data.attempt, homeSource = first.data.source, awaySource = second.data.source, differentSources = false }
@@ -317,7 +297,7 @@ script MatchFlow extends Logic
         self:PublishState(userId, "MATCHED")
         local matched = self:Match(ticket.data.profile)
         if self._T.records[userId] ~= ticket or ticket.data.state ~= "SAVING" then return end
-        if matched == nil or not self:Belongs(ticket.data, matched) then ticket.data.state = "QUEUE_ERROR" self:Report(userId, "QUEUE_RESULT_INVALID") return end
+        if matched == nil or not self:Belongs(ticket.data, matched) then ticket.data.state = "QUEUE_ERROR" self:Report(userId, { code = "QUEUE_RESULT_INVALID" }) return end
         if self.SaveDelaySeconds > 0 then wait(math.min(120, self.SaveDelaySeconds)) end
         if ticket.data.state ~= "SAVING" then return end
         local sealed = _FormationHandoff:Seal(userId, ticket, function()
@@ -329,7 +309,7 @@ script MatchFlow extends Logic
         if self._T.records[userId] ~= ticket or ticket.data.state ~= "SAVING" then return end
         if not sealed then
             ticket.data.state = "QUEUE_ERROR"
-            self:Report(userId, "CAPTURE_NOT_READY; cancel and retry")
+            self:Report(userId, { code = "CAPTURE_NOT_READY" })
             return
         end
         self._T.failures[userId] = nil
@@ -340,13 +320,13 @@ script MatchFlow extends Logic
         self._T.busy[userId] = true
         ticket.data.state = "COMMITTING"
         self:PublishState(userId, "COMMITTING")
-        if not _FormationHandoff:Store(ticket) then self._T.busy[userId] = nil self:Report(userId, "HANDOFF_SAVE_FAILED") return end
+        if not _FormationHandoff:Store(ticket) then self._T.busy[userId] = nil self:Report(userId, { code = "HANDOFF_SAVE_FAILED" }) return end
         if self._T.records[userId] ~= ticket or self:Player(userId) == nil then self._T.busy[userId] = nil return end
         ticket.data.state = "TRANSFER"
-        if not _FormationHandoff:Store(ticket) then self._T.busy[userId] = nil self:Report(userId, "HANDOFF_SEAL_FAILED") return end
+        if not _FormationHandoff:Store(ticket) then self._T.busy[userId] = nil self:Report(userId, { code = "HANDOFF_SEAL_FAILED" }) return end
         self._T.busy[userId] = nil
         if self._T.records[userId] ~= ticket or self:Player(userId) == nil then return end
-        self:Report(userId, "SEALED match=" .. matched.key .. " differentSources=" .. tostring(matched.differentSources))
+        self:Report(userId, { code = "SEALED", details = { matchKey = matched.key, differentSources = matched.differentSources } })
         self:NotifyReady(matched)
         self:Recover(userId)
     end
@@ -373,7 +353,7 @@ script MatchFlow extends Logic
                 table.insert(self._T.notifyTimers, timer)
             else
                 for userId, ticket in pairs(self._T.records) do
-                    if ticket.data.matchKey == matchKey and ticket.data.state == "TRANSFER" then self:Report(userId, "READINESS_FAILED") end
+                    if ticket.data.matchKey == matchKey and ticket.data.state == "TRANSFER" then self:Report(userId, { code = "READINESS_FAILED" }) end
                 end
             end
         end)
@@ -472,7 +452,7 @@ script MatchFlow extends Logic
         -- A reconnected player cannot join Depart's in-flight cancellation; that cleanup owns this ticket.
         if ticket.cancelling then log("[VRF][MatchCancel] cleanup owns cancellation") return end
         local state = ticket.data.state
-        if state ~= "QUEUED" and state ~= "RENEWING" and state ~= "QUEUE_ERROR" and state ~= "SAVING" and state ~= "CANCELLED" then self:Report(userId, "COMMITTED_USE_RETURN_OR_STATUS") return end
+        if state ~= "QUEUED" and state ~= "RENEWING" and state ~= "QUEUE_ERROR" and state ~= "SAVING" and state ~= "CANCELLED" then self:Report(userId, { code = "COMMITTED_USE_RETURN_OR_STATUS" }) return end
         log("[VRF][MatchCancel] requested state=" .. state)
         ticket.cancelling = true
         self._T.busy[userId] = true
@@ -490,7 +470,7 @@ script MatchFlow extends Logic
         if not cancelled then
             ticket.cancelling = nil
             self._T.busy[userId] = nil
-            self:Report(userId, "CANCEL_FAILED")
+            self:Report(userId, { code = "CANCEL_FAILED" })
             if self:Player(userId) ~= nil then self:ResumeDeferredMatch(userId, ticket) end
             return
         end
@@ -500,8 +480,8 @@ script MatchFlow extends Logic
         ticket.cancelling = nil
         self._T.busy[userId] = nil
         if stored or self:Player(userId) == nil then self._T.records[userId] = nil end
-        self:Report(userId, "CANCEL tombstone=" .. tostring(stored))
-        self:Report(userId, stored and "CANCELLED" or "CANCEL_SAVE_FAILED")
+        self:Report(userId, { code = "CANCEL_OBSERVED", details = { stored = stored } })
+        self:Report(userId, { code = stored and "CANCELLED" or "CANCEL_SAVE_FAILED" })
     end
 
     @ExecSpace("ServerOnly")
@@ -545,7 +525,7 @@ script MatchFlow extends Logic
             if not Environment:IsMakerPlay() and (data.state == "QUEUED" or data.state == "SAVING" or data.state == "RENEWING" or data.state == "QUEUE_ERROR") then
                 -- A restored reservation has no live callback owner; never present it as a healthy queue.
                 data.state = "QUEUE_ERROR"
-                self:Report(userId, "QUEUE_OWNER_LOST; cancel before retry")
+                self:Report(userId, { code = "QUEUE_OWNER_LOST" })
             elseif Environment:IsMakerPlay() and (data.adapter == "local" or data.adapter == nil) and (data.state == "QUEUED" or data.state == "SAVING" or data.state == "RENEWING" or data.state == "QUEUE_ERROR") then
                 -- A Maker Play restart discards its local FIFO, so stale queue reservations cannot resume.
                 local staleState = data.state
@@ -554,32 +534,32 @@ script MatchFlow extends Logic
                     self._T.records[userId] = nil
                     _FormationHandoff:Release(userId, ticket.id)
                     log("[VRF][MatchFlow] stale local queue cancelled=true")
-                    self:Report(userId, "CANCELLED")
+                    self:Report(userId, { code = "CANCELLED" })
                 else
                     data.state = staleState
                     _FormationHandoff:Release(userId, ticket.id)
-                    self:Report(userId, "STALE_QUEUE_CLEANUP_FAILED")
+                    self:Report(userId, { code = "STALE_QUEUE_CLEANUP_FAILED" })
                 end
             elseif Environment:IsMakerPlay() and self._T.localMatches[data.profile] == nil and (data.adapter == "local" or string.sub(data.matchKey, 1, 6) == "local-") and (data.state == "COMMITTING" or data.state == "TRANSFER") then
                 -- Restore a local match only after its Maker session has lost the in-memory match entry.
                 local staleState = data.state
                 data.state = "RETURNING"
                 if _FormationHandoff:Store(ticket) then
-                    self:Report(userId, "STALE_MATCH_RECOVERY")
+                    self:Report(userId, { code = "STALE_MATCH_RECOVERY" })
                     self:RestoreReturning(userId, ticket)
                 else
                     data.state = staleState
-                    self:Report(userId, "STALE_MATCH_RECOVERY_SAVE_FAILED")
+                    self:Report(userId, { code = "STALE_MATCH_RECOVERY_SAVE_FAILED" })
                 end
             elseif (data.state == "TRANSFER" or data.state == "COMMITTING") and data.expires <= DateTime.UtcNow.Elapsed and not _RoomService:IsInstanceRoom() then
                 local previous = data.state
                 data.state = "RETURNING"
                 if _FormationHandoff:Store(ticket) then
-                    self:Report(userId, "TRANSFER_EXPIRED")
+                    self:Report(userId, { code = "TRANSFER_EXPIRED" })
                     self:RestoreReturning(userId, ticket)
                 else
                     data.state = previous
-                    self:Report(userId, "RETURN_SAVE_FAILED")
+                    self:Report(userId, { code = "RETURN_SAVE_FAILED" })
                 end
             elseif data.state == "TRANSFER" and data.expires > DateTime.UtcNow.Elapsed and not _RoomService:IsInstanceRoom() then
                 local matched = self:Match(data.profile)
@@ -589,20 +569,20 @@ script MatchFlow extends Logic
             elseif data.state == "IN_ROOM" and _RoomService.RoomKey == data.matchKey then
                 -- Retain durable authority for battle admission and later lobby restoration.
                 local count = #_UserService.UserEntities.Values
-                self:Report(userId, "ARRIVED match=" .. data.matchKey .. " users=" .. tostring(count))
+                self:Report(userId, { code = "ARRIVED", details = { matchKey = data.matchKey, players = count } })
             elseif data.state == "IN_ROOM" and not _RoomService:IsInstanceRoom() then
                 -- A prior Maker session or room exit left a durable ticket behind; restore it in the lobby.
                 data.state = "RETURNING"
                 if _FormationHandoff:Store(ticket) then
-                    self:Report(userId, "STALE_ROOM_RECOVERY")
+                    self:Report(userId, { code = "STALE_ROOM_RECOVERY" })
                     self:RestoreReturning(userId, ticket)
                 else
                     data.state = "IN_ROOM"
-                    self:Report(userId, "STALE_ROOM_RECOVERY_SAVE_FAILED")
+                    self:Report(userId, { code = "STALE_ROOM_RECOVERY_SAVE_FAILED" })
                 end
             elseif data.state == "IN_ROOM" then
                 -- A visible retry can send a stale room ticket back to a safe lobby before restoring it.
-                self:Report(userId, "ROOM_MISMATCH")
+                self:Report(userId, { code = "ROOM_MISMATCH" })
             elseif data.state == "RETURNING" and not _RoomService:IsInstanceRoom() then
                 self:RestoreReturning(userId, ticket)
             end
@@ -625,7 +605,7 @@ script MatchFlow extends Logic
             if stored then
                 self._T.records[userId] = nil
                 self._T.localMatches[ticket.data.profile] = nil
-                self:Report(userId, "RETURNED restored=true cleanup=true")
+                self:Report(userId, { code = "RETURN_COMPLETED" })
                 return
             end
         end
@@ -640,7 +620,7 @@ script MatchFlow extends Logic
                 self:PublishState(userId, "RESTORE_PENDING")
             end, 1)
         else
-            self:Report(userId, "RESTORE_RETRY_REQUIRED")
+            self:Report(userId, { code = "RESTORE_RETRY_REQUIRED" })
         end
     end
 
@@ -660,11 +640,11 @@ script MatchFlow extends Logic
             self:Admit(userId, ticket, matched)
         elseif ticket.data.profile == matched.home then
             -- Persist the one-shot marker before dispatch; status never retries an ambiguous native warp.
-            if ticket.data.warpIssued then self:Report(userId, "WARP_ALREADY_ISSUED_WAIT_OR_RETURN") return end
+            if ticket.data.warpIssued then self:Report(userId, { code = "WARP_ALREADY_ISSUED_WAIT_OR_RETURN" }) return end
             ticket.data.warpIssued = true
             if not _FormationHandoff:Store(ticket) then return end
             local code = _MatchmakingService:WarpMatchUser(ticket.data.profile)
-            self:Report(userId, "WARP code=" .. tostring(code) .. " match=" .. matched.key)
+            self:Report(userId, { code = "WARP", details = { serviceCode = code, matchKey = matched.key } })
             local timer = 0
             timer = _TimerService:SetTimerOnce(function()
                 self._T.progressTimers[timer] = nil
@@ -672,7 +652,7 @@ script MatchFlow extends Logic
             end, 1)
             self._T.progressTimers[timer] = true
         else
-            self:Report(userId, "WAIT_HOME_STATUS; both capsules ready")
+            self:Report(userId, { code = "WAIT_HOME_STATUS" })
         end
     end
 
@@ -730,7 +710,7 @@ script MatchFlow extends Logic
             if not cancelled then
                 -- The native queue may still be live: keep the ticket locked and its callback owned for a retry.
                 if self:Player(userId) ~= nil then
-                    self:Report(userId, "CANCEL_FAILED")
+                    self:Report(userId, { code = "CANCEL_FAILED" })
                     self:ResumeDeferredMatch(userId, ticket)
                 end
                 return
@@ -758,12 +738,12 @@ script MatchFlow extends Logic
         if slot.room == nil or not slot.room:IsValid() then
             self._T.closedMatches[matched.key] = true
             self._T.rooms[matched.key] = nil
-            self:Report(userId, "ROOM_CREATE_FAILED")
+            self:Report(userId, { code = "ROOM_CREATE_FAILED" })
             return
         end
         if self:Player(userId) == nil or self._T.records[userId] ~= ticket or ticket.data.state ~= "TRANSFER" then return end
         ticket.data.state = "IN_ROOM"
-        if not _FormationHandoff:Store(ticket) then self:Report(userId, "ADMISSION_SAVE_FAILED") return end
+        if not _FormationHandoff:Store(ticket) then self:Report(userId, { code = "ADMISSION_SAVE_FAILED" }) return end
         if self:Player(userId) == nil or self._T.records[userId] ~= ticket then return end
         local moved = self:MoveToMatch(slot.room, userId)
         log("[VRF][MatchTransfer] match=" .. matched.key .. " entry=" .. tostring(moved))
@@ -772,7 +752,7 @@ script MatchFlow extends Logic
             ticket.data.state = "TRANSFER"
             _FormationHandoff:Store(ticket)
         end
-        self:Report(userId, "ROOM_MOVE ok=" .. tostring(moved))
+        self:Report(userId, { code = moved and "ROOM_MOVE_OK" or "ROOM_MOVE_FAILED", details = { moved = moved } })
     end
 
     @ExecSpace("Server")
@@ -780,7 +760,7 @@ script MatchFlow extends Logic
         -- Map transitions and visible recovery actions resume work without ongoing storage polling.
         local userId = senderUserId
         local player = self:Player(userId)
-        if player == nil then self:Report(userId, "DISABLED_OR_NOT_PUBLISHED") return end
+        if player == nil then self:Report(userId, { code = "DISABLED_OR_NOT_PUBLISHED" }) return end
         self:Recover(userId)
         local ticket = self._T.records[userId]
         if ticket ~= nil and ticket.data.state == "TRANSFER" then
@@ -789,7 +769,7 @@ script MatchFlow extends Logic
         end
         local state = ticket ~= nil and ticket.data.state or "IDLE"
         local elapsed = ticket ~= nil and math.floor((DateTime.UtcNow.Elapsed - ticket.data.started) / 1000) or 0
-        self:Report(userId, state .. " elapsed=" .. tostring(elapsed) .. " instance=" .. _WorldInstanceService.WorldInstanceId .. " room=" .. _RoomService.RoomKey)
+        self:Report(userId, { code = "STATUS", details = { elapsed = elapsed } })
     end
 
     @ExecSpace("Server")
@@ -839,10 +819,10 @@ script MatchFlow extends Logic
             local map = _EntityService:GetEntityByPath("/maps/matchprobe")
             local battle = isvalid(map) and map:GetComponent("script.BattleSession") or nil
             local profile = player.PlayerComponent.ProfileCode
-            if isvalid(battle) and battle:IsBattleActive() and (profile == battle.HomeProfile or profile == battle.AwayProfile) then self:Report(userId, "BATTLE_IN_PROGRESS") return end
+            if isvalid(battle) and battle:IsBattleActive() and (profile == battle.HomeProfile or profile == battle.AwayProfile) then self:Report(userId, { code = "BATTLE_IN_PROGRESS" }) return end
             if ticket == nil or ticket.data.state == "CANCELLED" or ticket.data.state == "RETURNED" then
                 local moved = self:MoveToLobby(userId)
-                self:Report(userId, "RETURN_MOVE ok=" .. tostring(moved))
+                self:Report(userId, { code = moved and "RETURN_MOVE_OK" or "RETURN_MOVE_FAILED", details = { moved = moved } })
                 return
             end
         end
@@ -860,7 +840,7 @@ script MatchFlow extends Logic
             local stored = _FormationHandoff:Store(ticket)
             self._T.busy[userId] = nil
             if stored then self:Recover(userId) end
-            self:Report(userId, "ABORT_TRANSFER stored=" .. tostring(stored))
+            self:Report(userId, { code = "ABORT_TRANSFER", details = { stored = stored } })
             return
         end
         if ticket.data.state == "RETURNING" then
@@ -868,7 +848,7 @@ script MatchFlow extends Logic
             self._T.busy[userId] = true
             local moved = self:MoveToLobby(userId)
             self._T.busy[userId] = nil
-            self:Report(userId, "RETURN_RETRY_MOVE ok=" .. tostring(moved))
+            self:Report(userId, { code = moved and "RETURN_RETRY_MOVE_OK" or "RETURN_RETRY_MOVE_FAILED", details = { moved = moved } })
             return
         end
         if ticket.data.state == "IN_ROOM" and _RoomService.RoomKey ~= ticket.data.matchKey then
@@ -878,15 +858,15 @@ script MatchFlow extends Logic
             if not _FormationHandoff:Store(ticket) then
                 ticket.data.state = "IN_ROOM"
                 self._T.busy[userId] = nil
-                self:Report(userId, "ROOM_MISMATCH_SAVE_FAILED")
+                self:Report(userId, { code = "ROOM_MISMATCH_SAVE_FAILED" })
                 return
             end
             local moved = self:MoveToLobby(userId)
             self._T.busy[userId] = nil
             if not moved then
-                self:Report(userId, "ROOM_MISMATCH_RETURN_FAILED")
+                self:Report(userId, { code = "ROOM_MISMATCH_RETURN_FAILED" })
             else
-                self:Report(userId, "ROOM_MISMATCH_RETURNING")
+                self:Report(userId, { code = "ROOM_MISMATCH_RETURNING" })
             end
             return
         end
@@ -897,12 +877,12 @@ script MatchFlow extends Logic
         if not _FormationHandoff:Store(ticket) then
             ticket.data.state = "IN_ROOM"
             self._T.busy[userId] = nil
-            self:Report(userId, "RETURN_SAVE_FAILED")
+            self:Report(userId, { code = "RETURN_SAVE_FAILED" })
             return
         end
         local moved = self:MoveToLobby(userId)
         self._T.busy[userId] = nil
-        self:Report(userId, "RETURN_MOVE ok=" .. tostring(moved))
+        self:Report(userId, { code = moved and "RETURN_MOVE_OK" or "RETURN_MOVE_FAILED", details = { moved = moved } })
     end
 
     @ExecSpace("ServerOnly")

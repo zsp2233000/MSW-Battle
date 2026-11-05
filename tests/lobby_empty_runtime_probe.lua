@@ -14,7 +14,7 @@ local ok, detail = pcall(function()
     for index = 1, 6 do assert(not l:Ui('Lobby/Command/Field/Unit'..tostring(index)).Enable, 'no fake roster') end
     _MatchFlowInput.action:SendEvent(ButtonClickEvent())
     assert(await(function() return _UserService.LocalPlayer.CurrentMapName == 'formationsim' end), 'main action reaches real simulation')
-    assert(_MatchFlowInput.State == 'IDLE', 'preparation does not queue')
+    assert(_MatchFlowInput.Snapshot.state == 'IDLE', 'preparation does not queue')
     l:Ui('Editor/Back'):SendEvent(ButtonClickEvent())
     wait(0.3)
     if l:Ui('ExitConfirm').EnabledInHierarchy then l:Ui('ExitConfirm/Window/ReturnWithoutSave'):SendEvent(ButtonClickEvent()) end

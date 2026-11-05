@@ -20,7 +20,7 @@ local ok, detail = pcall(function()
     end
     local seenBattle = false
     for attempt = 1, 900 do
-        if battle.Phase == "BATTLE" and _MatchFlowInput.State == "BATTLE" then
+        if battle.Phase == "BATTLE" and _MatchFlowInput.Snapshot.state == "BATTLE" then
             seenBattle = true
             assert(ui.hud.Enable and not ui.deployment.Enable and not ui.result.Enable, "battle shows the HUD only")
             assert(ui.hud.SpriteGUIRendererComponent.RaycastTarget == false, "HUD does not intercept the field")
@@ -45,12 +45,12 @@ local ok, detail = pcall(function()
             assert(text(ui.playerCount) == tostring(own) and text(ui.enemyCount) == tostring(enemy), "swapped HUD follows the viewer's side")
             log("[VRF][MatchedResultUI] SWAPPED_VIEW home=" .. battle.HomeProfile .. " hud=" .. text(ui.playerCount) .. "/" .. text(ui.enemyCount))
         end
-        if string.sub(_MatchFlowInput.State, 1, 7) == "RESULT_" then break end
+        if string.sub(_MatchFlowInput.Snapshot.state, 1, 7) == "RESULT_" then break end
         wait(0.1)
     end
     wait(0.3)
     local expected = battle:ResultForProfile(player.PlayerComponent.ProfileCode)
-    assert(expected ~= "" and _MatchFlowInput.State == "RESULT_" .. expected, "result belongs to this player's actual battle side")
+    assert(expected ~= "" and _MatchFlowInput.Snapshot.state == "RESULT_" .. expected, "result belongs to this player's actual battle side")
     assert(ui.OwnResult == expected and ui.result.Enable, "result window shows this player's result")
     assert(ui.resultWin.Enable == (expected == "WIN") and ui.resultLose.Enable == (expected == "LOSE") and ui.resultDraw.Enable == (expected == "DRAW"), "exactly one result entity")
     local own, enemy = counts()
@@ -72,7 +72,7 @@ local ok, detail = pcall(function()
         wait(0.1)
     end
     assert(player.CurrentMapName == "matchprobe" and ui.result.Enable and text(_MatchFlowInput.action) == "重試返回", "failed return stays on the result with a retry")
-    log("[VRF][MatchedResultUI] RETURN_FAILED msg=" .. _MatchFlowInput.Message .. " status=" .. text(_MatchFlowInput.status))
+    log("[VRF][MatchedResultUI] RETURN_FAILED msg=" .. _MatchFlowInput.Snapshot.reasonCode .. " status=" .. text(_MatchFlowInput.status))
     _MatchFlowInput.action:SendEvent(ButtonClickEvent())
     wait(0.03)
     assert(text(_MatchFlowInput.action) == "返回中…" and not _MatchFlowInput.action.ButtonComponent.Enable, "retry shows as pending")

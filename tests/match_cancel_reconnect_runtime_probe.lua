@@ -1,6 +1,6 @@
 -- server_main, one connected player in formationlobby. Owns unique storage keys and restores them afterwards.
 -- Reconnecting during disconnect cleanup must not strand the lock, unlock an unconfirmed queue, or leave stale state.
--- Then in client, log _MatchFlowInput.State, Busy and AllowsFormationActions(): a settled run shows IDLE, false, true.
+-- Then in client, log _MatchFlowInput.Snapshot.state, Busy and AllowsFormationActions(): a settled run shows IDLE, false, true.
 local previousKey, previousTransfer = _FormationService.StorageKey, _FormationHandoff.StorageKey
 local userId, previousSlot
 local function await(predicate, tries)

@@ -1,5 +1,7 @@
 # Battle verification
 
+`match_state_runtime_probe.lua` runs in the client of a fresh Play after the lobby is ready. It checks the public snapshot receiver and `MatchFlowState` projection/presentation: action selection, busy locks, elapsed wait, explicit failure effects, attempt isolation, return-failure precedence, and stale/foreign-room rejection. It sends no queue or storage commands; stop Play afterwards to discard its synthetic observations. Require `[VRF][MatchState] PASS`. Matchmaking probes read the single `MatchFlowInput.Snapshot` (`state`, `reasonCode`, `started`, `busy`, `summary`, `attempt`) rather than the former separate properties.
+
 Run the local contract suite from the repository root:
 
 ```powershell
