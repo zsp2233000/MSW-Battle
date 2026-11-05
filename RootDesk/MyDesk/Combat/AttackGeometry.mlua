@@ -1,0 +1,16 @@
+@Logic
+script AttackGeometry extends Logic
+
+    method table Rectangle(number footX, number footY, number bodyX, number bodyY, number direction, number range, number rangeY)
+        -- The single definition of the frontal attack rectangle, shared by combat and the editor preview.
+        -- bodyX/bodyY: hit box centre offset from the foot, already multiplied by the model scale (facing right).
+        -- direction: 1 faces right, -1 faces left. The rectangle starts at the body centre and reaches `range` forward.
+        return {
+            x = footX - bodyX * direction + direction * range / 2,
+            y = footY + bodyY,
+            w = range,
+            h = rangeY * 2,
+        }
+    end
+
+end

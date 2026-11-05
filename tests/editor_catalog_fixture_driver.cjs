@@ -17,7 +17,7 @@ async function main(){
       if(!fs.readFileSync(manifest.csvPath).equals(fixture)) throw new Error('overflow fixture write mismatch');
       await request('editor-catalog-probe',{...manifest,overflowSha256:sha256(fixture)},{signal});
     },{
-      variantStats:{MaxHp:650,AttackDamage:25,AttackIntervalSeconds:1.3,AttackRange:.8},
+      variantStats:{MaxHp:650,AttackDamageMin: 25, AttackDamageMax: 25,AttackIntervalSeconds:1.3,AttackRange:.8},
       lifecycle:{stop:details=>request('stop',details),refresh:details=>request('refresh',details),verifyRestored:details=>request('restored-probe',{sha256:details.originalSha256})},
       logger:message=>process.stdout.write(message+'\n'),
     });

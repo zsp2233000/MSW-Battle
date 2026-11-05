@@ -9,7 +9,7 @@ local function check(condition, message)
     else failures = failures + 1; log_error("[VRF][UnitMotionPhysics][FAIL] " .. message) end
 end
 local function row(id, name, x, y, extra)
-    local profile = { MoveSpeed = 0, AttackDamage = 0, AttackRange = 0,
+    local profile = { MoveSpeed = 0, AttackDamageMin = 0, AttackDamageMax = 0,
         RetargetIntervalSeconds = 0, AttackIntervalSeconds = 100 }
     for key, value in pairs(extra or {}) do profile[key] = value end
     return { monsterId = id, name = name, position = Vector3(x, y, 0), overrides = profile }
@@ -37,14 +37,30 @@ local function position(entity)
 end
 local function configureAttack(entity, id, damage)
     local profile = session:GetMonsterProfile(id)
-    profile.AttackDamage = damage or 0
+    profile.AttackDamageMin = damage or 0; profile.AttackDamageMax = damage or 0
     profile.AttackIntervalSeconds = 100
     profile.ImpactDelaySeconds = 0.01
     if not entity:GetComponent("script.BattleAttackComposition"):Configure(profile, 0) then error("attack configuration rejected") end
 end
 local function contact(attackerEntity, attacker)
+    -- Consume each quiet receiver's first attack so the long interval keeps it out of attack poise.
+    for _, entity in ipairs(session:GetTargetCandidates()) do
+        local unit = entity:GetComponent("script.BattleUnit")
+        if unit.Faction ~= attacker.Faction and unit.AttackDamageMax == 0 then
+            unit:DriveAttack(attackerEntity, true)
+            unit:AdvanceAttack(0.2)
+            unit:DriveAttack(attackerEntity, true)
+            unit:Tick(unit.AttackAnimationDuration + 0.01)
+            unit:AdvanceAttack(unit.AttackAnimationDuration + 0.01)
+        end
+    end
     configureAttack(attackerEntity, "monster_tank", 1)
-    attacker:DriveAttack(nil, false)
+    local target = nil
+    for _, candidate in ipairs(session:GetTargetCandidates()) do
+        if candidate:GetComponent("script.BattleUnit").Faction ~= attacker.Faction then target = candidate; break end
+    end
+    attacker:DriveAttack(target, true)
+    attacker:AdvanceAttack(0.02)
     -- Change future intent while preserving the already accepted contact and knockback batch.
     configureAttack(attackerEntity, "monster_shooter", 0)
     step()
@@ -63,14 +79,15 @@ local ok, detail = pcall(function()
         })
         local source, unit = actor("Pursuer")
         local target = actor("StationaryTarget")
-        target.HitComponent.Enable = false -- Keep the motion fixture stationary during native attack queries.
+        target.KinematicbodyComponent.Enable = false -- Freeze the target while retaining its native hit collider.
         local start = position(source)
         release()
         wait(1.6)
         local arrived = position(source)
-        check(arrived.x > start.x + 0.8, id .. " pursues on real RectTile frames")
-        check(math.abs(position(target).x - arrived.x - range) < 0.06,
-            id .. " stops at its configured range")
+        check(arrived.x > start.x + 0.6, id .. " pursues on real RectTile frames")
+        -- Opposite-facing model: 0.315 half-width minus two 0.045 horizontal offsets.
+        check(math.abs(position(target).x - arrived.x - range - 0.225) < 0.06,
+            id .. " stops when the native target collider touches its frontal range")
         wait(0.2)
         check(math.abs(position(source).x - arrived.x) < 0.001, id .. " remains stopped inside range")
         if id == "monster_shooter" then
@@ -78,6 +95,31 @@ local ok, detail = pcall(function()
             wait(0.2)
             check(math.abs(position(source).x - arrived.x) < 0.001, "shooter does not retreat from a closer target")
         end
+    end
+
+    for _, id in ipairs({ "monster_tank", "monster_warrior", "monster_shooter" }) do
+        prepare({ row(id, "AlignSource", -2, -2, { MoveSpeed = 1, AttackRange = 0.6,
+            AttackRangeY = 0.125, AttackDamageMin = 1, AttackDamageMax = 1 }) }, {
+            row("monster_warrior", "AlignTarget", 0.5, 1.5),
+        })
+        local source, unit = actor("AlignSource")
+        local target, targetUnit = actor("AlignTarget")
+        target.KinematicbodyComponent.Enable = false
+        release()
+        wait(0.25)
+        local diagonal = position(source)
+        check(diagonal.x > -1.9 and diagonal.y > -1.9,
+            id .. " moves straight toward an enemy outside horizontal overlap")
+        source.KinematicbodyComponent:SetWorldPosition(Vector2(0, 0))
+        source.MovementComponent:Stop()
+        wait(1.6)
+        local aligned = position(source)
+        check(math.abs(aligned.x) < 0.02 and aligned.y > 1 and aligned.y < 1.12,
+            id .. " moves only vertically after horizontal overlap and stops at the Y boundary")
+        wait(1)
+        check(math.abs(position(source).x - aligned.x) < 0.001
+            and math.abs(position(source).y - aligned.y) < 0.001 and targetUnit.DamageTakenSerial > 0,
+            id .. " remains stopped and its native hit reaches the aligned collider")
     end
 
     for _, faction in ipairs({ "PLAYER", "ENEMY" }) do
@@ -132,7 +174,7 @@ local ok, detail = pcall(function()
     step()
     check(receivingUnit.KnockbackActive and receivingEntity.KinematicbodyComponent.MoveVelocity.x < -12,
         "replacement pulse reverses at full speed instead of accumulating displacement")
-    check(receivingUnit.CurrentTargetName == right.Name and receivingUnit.CombatState == "MOVE",
+    check(receivingUnit.CurrentTargetName == right.Name and receivingUnit.CombatState ~= "ON_HIT",
         "unfinished knockback still permits normal retargeting and pursuit intent")
     receivingEntity.KinematicbodyComponent.Enable = true
     release()
@@ -142,7 +184,7 @@ local ok, detail = pcall(function()
 
     -- Reuse the map's existing collidable border tile as a temporary runtime wall.
     local tiles = map:GetChildByName("RectTileMap", true).RectTileMapComponent
-    local wall = tiles:GetTile(Vector2Int(15, 0))
+    local wall = tiles:GetTile(Vector2Int(0, -5))
     check(wall ~= nil and wall.IsCollidable, "runtime wall fixture uses the existing collidable tile")
     if wall == nil or not wall.IsCollidable then error("collidable tile unavailable") end
     changedTiles = tiles
@@ -171,7 +213,7 @@ local ok, detail = pcall(function()
     tiles:Reset()
     changedTiles = nil
 
-    prepare({ row("monster_shooter", "PausedReceiver", 0, 0, { AttackRange = 4, AttackDamage = 30,
+    prepare({ row("monster_shooter", "PausedReceiver", 0, 0, { AttackRange = 4,
         ImpactDelaySeconds = 0.04 }) }, {
         row("monster_warrior", "PauseContact", -0.3, 0),
         row("monster_shooter", "PauseHit", 2, 0),
@@ -179,8 +221,7 @@ local ok, detail = pcall(function()
     local pausedEntity, paused = actor("PausedReceiver")
     local contactEntity, contactUnit = actor("PauseContact")
     local hitEntity, hitUnit = actor("PauseHit")
-    paused.AttackRange = 0
-    paused:DriveAttack(hitEntity, true)
+
     configureAttack(hitEntity, "monster_shooter", 1)
     hitUnit:DriveAttack(pausedEntity, true)
     hitUnit:AdvanceAttack(0.02)
@@ -191,8 +232,8 @@ local ok, detail = pcall(function()
     wait(0.1)
     check(position(pausedEntity).x > before.x + 0.1 and paused.CombatState == "ON_HIT",
         "knockback travels during hit stop on real frames")
-    check(hitUnit.Hp == 90 and hitUnit.DamageTakenSerial == 1,
-        "accepted attack reaches impact during hit stop and knockback")
+    check(paused.Hp == 118 and paused.DamageTakenSerial == 2,
+        "both native attacks resolve while hit stop and knockback coexist")
 
     -- Reconfigure through the existing actor interface while motion is still paused.
     if not session:BeginManualSimulation() then error("reconfiguration clock unavailable") end

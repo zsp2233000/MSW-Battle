@@ -16,7 +16,7 @@ local runOk, runDetail = pcall(function()
     local tank = catalog:GetProfile("monster_tank")
     local variant = catalog:GetProfile("probe_tank_variant")
     local options = catalog:GetDeploymentOptions()
-    check(tank ~= nil and tank.MonsterId == "monster_tank" and tank.MonsterName == "Tank"
+    check(tank ~= nil and tank.MonsterId == "monster_tank" and tank.MonsterName == "菇菇寶貝"
         and tank.MonsterType == "TANK", "original tank profile is restored")
     check(variant == nil, "temporary variant MonsterId is absent after restoration")
     check(#options == 3, "formal deployment catalog contains only the three production rows")

@@ -7,10 +7,14 @@ local function check(condition, message)
     else failures = failures + 1; log_error("[VRF][UnitMotion][FAIL] " .. message) end
 end
 local function row(id, name, x, y, overrides)
+    overrides = overrides or {}
+    local damage = ({ monster_tank = 40, monster_warrior = 35, monster_shooter = 30 })[id]
+    if overrides.AttackDamageMin == nil then overrides.AttackDamageMin = damage end
+    if overrides.AttackDamageMax == nil then overrides.AttackDamageMax = damage end
     return { monsterId = id, name = name, position = Vector3(x, y, 0), overrides = overrides }
 end
 local function quiet(extra)
-    local profile = { MoveSpeed = 0, AttackDamage = 0, AttackRange = 0,
+    local profile = { MoveSpeed = 0, AttackDamageMin = 0, AttackDamageMax = 0,
         RetargetIntervalSeconds = 0.5, AttackIntervalSeconds = 100 }
     for key, value in pairs(extra or {}) do profile[key] = value end
     return profile
@@ -72,14 +76,14 @@ local ok, detail = pcall(function()
 
     for _, interval in ipairs({ 0, 0.5 }) do
         scene({ row("monster_warrior", "PauseSource", 0, 0, quiet({ RetargetIntervalSeconds = interval })) }, {
-            row("monster_shooter", "PauseAttacker", 2, 0, quiet({ AttackDamage = 1,
+            row("monster_shooter", "PauseAttacker", 2, 0, quiet({ AttackDamageMin = 1, AttackDamageMax = 1,
                 AttackRange = 4, ImpactDelaySeconds = 0.01 })),
             row("monster_warrior", "PauseNearer", 3, 0, quiet()),
         }, function()
             local source, unit = actor("PauseSource")
             local attackerEntity, attacker = actor("PauseAttacker")
             local nearer = actor("PauseNearer")
-            attacker.AttackRange = 0
+
             attacker:DriveAttack(source, true) -- Consume the enemy opening delay.
             advance(session.EnemyOpeningDelay + 0.02)
             nativeShot(attacker, source)
@@ -102,7 +106,7 @@ local ok, detail = pcall(function()
         end)
     end
 
-    scene({ row("monster_shooter", "LockedSource", 0, 0, quiet({ AttackDamage = 30,
+    scene({ row("monster_shooter", "LockedSource", 0, 0, quiet({ AttackDamageMin = 30, AttackDamageMax = 30,
         AttackRange = 4, RetargetIntervalSeconds = 0, ImpactDelaySeconds = 0.3 })) }, {
         row("monster_warrior", "LockedFirst", 2, 0, quiet()),
         row("monster_warrior", "LockedNearer", 3, 0, quiet()),
@@ -114,8 +118,11 @@ local ok, detail = pcall(function()
         check(unit.AttackSerial == 1 and unit.CurrentTargetName == firstEntity.Name, "acquisition hands an in-range attack to composition")
         place(nearerEntity, 1, 0)
         advance(0.31)
-        check(unit.CurrentTargetName == nearerEntity.Name and first.Hp == 190 and nearer.Hp == 220,
-            "retargeting leaves the accepted attack locked to its original target")
+        check(unit.CurrentTargetName == firstEntity.Name and first.Hp == 190 and nearer.Hp == 220,
+            "attack animation holds acquisition and the accepted target lock")
+        advance(unit.AttackAnimationDuration)
+        check(unit.CurrentTargetName == nearerEntity.Name,
+            "acquisition resumes after the attack animation")
     end)
 end)
 if clockOwned and isvalid(session) then

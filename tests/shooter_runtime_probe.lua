@@ -11,6 +11,10 @@ local function check(condition, message)
 end
 
 local function row(monsterId, name, position, overrides)
+    overrides = overrides or {}
+    local damage = ({ monster_tank = 40, monster_warrior = 35, monster_shooter = 30 })[monsterId]
+    if overrides.AttackDamageMin == nil then overrides.AttackDamageMin = damage end
+    if overrides.AttackDamageMax == nil then overrides.AttackDamageMax = damage end
     return { monsterId = monsterId, name = name, position = position, overrides = overrides }
 end
 
@@ -55,8 +59,7 @@ local function prepareScene()
         { row("monster_warrior", "Issue17_ShooterTarget", Vector3(3, 0, 0), {
             MaxHp = 30,
             MoveSpeed = 0,
-            AttackDamage = 0,
-            AttackRange = 0,
+            AttackDamageMin = 0, AttackDamageMax = 0,
             RetargetIntervalSeconds = 0,
             AttackIntervalSeconds = 100,
         }) }
@@ -103,8 +106,8 @@ local runOk, runDetail = pcall(function()
     if not attackStarted then return end
     local attackObservedAtMs = DateTime.UtcNow.Elapsed
     local attackStartDistance = distance(position(shooter), position(target))
-    check(attackStartDistance <= actor.AttackRange + 0.001,
-        "attack starts only after the shooter enters its catalog range")
+    check(attackStartDistance > actor.AttackRange and attackStartDistance <= actor.AttackRange + 0.3,
+        "attack starts when the target collider enters the frontal rectangle")
     check(defender.Hp == 30 and defender.DamageTakenSerial == 0,
         "AttackSerial advances before the catalog impact frame reaches the target")
 

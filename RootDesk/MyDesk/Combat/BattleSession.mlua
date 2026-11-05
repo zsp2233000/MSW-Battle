@@ -411,9 +411,11 @@ script BattleSession extends Component
         local allowedOverrides = {
             MonsterName = true,
             MaxHp = true,
-            AttackDamage = true,
+            AttackDamageMin = true,
+            AttackDamageMax = true,
             MoveSpeed = true,
             AttackRange = true,
+            AttackRangeY = true,
             RetargetIntervalSeconds = true,
             ImpactDelaySeconds = true,
             AttackIntervalSeconds = true,
@@ -438,9 +440,9 @@ script BattleSession extends Component
                         if type(value) ~= "string" or value:match("%S") == nil then return nil end
                     elseif key == "MaxHp" then
                         if not self:IsFiniteTestNumber(value) or value < 1 or value % 1 ~= 0 then return nil end
-                    elseif key == "AttackDamage" then
+                    elseif key == "AttackDamageMin" or key == "AttackDamageMax" then
                         if not self:IsFiniteTestNumber(value) or value < 0 or value % 1 ~= 0 then return nil end
-                    elseif key == "AttackIntervalSeconds" then
+                    elseif key == "AttackIntervalSeconds" or key == "AttackRangeY" then
                         if not self:IsFiniteTestNumber(value) or value <= 0 then return nil end
                     else
                         if not self:IsFiniteTestNumber(value) or value < 0 then return nil end
@@ -449,6 +451,7 @@ script BattleSession extends Component
                 end
             end
 
+            if profile.AttackDamageMax < profile.AttackDamageMin then return nil end
             usedNames[entry.name] = true
             table.insert(prepared, {
                 name = entry.name,
@@ -918,7 +921,7 @@ script BattleSession extends Component
             local attackerUnit = attacker:GetComponent("script.BattleUnit")
             if isvalid(attackerUnit) then
                 attackerKind = attackerUnit.UnitKind
-                if attackerKind ~= "TANK" then hitEffectRUID = attackerUnit:GetHitEffectRUID() or "" end
+                hitEffectRUID = attackerUnit:GetHitEffectRUID() or ""
             end
         end
         table.insert(self._T.pendingDamage, { target = target, amount = amount, attacker = attacker,

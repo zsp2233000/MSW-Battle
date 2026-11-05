@@ -37,19 +37,32 @@ local ok, detail = pcall(function()
         check(parse("monster_tank", case[2]) == nil and string.find(catalog.ErrorMessage, case[3], 1, true) ~= nil,
             case[1] .. " is rejected with its diagnostic")
     end
-    for _, field in ipairs({ "MaxHp", "MoveSpeed", "AttackDamage", "AttackIntervalSeconds", "AttackRange",
-        "RetargetIntervalSeconds", "HitStopDurationSeconds", "ContactCooldownSeconds", "ContactSizeX", "ContactSizeY", "KnockbackDistance" }) do
+    for _, field in ipairs({ "MaxHp", "MoveSpeed", "AttackDamageMin", "AttackDamageMax", "AttackIntervalSeconds", "AttackRange", "AttackRangeY",
+        "RetargetIntervalSeconds", "HitStopDurationSeconds", "KnockbackDistance" }) do
         check(parse("monster_tank", { [field] = "" }) == nil and string.find(catalog.ErrorMessage, field, 1, true) ~= nil,
             "blank required numeric " .. field .. " is rejected")
         check(parse("monster_tank", { [field] = "invalid" }) == nil, "nonnumeric " .. field .. " is rejected")
     end
     check(parse("monster_tank", { MaxHp = "1.5" }) == nil, "fractional HP is rejected")
-    check(parse("monster_tank", { AttackDamage = "0" }) == nil, "nonpositive damage is rejected")
+    for _, field in ipairs({ "AttackDamageMin", "AttackDamageMax" }) do
+        for _, value in ipairs({ "0", "-1", "1.5", "1e999" }) do
+            check(parse("monster_tank", { [field] = value }) == nil, field .. " rejects " .. value)
+        end
+    end
+    check(parse("monster_tank", { AttackDamageMin = "13", AttackDamageMax = "12" }) == nil,
+        "reversed damage interval is rejected")
+    local fixed = parse("monster_tank", { AttackDamageMin = "9", AttackDamageMax = "9" })
+    check(fixed ~= nil and fixed.AttackDamageMin == 9 and fixed.AttackDamageMax == 9,
+        "equal endpoints are a valid fixed-damage interval")
     check(parse("monster_tank", { MoveSpeed = "1e999" }) == nil, "nonfinite speed is rejected")
-    for _, id in ipairs({ "monster_warrior", "monster_shooter" }) do
-        local profile = parse(id, { AttackImpactFrame = "" })
-        check(profile ~= nil and profile.AttackImpactFrame == 1 and profile.ImpactDelaySeconds == 0,
-            id .. " blank impact frame defaults to first-frame impact")
+    for _, value in ipairs({ "0", "-0.1", "1e999" }) do
+        check(parse("monster_tank", { AttackRangeY = value }) == nil, "AttackRangeY rejects " .. value)
+    end
+    local verticalRange = parse("monster_tank", { AttackRangeY = "0.125" })
+    check(verticalRange ~= nil and verticalRange.AttackRangeY == 0.125, "positive AttackRangeY is preserved")
+    for _, id in ipairs({ "monster_tank", "monster_warrior", "monster_shooter" }) do
+        check(parse(id, { AttackImpactFrame = "" }) == nil, id .. " rejects blank impact frame")
+        check(parse(id, { AttackAnimationRUID = "" }) == nil, id .. " rejects blank attack animation")
         check(parse(id, { AttackImpactFrame = "0" }) == nil, id .. " rejects zero impact frame")
         check(parse(id, { AttackImpactFrame = "99999" }) == nil, id .. " rejects an impact frame beyond the actual clip")
     end
@@ -61,12 +74,13 @@ local ok, detail = pcall(function()
         "a different identity accepts the same actual resource RUIDs")
     reset()
     for _, expected in ipairs({
-        { "monster_tank", 500, 1.1, 40, 2, 0.65 },
-        { "monster_warrior", 220, 2, 35, 0.7, 0.6 },
-        { "monster_shooter", 120, 0.8, 30, 2, 4 },
+        { "monster_tank", 400, 0.4, 8, 5, 0.65, 12 },
+        { "monster_warrior", 220, 1, 20, 3, 0.6, 30 },
+        { "monster_shooter", 120, 0.8, 32, 2, 4, 48 },
     }) do
         local profile = catalog:GetProfile(expected[1])
-        check(profile.MaxHp == expected[2] and profile.MoveSpeed == expected[3] and profile.AttackDamage == expected[4]
+        check(profile.MaxHp == expected[2] and profile.MoveSpeed == expected[3] and profile.AttackDamageMin == expected[4]
+            and profile.AttackDamageMax == expected[7]
             and profile.AttackIntervalSeconds == expected[5] and profile.AttackRange == expected[6],
             expected[1] .. " loads the current formal CSV's independent numeric values")
     end

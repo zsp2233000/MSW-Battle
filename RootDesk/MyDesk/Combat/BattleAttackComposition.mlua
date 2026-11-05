@@ -4,14 +4,14 @@ script BattleAttackComposition extends Component
     @ExecSpace("ServerOnly")
     method boolean Configure(table profile, number openingDelay)
         -- Replace attack work atomically while preserving the actor's observation counters.
-        self:Cancel("RECONFIGURE")
+        self:Cancel()
         local previousType = self._T.adapterType
         local previousAdapter = nil
         if previousType ~= nil then previousAdapter = self.Entity:GetComponent(previousType) end
         self._T.configured = false
         self._T.adapter = nil
         self._T.profile = nil
-        local adapterTypes = { ASSAULT = "script.AssaultAttack", SHOOTER = "script.ShooterAttack", TANK = "script.TankContactAttack" }
+        local adapterTypes = { ASSAULT = "script.SingleTargetAttack", SHOOTER = "script.SingleTargetAttack", TANK = "script.AreaAttack" }
         local adapterType = nil
         if profile ~= nil then adapterType = adapterTypes[profile.MonsterType] end
         if adapterType == nil then
@@ -67,15 +67,14 @@ script BattleAttackComposition extends Component
 
     @ExecSpace("ServerOnly")
     method void TryEngage(Entity target, boolean targetInRange)
-        -- Accept a delayed strike or query tank contact without exposing timing policy.
+        -- Accept a delayed strike through the same lifecycle for every monster type.
         if not isvalid(self:GetActiveSession()) then return end
         local profile = self._T.profile
-        if profile.MonsterType == "TANK" then
-            self._T.adapter:ResolveContact()
-            return
-        end
         if targetInRange ~= true or not isvalid(target) then return end
-        if self._T.pendingTarget ~= nil or (self._T.cooldownRemaining or 0) > 0 then return end
+        local unit = self.Entity:GetComponent("script.BattleUnit")
+        if unit.AttackPoiseActive or self._T.pendingTarget ~= nil or (self._T.cooldownRemaining or 0) > 0 then return end
+        local direction = self:GetTargetDirection(target)
+        if not self:IsTargetInRange(target, direction) then return end
         if self._T.openingDelayPending == true then
             self._T.openingDelayPending = false
             self._T.cooldownRemaining = self._T.openingDelay
@@ -85,7 +84,7 @@ script BattleAttackComposition extends Component
         self._T.pendingTarget = target
         self._T.impactRemaining = profile.ImpactDelaySeconds
         self._T.cooldownRemaining = profile.AttackIntervalSeconds
-        self:PublishAttack("ATTACK_START", target)
+        self:PublishAttackStart(target)
     end
 
     @ExecSpace("ServerOnly")
@@ -96,37 +95,29 @@ script BattleAttackComposition extends Component
             return
         end
         self._T.cooldownRemaining = math.max(0, (self._T.cooldownRemaining or 0) - delta)
-        if self._T.profile ~= nil and self._T.profile.MonsterType == "TANK" and isvalid(self._T.adapter) then
-            self._T.adapter:AdvanceContactCooldowns(delta)
-        end
         if self._T.pendingTarget == nil then return end
-        local target = self._T.pendingTarget
-        if not isvalid(self:GetActiveSession()) or not isvalid(target) then
-            self:Cancel("INVALID")
-            return
-        end
-        if not self._T.adapter:CanContinue(target) then
-            self:Cancel("INVALID")
+        if not isvalid(self:GetActiveSession()) then
+            self:Cancel()
             return
         end
         self._T.impactRemaining = self._T.impactRemaining - delta
         if self._T.impactRemaining > 0 then return end
+        local target = self._T.pendingTarget
         self._T.pendingTarget = nil
         self._T.impactRemaining = -1
-        local unit = self.Entity:GetComponent("script.BattleUnit")
-        if isvalid(unit) then unit:FaceTarget(target) end
+        -- A departed or dead target is a whiff: the animation and interval have already been committed.
         self._T.adapter:ResolveImpact(target)
     end
 
     @ExecSpace("ServerOnly")
-    method void Cancel(string reason)
-        -- Discard unaccepted work; session-owned damage batches survive cancellation.
+    method void Cancel()
+        -- Discard unresolved work when the actor stops or is reconfigured; accepted damage batches survive.
+        local unit = self.Entity:GetComponent("script.BattleUnit")
+        if isvalid(unit) then unit:EndAttackPoise() end
         self._T.pendingTarget = nil
         self._T.impactRemaining = -1
         if isvalid(self._T.adapter) then self._T.adapter:ResetTarget() end
-        if reason == "RECONFIGURE" or self._T.profile == nil or self._T.profile.MonsterType ~= "ASSAULT" then
-            self._T.cooldownRemaining = 0
-        end
+        self._T.cooldownRemaining = 0
     end
 
     @ExecSpace("ServerOnly")
@@ -135,24 +126,76 @@ script BattleAttackComposition extends Component
         if not self:IsCurrentAdapter(adapter) or not isvalid(defender) then return end
         local session = self:GetActiveSession()
         if self._T.profile.MonsterType == "TANK" then
-            self:PublishAttack("TANK_CONTACT_HIT", defender)
             session:QueueKnockback(self.Entity, defender, self._T.profile.KnockbackDistance)
-        else
-            session:EmitPresentation("HIT", self.Entity, defender, self._T.profile.AttackDamage)
         end
     end
 
     @ExecSpace("ServerOnly")
-    method void PublishAttack(string eventName, Entity target)
-        -- Announce one accepted strike or one successful tank contact defender.
+    method void PublishAttackStart(Entity target)
+        -- Announce exactly one accepted strike regardless of the number of defenders.
         local unit = self.Entity:GetComponent("script.BattleUnit")
         local session = self:GetActiveSession()
         if not isvalid(unit) or not isvalid(session) then return end
         unit:FaceTarget(target)
-        if eventName == "ATTACK_START" then unit:BeginAttackPoise() end
+        unit:BeginAttackPoise()
         unit.AttackSerial = unit.AttackSerial + 1
         unit:PlayCombatSound(self._T.profile.AttackSoundRUID)
-        session:EmitPresentation(eventName, self.Entity, target, self._T.profile.AttackDamage)
+        session:EmitPresentation("ATTACK_START", self.Entity, target, 0)
+    end
+
+    @ExecSpace("ServerOnly")
+    method number GetTargetDirection(Entity target)
+        -- Keep the previous facing when the target is almost exactly above or below.
+        local direction = self.Entity:GetComponent("script.BattleUnit"):GetFacing()
+        if isvalid(target) then
+            local dx = target.TransformComponent.WorldPosition.x - self.Entity.TransformComponent.WorldPosition.x
+            if math.abs(dx) > 0.0001 then direction = dx > 0 and 1 or -1 end
+        end
+        return direction
+    end
+
+    @ExecSpace("ServerOnly")
+    method any GetAttackShape(number direction)
+        -- Build the sole frontal rectangle from the actor's actual hit collider centre.
+        local transform = self.Entity.TransformComponent
+        local position = transform.WorldPosition
+        local scale = transform.Scale
+        local offset = self.Entity.HitComponent.ColliderOffset
+        local profile = self._T.profile
+        local rect = _AttackGeometry:Rectangle(position.x, position.y, offset.x * math.abs(scale.x), offset.y * scale.y,
+            direction, profile.AttackRange, profile.AttackRangeY)
+        return BoxShape(Vector2(rect.x, rect.y), Vector2(rect.w, rect.h), 0)
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean IsTargetInRange(Entity target, number direction)
+        -- Query the same native collider geometry used for impact, without causing a hit.
+        if self._T.profile == nil then return false end
+        return self:OverlapsHitBox(target, self:GetAttackShape(direction))
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean IsTargetInReachColumn(Entity target, number direction)
+        -- Same rectangle stretched across the arena's Y span: the target only needs vertical alignment.
+        if self._T.profile == nil then return false end
+        local session = self:GetActiveSession()
+        if not isvalid(session) then return false end
+        local shape = self:GetAttackShape(direction)
+        shape.Size = Vector2(shape.Size.x, 2 * (session.ArenaMaxY - session.ArenaMinY))
+        return self:OverlapsHitBox(target, shape)
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean OverlapsHitBox(Entity target, any shape)
+        -- Report whether the target's enabled hit box overlaps the shape.
+        if not isvalid(target) then return false end
+        local hit = target.HitComponent
+        if not isvalid(hit) or not hit.EnableInHierarchy then return false end
+        local simulator = _CollisionService:GetSimulator(self.Entity)
+        for _, collider in ipairs(simulator:OverlapAll(hit.CollisionGroup, shape)) do
+            if collider == hit then return true end
+        end
+        return false
     end
 
 end

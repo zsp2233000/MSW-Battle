@@ -8,6 +8,7 @@ script MonsterCatalog extends Component
     method void OnInitialize()
         -- Initialize the map-scoped catalog without exposing server diagnostics to clients.
         self._T.profilesById = {}
+        self._T.bodyOffsets = {}
         self.ErrorMessage = ""
         self.IsLoaded = false
     end
@@ -133,30 +134,22 @@ script MonsterCatalog extends Component
         }
         profile.MaxHp = self:ReadInteger(row:GetItem("MaxHp"), "MaxHp", monsterId, 1)
         profile.MoveSpeed = self:ReadNumber(row:GetItem("MoveSpeed"), "MoveSpeed", monsterId, 0.0001)
-        profile.AttackDamage = self:ReadInteger(row:GetItem("AttackDamage"), "AttackDamage", monsterId, 1)
+        profile.AttackDamageMin = self:ReadInteger(row:GetItem("AttackDamageMin"), "AttackDamageMin", monsterId, 1)
+        profile.AttackDamageMax = self:ReadInteger(row:GetItem("AttackDamageMax"), "AttackDamageMax", monsterId, 1)
+        if profile.AttackDamageMax < profile.AttackDamageMin then
+            self:SetError("AttackDamageMax is below AttackDamageMin for " .. monsterId)
+        end
         profile.AttackIntervalSeconds = self:ReadNumber(row:GetItem("AttackIntervalSeconds"), "AttackIntervalSeconds", monsterId, 0.0001)
         profile.AttackRange = self:ReadNumber(row:GetItem("AttackRange"), "AttackRange", monsterId, 0.0001)
-        local attackImpactFrame = row:GetItem("AttackImpactFrame")
-        if monsterType == "TANK" and self:IsBlank(attackImpactFrame) then
-            profile.AttackImpactFrame = 0
-        elseif monsterType ~= "TANK" and self:IsBlank(attackImpactFrame) then
-            profile.AttackImpactFrame = 1
-        else
-            profile.AttackImpactFrame = self:ReadInteger(attackImpactFrame, "AttackImpactFrame", monsterId, 0)
-        end
+        profile.AttackRangeY = self:ReadNumber(row:GetItem("AttackRangeY"), "AttackRangeY", monsterId, 0)
+        if profile.AttackRangeY <= 0 then self:SetError("invalid numeric value AttackRangeY for " .. monsterId) end
+        profile.AttackImpactFrame = self:ReadInteger(row:GetItem("AttackImpactFrame"), "AttackImpactFrame", monsterId, 1)
         profile.RetargetIntervalSeconds = self:ReadNumber(row:GetItem("RetargetIntervalSeconds"), "RetargetIntervalSeconds", monsterId, 0.0001)
         profile.HitStopDurationSeconds = self:ReadNumber(row:GetItem("HitStopDurationSeconds"), "HitStopDurationSeconds", monsterId, 0)
         if self.ErrorMessage ~= "" then return nil end
-        local contactMinimum = 0
-        if monsterType == "TANK" then contactMinimum = 0.0001 end
-        profile.ContactCooldownSeconds = self:ReadNumber(row:GetItem("ContactCooldownSeconds"), "ContactCooldownSeconds", monsterId, contactMinimum)
-        profile.ContactSizeX = self:ReadNumber(row:GetItem("ContactSizeX"), "ContactSizeX", monsterId, contactMinimum)
-        profile.ContactSizeY = self:ReadNumber(row:GetItem("ContactSizeY"), "ContactSizeY", monsterId, contactMinimum)
-        profile.KnockbackDistance = self:ReadNumber(row:GetItem("KnockbackDistance"), "KnockbackDistance", monsterId, contactMinimum)
-        if monsterType ~= "TANK" and profile.AttackImpactFrame <= 0 then
-            self:SetError("invalid numeric value AttackImpactFrame for " .. monsterId)
-            return nil
-        end
+        local knockbackMinimum = 0
+        if monsterType == "TANK" then knockbackMinimum = 0.0001 end
+        profile.KnockbackDistance = self:ReadNumber(row:GetItem("KnockbackDistance"), "KnockbackDistance", monsterId, knockbackMinimum)
         if self.ErrorMessage ~= "" then return nil end
 
         local assetFields = {
@@ -164,7 +157,6 @@ script MonsterCatalog extends Component
             "DieAnimationRUID", "HitEffectRUID", "AttackSoundRUID", "OnHitSoundRUID", "DieSoundRUID",
         }
         local optionalAssetFields = {
-            AttackAnimationRUID = monsterType == "TANK",
             HitEffectRUID = true,
             AttackSoundRUID = true,
             OnHitSoundRUID = true,
@@ -202,20 +194,38 @@ script MonsterCatalog extends Component
         profile.HitAnimationDurationSeconds = hitClip.duration
         profile.ImpactDelaySeconds = 0
         profile.AttackAnimationDurationSeconds = 0
-        if monsterType ~= "TANK" then
-            local attackClip = self:ReadPresentationClip(profile.AttackAnimationRUID, monsterId, "AttackAnimationRUID")
-            if attackClip == nil then return nil end
-            if profile.AttackImpactFrame > #attackClip.frames then
-                self:SetError("AttackImpactFrame exceeds attack clip for " .. monsterId)
-                return nil
-            end
-            profile.AttackAnimationDurationSeconds = attackClip.duration
-            for frameIndex = 1, profile.AttackImpactFrame - 1 do
-                profile.ImpactDelaySeconds = profile.ImpactDelaySeconds + attackClip.frames[frameIndex].Delay
-            end
-            profile.ImpactDelaySeconds = profile.ImpactDelaySeconds / attackClip.playRate
+        local attackClip = self:ReadPresentationClip(profile.AttackAnimationRUID, monsterId, "AttackAnimationRUID")
+        if attackClip == nil then return nil end
+        if profile.AttackImpactFrame > #attackClip.frames then
+            self:SetError("AttackImpactFrame exceeds attack clip for " .. monsterId)
+            return nil
         end
+        profile.AttackAnimationDurationSeconds = attackClip.duration
+        for frameIndex = 1, profile.AttackImpactFrame - 1 do
+            profile.ImpactDelaySeconds = profile.ImpactDelaySeconds + attackClip.frames[frameIndex].Delay
+        end
+        profile.ImpactDelaySeconds = profile.ImpactDelaySeconds / attackClip.playRate
         return profile
+    end
+
+    method any MeasureBodyCenterOffset(string modelId)
+        -- Read the hit box centre's offset from the foot once, scaled like BattleAttackComposition:GetAttackShape does,
+        -- so the editor's range preview shares the combat shape's body centre at any model scale.
+        local cached = self._T.bodyOffsets[modelId]
+        if cached ~= nil then return cached end
+        local probe = _SpawnService:SpawnByModelId(modelId, "CatalogBodyProbe", Vector3.zero, self.Entity)
+        local hit = isvalid(probe) and probe.HitComponent or nil
+        if not isvalid(hit) then
+            if isvalid(probe) then probe:Destroy() end
+            self:SetError("hit box unavailable for model " .. modelId)
+            return nil
+        end
+        local offset = hit.ColliderOffset
+        local scale = probe.TransformComponent.Scale
+        cached = { x = offset.x * math.abs(scale.x), y = offset.y * scale.y }
+        probe:Destroy()
+        self._T.bodyOffsets[modelId] = cached
+        return cached
     end
 
     method boolean ValidateRoster(table roster)
@@ -238,13 +248,14 @@ script MonsterCatalog extends Component
         self.ErrorMessage = ""
         self.IsLoaded = false
         self._T.profilesById = {}
+        self._T.bodyOffsets = self._T.bodyOffsets or {}
         self._T.allowedModelIds = allowedModelIds or {}
         local dataset = _DataService:GetTable(datasetName)
         if dataset == nil then return self:SetError("MonsterData table unavailable") end
         local requiredColumns = {
-            "MonsterId", "MonsterName", "MonsterType", "ModelId", "MaxHp", "MoveSpeed", "AttackDamage",
-            "AttackIntervalSeconds", "AttackRange", "AttackImpactFrame", "RetargetIntervalSeconds",
-            "HitStopDurationSeconds", "ContactSizeX", "ContactSizeY",
+            "MonsterId", "MonsterName", "MonsterType", "ModelId", "MaxHp", "MoveSpeed", "AttackDamageMin", "AttackDamageMax",
+            "AttackIntervalSeconds", "AttackRange", "AttackRangeY", "AttackImpactFrame", "RetargetIntervalSeconds",
+            "HitStopDurationSeconds",
             "KnockbackDistance", "StandAnimationRUID", "MoveAnimationRUID", "AttackAnimationRUID",
             "HitAnimationRUID", "DieAnimationRUID", "HitEffectRUID", "AttackSoundRUID",
             "OnHitSoundRUID", "DieSoundRUID",
@@ -262,6 +273,9 @@ script MonsterCatalog extends Component
             self._T.profilesById[profile.MonsterId] = profile
         end
         if self:ValidateRoster(fixedRoster) == false then return false end
+        for _, profile in pairs(self._T.profilesById) do
+            if self:MeasureBodyCenterOffset(profile.ModelId) == nil then return false end
+        end
         self.IsLoaded = true
         log("[M1][MonsterCatalog] loaded and validated rows=" .. tostring(rowCount))
         return true
@@ -285,9 +299,12 @@ script MonsterCatalog extends Component
         -- Publish identity, art and display-only intelligence from the validated profile.
         local options = {}
         for _, profile in pairs(self._T.profilesById or {}) do
+            local body = (self._T.bodyOffsets or {})[profile.ModelId] or {}
             table.insert(options, { monsterId = profile.MonsterId, monsterName = profile.MonsterName, standRuid = profile.StandAnimationRUID,
-                monsterType = profile.MonsterType, maxHp = profile.MaxHp, attackDamage = profile.AttackDamage,
-                attackInterval = profile.AttackIntervalSeconds, attackRange = profile.AttackRange })
+                monsterType = profile.MonsterType, maxHp = profile.MaxHp,
+                attackDamageMin = profile.AttackDamageMin, attackDamageMax = profile.AttackDamageMax,
+                attackInterval = profile.AttackIntervalSeconds, attackRange = profile.AttackRange,
+                attackRangeY = profile.AttackRangeY, bodyOffsetX = body.x, bodyOffsetY = body.y })
         end
         table.sort(options, function(left, right) return left.monsterId < right.monsterId end)
         return options

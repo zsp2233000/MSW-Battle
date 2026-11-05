@@ -44,7 +44,8 @@ script FormationCatalogCards extends Logic
         local parts = {}
         for _, option in ipairs(options) do
             table.insert(parts, table.concat({ option.monsterId, option.monsterName, option.standRuid, option.monsterType,
-                tostring(option.maxHp), tostring(option.attackDamage), tostring(option.attackInterval), tostring(option.attackRange) }, "|"))
+                tostring(option.maxHp), tostring(option.attackDamageMin), tostring(option.attackDamageMax),
+                tostring(option.attackInterval), tostring(option.attackRange) }, "|"))
         end
         local key = table.concat(parts, "\n")
         if key == self._T.optionsKey then return end
@@ -137,14 +138,20 @@ script FormationCatalogCards extends Logic
         _FormationLobby:SetText(target .. "/Kind", (option ~= nil and kind == "") and "—" or kind)
         local stats = {
             { "Health", "maxHp", "" },
-            { "Damage", "attackDamage", "" },
+            { "Damage", nil, "" },
             { "Interval", "attackInterval", " 秒" },
             { "Range", "attackRange", "" },
         }
         for _, stat in ipairs(stats) do
             local path = target .. "/Stats/" .. stat[1]
             _FormationLobby:SetEnabled(path, option ~= nil)
-            _FormationLobby:SetText(path .. "/Value", option ~= nil and (tostring(option[stat[2]]) .. stat[3]) or "")
+            local value = ""
+            if option ~= nil and stat[1] == "Damage" then
+                value = string.format("%d～%d", option.attackDamageMin, option.attackDamageMax)
+            elseif option ~= nil then
+                value = tostring(option[stat[2]]) .. stat[3]
+            end
+            _FormationLobby:SetText(path .. "/Value", value)
         end
         _FormationLobby:SetText(target .. "/Stats", option == nil and "正在載入怪物資料…" or "")
     end

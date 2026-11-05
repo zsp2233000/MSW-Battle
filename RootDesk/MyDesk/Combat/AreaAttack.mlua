@@ -1,0 +1,52 @@
+@Component
+script AreaAttack extends AttackComponent
+    property integer AttackDamageMin = 1
+    property integer AttackDamageMax = 1
+
+    @ExecSpace("ServerOnly")
+    method void Configure(table profile, Component execution)
+        -- Use the shared strike clock and native damage pipeline.
+        self.AttackDamageMin = profile.AttackDamageMin
+        self.AttackDamageMax = profile.AttackDamageMax
+        self._T.execution = execution
+        self:ResetTarget()
+    end
+
+    @ExecSpace("ServerOnly")
+    method void ResetTarget()
+        -- Clear per-swing deduplication on cancellation or the next attack.
+        self._T.hitTargets = {}
+    end
+
+    @ExecSpace("ServerOnly")
+    method void ResolveImpact(Entity target)
+        -- Sweep the current position using the facing locked at attack start, even if the selected target left.
+        if not isvalid(self.Entity) then return end
+        local execution = self._T.execution
+        if not isvalid(execution) then return end
+        local direction = self.Entity:GetComponent("script.BattleUnit"):GetFacing()
+        self:Attack(execution:GetAttackShape(direction), "area", nil)
+    end
+
+    method integer CalcDamage(Entity attacker, Entity defender, string attackInfo)
+        -- Roll each defender's damage independently through native HitEvent.
+        return math.random(self.AttackDamageMin, self.AttackDamageMax)
+    end
+
+    method boolean IsAttackTarget(Entity defender, string attackInfo)
+        -- Accept each opposing live defender once per swing.
+        if not isvalid(self._T.execution) or not self._T.execution:IsCurrentAdapter(self) then return false end
+        local attackerUnit = self.Entity:GetComponent("script.BattleUnit")
+        local defenderUnit = nil
+        if isvalid(defender) then defenderUnit = defender:GetComponent("script.BattleUnit") end
+        if not isvalid(defenderUnit) or not defenderUnit:IsAlive() or attackerUnit.Faction == defenderUnit.Faction then return false end
+        if self._T.hitTargets[defender] then return false end
+        return __base:IsAttackTarget(defender, attackInfo)
+    end
+
+    method void OnAttack(Entity defender)
+        -- Deduplicate this swing and request the normal tank knockback reaction.
+        self._T.hitTargets[defender] = true
+        if isvalid(self._T.execution) then self._T.execution:OnNativeHit(self, defender) end
+    end
+end

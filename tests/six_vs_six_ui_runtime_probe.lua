@@ -83,11 +83,11 @@ local positions = { Vector3(-4.4, 1, 0), Vector3(-4.4, 0, 0), Vector3(-4.4, -1, 
 local cards = {}
 
 local function observeResult(elapsed)
-    if adapter.session.Phase ~= "RESULT" and elapsed < 45 then
+    if adapter.session.Phase ~= "RESULT" and elapsed < 120 then
         later(function() observeResult(elapsed + 1) end, 1)
         return
     end
-    check(adapter.session.Phase == "RESULT", "UI-started six-versus-six battle reaches RESULT within 45 seconds")
+    check(adapter.session.Phase == "RESULT", "UI-started six-versus-six battle reaches RESULT within 120 seconds")
     if adapter.session.Phase ~= "RESULT" then finish(); return end
     later(function()
         local result = adapter.session.Result

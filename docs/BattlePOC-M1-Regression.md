@@ -16,7 +16,7 @@ Maker 使用 `Stop → Clear logs → Refresh → Build logs → Play → Execut
 | 零、第一、第六、第七隻；部署區、0.6 間距、移除與開戰後修改拒絕 | `DeploymentProbe` 公開命令邊界檢查；`SixVsSixUI` 另經已連接的開始按鈕拒絕零隻、逐一部署六隻及拒絕第七隻 | PASS；原資料還原後已複驗 |
 | 最近存活目標、移動／死亡後重選、同距離保留目標 | `TargetCrowdingProbe` 完整 controlled roster 與真實移動／死亡 | PASS |
 | 三筆初始 dataset 數值、同種類獨立數值、固定傷害 | `CatalogValidation` 核對正式三列；`CatalogVariant` 正式部署獨立 TANK 數值，原生命中 40 + 25 後敵方 HP 為 435、傷害 serial 為 2；`AttackExecutionProbe` 核對戰士 35、射手 30 | PASS |
-| 坦克多目標接觸與各目標冷卻、擊退邊界、射手無投射物 | `TankProbe`、`ShooterProbe`、`AttackExecutionProbe`；位移採真實 Maker frames | PASS |
+| 坦克前方範圍攻擊（#54 前為接觸與各目標冷卻）、擊退邊界、射手無投射物 | `TankProbe`、`ShooterProbe`、`AttackExecutionProbe`；位移採真實 Maker frames | PASS |
 | Win、Lose、同批 Draw、一次 RESULT、唯一訊號、結果後停機 | `SixVsSixBatch` 測兩種同批命中順序；`TargetCrowdingProbe` 測自然結果；`SixVsSixFullBattle` 自然 12 單位單局後再觀察 1 秒 | PASS |
 | 死亡立即退出存活計數／索敵、拒絕後續傷害 | `TargetCrowdingProbe` 的實際死亡重選；`AttackExecutionProbe` 保留存活 reserve，在 BATTLE 中送達遲來 HitEvent，核對 HP、serial、history 與存活數不變 | PASS |
 | 完整死亡動畫結束後才隱藏 | `SixVsSixUI` 觀察原生 SpriteAnimPlayer 事件：本次 10 個死亡單位全部在播放開始時仍可見，完成播放後才隱藏；不填死亡秒數 | PASS |
@@ -56,7 +56,7 @@ Maker 使用 `Stop → Clear logs → Refresh → Build logs → Play → Execut
 824644393d4c0294da8d80af4b6629d7d4d88f0d088eda8102edba0901202ec3
 ```
 
-暫存同種類測試列採 HP 650、移速 0.7、傷害 25、攻擊間隔 1.3、距離 0.8、接觸冷卻 1.3；原 TANK 的 ID 與數值不變，只改顯示名稱。所有 RUID 與原 TANK 共用。測後原名 `Tank`、三個正式選項及零玩家部署皆已確認，暫存 ID 不存在。帶 request ID 的橋接交易最終 `[VRF][CatalogFixture] PASS`、退出碼 0；每筆 Stop、Refresh 與 restored verifier 皆在真實 Maker 操作完成後才回覆相同 ID。備份交易成功結束，暫存 row、backup 與 manifest 均未納入提交。
+暫存同種類測試列（#10 當時的欄位）採 HP 650、移速 0.7、傷害 25、攻擊間隔 1.3、距離 0.8、接觸冷卻 1.3；接觸欄位已於 #58 移除，現行夾具見 `tests/monster_catalog_csv_fixture.cjs`；原 TANK 的 ID 與數值不變，只改顯示名稱。所有 RUID 與原 TANK 共用。測後原名 `Tank`、三個正式選項及零玩家部署皆已確認，暫存 ID 不存在。帶 request ID 的橋接交易最終 `[VRF][CatalogFixture] PASS`、退出碼 0；每筆 Stop、Refresh 與 restored verifier 皆在真實 Maker 操作完成後才回覆相同 ID。備份交易成功結束，暫存 row、backup 與 manifest 均未納入提交。
 
 ## 實際地圖清單與處置
 

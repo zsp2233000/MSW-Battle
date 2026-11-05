@@ -24,7 +24,7 @@ local ok, detail = pcall(function()
         for otherIndex, other in ipairs(_FormationEditSession.Snapshot.options) do
             local card = l:Ui('Editor/Catalog/Monster' .. tostring(otherIndex))
             local selected = other.monsterId == option.monsterId
-            assert(card.SpriteGUIRendererComponent.ImageRUID.DataId == (selected and '359082ed43c44cc1a597b00b61bafa36' or 'dc14abffdb9f400e819f61b9ab7e6805'), 'only selected card uses the gold base frame')
+            assert(card:GetChildByName('SelectedFrame').Enable == selected, 'gold frame follows exclusive selection')
             local glow = card:GetChildByName('SelectedGlow')
             assert(glow.Enable == selected, 'check mark follows exclusive selection')
             assert(not isvalid(glow:GetChildByName('Border')), 'no frame overlays the card content')
@@ -34,9 +34,11 @@ local ok, detail = pcall(function()
         end
         assert(string.find(l:Ui('Editor/Intel/Kind').TextGUIRendererComponent.Text, kinds[option.monsterType], 1, true), 'formal monster kind')
         for statIndex, field in ipairs({'Health','Damage','Interval','Range'}) do
-            local value = option[({'maxHp','attackDamage','attackInterval','attackRange'})[statIndex]]
+            local value = option[({'maxHp','attackDamageMin','attackInterval','attackRange'})[statIndex]]
+            if field == 'Damage' then value = string.format('%d～%d', option.attackDamageMin, option.attackDamageMax) end
             local stats = l:Ui('Editor/Intel/Stats/'..field..'/Value').TextGUIRendererComponent.Text
             assert(value ~= nil and string.find(stats, tostring(value), 1, true), 'formal combat statistic shown')
+            if field == 'Damage' then assert(stats == value, 'complete damage interval shown') end
             assert(l:Ui('Editor/Intel/Stats/'..field..'/Icon').EnabledInHierarchy, 'stat icon visible')
         end
         assert(l:Ui('Editor/Intel/Name').TextGUIRendererComponent.Text == option.monsterName, 'formal name shown')
@@ -48,7 +50,9 @@ local ok, detail = pcall(function()
     local units = _FormationEditSession.Draft
     if #units > 0 then
         local unit = units[1]
-        _UserService.LocalPlayer.CurrentMap:GetComponent('FormationMapInput'):HandleWorldClick(Vector3(unit.x, unit.y, 0))
+        local input = _UserService.LocalPlayer.CurrentMap:GetComponent('FormationMapInput')
+        input:RightClick(unit.x, unit.y)
+        input:HandleWorldClick(Vector3(unit.x, unit.y, 0))
         assert(_FormationEditSession.SelectedUnit == 1, 'world unit selection')
         assert(l:Ui('Editor/Intel/Name').TextGUIRendererComponent.Text == _FormationEditSession:MonsterName(unit.monsterId), 'intel follows selected unit')
     end
