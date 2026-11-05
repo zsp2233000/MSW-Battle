@@ -179,48 +179,110 @@ script FormationMapInput extends Component
         -- The cursor preview exists only while a legal edit target could be armed under the mouse.
         local ghost = self._T.ghost
         if isvalid(ghost) then ghost:SetEnable(false) end
-        if isvalid(self._T.range) then self._T.range:SetEnable(false) end
+        self:SetRangeEnable(false)
         self._T.ghostMode = ""
     end
 
     @ExecSpace("ClientOnly")
+    method void SetRangeEnable(boolean enable)
+        -- The range outline is four thin bars; they show and hide together.
+        for _, bar in ipairs(self._T.range or {}) do
+            if isvalid(bar) then bar:SetEnable(enable) end
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void DestroyRange()
+        -- Remove every bar of the range outline and forget them.
+        for _, bar in ipairs(self._T.range or {}) do
+            if isvalid(bar) then bar:Destroy() end
+        end
+        self._T.range = nil
+        self._T.rangeLook = nil
+    end
+
+    @ExecSpace("ClientOnly")
+    method table DashPixels(number length, Color color)
+        -- Pixels of one dashed bar: two dash pixels then one gap, repeated about every 0.2 units.
+        -- Both ends are dashes, so the corners where two bars meet stay closed.
+        local count = math.max(1, math.floor(length / 0.2 + 0.5)) * 3 + 2
+        local clear = Color(color.r, color.g, color.b, 0)
+        local pixels = {}
+        for index = 1, count do pixels[index] = (index % 3 == 0) and clear or color end
+        return pixels
+    end
+
+    @ExecSpace("ClientOnly")
     method void ShowRange(any option, number x, number y, boolean legal)
-        -- Draw the right-facing attack rectangle exactly as BattleAttackComposition:GetAttackShape builds it,
+        -- Outline the right-facing attack rectangle exactly as BattleAttackComposition:GetAttackShape builds it,
         -- from the published numbers: the body centre starts the rectangle and it reaches AttackRange forward.
         -- Like the battle spawn, this assumes a unit scale of 1 (battle units only flip the sign of X).
         if option.attackRangeY == nil or option.bodyOffsetX == nil or option.bodyOffsetY == nil then
-            if isvalid(self._T.range) then self._T.range:SetEnable(false) end
+            self:SetRangeEnable(false)
             return
         end
-        local range = self._T.range
-        if not isvalid(range) then
-            range = _SpawnService:SpawnByModelId("formationrangepreview", "FormationRangeGhost", Vector3(x, y, 0), self.Entity)
-            if not isvalid(range) then return end
-            self._T.range = range
+        local bars = self._T.range
+        if bars == nil then
+            -- Bars 1..4 are top, bottom, left, right.
+            bars = {}
+            for index = 1, 4 do
+                local bar = _SpawnService:SpawnByModelId("formationrangepreview", "FormationRangeGhost" .. tostring(index), Vector3(x, y, 0), self.Entity)
+                if not isvalid(bar) then
+                    for _, made in ipairs(bars) do made:Destroy() end
+                    return
+                end
+                bars[index] = bar
+            end
+            self._T.range = bars
             self._T.rangeLook = nil
         end
+        local w, h = option.attackRange, option.attackRangeY * 2
+        -- The bars sit inside the rectangle, so its outer size stays exactly the combat rectangle.
+        local t = math.min(0.04, w / 4, h / 4)
         -- This runs every frame: colour and size are rewritten only when the monster, its numbers or the legality change.
-        local look = table.concat({ option.monsterId, option.attackRange, option.attackRangeY, tostring(legal) }, "|")
+        local look = table.concat({ option.monsterId, w, h, tostring(legal) }, "|")
         if self._T.rangeLook ~= look then
-            local color = legal and Color(0.35, 0.75, 1, 0.35) or Color(1, 0.25, 0.25, 0.35)
-            -- One logical pixel stretched by scale; 1 world unit is 100 px.
-            range.PixelRendererComponent:ResetWithColor(1, 1, color)
-            range.TransformComponent.Scale = Vector3(option.attackRange * 100, option.attackRangeY * 2 * 100, 1)
+            local color = legal and Color(0.35, 0.75, 1, 0.85) or Color(1, 0.25, 0.25, 0.85)
+            -- Each bar is a one-pixel-wide strip of dash pixels stretched by scale; 1 world unit is 100 px.
+            local across = self:DashPixels(w, color)
+            local down = self:DashPixels(h - 2 * t, color)
+            for index, bar in ipairs(bars) do
+                if index <= 2 then
+                    bar.PixelRendererComponent:ResetWithColors(#across, 1, across)
+                    bar.TransformComponent.Scale = Vector3(w * 100 / #across, t * 100, 1)
+                else
+                    bar.PixelRendererComponent:ResetWithColors(1, #down, down)
+                    bar.TransformComponent.Scale = Vector3(t * 100, (h - 2 * t) * 100 / #down, 1)
+                end
+            end
             self._T.rangeLook = look
         end
-        range.TransformComponent.Position = Vector3(x - option.bodyOffsetX + option.attackRange / 2, y + option.bodyOffsetY, 0)
-        if range.Enable ~= true then range:SetEnable(true) end
+        local cx, cy = x - option.bodyOffsetX + w / 2, y + option.bodyOffsetY
+        local spots = { Vector3(cx, cy + (h - t) / 2, 0), Vector3(cx, cy - (h - t) / 2, 0), Vector3(cx - (w - t) / 2, cy, 0), Vector3(cx + (w - t) / 2, cy, 0) }
+        for index, bar in ipairs(bars) do
+            bar.TransformComponent.Position = spots[index]
+            if bar.Enable ~= true then bar:SetEnable(true) end
+        end
     end
 
     @ExecSpace("ClientOnly")
     method any RangeInfo()
-        -- Read the rectangle back from its entity: centre, size in world units and colour, as the player sees them.
-        local range = self._T.range
-        if not isvalid(range) or range.Enable ~= true or self._T.ghostMode == "" then return { visible = false } end
-        local position = range.TransformComponent.Position
-        local scale = range.TransformComponent.Scale
-        local tint = range.PixelRendererComponent:GetPixel(1, 1)
-        return { visible = true, x = position.x, y = position.y, w = scale.x / 100, h = scale.y / 100, r = tint.r, g = tint.g, b = tint.b, a = tint.a }
+        -- Read the outline back from its bars: centre, outer size, line width in world units and colour, as the player sees them.
+        local bars = self._T.range
+        if bars == nil or #bars ~= 4 or not isvalid(bars[1]) or bars[1].Enable ~= true or self._T.ghostMode == "" then return { visible = false } end
+        local top = bars[1].TransformComponent.Position
+        local bottom = bars[2].TransformComponent.Position
+        local scale = bars[1].TransformComponent.Scale
+        local strip = bars[1].PixelRendererComponent
+        local border = scale.y * strip.Height / 100
+        local tint = strip:GetPixel(1, 1)
+        -- Gaps along the top bar; the last pixel is a dash, so the corner is closed.
+        local gaps = 0
+        for column = 1, strip.Width do
+            if strip:GetPixel(column, 1).a < 0.5 then gaps = gaps + 1 end
+        end
+        local closed = strip:GetPixel(strip.Width, 1).a > 0.5
+        return { visible = true, x = top.x, y = (top.y + bottom.y) / 2, w = scale.x * strip.Width / 100, h = top.y - bottom.y + border, border = border, gaps = gaps, closed = closed, r = tint.r, g = tint.g, b = tint.b, a = tint.a }
     end
 
     @ExecSpace("ClientOnly")
@@ -366,10 +428,8 @@ script FormationMapInput extends Component
         self:ClearSelectionEffect()
         for _, entity in ipairs(self._T.previews or {}) do if isvalid(entity) then entity:Destroy() end end
         if isvalid(self._T.ghost) then self._T.ghost:Destroy() end
-        if isvalid(self._T.range) then self._T.range:Destroy() end
+        self:DestroyRange()
         self._T.ghost = nil
-        self._T.range = nil
-        self._T.rangeLook = nil
         self._T.ghostRuid = ""
         self._T.ghostMode = ""
         self._T.hoverIndex = 0

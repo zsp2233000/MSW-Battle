@@ -293,10 +293,14 @@ test('#60 the attack range preview is drawn with the monster preview, collider-f
   const input = read('RootDesk/MyDesk/Formations/FormationMapInput.mlua');
   const catalog = read('RootDesk/MyDesk/Combat/MonsterCatalog.mlua');
   assert.match(method(input, 'ShowGhost'), /self:ShowRange\(option, x, y, legal\)/, 'same call and same legality as the monster preview');
-  assert.match(method(input, 'HideGhost'), /_T\.range:SetEnable\(false\)/, 'hidden whenever the monster preview is');
+  assert.match(method(input, 'HideGhost'), /self:SetRangeEnable\(false\)/, 'hidden whenever the monster preview is');
+  assert.match(method(input, 'ShowRange'), /for index = 1, 4 do[\s\S]*?"formationrangepreview"/, 'the outline is four bars of the collider-free model');
+  assert.match(method(input, 'ShowRange'), /ResetWithColors/, 'each bar is a dashed strip, not a solid fill');
+  assert.match(method(input, 'DashPixels'), /\* 3 \+ 2[\s\S]*index % 3 == 0/, 'two dash pixels then a gap, and the strip starts and ends on a dash');
   assert.match(method(input, 'UpdateGhost'), /mode == "" or _InputService:IsPointerOverUI\(\) then\s*self:HideGhost\(\)/, 'no mode or a cursor over UI hides both previews');
   assert.match(method(input, 'RightClick'), /mode == "MOVE"[\s\S]*?self:HideGhost\(\)[\s\S]*?return[\s\S]*mode == "PLACE"[\s\S]*?self:HideGhost\(\)/, 'cancelling a move or a placement hides at once');
-  assert.match(method(input, 'ClearPreviews'), /_T\.range:Destroy\(\)/, 'no entity is left behind');
+  assert.match(method(input, 'ClearPreviews'), /self:DestroyRange\(\)/, 'no entity is left behind');
+  assert.match(method(input, 'DestroyRange'), /bar:Destroy\(\)/, 'every bar of the outline is destroyed');
   assert.match(catalog, /attackRangeY = profile\.AttackRangeY, bodyOffsetX = body\.x, bodyOffsetY = body\.y/, 'the catalog publishes the preview numbers');
   assert.match(method(catalog, 'MeasureBody'), /HitComponent[\s\S]*ColliderOffset/, 'the body centre is read from the model\'s real hit box, not stored again');
   const model = require('../.agents/skills/msw-general/scripts/model/msw_model_builder.cjs').ModelBuilder.snapshot('RootDesk/MyDesk/Models/MapObjects/FormationRangePreview.model');

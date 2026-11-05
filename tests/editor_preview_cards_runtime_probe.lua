@@ -87,14 +87,17 @@ local ok, detail = pcall(function()
     end
     -- A pixel texture may store 8-bit channels, so colours are compared to the nearest 1/100.
     local function tone(a, b) return math.abs(a - b) < 0.01 end
-    local function red(range) return tone(range.r, 1) and tone(range.g, 0.25) and tone(range.b, 0.25) and tone(range.a, 0.35) end
+    local function red(range) return tone(range.r, 1) and tone(range.g, 0.25) and tone(range.b, 0.25) and tone(range.a, 0.85) end
     local armedId = _FormationEditSession.SelectedMonsterId
     local armed = _FormationEditSession:Option(armedId)
     assert(armed.attackRangeY ~= nil and armed.bodyOffsetX ~= nil and armed.bodyOffsetY ~= nil, 'the catalog publishes the preview numbers')
     input:ShowGhost('PLACE', -5, 2)
     local range = input:GhostInfo().range
     assert(rangeMatches(range, armed, -5, 2), 'legal: starts at the body centre, reaches AttackRange rightwards, AttackRangeY both ways')
-    assert(range.r < range.b and tone(range.a, 0.35), 'legal: a translucent, non-red rectangle')
+    assert(range.r < range.b and tone(range.a, 0.85), 'legal: a non-red outline')
+    -- Outline only: four thin bars inside the rectangle, so the middle stays empty and the monster underneath stays visible.
+    assert(#input._T.range == 4 and range.border > 0 and range.border * 2 < math.min(range.w, range.h), 'the range is a thin outline, not a filled rectangle')
+    assert(range.gaps >= 1 and range.closed, 'the outline is dashed (it has gaps) and ends on a dash so the corner stays closed')
     input:ShowGhost('PLACE', -3, 1)
     assert(rangeMatches(input:GhostInfo().range, armed, -3, 1), 'the rectangle follows the preview')
     info = input:ShowGhost('PLACE', 5, 2)
@@ -111,9 +114,10 @@ local ok, detail = pcall(function()
     assert(not input:GhostInfo().range.visible, 'no placement or move mode means no rectangle')
     _FormationEditSession:SelectMonster(armedId)
     input:ShowGhost('PLACE', -5, 2)
-    local rangeEntity = input._T.range
-    assert(isvalid(rangeEntity) and rangeEntity.HitComponent == nil and rangeEntity.KinematicbodyComponent == nil and rangeEntity.TriggerComponent == nil,
-        'the rectangle has no collider and is not a target')
+    for index, bar in ipairs(input._T.range) do
+        assert(isvalid(bar) and bar.HitComponent == nil and bar.KinematicbodyComponent == nil and bar.TriggerComponent == nil,
+            'outline bar ' .. index .. ' has no collider and is not a target')
+    end
     assert(#_FormationEditSession.Draft == 0 and not _FormationEditSession:IsDirty() and #input._T.previews == 0, 'the rectangle is not a unit or an edit')
     input:HideGhost()
     assert(not input:GhostInfo().range.visible, 'hiding the preview hides the rectangle')
@@ -165,10 +169,11 @@ local ok, detail = pcall(function()
 
     -- Leaving the map clears every local preview entity, the rectangle included.
     local leftover = input._T.range
-    assert(isvalid(leftover), 'a rectangle exists to clear')
+    assert(leftover ~= nil and #leftover == 4 and isvalid(leftover[1]), 'an outline exists to clear')
     input:ClearPreviews()
     wait(0.2)
-    assert(not isvalid(leftover) and input._T.range == nil, 'clearing previews leaves no rectangle behind')
+    for index, bar in ipairs(leftover) do assert(not isvalid(bar), 'outline bar ' .. index .. ' is destroyed') end
+    assert(input._T.range == nil, 'clearing previews leaves no rectangle behind')
     log('[VRF][Preview50] range cleared')
 end)
 local mapInput = _UserService.LocalPlayer.CurrentMap:GetComponent('FormationMapInput')
