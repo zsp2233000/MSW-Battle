@@ -125,7 +125,7 @@
 | 移動 | `MovementComponent` 逐幀朝目標方向移動；禁止用計時器跳位置或直接改 Transform 模擬移動 |
 | 索敵與狀態 | 自訂 `@Component` 保存陣營、目前目標與 `IDLE/MOVE/ATTACK/HIT/DEAD`；每 0.5 秒掃描最近存活敵人 |
 | 一般攻擊 | `AttackComponent`、`HitComponent` 與 Hit 事件鏈；攻擊動畫命中影格觸發固定傷害 |
-| 坦克攻擊 | `TankContactAttack`（檔名沿用）在命中影格以前方矩形對範圍內所有敵方各抽一次傷害，經 Hit 流程造成傷害，再使用 Kinematicbody 位移並夾在邊界內擊退；整次攻擊共用一個攻擊間隔 |
+| 坦克攻擊 | `AreaAttack`（戰士與射手共用 `SingleTargetAttack`）在命中影格以前方矩形對範圍內所有敵方各抽一次傷害，經 Hit 流程造成傷害，再使用 Kinematicbody 位移並夾在邊界內擊退；整次攻擊共用一個攻擊間隔 |
 | 射手 | 距離驗證後於命中影格直接命中目標；不建立投射物 Entity |
 | 動畫 | `TankPresentation` 在客戶端依坦克狀態切換人類提供的 stand／move／hit／die AnimationClip RUID；目前仍以 death hold 延遲移除，待改為動畫結束事件 |
 | HP 條 | 單位下的世界空間子 Entity；兩個人類提供的 Sprite RUID，填充值依 HP 比例縮放 |

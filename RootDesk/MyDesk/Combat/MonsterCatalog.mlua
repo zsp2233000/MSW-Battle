@@ -208,8 +208,9 @@ script MonsterCatalog extends Component
         return profile
     end
 
-    method any MeasureBody(string modelId)
-        -- Read the model's hit box centre once; the editor's range preview must share the combat shape's body centre.
+    method any MeasureBodyCenterOffset(string modelId)
+        -- Read the hit box centre's offset from the foot once, scaled like BattleAttackComposition:GetAttackShape does,
+        -- so the editor's range preview shares the combat shape's body centre at any model scale.
         local cached = self._T.bodyOffsets[modelId]
         if cached ~= nil then return cached end
         local probe = _SpawnService:SpawnByModelId(modelId, "CatalogBodyProbe", Vector3.zero, self.Entity)
@@ -220,7 +221,8 @@ script MonsterCatalog extends Component
             return nil
         end
         local offset = hit.ColliderOffset
-        cached = { x = offset.x, y = offset.y }
+        local scale = probe.TransformComponent.Scale
+        cached = { x = offset.x * math.abs(scale.x), y = offset.y * scale.y }
         probe:Destroy()
         self._T.bodyOffsets[modelId] = cached
         return cached
@@ -272,7 +274,7 @@ script MonsterCatalog extends Component
         end
         if self:ValidateRoster(fixedRoster) == false then return false end
         for _, profile in pairs(self._T.profilesById) do
-            if self:MeasureBody(profile.ModelId) == nil then return false end
+            if self:MeasureBodyCenterOffset(profile.ModelId) == nil then return false end
         end
         self.IsLoaded = true
         log("[M1][MonsterCatalog] loaded and validated rows=" .. tostring(rowCount))

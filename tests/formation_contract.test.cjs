@@ -302,7 +302,7 @@ test('#60 the attack range preview is drawn with the monster preview, collider-f
   assert.match(method(input, 'ClearPreviews'), /self:DestroyRange\(\)/, 'no entity is left behind');
   assert.match(method(input, 'DestroyRange'), /bar:Destroy\(\)/, 'every bar of the outline is destroyed');
   assert.match(catalog, /attackRangeY = profile\.AttackRangeY, bodyOffsetX = body\.x, bodyOffsetY = body\.y/, 'the catalog publishes the preview numbers');
-  assert.match(method(catalog, 'MeasureBody'), /HitComponent[\s\S]*ColliderOffset/, 'the body centre is read from the model\'s real hit box, not stored again');
+  assert.match(method(catalog, 'MeasureBodyCenterOffset'), /HitComponent[\s\S]*ColliderOffset/, 'the body centre is read from the model\'s real hit box, not stored again');
   const model = require('../.agents/skills/msw-general/scripts/model/msw_model_builder.cjs').ModelBuilder.snapshot('RootDesk/MyDesk/Models/MapObjects/FormationRangePreview.model');
   assert.deepEqual(model.components, ['MOD.Core.TransformComponent', 'MOD.Core.PixelRendererComponent'], 'the rectangle model cannot be a target or collide');
 });

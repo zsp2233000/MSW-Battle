@@ -138,16 +138,18 @@ script FormationCatalogCards extends Logic
         _FormationLobby:SetText(target .. "/Kind", (option ~= nil and kind == "") and "—" or kind)
         local stats = {
             { "Health", "maxHp", "" },
-            { "Damage", "attackDamageMin", "" },
+            { "Damage", nil, "" },
             { "Interval", "attackInterval", " 秒" },
             { "Range", "attackRange", "" },
         }
         for _, stat in ipairs(stats) do
             local path = target .. "/Stats/" .. stat[1]
             _FormationLobby:SetEnabled(path, option ~= nil)
-            local value = option ~= nil and (tostring(option[stat[2]]) .. stat[3]) or ""
+            local value = ""
             if option ~= nil and stat[1] == "Damage" then
                 value = string.format("%d～%d", option.attackDamageMin, option.attackDamageMax)
+            elseif option ~= nil then
+                value = tostring(option[stat[2]]) .. stat[3]
             end
             _FormationLobby:SetText(path .. "/Value", value)
         end

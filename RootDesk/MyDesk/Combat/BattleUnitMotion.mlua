@@ -150,8 +150,8 @@ script BattleUnitMotion extends Component
         local dy = targetPosition.y - position.y
         local attack = self.Entity:GetComponent("script.BattleAttackComposition")
         local direction = attack:GetTargetDirection(target)
-        if not attack:IsTargetInRange(target, direction, false) then
-            if attack:IsTargetInRange(target, direction, true) then dx = 0 end
+        if not attack:IsTargetInRange(target, direction) then
+            if attack:IsTargetInReachColumn(target, direction) then dx = 0 end
             local distance = math.sqrt(dx * dx + dy * dy)
             if distance <= 0 then return end
             local directionX = dx / distance

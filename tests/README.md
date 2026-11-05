@@ -98,7 +98,7 @@ After restoration, re-run `node --test tests/*.test.cjs`, `deployment_runtime_pr
 
 The probes assert observed HP, `DamageTakenSerial`, `OnHitSoundSerial`, `AttackSerial`, events, positions, and results. Source-string assertions remain for structural contracts only; they do not substitute for runtime evidence.
 
-Controlled contact scenarios pin `AttackDamageMin = 40, AttackDamageMax = 40` when their literal HP expectations require it. The formal catalog uses its configured damage intervals. Motion behavior is verified through the session and existing actor observations; the former source-string assertion about where knockback lived has been removed.
+Controlled attack scenarios pin `AttackDamageMin = 40, AttackDamageMax = 40` when their literal HP expectations require it. The formal catalog uses its configured damage intervals. Motion behavior is verified through the session and existing actor observations; the former source-string assertion about where knockback lived has been removed.
 
 For #55, `attack_execution_runtime_probe.lua` samples each attack type 32 times using an 8–9 interval, checking both endpoints, variation, native `HitEvent` / `HIT` / `DAMAGE` amounts against HP loss, and independent rolls for area targets. The receivers' native Bodies are held while the existing manual attack clock advances, so real-frame tank knockback cannot move the damage fixtures out of contact. Existing cancellation, range and tank contact rules remain covered until their separate attack-rules tickets land. Catalog validation covers both damage fields, reversed bounds and equal endpoints. The intel and tooltip probes compare the entire `min～max` text through real card selection and hover events.
 

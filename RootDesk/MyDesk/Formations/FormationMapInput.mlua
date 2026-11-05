@@ -14,6 +14,7 @@ script FormationMapInput extends Component
         self._T.ghostLegal = false
         self._T.ghostMode = ""
         self._T.range = nil
+        self._T.rangeFailed = false
         self._T.rangeLook = nil
         self._T.hoverIndex = 0
         self._T.touch = _InputService:ConnectEvent(ScreenTouchEvent, self.HandleTouch)
@@ -198,6 +199,7 @@ script FormationMapInput extends Component
             if isvalid(bar) then bar:Destroy() end
         end
         self._T.range = nil
+        self._T.rangeFailed = false
         self._T.rangeLook = nil
     end
 
@@ -214,15 +216,15 @@ script FormationMapInput extends Component
 
     @ExecSpace("ClientOnly")
     method void ShowRange(any option, number x, number y, boolean legal)
-        -- Outline the right-facing attack rectangle exactly as BattleAttackComposition:GetAttackShape builds it,
-        -- from the published numbers: the body centre starts the rectangle and it reaches AttackRange forward.
-        -- Like the battle spawn, this assumes a unit scale of 1 (battle units only flip the sign of X).
+        -- Outline the right-facing attack rectangle from AttackGeometry, the same definition combat uses,
+        -- fed with the catalog's published (already scaled) body centre.
         if option.attackRange == nil or option.attackRangeY == nil or option.bodyOffsetX == nil or option.bodyOffsetY == nil then
             self:SetRangeEnable(false)
             return
         end
+        -- After a spawn failure do not retry every frame; ClearPreviews resets the flag.
+        if self._T.rangeFailed then return end
         local bars = self._T.range
-        if bars == false then return end
         if bars == nil then
             -- Bars 1..4 are top, bottom, left, right.
             bars = {}
@@ -230,8 +232,7 @@ script FormationMapInput extends Component
                 local bar = _SpawnService:SpawnByModelId("formationrangepreview", "FormationRangeGhost" .. tostring(index), Vector3(x, y, 0), self.Entity)
                 if not isvalid(bar) then
                     for _, made in ipairs(bars) do if isvalid(made) then made:Destroy() end end
-                    -- false = spawning failed; do not retry every frame until ClearPreviews resets it.
-                    self._T.range = false
+                    self._T.rangeFailed = true
                     return
                 end
                 bars[index] = bar
@@ -239,7 +240,8 @@ script FormationMapInput extends Component
             self._T.range = bars
             self._T.rangeLook = nil
         end
-        local w, h = option.attackRange, option.attackRangeY * 2
+        local rect = _AttackGeometry:Rectangle(x, y, option.bodyOffsetX, option.bodyOffsetY, 1, option.attackRange, option.attackRangeY)
+        local w, h = rect.w, rect.h
         -- The bars sit inside the rectangle, so its outer size stays exactly the combat rectangle.
         local t = math.min(0.04, w / 4, h / 4)
         -- This runs every frame: colour and size are rewritten only when the monster, its numbers or the legality change.
@@ -260,7 +262,7 @@ script FormationMapInput extends Component
             end
             self._T.rangeLook = look
         end
-        local cx, cy = x - option.bodyOffsetX + w / 2, y + option.bodyOffsetY
+        local cx, cy = rect.x, rect.y
         local spots = { Vector3(cx, cy + (h - t) / 2, 0), Vector3(cx, cy - (h - t) / 2, 0), Vector3(cx - (w - t) / 2, cy, 0), Vector3(cx + (w - t) / 2, cy, 0) }
         for index, bar in ipairs(bars) do
             bar.TransformComponent.Position = spots[index]

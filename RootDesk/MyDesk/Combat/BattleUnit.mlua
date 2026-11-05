@@ -224,6 +224,12 @@ script BattleUnit extends Component
         self:FaceDirection(targetTransform.WorldPosition.x - transform.WorldPosition.x)
     end
 
+    @ExecSpace("ServerOnly")
+    method number GetFacing()
+        -- Maple sprites face left, so a negative X scale means facing right (1); otherwise left (-1).
+        return self.Entity.TransformComponent.Scale.x < 0 and 1 or -1
+    end
+
     method any GetSession()
         -- Resolve the map-scoped session component from the unit's current map.
         local map = self.Entity.CurrentMap
