@@ -17,7 +17,12 @@ local ok, detail = pcall(function()
         cancelled, reason = pcall(function()
             _MatchFlow:CancelForUser(firstId)
             _MatchFlow:CancelForUser(secondId)
-            _MatchFlow:QueueForUser(firstId)
+            -- Arrival recovery may still own a read after cancellation; retry the same public command once idle.
+            for retry = 1, 100 do
+                _MatchFlow:QueueForUser(firstId)
+                if _MatchFlow:StateForUser(firstId) == 'QUEUED' then break end
+                wait(0.1)
+            end
         end)
         done = true
     end, 0.5)

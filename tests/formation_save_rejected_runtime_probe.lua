@@ -33,7 +33,7 @@ local ok, detail = pcall(function()
     record = service:GetSession(users[1].PlayerComponent.UserId)
     assert(record ~= nil, '玩家 session 存在')
     assert(await(function() return record.loadState == 'NEW' or record.loadState == 'READY' end), '初始讀取成功')
-    assert(not record.pending and not record.transferLocked and service._T.writers[record.profile] == nil, '沒有儲存或交接進行中')
+    assert(not record.pending and service._T.writers[record.profile] == nil, '沒有儲存或交接進行中')
     previousResult, previousMessage = record.result, record.message
     captured = true
     local catalog = service:GetCatalog()

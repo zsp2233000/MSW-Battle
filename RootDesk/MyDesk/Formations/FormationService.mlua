@@ -82,7 +82,7 @@ script FormationService extends Logic
     method void RequestRetryLoad()
         -- Explicitly reconcile failed or unconfirmed writes by reading the durable content again.
         local record = self:GetSession(senderUserId)
-        if record == nil or record.transferLocked or record.pending or record.loadState == "LOADING" then return end
+        if record == nil or _FormationHandoff:IsLocked(record.profile) or record.pending or record.loadState == "LOADING" then return end
         self:Load(record)
     end
 
@@ -157,7 +157,7 @@ script FormationService extends Logic
     method void RequestSelectSlot(integer slotId)
         -- Selecting a group changes only the viewed slot; it never writes storage or changes the active slot.
         local record = self:GetSession(senderUserId)
-        if record == nil or record.transferLocked or _MatchFlow:IsFormationLocked(senderUserId) or record.pending or not record.initialized or slotId < 1 or slotId > 5 then return end
+        if record == nil or _FormationHandoff:IsLocked(record.profile) or record.pending or not record.initialized or slotId < 1 or slotId > 5 then return end
         record.editSlot = slotId
         record.message = "已選取第 " .. tostring(slotId) .. " 組"
         self:Publish(record)
@@ -185,7 +185,7 @@ script FormationService extends Logic
         if record == nil then return end
         -- A request that cannot be correlated still gets an answer, so no client waits on silence.
         if type(requestId) ~= "string" or #requestId == 0 or #requestId > 64 then self:Publish(record) return end
-        if record.transferLocked or _MatchFlow:IsFormationLocked(forUserId) then self:Reject(record, "SAVE", slotId, requestId, "REJECTED", "配對進行中，取消完成或返回大廳後可繼續編輯") return end
+        if _FormationHandoff:IsLocked(record.profile) then self:Reject(record, "SAVE", slotId, requestId, "REJECTED", "配對進行中，取消完成或返回大廳後可繼續編輯") return end
         if not record.initialized or not _FormationSchema:IsLoadConfirmed(record.loadState) then
             self:Reject(record, "SAVE", slotId, requestId, "REJECTED", "必須先成功讀取資料；請重新讀取")
             return
@@ -228,7 +228,7 @@ script FormationService extends Logic
     method void ActivateForUser(string forUserId, integer slotId, integer expectedRevision)
         -- Activation writes only the confirmed slot; it never saves or activates unsaved content implicitly.
         local record = self:GetSession(forUserId)
-        if record == nil or record.pending or record.transferLocked or _MatchFlow:IsFormationLocked(forUserId) then return end
+        if record == nil or record.pending or _FormationHandoff:IsLocked(record.profile) then return end
         local slot = record.saved.slots[tostring(slotId)]
         if slot == nil or slotId ~= record.editSlot or slot.revision ~= expectedRevision then self:Publish(record) return end
         if #slot.units == 0 then
@@ -284,7 +284,7 @@ script FormationService extends Logic
             if completed then
                 -- Accept a late durable acknowledgement only while this source still owns this exact write.
                 if code ~= 0 or record.uncertain == nil or record.writeEpoch ~= epoch
-                    or record.transferLocked or self._T.sessions[record.userId] ~= record then return end
+                    or _FormationHandoff:IsLocked(record.profile) or _FormationHandoff:IsLocked(record.profile) or self._T.sessions[record.userId] ~= record then return end
                 if record.raw ~= expected then return end
             end
             completed = true
@@ -348,12 +348,10 @@ script FormationService extends Logic
     end
 
     @ExecSpace("ServerOnly")
-    method boolean LockTransfer(string forUserId, string profile, string ticketId)
-        -- Freeze this player's editing for one transfer; only the matching ticket may release it.
+    method boolean ProfileOwnedBy(string forUserId, string profile)
+        -- Confirm the authenticated session only. FormationHandoff owns its edit lock.
         local session = self:GetSession(forUserId)
-        if session == nil or session.profile ~= profile then return false end
-        session.transferLocked = ticketId
-        return true
+        return session ~= nil and session.profile == profile
     end
 
     @ExecSpace("ServerOnly")
@@ -379,7 +377,6 @@ script FormationService extends Logic
         record.saved = document
         record.loadEpoch = (record.loadEpoch or 0) + 1
         record.writeEpoch = (record.writeEpoch or 0) + 1
-        record.transferLocked = false
         record.raw = transfer.confirmedMatchesSaved and transfer.saved or transfer.confirmedRaw
         record.sessionId = transfer.sessionId or record.sessionId
         record.editSlot = transfer.editSlot
@@ -395,13 +392,6 @@ script FormationService extends Logic
         return true
     end
 
-    @ExecSpace("ServerOnly")
-    method void ReleaseTransfer(string forUserId, string ticketId)
-        -- Release only the matching lock without recreating a departed player's session.
-        local record = self._T.sessions[forUserId]
-        if record ~= nil and record.transferLocked == ticketId then record.transferLocked = false end
-    end
-
     @ExecSpace("Server")
     method void RequestTravel(string destination)
         -- Limit destinations and derive the traveller from the RPC sender.
@@ -410,7 +400,7 @@ script FormationService extends Logic
         if not isvalid(player) then return end
         local record = self:GetSession(senderUserId)
         local reconciled = record ~= nil and _FormationSchema:IsLoadConfirmed(record.loadState)
-        if _MatchFlow:IsFormationLocked(senderUserId) or (record ~= nil and (record.transferLocked or record.pending or (record.uncertain ~= nil and not reconciled))) then
+        if _FormationHandoff:IsLockedForUser(senderUserId) or (record ~= nil and (record.pending or (record.uncertain ~= nil and not reconciled))) then
             if record ~= nil then self:Publish(record) end
             return
         end
@@ -431,7 +421,7 @@ script FormationService extends Logic
         -- Position and lock only the authenticated sender while they are on the formation simulation map.
         local player = _UserService:GetUserEntityByUserId(senderUserId)
         local record = self:GetSession(senderUserId)
-        if record ~= nil and record.transferLocked then return end
+        if record ~= nil and _FormationHandoff:IsLocked(record.profile) then return end
         local map = _EntityService:GetEntityByPath("/maps/formationsim")
         if not isvalid(player) or not isvalid(map) or player.CurrentMap ~= map then return end
         local controller = player:GetComponent("PlayerControllerComponent")
