@@ -19,6 +19,14 @@ local ok, detail = pcall(function()
             local view = rules:Present(value, context)
             assert(view.action == action and view.enabled, state .. " action")
             assert(view.allowsFormationActions == (state == "IDLE"), state .. " editing lock")
+            for _, blocker in ipairs({ "editBusy", "unconfirmed", "confirming" }) do
+                context[blocker] = true
+                assert(not rules:Present(value, context).enabled, state .. " blocked by " .. blocker)
+                context[blocker] = false
+            end
+            context.pending = true
+            assert(rules:Present(value, context).label == (action == "CANCEL" and "取消中…" or (state == "IDLE" and "處理中…" or (state == "RETURNING" or string.sub(state, 1, 7) == "RESULT_") and "返回中…" or view.label)), state .. " pending label")
+            context.pending = false
             value.busy = true
             assert(not rules:Present(value, context).enabled, state .. " busy")
         end
@@ -56,16 +64,41 @@ local ok, detail = pcall(function()
     first.sequence = 1000000
     _MatchFlow:ReceiveState(first)
     assert(input.Snapshot.state == "QUEUED", "public receiver accepts current room")
+    local editor = _FormationEditSession
+    local originalFormation = editor.Snapshot
+    local editSequence = 10000000
+    for _, state in ipairs({ "QUEUED", "COMMITTING", "RETURNING", "RESULT_WIN" }) do
+        for _, blocker in ipairs({ "busy", "unconfirmed", "confirming" }) do
+            local formation = {}
+            for key, value in pairs(originalFormation) do formation[key] = value end
+            formation.pending = blocker == "busy"
+            if blocker == "unconfirmed" then formation.uncertain = true formation.loadState = "CONFLICT" end
+            editSequence = editSequence + 1
+            editor:Observe(formation, editSequence)
+            if blocker == "confirming" then editor:OpenConfirmation("RETURN", 0) end
+            local blocked = snapshot(state)
+            blocked.sequence = editSequence
+            _MatchFlow:ReceiveState(blocked)
+            local before = input:View()
+            assert(not before.enabled and not input.action.ButtonComponent.Enable, state .. " renders disabled for " .. blocker)
+            input:Click()
+            assert(input:View().label == before.label, state .. " blocked click never enters pending")
+            editor:CloseConfirmation()
+        end
+    end
+    editor:Observe(originalFormation, editSequence + 1)
+    first.sequence = editSequence + 1
+    _MatchFlow:ReceiveState(first)
     local stale = snapshot("IDLE")
     stale.sequence = 999999
     _MatchFlow:ReceiveState(stale)
     assert(input.Snapshot.state == "QUEUED", "stale sequence cannot unlock")
     stale.sourceRoom = "foreign"
-    stale.sequence = 1000001
+    stale.sequence = editSequence + 2
     _MatchFlow:ReceiveState(stale)
     assert(input.Snapshot.state == "QUEUED", "foreign room cannot unlock")
     original.sequenceKey = "state-probe"
-    original.sequence = 1000002
+    original.sequence = editSequence + 2
     _MatchFlow:ReceiveState(original)
 end)
 log(ok and "[VRF][MatchState] PASS" or "[VRF][MatchState] FAIL " .. tostring(detail))

@@ -125,14 +125,9 @@ script MatchFlowInput extends Logic
         if not view.enabled then return end
         local player = _UserService.LocalPlayer
         if not isvalid(player) or (player.CurrentMapName ~= "formationlobby" and player.CurrentMapName ~= "matchprobe") then return end
-        if _FormationEditSession.ConfirmKind ~= "" or _FormationEditSession:Busy() or _FormationEditSession:Unconfirmed() then return end
-        if self.Snapshot.state == "IDLE" then
-            local formation = _FormationEditSession.Snapshot
-            if not _FormationSchema:IsLoadConfirmed(formation.loadState) or formation.pending then return end
-            if not _FormationEditSession:HasValidActive() then
-                if _UserService.LocalPlayer.CurrentMapName == "formationlobby" then _FormationLobby:Travel("formationsim") end
-                return
-            end
+        if view.action == "PREPARE" then
+            _FormationLobby:Travel("formationsim")
+            return
         end
         self._T.pending = true
         self._T.pendingSeconds = 0

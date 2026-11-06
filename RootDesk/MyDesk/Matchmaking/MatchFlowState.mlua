@@ -38,6 +38,8 @@ script MatchFlowState extends Logic
         local label = "開始配對"
         local formation = context.formation
         local idleBlocked = false
+        local cancelStates = { QUEUED = true, RENEWING = true, CANCELLING = true, CANCELLED = true, QUEUE_ERROR = true, SAVING = true }
+        local canCancel = cancelStates[snapshot.state] == true
         if snapshot.state == "QUEUED" then
             text = "正在尋找對手 · 已等候 " .. tostring(elapsed) .. " 秒"
             label = "取消配對"
@@ -103,13 +105,13 @@ script MatchFlowState extends Logic
             label = "返回中…"
         end
         if context.pending and snapshot.state == "IDLE" then text = "正在確認配對狀態…" label = "處理中…" end
-        if context.pending and (snapshot.state == "QUEUED" or snapshot.state == "RENEWING" or snapshot.state == "CANCELLING" or snapshot.state == "CANCELLED" or snapshot.state == "QUEUE_ERROR" or snapshot.state == "SAVING") then
+        if context.pending and canCancel then
             text = "正在確認取消結果，完成前暫停整備…" label = "取消中…"
         end
         if snapshot.state == "IDLE" and (snapshot.reasonCode == "RETURNED" or snapshot.reasonCode == "CANCELLED") then text = "已返回或取消，可以重新開始配對" end
         if snapshot.state == "IDLE" then
             local ready = context.ready
-            idleBlocked = not ready or context.editBusy or context.unconfirmed or context.confirming
+            idleBlocked = not ready or formation.pending == true
             if not ready then
                 text = "正在載入隊伍；若持續沒有回應，請按「重新讀取」。"
                 label = "等待讀取"
@@ -120,16 +122,17 @@ script MatchFlowState extends Logic
                 text = "請先放置 1～6 個單位，儲存後設為出戰。"
                 local inLobby = context.inLobby
                 label = inLobby and "前往整備" or "請先儲存並設為出戰"
-                idleBlocked = not inLobby
+                idleBlocked = idleBlocked or not inLobby
             end
         end
         local known = { IDLE = true, QUEUED = true, RENEWING = true, QUEUE_ERROR = true, CANCELLING = true, CANCELLED = true, SAVING = true, COMMITTING = true, TRANSFER = true, IN_ROOM = true, WAITING = true, ENTRY_FAILED = true, ABORTED = true, ROOM_MISMATCH = true, RETURNING = true, BATTLE = true, RESULT_WIN = true, RESULT_LOSE = true, RESULT_DRAW = true }
         local action = "QUEUE"
         if snapshot.reasonCode == "READINESS_FAILED" then action = "STATUS"
-        elseif snapshot.state == "QUEUED" or snapshot.state == "SAVING" or snapshot.state == "RENEWING" or snapshot.state == "QUEUE_ERROR" or snapshot.state == "CANCELLING" or snapshot.state == "CANCELLED" then action = "CANCEL"
+        elseif canCancel then action = "CANCEL"
         elseif snapshot.state == "IDLE" and not context.hasActive then action = "PREPARE"
         elseif snapshot.state ~= "IDLE" then action = "RETURN" end
         local enabled = known[snapshot.state] == true and snapshot.state ~= "BATTLE" and not snapshot.busy and not context.pending and not idleBlocked
+            and not context.editBusy and not context.unconfirmed and not context.confirming
         return { text = text, label = label, action = action, enabled = enabled,
             allowsFormationActions = snapshot.state == "IDLE" and not snapshot.busy and not context.pending }
     end
