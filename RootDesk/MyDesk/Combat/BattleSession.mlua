@@ -56,30 +56,20 @@ script BattleSession extends Component
         self._T.manualSimulation = false
         self._T.initialized = false
         self:ClearConfigurationUsers()
-        self:ClearUnits()
-        self._T.pendingDamage = {}
-        self._T.pendingKnockbacks = {}
         self._T.monsterCatalog = nil
-        self._T.nextPlayerUnitNumber = 0
-        self._T.eventHistory = {}
         self._T.dataReady = false
-        self._T.resultEntered = false
-        self.Result = ""
-        self._T.configurationErrorDetail = ""
-        self.InitialPlayerAlive = 0
-        self.InitialEnemyAlive = 0
-        self.UnitSnapshots = ""
-        self.EventHistory = ""
-        self.LastEvent = ""
-        self.LastEventSourceName = ""
-        self.LastEventTargetName = ""
-        self.LastEventAmount = 0
+        self:ResetRosterState()
         self:DisableDefaultPlayer()
+        self:LoadRosterFromMap()
+        self._T.initialized = true
+        self._T.rebuilding = false
+    end
 
+    @ExecSpace("ServerOnly")
+    method void LoadRosterFromMap()
+        -- Load the catalog, then open deployment from the map's validated BattlePlacement entities.
         if self:LoadMonsterData() == false then
             self:RefreshSnapshot()
-            self._T.initialized = true
-            self._T.rebuilding = false
             return
         end
 
@@ -88,8 +78,6 @@ script BattleSession extends Component
             self.HomeProfile = ""
             self.AwayProfile = ""
             self.Phase = "WAITING"
-            self._T.initialized = true
-            self._T.rebuilding = false
             self:RefreshSnapshot()
             log("[VRF][MatchedBattle] waiting for authorized formations")
             return
@@ -98,33 +86,67 @@ script BattleSession extends Component
         local placedRoster = self:BuildPlacedRoster()
         if placedRoster == nil then
             self:RefreshSnapshot()
-            self._T.initialized = true
-            self._T.rebuilding = false
             return
         end
         self._T.placedRoster = placedRoster
-        if self:SpawnPlacedRoster(placedRoster) == false then
-            self:ClearUnits()
-            self:FailConfiguration("map placement roster spawn failed")
-            self:RefreshSnapshot()
-            self._T.initialized = true
-            self._T.rebuilding = false
-            return
+        local entries = {}
+        for index, entry in ipairs(placedRoster) do
+            table.insert(entries, { name = entry.name .. "_Unit_" .. tostring(index), faction = entry.faction,
+                profile = self:GetMonsterProfile(entry.monsterId), position = entry.position })
         end
+        if not self:ReplaceRoster(entries, "map placement roster") then return end
 
+        -- Successful spawning consumes the Maker markers; failure keeps them for configuration recovery.
         for _, entry in ipairs(placedRoster) do
             if isvalid(entry.source) then entry.source:Destroy() end
         end
         self.InitialPlayerAlive = self.PlayerAlive
         self.InitialEnemyAlive = self.EnemyAlive
-        self.ConfigurationError = ""
-        self.SessionGeneration = self.SessionGeneration + 1
-        self.Phase = "DEPLOYMENT"
-        self._T.initialized = true
-        self._T.rebuilding = false
         self:EmitPresentation("DEPLOYMENT_START", nil, nil, 0)
         self:RefreshSnapshot()
         log("[M1][BattleSession] DEPLOYMENT ready: map playerUnits=" .. tostring(self.PlayerAlive) .. " enemyUnits=" .. tostring(self.EnemyAlive))
+    end
+
+    @ExecSpace("ServerOnly")
+    method void ResetRosterState()
+        -- The single reset list for every roster replacement; serials and generation stay monotonic.
+        self:ClearUnits()
+        self._T.nextPlayerUnitNumber = 0
+        self._T.eventHistory = {}
+        self._T.resultEntered = false
+        self._T.configurationErrorDetail = ""
+        self.Result = ""
+        self.ConfigurationError = ""
+        self.InitialPlayerAlive = 0
+        self.InitialEnemyAlive = 0
+        self.UnitSnapshots = ""
+        self.EventHistory = ""
+        self.LastEvent = ""
+        self.LastEventSourceName = ""
+        self.LastEventTargetName = ""
+        self.LastEventAmount = 0
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean ReplaceRoster(table entries, string label)
+        -- Replace every unit from ordered, already validated entries; callers own the rebuilding guard and their epilogue.
+        self:ResetRosterState()
+        for _, entry in ipairs(entries) do
+            local entity = nil
+            if entry.profile ~= nil then
+                entity = self:SpawnConfiguredUnit(entry.profile.ModelId, entry.name, entry.faction, entry.profile, entry.position)
+            end
+            if not isvalid(entity) then
+                self:FailConfiguration(label .. " spawn failed for " .. entry.name)
+                self:RefreshSnapshot()
+                return false
+            end
+        end
+        self.SessionGeneration = self.SessionGeneration + 1
+        self.Phase = "DEPLOYMENT"
+        log("[VRF][BattleSession] roster replaced label=" .. label .. " playerUnits=" .. tostring(self.PlayerAlive)
+            .. " enemyUnits=" .. tostring(self.EnemyAlive) .. " generation=" .. tostring(self.SessionGeneration))
+        return true
     end
 
     @ExecSpace("ServerOnly")
@@ -477,48 +499,21 @@ script BattleSession extends Component
         local preparedEnemies = self:ValidateTestRoster(enemyRoster, 1, self.DeploymentMaxUnits, usedNames)
         if preparedEnemies == nil then return false end
 
-        self._T.rebuilding = true
-        self:ClearUnits()
-        self._T.nextPlayerUnitNumber = 0
-        self._T.eventHistory = {}
-        self._T.resultEntered = false
-        self.Result = ""
-        self.ConfigurationError = ""
-        self._T.configurationErrorDetail = ""
-        self.InitialPlayerAlive = 0
-        self.InitialEnemyAlive = 0
-        self.Snapshot = ""
-        self.UnitSnapshots = ""
-        self.EventHistory = ""
-        self.LastEvent = ""
-        self.LastEventSourceName = ""
-        self.LastEventTargetName = ""
-        self.LastEventAmount = 0
-
+        local entries = {}
         for _, entry in ipairs(preparedPlayers) do
-            local entity = self:SpawnConfiguredUnit(entry.profile.ModelId, entry.name, "PLAYER", entry.profile, entry.position)
-            if not isvalid(entity) then
-                self._T.rebuilding = false
-                self:FailConfiguration("controlled test player spawn failed for " .. entry.name)
-                self:RefreshSnapshot()
-                return false
-            end
+            table.insert(entries, { name = entry.name, faction = "PLAYER", profile = entry.profile, position = entry.position })
         end
         for _, entry in ipairs(preparedEnemies) do
-            local entity = self:SpawnConfiguredUnit(entry.profile.ModelId, entry.name, "ENEMY", entry.profile, entry.position)
-            if not isvalid(entity) then
-                self._T.rebuilding = false
-                self:FailConfiguration("controlled test enemy spawn failed for " .. entry.name)
-                self:RefreshSnapshot()
-                return false
-            end
+            table.insert(entries, { name = entry.name, faction = "ENEMY", profile = entry.profile, position = entry.position })
         end
+        self._T.rebuilding = true
+        local replaced = self:ReplaceRoster(entries, "controlled test roster")
+        self._T.rebuilding = false
+        if not replaced then return false end
 
-        self.Phase = "DEPLOYMENT"
+        -- Test scenes count deployed players from zero; TryStartBattle records the real initial counts.
         self.InitialPlayerAlive = 0
         self.InitialEnemyAlive = self.EnemyAlive
-        self.SessionGeneration = self.SessionGeneration + 1
-        self._T.rebuilding = false
         self:RefreshSnapshot()
         log("[M1][BattleSession] controlled test scene ready: playerUnits=" .. tostring(self.PlayerAlive)
             .. " enemyUnits=" .. tostring(self.EnemyAlive) .. " generation=" .. tostring(self.SessionGeneration))
@@ -573,31 +568,21 @@ script BattleSession extends Component
         local home = self:PrepareMatchedRoster(homeUnits, false)
         local away = self:PrepareMatchedRoster(awayUnits, true)
         if home == nil or away == nil then return false end
-        self._T.rebuilding = true
-        self:ClearUnits()
-        self._T.resultEntered = false
-        self._T.eventHistory = {}
-        self.EventHistory = ""
-        self.Result = ""
-        self.ConfigurationError = ""
-        self.MatchKey = matchKey
-        self.HomeProfile = homeProfile
-        self.AwayProfile = awayProfile
+        local entries = {}
         for side, roster in ipairs({ home, away }) do
             local faction = side == 1 and "PLAYER" or "ENEMY"
             for index, entry in ipairs(roster) do
-                local entity = self:SpawnConfiguredUnit(entry.profile.ModelId, "Match_" .. faction .. "_" .. tostring(index), faction, entry.profile, entry.position)
-                if not isvalid(entity) then
-                    self._T.rebuilding = false
-                    self:FailConfiguration("matched roster spawn failed")
-                    self:RefreshSnapshot()
-                    return false
-                end
+                table.insert(entries, { name = "Match_" .. faction .. "_" .. tostring(index), faction = faction,
+                    profile = entry.profile, position = entry.position })
             end
         end
-        self.SessionGeneration = self.SessionGeneration + 1
+        self._T.rebuilding = true
+        self.MatchKey = matchKey
+        self.HomeProfile = homeProfile
+        self.AwayProfile = awayProfile
+        local replaced = self:ReplaceRoster(entries, "matched roster")
         self._T.rebuilding = false
-        self.Phase = "DEPLOYMENT"
+        if not replaced then return false end
         local started = self:TryStartBattle()
         log("[VRF][MatchedBattle] initialized home=" .. tostring(#home) .. " away=" .. tostring(#away) .. " started=" .. tostring(started))
         return started
@@ -829,16 +814,6 @@ script BattleSession extends Component
         self:EmitPresentation("SESSION_START", nil, nil, 0)
         self:RefreshSnapshot()
         log("[M1][BattleSession] BATTLE started: playerUnits=" .. tostring(self.PlayerAlive) .. " enemyUnits=" .. tostring(self.EnemyAlive))
-        return true
-    end
-
-    method boolean SpawnPlacedRoster(table roster)
-        -- Create every validated map unit, preserving each placement's faction and world position.
-        for index, entry in ipairs(roster) do
-            local entity = self:SpawnMonster(entry.monsterId, entry.name .. "_Unit_" .. tostring(index), entry.faction, entry.position)
-            if not isvalid(entity) then return false end
-            log("[M1][BattleSession] MAP_UNIT name=" .. entry.name .. " monsterId=" .. entry.monsterId .. " faction=" .. entry.faction)
-        end
         return true
     end
 
