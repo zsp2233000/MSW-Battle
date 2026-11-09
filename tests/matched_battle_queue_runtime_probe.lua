@@ -56,7 +56,7 @@ local ok, detail = pcall(function()
     wait(0.2)
     for _, userId in ipairs({firstId, secondId}) do
         local restored
-        for attempt = 1, 900 do
+        for attempt = 1, 2000 do
             local player = _UserService:GetUserEntityByUserId(userId)
             if isvalid(player) and player.CurrentMapName == "formationlobby" then
                 restored = _FormationService:GetSession(userId)

@@ -391,12 +391,13 @@ test('the handoff reaches formation sessions only through FormationService opera
   const service = read('RootDesk/MyDesk/Formations/FormationService.mlua');
   // No session record access: the session shape and its transfer lock belong to FormationService alone.
   assert.doesNotMatch(handoff, /GetSession|transferLocked|loadEpoch|writeEpoch|restoredSession/, 'handoff holds no session fields');
-  assert.doesNotMatch(handoff, /(session|record)\.(initialized|pending|loadState|saved|sessionId|editSlot|uncertain|message)\b/, 'handoff reads no session state');
+  assert.doesNotMatch(handoff, /session\.(initialized|pending|loadState|saved|sessionId|editSlot|uncertain|message)\b/, 'handoff reads no formation-session state');
   assert.doesNotMatch(handoff, /_FormationService:(Publish|Load)\(/, 'restoring a session is FormationService work');
-  for (const name of ['ActiveFormation', 'LockTransfer', 'ExportConfirmed', 'ImportConfirmed', 'ReleaseTransfer']) {
+  for (const name of ['ActiveFormation', 'ExportConfirmed', 'ImportConfirmed', 'ProfileOwnedBy']) {
     assert.ok(handoff.includes(`_FormationService:${name}(`), `handoff uses ${name}`);
     assert.match(service, new RegExp(`method \\w+ ${name}\\(`), `FormationService defines ${name}`);
   }
+  assert.doesNotMatch(service, /LockTransfer|ReleaseTransfer|transferLocked/, 'the handoff owns the only edit lock');
 });
 
 test('catalog options use named fields and one rule decides a confirmed read', () => {
@@ -413,12 +414,26 @@ test('catalog options use named fields and one rule decides a confirmed read', (
   assert.match(read('RootDesk/MyDesk/Combat/MonsterCatalog.mlua'), /monsterId = profile\.MonsterId, monsterName = profile\.MonsterName, standRuid = profile\.StandAnimationRUID/);
 });
 
-test('only FormationService assigns the transfer lock', () => {
-  const offenders = [];
-  for (const dir of ['RootDesk/MyDesk/Formations', 'RootDesk/MyDesk/Matchmaking', 'RootDesk/MyDesk/Combat']) {
-    for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.mlua'))) {
-      if (/\.transferLocked\s*=[^=]/.test(read(`${dir}/${file}`)) && file !== 'FormationService.mlua') offenders.push(file);
-    }
-  }
-  assert.deepEqual(offenders, [], 'transferLocked is written only inside FormationService');
+test('only FormationHandoff owns the profile edit lock', () => {
+  const match = read('RootDesk/MyDesk/Matchmaking/MatchFlow.mlua');
+  const locked = match.match(/method boolean IsFormationLocked\(string userId\)[\s\S]*?\n    end/);
+  assert.ok(locked, 'IsFormationLocked exists');
+  assert.match(locked[0], /return _FormationHandoff:IsLockedForUser\(userId\)/);
+  assert.doesNotMatch(locked[0], /_T\.busy|_T\.records/);
+  assert.match(match, /_FormationHandoff:OpenForUser\(/);
+  assert.match(match, /_FormationHandoff:Reconcile\(/);
+  assert.match(match, /_FormationHandoff:Read\(otherProfile\)/);
+  assert.doesNotMatch(match, /_FormationHandoff:Read\(profile\)|_FormationHandoff:Read\(player/);
+  assert.doesNotMatch(match, /_FormationHandoff:Store\(|_FormationHandoff:Release\(/);
+  assert.doesNotMatch(match, /ticket\.data\.state\s*=[^=]/);
+  assert.doesNotMatch(match, /_UNCONFIRMED/, 'match flow reports reducer-known failure codes');
+  const finish = match.match(/method boolean Finish\(string userId, table ticket, string doneState, any attempt\)[\s\S]*?\n    end/);
+  assert.ok(finish, 'Finish exists');
+  assert.equal((finish[0].match(/attempt\(\)/g) || []).length, 1, 'an explicit failed write is not retried');
+  const renew = match.match(/method void ResumeRenew\(string userId, table ticket, string expiredRequestId\)[\s\S]*?\n    end/);
+  assert.ok(renew, 'partial renew resumes on the existing request');
+  assert.equal((renew[0].match(/_FormationHandoff:Renew\(/g) || []).length, 1);
+  assert.match(renew[0], /state ~= "RENEWING" or type\(requestId\) ~= "string"/);
+  assert.ok(renew[0].indexOf("self:Settled(userId, ticket)") < renew[0].indexOf("_UtilLogic:NewGuid()"));
+  assert.match(match, /busy\[userId\] = nil self:Report\(userId, \{ code = "QUEUE_SERVICE_FAILED" \}\) return/);
 });

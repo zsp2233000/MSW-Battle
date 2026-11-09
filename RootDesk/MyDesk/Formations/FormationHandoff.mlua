@@ -8,6 +8,7 @@ script FormationHandoff extends Logic
         -- Keep formation payloads private across map changes and discard them with their room.
         self._T.records = {}
         self._T.byId = {}
+        self._T.profileOf = {}
         self._T.ended = false
         log("[VRF][Handoff] ready")
     end
@@ -47,6 +48,7 @@ script FormationHandoff extends Logic
         local previous = self._T.records[profile]
         if self._T.ended or (previous ~= nil and previous.writing ~= nil) then return nil end
         local epoch = previous ~= nil and previous.epoch or 0
+        local pending = previous ~= nil and previous.pending or nil
         local done, code, raw = false, -1, nil
         _FormationStorage:Read(profile, self.StorageKey, function(result, key, value)
             code, raw, done = result, value, true
@@ -63,36 +65,206 @@ script FormationHandoff extends Logic
         end
         -- A read started before another operation must not replace its newer in-memory authority.
         if self._T.records[profile] ~= previous or (previous ~= nil and (previous.writing ~= nil or previous.epoch ~= epoch)) then return nil end
-        if previous ~= nil and previous.raw == (raw or "") then
-            return { id = previous.attempt, profile = profile, epoch = previous.epoch, data = data ~= nil and self:Metadata(data) or nil }
+        if previous ~= nil then previous.observedRaw = raw or "" end
+        if previous == nil then
+            previous = { profile = profile, epoch = 0 }
+            self._T.records[profile] = previous
+        end
+        if pending ~= nil and previous.pending == pending and (raw or "") == pending.raw then
+            self:Adopt(previous, pending)
+                    return { id = previous.attempt, profile = profile, epoch = previous.epoch, data = previous.metadata ~= nil and self:Metadata(previous.metadata) or nil }
+        end
+        if pending ~= nil and previous.pending == pending and (raw or "") ~= previous.raw then
+            previous.pending = nil
+        end
+        if pending ~= nil and previous.pending == pending then
+            return { id = previous.attempt, profile = profile, epoch = previous.epoch, data = previous.metadata ~= nil and self:Metadata(previous.metadata) or nil }
+        end
+        if previous.raw == (raw or "") and previous.metadata ~= nil then
+            return { id = previous.attempt, profile = profile, epoch = previous.epoch, data = self:Metadata(previous.metadata) }
         end
         local id = data ~= nil and data.attempt or ""
-        local record = previous or { profile = profile, epoch = 0 }
-        if record.attempt ~= id then
-            if record.attempt ~= nil then self._T.byId[record.attempt] = nil end
+        if previous.attempt ~= id then
+            if previous.attempt ~= nil and previous.attempt ~= "" then self._T.byId[previous.attempt] = nil end
         end
-        record.attempt = id
-        record.epoch = record.epoch + 1
-        record.raw = raw or ""
-        record.transfer = data ~= nil and data.state ~= "CANCELLED" and data.state ~= "RETURNED" and data.transfer or nil
-        record.metadata = data ~= nil and self:Metadata(data) or nil
-        record.sealed = false
-        self._T.records[profile] = record
-        if id ~= "" then self._T.byId[id] = record end
-        return { id = id, profile = profile, epoch = record.epoch, data = record.metadata ~= nil and self:Metadata(record.metadata) or nil }
+        previous.attempt = id
+        previous.epoch = previous.epoch + 1
+        previous.raw = raw or ""
+        previous.transfer = data ~= nil and data.state ~= "CANCELLED" and data.state ~= "RETURNED" and data.transfer or nil
+        previous.metadata = data ~= nil and self:Metadata(data) or nil
+        previous.sealed = false
+        if not previous.opening and previous.lockAttempt ~= nil and previous.lockAttempt ~= "" and previous.lockAttempt ~= id then previous.lockAttempt = "" end
+        if id ~= "" then self._T.byId[id] = previous end
+        return { id = id, profile = profile, epoch = previous.epoch, data = previous.metadata ~= nil and self:Metadata(previous.metadata) or nil }
     end
 
     @ExecSpace("ServerOnly")
-    method boolean Store(table ticket)
-        -- Compare exact durable bytes and a local generation so stale completions cannot publish a newer attempt.
+    method any OpenForUser(string forUserId)
+        -- Block editing before the first durable read, including a reconnect with no cached ticket.
+        local player = _UserService:GetUserEntityByUserId(forUserId)
+        if not isvalid(player) then return nil end
+        local profile = player.PlayerComponent.ProfileCode
+        self._T.profileOf[forUserId] = profile
+        local record = self._T.records[profile]
+        if record == nil then
+            record = { profile = profile, epoch = 0, attempt = "", raw = "" }
+            self._T.records[profile] = record
+        end
+        if record.writing ~= nil or record.opening then return nil end
+        record.opening = true
+        record.lockUser = forUserId
+        local ticket = self:Read(profile)
+        record.opening = false
+        if ticket == nil then record.openFailed = true return nil end
+        record.openFailed = nil
+        if ticket.data ~= nil and ticket.data.state ~= "CANCELLED" and ticket.data.state ~= "RETURNED" then
+            record.lockAttempt = ticket.id
+        elseif record.pending == nil then
+            record.lockAttempt = ""
+        end
+        return ticket
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean IsLockedForUser(string forUserId)
+        -- The compatibility query uses the same profile authority even after its entity has departed.
+        local player = _UserService:GetUserEntityByUserId(forUserId)
+        local profile = isvalid(player) and player.PlayerComponent.ProfileCode or self._T.profileOf[forUserId]
+        return profile ~= nil and self:IsLocked(profile)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Adopt(table record, table candidate)
+        -- Publish only exact bytes confirmed by storage, fencing every earlier handle.
+        record.raw = candidate.raw
+        record.metadata = self:Metadata(candidate.metadata)
+        record.transfer = candidate.transfer
+        record.pending = nil
+        record.epoch = record.epoch + 1
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean IsLocked(string profile)
+        -- Opening covers a pre-attempt read. A bound attempt stays locked until Release, even while storage is still terminal.
+        local record = self._T.records[profile]
+        if record == nil then return false end
+        if record.opening == true or record.openFailed or record.pending ~= nil or record.writing ~= nil then return true end
+        return record.lockAttempt ~= nil and record.lockAttempt ~= ""
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Publish(table ticket, table record)
+        -- Callers keep a metadata copy; serialized formations and storage bytes stay private.
+        ticket.id = record.attempt
+        ticket.epoch = record.epoch
+        ticket.profile = record.profile
+        ticket.data = record.metadata ~= nil and self:Metadata(record.metadata) or nil
+        ticket.failure = nil
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean Current(table ticket, table record)
+        -- A handle owns only its exact local generation and attempt.
+        return not self._T.ended and record ~= nil and self._T.records[ticket.profile] == record
+            and record.attempt == ticket.id and record.epoch == ticket.epoch and record.writing == nil
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean Acquire(string forUserId, table ticket)
+        -- Own the edit lock here; FormationService only confirms that this user owns the profile.
         local record = self._T.records[ticket.profile]
-        if self._T.ended or record == nil or record.writing ~= nil or record.epoch ~= ticket.epoch or record.attempt ~= ticket.id then return false end
-        if type(ticket.data) ~= "table" or ticket.data.profile ~= ticket.profile or ticket.data.attempt ~= ticket.id then return false end
-        local data = self:Metadata(ticket.data)
+        if record ~= nil and record.lockAttempt == ticket.id then return true end
+        if self:IsLocked(ticket.profile) then return false end
+        if not _FormationService:ProfileOwnedBy(forUserId, ticket.profile) then return false end
+        if record ~= nil then record.lockAttempt = ticket.id end
+        return true
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Retain(table record, string attempt)
+        -- A stale operation cannot take another attempt's edit lock.
+        if record.lockAttempt == nil or record.lockAttempt == "" or record.lockAttempt == attempt then record.lockAttempt = attempt end
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean Release(string forUserId, string ticketId)
+        -- Idempotent once this ticket is terminal. Another attempt's lock is left alone.
+        local record = self._T.byId[ticketId]
+        if record == nil and self._T.profileOf ~= nil then record = self._T.records[self._T.profileOf[forUserId]] end
+        if record == nil then return true end
+        if record.lockAttempt ~= nil and record.lockAttempt ~= "" and record.lockAttempt ~= ticketId then return false end
+        local state = record.metadata ~= nil and record.metadata.state or ""
+        if state ~= "CANCELLED" and state ~= "RETURNED" then return false end
+        record.lockAttempt = ""
+        record.opening = false
+        record.openFailed = nil
+        if record.lockUser == forUserId then record.lockUser = nil end
+        return true
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean Transition(string forUserId, table ticket, string target, any apply)
+        -- Write from private authority. Explicit failure keeps the last durable state; timeout keeps the requested intent.
+        local record = self._T.records[ticket.profile]
+        if not self:Current(ticket, record) or record.metadata == nil or record.transfer == nil then return false end
+        if not self:Acquire(forUserId, ticket) then return false end
+        if record.pending ~= nil then
+            local pendingState = record.pending.state
+            if not self:Reconcile(forUserId, ticket) then return false end
+            if pendingState == target then return true end
+        end
+        local source = record.metadata.state
+        local allowed = {
+            RENEWING = { QUEUED = true, QUEUE_ERROR = true },
+            QUEUED = { RENEWING = true },
+            QUEUE_ERROR = { QUEUED = true, RENEWING = true, SAVING = true },
+            SAVING = { QUEUED = true },
+            COMMITTING = { SAVING = true, COMMITTING = true },
+            TRANSFER = { COMMITTING = true, TRANSFER = true, IN_ROOM = true },
+            IN_ROOM = { TRANSFER = true },
+            RETURNING = { COMMITTING = true, TRANSFER = true, IN_ROOM = true, RETURNING = true },
+        }
+        if not (allowed[target] and allowed[target][source]) and not (target == source and (target == "COMMITTING" or target == "RETURNING")) then return false end
+        local metadata = self:Metadata(record.metadata)
+        local applied = apply == nil or apply(metadata, record)
+        if not applied or not self:Current(ticket, record) then return false end
+        metadata.state = target
+        local raw = self:Encode(record, metadata)
+        if raw == nil then return false end
+        record.pending = { state = target, raw = raw, metadata = metadata, transfer = record.transfer }
+        self:Retain(record, ticket.id)
+        local outcome = self:Write(ticket, record, raw, metadata)
+        if outcome == "FAILED" or outcome == "REJECTED" then
+            record.pending = nil
+            self:Publish(ticket, record)
+            return false
+        end
+        if outcome == "UNCERTAIN" then
+            self:Publish(ticket, record)
+            log("[VRF][Handoff] " .. target .. " unconfirmed; lock retained")
+            return false
+        end
+        self:Retain(record, ticket.id)
+        self:Publish(ticket, record)
+        log("[VRF][Handoff] transition=" .. source .. "->" .. target)
+        return true
+    end
+
+    @ExecSpace("ServerOnly")
+    method any Encode(table record, table metadata)
+        -- Serialize the private payload without exposing it through a ticket.
+        local data = self:Metadata(metadata)
         data.transfer = record.transfer
-        if not self:ValidEnvelope(data, ticket.profile) then return false end
+        if not self:ValidEnvelope(data, record.profile) then return nil end
         local raw = _HttpService:JSONEncode(data)
-        if #raw > 48000 then return false end
+        if #raw > 48000 then return nil end
+        return raw
+    end
+
+    @ExecSpace("ServerOnly")
+    method string Write(table ticket, table record, string raw, table metadata)
+        -- Compare exact durable bytes and a local generation so stale completions cannot publish a newer attempt.
+        if not self:Current(ticket, record) then return "REJECTED" end
         local operation = {}
         record.writing = operation
         local done, result = false, -1
@@ -102,41 +274,103 @@ script FormationHandoff extends Logic
         local remaining = math.max(1, math.min(10, _FormationService.SaveTimeoutSeconds))
         while not done and remaining > 0 and not self._T.ended do wait(0.05) remaining = remaining - 0.05 end
         if record.writing == operation then record.writing = nil end
-        if not done or result ~= 0 or self._T.ended or self._T.records[ticket.profile] ~= record or record.epoch ~= ticket.epoch then
+        if not done or self._T.ended or self._T.records[ticket.profile] ~= record or record.epoch ~= ticket.epoch then
             log("[VRF][Handoff] write unconfirmed; retained for explicit recovery")
-            return false
+            return "UNCERTAIN"
+        end
+        if result == 1000004 or result == 2000000 then
+            log("[VRF][Handoff] write requires reconciliation code=" .. tostring(result))
+            return "UNCERTAIN"
+        end
+        if result ~= 0 then
+            log("[VRF][Handoff] write failed code=" .. tostring(result))
+            return "FAILED"
         end
         record.raw = raw
-        record.metadata = self:Metadata(data)
+        record.metadata = self:Metadata(metadata)
+        record.pending = nil
         record.epoch = record.epoch + 1
         ticket.epoch = record.epoch
+        return "OK"
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean Reserve(string forUserId, table ticket, table request)
+        -- Reserve one confirmed roster without accepting caller-authored lifecycle state.
+        local record = self._T.records[ticket.profile]
+        if not self:Current(ticket, record) or record.pending ~= nil or self:IsLocked(ticket.profile) then return false end
+        if record.metadata ~= nil and record.metadata.state ~= "RETURNED" and record.metadata.state ~= "CANCELLED" then return false end
+        ticket.failure = "NEED_LOADED_VALID_ACTIVE_FORMATION_AND_NO_PENDING_SAVE"
+        local formation = _FormationService:ActiveFormation(forUserId)
+        if formation == nil or formation.profile ~= ticket.profile or formation.units == nil then return false end
+        if type(request) ~= "table" or type(request.attempt) ~= "string" or type(request.requestId) ~= "string" then return false end
+        local transfer = _FormationService:ExportConfirmed(forUserId)
+        if transfer == nil then return false end
+        local previous = { attempt = record.attempt, metadata = record.metadata, transfer = record.transfer }
+        transfer.fixed = _HttpService:JSONEncode(formation.units)
+        local metadata = { schema = 1, profile = ticket.profile, attempt = request.attempt, requestId = request.requestId,
+            summary = "第 " .. tostring(formation.slotId) .. " 組 · 版本 " .. tostring(formation.revision) .. " · " .. tostring(formation.count) .. " / 6",
+            source = request.source, adapter = request.adapter, state = "QUEUED", started = DateTime.UtcNow.Elapsed, expires = 0, matchKey = "" }
+        record.transfer = transfer
+        local raw = self:Encode(record, metadata)
+        if raw == nil then record.transfer = previous.transfer return false end
+        if record.attempt ~= "" then self._T.byId[record.attempt] = nil end
+        record.attempt = request.attempt
+        record.lockAttempt = request.attempt
+        record.lockUser = forUserId
+        self._T.profileOf[forUserId] = ticket.profile
+        record.sealed = false
+        self._T.byId[record.attempt] = record
+        ticket.id = record.attempt
+        record.metadata = self:Metadata(metadata)
+        record.pending = { state = "QUEUED", raw = raw, metadata = metadata, transfer = transfer }
+        local outcome = self:Write(ticket, record, raw, metadata)
+        if outcome == "FAILED" or outcome == "REJECTED" then
+            self._T.byId[record.attempt] = nil
+            record.attempt, record.metadata, record.transfer = previous.attempt, previous.metadata, previous.transfer
+            record.pending, record.lockAttempt = nil, ""
+            if record.attempt ~= "" then self._T.byId[record.attempt] = record end
+        end
+        self:Publish(ticket, record)
+        if outcome ~= "OK" then ticket.failure = "RESERVATION_SAVE_FAILED" return false end
+        log("[VRF][Handoff] reserved fixed roster")
         return true
     end
 
     @ExecSpace("ServerOnly")
-    method boolean Reserve(string forUserId, table ticket)
-        -- Freeze only the confirmed active formation and bind the reservation to the authenticated profile.
-        local formation = _FormationService:ActiveFormation(forUserId)
+    method boolean Renew(string forUserId, table ticket, string requestId)
+        -- Keep the frozen roster and game attempt; only the native queue request changes.
+        if type(requestId) ~= "string" or requestId == "" then return false end
         local record = self._T.records[ticket.profile]
-        if formation == nil or formation.profile ~= ticket.profile or record == nil or record.epoch ~= ticket.epoch or record.writing ~= nil then return false end
-        if record.metadata ~= nil and record.metadata.state ~= "RETURNED" and record.metadata.state ~= "CANCELLED" then return false end
-        ticket.failure = "NEED_LOADED_VALID_ACTIVE_FORMATION_AND_NO_PENDING_SAVE"
-        local fixed = formation.units
-        if fixed == nil or type(ticket.data) ~= "table" or ticket.data.state ~= "QUEUED" or type(ticket.data.attempt) ~= "string" then return false end
-        local transfer = _FormationService:ExportConfirmed(forUserId)
-        if transfer == nil then return false end
-        transfer.fixed = _HttpService:JSONEncode(fixed)
-        ticket.data.summary = "第 " .. tostring(formation.slotId) .. " 組 · 版本 " .. tostring(formation.revision) .. " · " .. tostring(formation.count) .. " / 6"
-        if record.attempt ~= "" then self._T.byId[record.attempt] = nil end
-        ticket.id = ticket.data.attempt
-        record.attempt = ticket.id
-        record.transfer = transfer
-        record.sealed = false
-        self._T.byId[ticket.id] = record
-        ticket.failure = "RESERVATION_SAVE_FAILED"
-        local stored = self:Store(ticket)
-        if stored then ticket.failure = nil log("[VRF][Handoff] reserved fixed roster") end
-        return stored
+        if not self:Current(ticket, record) or record.metadata == nil then return false end
+        if record.metadata.state == "RENEWING" then
+            if record.metadata.requestId ~= requestId then return false end
+            return self:Transition(forUserId, ticket, "QUEUED", nil)
+        end
+        return self:Transition(forUserId, ticket, "RENEWING", function(metadata)
+            metadata.requestId = requestId
+            return true
+        end) and self:Transition(forUserId, ticket, "QUEUED", nil)
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean BeginSave(string forUserId, table ticket, any isCurrent)
+        -- Mark the matched queue before sealing. This intent does not write storage.
+        local record = self._T.records[ticket.profile]
+        if not self:Current(ticket, record) or record.metadata == nil then return false end
+        if isCurrent ~= nil and not isCurrent() then return false end
+        if record.metadata.state == "SAVING" then
+            if not self:Acquire(forUserId, ticket) then return false end
+            self:Publish(ticket, record)
+            return true
+        end
+        if record.metadata.state ~= "QUEUED" then return false end
+        if not self:Acquire(forUserId, ticket) then return false end
+        record.metadata.state = "SAVING"
+        self:Retain(record, ticket.id)
+        self:Publish(ticket, record)
+        log("[VRF][Handoff] transition=QUEUED->SAVING")
+        return true
     end
 
     @ExecSpace("ServerOnly")
@@ -144,11 +378,11 @@ script FormationHandoff extends Logic
         -- Keep the queue-time roster and capture only confirmed content once any in-flight save has settled.
         local record = self._T.records[ticket.profile]
         local current = function()
-            return not self._T.ended and self._T.records[ticket.profile] == record and record ~= nil
-                and record.attempt == ticket.id and record.epoch == ticket.epoch and (isCurrent == nil or isCurrent())
+            return self:Current(ticket, record) and (isCurrent == nil or isCurrent())
         end
-        if not current() or record.transfer == nil then return false end
+        if not current() or record.transfer == nil or record.metadata == nil or record.metadata.state ~= "SAVING" then return false end
         if record.sealed then return true end
+        if not self:Acquire(forUserId, ticket) then return false end
         local latest = _FormationService:ExportConfirmed(forUserId)
         local remaining = 200
         while latest == nil and remaining > 0 do
@@ -158,12 +392,81 @@ script FormationHandoff extends Logic
             latest = _FormationService:ExportConfirmed(forUserId)
         end
         if latest == nil or not current() then return false end
-        if not _FormationService:LockTransfer(forUserId, ticket.profile, ticket.id) then return false end
         latest.fixed = record.transfer.fixed
         record.transfer = latest
         record.sealed = true
+        self:Retain(record, ticket.id)
         log("[VRF][Handoff] sealed confirmed formations; queue roster retained")
         return true
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean FailQueue(string forUserId, table ticket)
+        -- A rejected queue result is explicit; a timed-out write remains locked for the same retry.
+        return self:Transition(forUserId, ticket, "QUEUE_ERROR", nil)
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean Commit(string forUserId, table ticket, table matched, number lifetimeSeconds)
+        -- Publish the non-cancellable boundary before any write can yield.
+        local record = self._T.records[ticket.profile]
+        if type(matched) ~= "table" or type(matched.key) ~= "string" then return false end
+        if not self:Current(ticket, record) or record.metadata == nil then return false end
+        if record.metadata.state == "SAVING" and not record.sealed then return false end
+        if record.pending ~= nil and not self:Reconcile(forUserId, ticket) then return false end
+        if record.metadata.state == "TRANSFER" and record.metadata.matchKey == matched.key then self:Publish(ticket, record) return true end
+        if record.metadata.state == "SAVING" then
+            if type(matched) ~= "table" or type(matched.key) ~= "string" or matched.key == "" then return false end
+            local metadata = self:Metadata(record.metadata)
+            metadata.state = "COMMITTING"
+            metadata.match = self:Metadata({ match = matched }).match
+            metadata.matchKey = matched.key
+            metadata.expires = DateTime.UtcNow.Elapsed + lifetimeSeconds * 1000
+            local raw = self:Encode(record, metadata)
+            if raw == nil then return false end
+            record.metadata = metadata
+            log("[VRF][Handoff] transition=SAVING->COMMITTING; cancellation closed")
+            self:Publish(ticket, record)
+            record.pending = { state = "COMMITTING", raw = raw, metadata = metadata, transfer = record.transfer }
+            if self:Write(ticket, record, raw, metadata) ~= "OK" then self:Publish(ticket, record) return false end
+            self:Publish(ticket, record)
+        elseif record.metadata.state ~= "COMMITTING" then
+            return false
+        end
+        return self:Transition(forUserId, ticket, "TRANSFER", nil)
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean MarkWarp(string forUserId, table ticket)
+        -- Persist the one-shot marker without issuing native warp. An uncertain result must not be retried here.
+        local record = self._T.records[ticket.profile]
+        if not self:Current(ticket, record) or record.metadata == nil or record.metadata.state ~= "TRANSFER" then return false end
+        if record.metadata.warpIssued == true then
+            self:Publish(ticket, record)
+            return false
+        end
+        return self:Transition(forUserId, ticket, "TRANSFER", function(metadata)
+            metadata.warpIssued = true
+            return true
+        end)
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean Admit(string forUserId, table ticket)
+        -- Record room entry only. Movement remains the caller's separate native operation.
+        return self:Transition(forUserId, ticket, "IN_ROOM", nil)
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean WithdrawAdmission(string forUserId, table ticket)
+        -- A confirmed failed move is the only path from the room back to transfer.
+        return self:Transition(forUserId, ticket, "TRANSFER", nil)
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean BeginReturn(string forUserId, table ticket)
+        -- Confirm the return before the caller may leave the room.
+        return self:Transition(forUserId, ticket, "RETURNING", nil)
     end
 
     @ExecSpace("ServerOnly")
@@ -189,43 +492,66 @@ script FormationHandoff extends Logic
     end
 
     @ExecSpace("ServerOnly")
-    method void Release(string forUserId, string ticketId)
-        -- An old cancellation can release only its own source editing lock.
-        _FormationService:ReleaseTransfer(forUserId, ticketId)
+    method boolean Reconcile(string forUserId, table ticket)
+        -- Retry the exact candidate with CAS; unchanged old bytes never authorize an unlock.
+        local record = self._T.records[ticket.profile]
+        if not self:Current(ticket, record) then return false end
+        local pending = record.pending
+        if pending == nil then return true end
+        local latest = self:Read(ticket.profile)
+        if latest == nil or self._T.records[ticket.profile] ~= record or record.attempt ~= ticket.id then return false end
+        ticket.epoch = record.epoch
+        if record.pending == nil then self:Publish(ticket, record) return true end
+        if record.pending ~= pending or record.observedRaw ~= record.raw then return false end
+        local outcome = self:Write(ticket, record, pending.raw, pending.metadata)
+        if outcome ~= "OK" then return false end
+        record.transfer = pending.transfer
+        self:Publish(ticket, record)
+        log("[VRF][Handoff] reconciled=" .. pending.state)
+        return true
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean CanCancel(table ticket)
+        -- The same policy guards native cancellation and the durable terminal transition.
+        local record = self._T.records[ticket.profile]
+        if not self:Current(ticket, record) or record.metadata == nil then return false end
+        local state = record.metadata.state
+        return state == "QUEUED" or state == "RENEWING" or state == "QUEUE_ERROR" or state == "SAVING" or state == "CANCELLED"
     end
 
     @ExecSpace("ServerOnly")
     method boolean Close(string forUserId, table ticket, string terminalState)
-        -- Retain the payload on a failed tombstone write and erase it only after durable confirmation.
+        -- Keep payload and lock until the terminal write is confirmed, including cleanup retries.
         if terminalState ~= "CANCELLED" and terminalState ~= "RETURNED" then return false end
         local record = self._T.records[ticket.profile]
-        if record == nil or record.attempt ~= ticket.id or record.epoch ~= ticket.epoch or record.writing ~= nil then return false end
-        -- A timed-out write may have committed after Store returned; retry against durable authority.
+        if not self:Current(ticket, record) then return false end
+        if record.pending ~= nil and not self:Reconcile(forUserId, ticket) then return false end
         local latest = self:Read(ticket.profile)
         if latest == nil or latest.id ~= ticket.id then return false end
-        if latest.data ~= nil and latest.data.attempt == ticket.id then
-            local state = latest.data.state
-            if terminalState == "CANCELLED" and state ~= "QUEUED" and state ~= "RENEWING" and state ~= "QUEUE_ERROR" and state ~= "SAVING" and state ~= "CANCELLED" then return false end
-            if terminalState == "RETURNED" and state ~= "RETURNING" and state ~= "RETURNED" then return false end
-        end
         ticket.epoch = latest.epoch
-        record = self._T.records[ticket.profile]
-        if record.metadata ~= nil and record.metadata.state == terminalState and record.transfer == nil then
-            ticket.data.state = terminalState
-            self:Release(forUserId, ticket.id)
-            log("[VRF][Handoff] closed=" .. terminalState .. " already durable")
-            return true
-        end
-        local transfer, previous = record.transfer, ticket.data.state
+        self:Publish(ticket, record)
+        local state = record.metadata ~= nil and record.metadata.state or ""
+        if state == terminalState and record.transfer == nil then return self:Release(forUserId, ticket.id) end
+        if terminalState == "CANCELLED" and not self:CanCancel(ticket) then return false end
+        if terminalState == "RETURNED" and state ~= "RETURNING" then return false end
+        local transfer = record.transfer
+        local metadata = self:Metadata(record.metadata)
+        metadata.state = terminalState
         record.transfer = nil
-        ticket.data.state = terminalState
-        local stored = self:Store(ticket)
-        if not stored then record.transfer = transfer ticket.data.state = previous end
-        if stored then
-            self:Release(forUserId, ticket.id)
-            log("[VRF][Handoff] closed=" .. terminalState)
+        local raw = self:Encode(record, metadata)
+        record.transfer = transfer
+        if raw == nil then return false end
+        record.pending = { state = terminalState, raw = raw, metadata = metadata, transfer = nil }
+        local outcome = self:Write(ticket, record, raw, metadata)
+        if outcome ~= "OK" then
+            if outcome == "FAILED" or outcome == "REJECTED" then record.pending = nil end
+            return false
         end
-        return stored
+        record.transfer = nil
+        self:Publish(ticket, record)
+        log("[VRF][Handoff] closed=" .. terminalState)
+        return self:Release(forUserId, ticket.id)
     end
 
     @ExecSpace("ServerOnly")
@@ -253,5 +579,6 @@ script FormationHandoff extends Logic
         self._T.ended = true
         self._T.records = {}
         self._T.byId = {}
+        self._T.profileOf = {}
     end
 end

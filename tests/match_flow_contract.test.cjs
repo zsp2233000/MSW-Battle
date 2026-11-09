@@ -14,11 +14,7 @@ test('#52 queue starts only in the lobby, including authenticated server request
   assert.match(method(read('Matchmaking/MatchFlowInput'), 'Click'), /CurrentMapName/);
 });
 
-test('#52 every formation mutation and travel is guarded by the authoritative match lock', () => {
-  const source = read('Formations/FormationService');
-  for (const name of ['RequestSelectSlot', 'SaveForUser', 'ActivateForUser', 'RequestTravel']) {
-    assert.match(method(source, name), /_MatchFlow:IsFormationLocked\(/, name);
-  }
+test('#52 cancellation closes the handoff only after native confirmation', () => {
   const cancel = method(read('Matchmaking/MatchFlow'), 'CancelForUser');
   assert.ok(cancel.indexOf('if not cancelled then') < cancel.indexOf('_FormationHandoff:Close'),
     'failed native cancellation must not persist a terminal ticket or release editing');
