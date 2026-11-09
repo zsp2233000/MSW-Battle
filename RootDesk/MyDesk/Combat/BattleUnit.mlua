@@ -314,7 +314,8 @@ script BattleUnit extends Component
         local map = self.Entity.CurrentMap
         local view = isvalid(map) and map:GetComponent("script.BattleView") or nil
         if isvalid(view) and view:HasParticipants() then
-            local tag = self.Entity.NameTagComponent
+            local label = self.Entity:GetChildByName("NameTag")
+            local tag = isvalid(label) and label.NameTagComponent or nil
             if isvalid(tag) then tag.Enable = false end
         else
             self:UpdateNameTag(self.Entity)
@@ -344,25 +345,13 @@ script BattleUnit extends Component
 
     @ExecSpace("ClientOnly")
     method void UpdateNameTag(Entity display)
-        -- Use the viewer's player-name style on the actual visible actor, below its feet.
+        -- Update the authored name tag's content and visibility while preserving its model appearance.
         if self.MonsterName == "" or not isvalid(display) then return end
-        local player = _UserService.LocalPlayer
-        local sourceTag = isvalid(player) and player.NameTagComponent or nil
-        if not isvalid(sourceTag) then return end
-        local tag = display.NameTagComponent
-        if not isvalid(tag) then
-            display:AddComponent("MOD.Core.NameTagComponent")
-            tag = display.NameTagComponent
-            if not isvalid(tag) then return end
-        end
+        local label = display:GetChildByName("NameTag")
+        local tag = isvalid(label) and label.NameTagComponent or nil
+        if not isvalid(tag) then return end
         local text = "Lv." .. tostring(self.Level) .. " " .. self.MonsterName
         if tag.Name ~= text then
-            tag.NameTagRUID = sourceTag.NameTagRUID
-            tag.FontSize = sourceTag.FontSize
-            tag.FontColor = sourceTag.FontColor
-            tag.Bold = sourceTag.Bold
-            tag.FontOffset = sourceTag.FontOffset
-            tag.OffsetY = -0.2
             tag.Name = text
             log("[VRF][MonsterLevel] NAME " .. display.Name .. " " .. text)
         end

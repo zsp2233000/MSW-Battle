@@ -855,8 +855,6 @@ script BattleSession extends Component
         end
 
         entity:AddComponent("script.BattleUnit")
-        entity:AddComponent("MOD.Core.NameTagComponent")
-        entity.NameTagComponent.Enable = false
         entity:AddComponent("script.BattleHPBar")
         entity:AddComponent("script.BattleHitEffectPresentation")
         entity:AddComponent("script.BattleAttackComposition")
