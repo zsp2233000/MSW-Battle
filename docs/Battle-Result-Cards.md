@@ -54,3 +54,16 @@
 - 測試只改 Play 內的 session／單位，未寫入隊伍存檔或 DataStorage。
 - UIBuilder 讀回比對確認原有 59 個 UI 實體內容皆相同，僅新增六個樣板實體；大幅文字 diff 來自 builder 序列化。
 - 尚未目視驗收卡片素材、較小視窗與手機版面；本輪也未重跑真人配對、返回按鈕或返回失敗重試流程。
+
+### 移除後重新部署的回歸
+
+- 收尾檢查發現部署移除會縮短 roster，改以獨立遞增的出戰順序避免新怪物與仍在場的怪物共用排序值；每次重建 roster 時重設。
+- 新增可重跑的 `tests/result_cards_fixture.lua`：全新 Maker Play，先將玩家移至 `template`，在 `server_main` 執行 fixture，再在 `client` 執行 `tests/result_cards_runtime_probe.lua`。
+- 已驗證六隻坦克、移除第一隻再補回後的順序唯一，以及 `PASS result=WIN count=6 own=PLAYER`；移回大廳另取得 `PASS six-card lobby cleanup`。這輪更新後重新執行完整 Node suite 仍為 57/57，session 的 LSP Error／Warning 為 0。
+
+## 雙軸審查
+
+- 比較基準：`main`（`19b3550`）；兩個獨立代理審查 `137e295`，並納入後續出戰順序計數器修正與 server fixture。
+- Standards：0 項硬性違規；1 項低風險觀察：同步資料未到齊或缺少樣板時等待重試，沒有額外等待提示或失敗 log。現有成功路徑已有 VRF 證據，保留此觀察供後續診斷。
+- Spec：0 項未解決的重大缺漏或範圍擴張。移除後重新部署的順序問題已修正並驗證。
+- 審查不代替前述原生外觀與真人配對驗收。

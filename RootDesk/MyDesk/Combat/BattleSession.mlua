@@ -112,6 +112,7 @@ script BattleSession extends Component
         -- The single reset list for every roster replacement; serials and generation stay monotonic.
         self:ClearUnits()
         self._T.nextPlayerUnitNumber = 0
+        self._T.nextDeploymentOrder = 0
         self._T.eventHistory = {}
         self._T.resultEntered = false
         self._T.configurationErrorDetail = ""
@@ -866,7 +867,8 @@ script BattleSession extends Component
         end
         unit:ConfigurePresentation(profile)
         local record = { entity = entity, unit = unit, faction = faction, monsterId = profile.MonsterId, monsterName = profile.MonsterName, unitKind = profile.MonsterType, dead = false, removable = false }
-        unit.DeploymentOrder = #self._T.units + 1
+        self._T.nextDeploymentOrder = (self._T.nextDeploymentOrder or 0) + 1
+        unit.DeploymentOrder = self._T.nextDeploymentOrder
         table.insert(self._T.units, record)
         if faction == "PLAYER" then
             self.PlayerAlive = self.PlayerAlive + 1
