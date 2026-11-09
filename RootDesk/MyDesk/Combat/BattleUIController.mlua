@@ -16,6 +16,7 @@ script BattleUIController extends Logic
     property Entity resultPlayerCount = "506bb73b-00a6-4313-ba14-ba1d3189f3a9"
     property Entity resultEnemyCount = "585aa74a-1ef0-4897-9885-4b996eb49840"
     property string OwnResult = ""
+    property number ResultDisplayDelaySeconds = 2
 
     @ExecSpace("ClientOnly")
     method void OnBeginPlay()
@@ -101,6 +102,17 @@ script BattleUIController extends Logic
     @ExecSpace("ClientOnly")
     method void SetResult(string result)
         -- Keep exactly the local viewer's result entity enabled.
+        if result == "" then
+            self._T.pendingResult = nil
+            self._T.resultDisplayAt = nil
+        else
+            if self._T.pendingResult ~= result then
+                self._T.pendingResult = result
+                self._T.resultDisplayAt = _UtilLogic.ElapsedSeconds + self.ResultDisplayDelaySeconds
+                log("[VRF][BattleUI] result delay started=" .. result)
+            end
+            if _UtilLogic.ElapsedSeconds < self._T.resultDisplayAt then result = "" end
+        end
         if self.OwnResult == result then return end
         self.OwnResult = result
         self:SetEnabled(self.resultWin, result == "WIN")
@@ -118,6 +130,11 @@ script BattleUIController extends Logic
         local session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
         local presentation = isvalid(map) and map:GetComponent("script.BattlePresentation") or nil
         local active = isvalid(session)
+        if self._T.resultSession ~= session or (active and self._T.resultGeneration ~= session.SessionGeneration) then
+            self:SetResult("")
+            self._T.resultSession = session
+            self._T.resultGeneration = active and session.SessionGeneration or nil
+        end
         self:SetEnabled(self.root, active)
         if not active then
             self:SetEnabled(self.hud, false)
