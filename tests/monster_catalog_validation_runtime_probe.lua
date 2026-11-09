@@ -38,12 +38,20 @@ local ok, detail = pcall(function()
             case[1] .. " is rejected with its diagnostic")
     end
     for _, field in ipairs({ "MaxHp", "MoveSpeed", "AttackDamageMin", "AttackDamageMax", "AttackIntervalSeconds", "AttackRange", "AttackRangeY",
-        "RetargetIntervalSeconds", "HitStopDurationSeconds", "KnockbackDistance" }) do
+        "RetargetIntervalSeconds", "HitStopDurationSeconds", "KnockbackDistance", "MaxHpGrowthRate", "AttackDamageGrowthRate" }) do
         check(parse("monster_tank", { [field] = "" }) == nil and string.find(catalog.ErrorMessage, field, 1, true) ~= nil,
             "blank required numeric " .. field .. " is rejected")
         check(parse("monster_tank", { [field] = "invalid" }) == nil, "nonnumeric " .. field .. " is rejected")
     end
     check(parse("monster_tank", { MaxHp = "1.5" }) == nil, "fractional HP is rejected")
+    for _, field in ipairs({ "MaxHpGrowthRate", "AttackDamageGrowthRate" }) do
+        for _, value in ipairs({ "-0.035", "1e999", "-1e999", "nan" }) do
+            check(parse("monster_tank", { [field] = value }) == nil and string.find(catalog.ErrorMessage, field, 1, true) ~= nil,
+                field .. " rejects invalid growth " .. value)
+        end
+        local zeroGrowth = parse("monster_tank", { [field] = "0" })
+        check(zeroGrowth ~= nil and zeroGrowth[field] == 0, field .. " accepts zero growth")
+    end
     for _, field in ipairs({ "AttackDamageMin", "AttackDamageMax" }) do
         for _, value in ipairs({ "0", "-1", "1.5", "1e999" }) do
             check(parse("monster_tank", { [field] = value }) == nil, field .. " rejects " .. value)

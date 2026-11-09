@@ -1,0 +1,32 @@
+@Logic
+script MonsterProgression extends Logic
+
+    method table ApplyExperience(integer level, integer experience, integer gained)
+        -- Normalize progress with one point requirement per current level; MAX stores no experience.
+        if level < 1 or level > 30 or level % 1 ~= 0
+            or experience < 0 or experience >= math.huge or experience % 1 ~= 0
+            or gained < 0 or gained >= math.huge or gained % 1 ~= 0 then return nil end
+        local remaining = experience + gained
+        while level < 30 do
+            local required = level
+            if remaining < required then break end
+            remaining = remaining - required
+            level = level + 1
+        end
+        if level == 30 then remaining = 0 end
+        return { level = level, experience = remaining }
+    end
+
+    method table CalculateStats(table base, integer level)
+        -- Scale only health and damage from the Lv1 profile, without mutating the caller's data.
+        if level < 1 or level > 30 or level % 1 ~= 0 then return nil end
+        local healthMultiplier = 1 + base.MaxHpGrowthRate * (level - 1)
+        local damageMultiplier = 1 + base.AttackDamageGrowthRate * (level - 1)
+        return {
+            MaxHp = math.floor(base.MaxHp * healthMultiplier),
+            AttackDamageMin = math.floor(base.AttackDamageMin * damageMultiplier),
+            AttackDamageMax = math.floor(base.AttackDamageMax * damageMultiplier),
+        }
+    end
+
+end

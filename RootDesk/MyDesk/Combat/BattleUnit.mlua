@@ -4,6 +4,7 @@ script BattleUnit extends Component
     @Sync property string Faction = ""
     @Sync property string MonsterId = ""
     @Sync property string MonsterName = ""
+    @Sync property integer Level = 1
     @Sync property integer DeploymentOrder = 0
     @Sync property string UnitKind = "ASSAULT"
     @Sync property string CombatState = "IDLE"
@@ -93,6 +94,7 @@ script BattleUnit extends Component
         log("[VRF][BattleUnit] DEFAULT_FACING " .. self.Entity.Name .. ", faction=" .. faction
             .. ", scaleX=" .. tostring(self.Entity.TransformComponent.Scale.x))
         self.MonsterName = displayName
+        self.Level = profile.Level or 1
         self.UnitKind = unitKind
         self.MaxHp = maxHp
         self.Hp = maxHp
@@ -309,6 +311,14 @@ script BattleUnit extends Component
     @ExecSpace("ClientOnly")
     method void OnUpdate(number delta)
         -- Mirror combat presentation on the client; death keeps exclusive control of the sprite.
+        local map = self.Entity.CurrentMap
+        local view = isvalid(map) and map:GetComponent("script.BattleView") or nil
+        if isvalid(view) and view:HasParticipants() then
+            local tag = self.Entity.NameTagComponent
+            if isvalid(tag) then tag.Enable = false end
+        else
+            self:UpdateNameTag(self.Entity)
+        end
         self:PreloadDeathAnimationDuration()
         self:UpdatePresentation()
         if self.IsDead ~= true then return end
@@ -330,6 +340,33 @@ script BattleUnit extends Component
         sprite.EndFrameIndex = 2147483647
         sprite.PlayRate = 1
         sprite.SpriteRUID = self.DeathAnimationRUID
+    end
+
+    @ExecSpace("ClientOnly")
+    method void UpdateNameTag(Entity display)
+        -- Use the viewer's player-name style on the actual visible actor, below its feet.
+        if self.MonsterName == "" or not isvalid(display) then return end
+        local player = _UserService.LocalPlayer
+        local sourceTag = isvalid(player) and player.NameTagComponent or nil
+        if not isvalid(sourceTag) then return end
+        local tag = display.NameTagComponent
+        if not isvalid(tag) then
+            display:AddComponent("MOD.Core.NameTagComponent")
+            tag = display.NameTagComponent
+            if not isvalid(tag) then return end
+        end
+        local text = "Lv." .. tostring(self.Level) .. " " .. self.MonsterName
+        if tag.Name ~= text then
+            tag.NameTagRUID = sourceTag.NameTagRUID
+            tag.FontSize = sourceTag.FontSize
+            tag.FontColor = sourceTag.FontColor
+            tag.Bold = sourceTag.Bold
+            tag.FontOffset = sourceTag.FontOffset
+            tag.OffsetY = -0.2
+            tag.Name = text
+            log("[VRF][MonsterLevel] NAME " .. display.Name .. " " .. text)
+        end
+        tag.Enable = self.IsDead ~= true
     end
 
     @ExecSpace("ClientOnly")

@@ -432,6 +432,7 @@ script BattleSession extends Component
         if count < minimumCount or count > maximumCount or count ~= highestIndex then return nil end
 
         local allowedOverrides = {
+            Level = true,
             MonsterName = true,
             MaxHp = true,
             AttackDamageMin = true,
@@ -461,6 +462,8 @@ script BattleSession extends Component
                     if type(key) ~= "string" or allowedOverrides[key] ~= true then return nil end
                     if key == "MonsterName" then
                         if type(value) ~= "string" or value:match("%S") == nil then return nil end
+                    elseif key == "Level" then
+                        if not self:IsFiniteTestNumber(value) or value < 1 or value > 30 or value % 1 ~= 0 then return nil end
                     elseif key == "MaxHp" then
                         if not self:IsFiniteTestNumber(value) or value < 1 or value % 1 ~= 0 then return nil end
                     elseif key == "AttackDamageMin" or key == "AttackDamageMax" then
@@ -837,6 +840,14 @@ script BattleSession extends Component
         end
         local map = self:GetMapEntity()
         if not isvalid(map) then return nil end
+        local level = 1
+        if Environment:IsMakerPlay() then level = profile.Level or 1 end
+        local stats = _MonsterProgression:CalculateStats(profile, level)
+        if stats == nil then return nil end
+        local configured = {}
+        for key, value in pairs(profile) do configured[key] = value end
+        for key, value in pairs(stats) do configured[key] = value end
+        configured.Level = level
         local entity = _SpawnService:SpawnByModelId(modelId, name, position, map)
         if not isvalid(entity) then
             log_error("[M1][BattleSession] SpawnByModelId returned nil for " .. modelId)
@@ -844,6 +855,8 @@ script BattleSession extends Component
         end
 
         entity:AddComponent("script.BattleUnit")
+        entity:AddComponent("MOD.Core.NameTagComponent")
+        entity.NameTagComponent.Enable = false
         entity:AddComponent("script.BattleHPBar")
         entity:AddComponent("script.BattleHitEffectPresentation")
         entity:AddComponent("script.BattleAttackComposition")
@@ -860,12 +873,14 @@ script BattleSession extends Component
         if faction == "ENEMY" then openingDelay = self.EnemyOpeningDelay end
         unit:BindAttackExecution(attackExecution)
         unit:SetMonsterIdentity(profile.MonsterId, profile.MonsterName, profile.HitEffectRUID)
-        if not unit:Configure(faction, profile.MonsterName, profile, openingDelay) then
+        if not unit:Configure(faction, profile.MonsterName, configured, openingDelay) then
             log_error("[M1][BattleSession] combat execution configuration failed on " .. name)
             entity:Destroy()
             return nil
         end
         unit:ConfigurePresentation(profile)
+        log("[VRF][MonsterLevel] SPAWN " .. name .. " level=" .. tostring(unit.Level)
+            .. " hp=" .. tostring(unit.MaxHp) .. " damage=" .. tostring(unit.AttackDamageMin) .. "~" .. tostring(unit.AttackDamageMax))
         local record = { entity = entity, unit = unit, faction = faction, monsterId = profile.MonsterId, monsterName = profile.MonsterName, unitKind = profile.MonsterType, dead = false, removable = false }
         self._T.nextDeploymentOrder = (self._T.nextDeploymentOrder or 0) + 1
         unit.DeploymentOrder = self._T.nextDeploymentOrder
