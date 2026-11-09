@@ -143,7 +143,7 @@ script MonsterCatalog extends Component
         profile.AttackRange = self:ReadNumber(row:GetItem("AttackRange"), "AttackRange", monsterId, 0.0001)
         profile.AttackRangeY = self:ReadNumber(row:GetItem("AttackRangeY"), "AttackRangeY", monsterId, 0)
         if profile.AttackRangeY <= 0 then self:SetError("invalid numeric value AttackRangeY for " .. monsterId) end
-        profile.AttackImpactFrame = self:ReadInteger(row:GetItem("AttackImpactFrame"), "AttackImpactFrame", monsterId, 1)
+        profile.AttackDamageFrame = self:ReadInteger(row:GetItem("AttackDamageFrame"), "AttackDamageFrame", monsterId, 1)
         profile.RetargetIntervalSeconds = self:ReadNumber(row:GetItem("RetargetIntervalSeconds"), "RetargetIntervalSeconds", monsterId, 0.0001)
         profile.HitStopDurationSeconds = self:ReadNumber(row:GetItem("HitStopDurationSeconds"), "HitStopDurationSeconds", monsterId, 0)
         if self.ErrorMessage ~= "" then return nil end
@@ -153,13 +153,14 @@ script MonsterCatalog extends Component
         if self.ErrorMessage ~= "" then return nil end
 
         local assetFields = {
-            "StandAnimationRUID", "MoveAnimationRUID", "AttackAnimationRUID", "HitAnimationRUID",
-            "DieAnimationRUID", "HitEffectRUID", "AttackSoundRUID", "OnHitSoundRUID", "DieSoundRUID",
+            "StandAnimationRUID", "MoveAnimationRUID", "AttackAnimationRUID", "HurtAnimationRUID",
+            "DieAnimationRUID", "AttackEffectRUID", "HitEffectRUID", "AttackSoundRUID", "HurtSoundRUID", "DieSoundRUID",
         }
         local optionalAssetFields = {
+            AttackEffectRUID = true,
             HitEffectRUID = true,
             AttackSoundRUID = true,
-            OnHitSoundRUID = true,
+            HurtSoundRUID = true,
             DieSoundRUID = true,
         }
         for _, fieldName in ipairs(assetFields) do
@@ -176,11 +177,12 @@ script MonsterCatalog extends Component
             StandAnimationRUID = ResourceType.AnimationClip,
             MoveAnimationRUID = ResourceType.AnimationClip,
             AttackAnimationRUID = ResourceType.AnimationClip,
-            HitAnimationRUID = ResourceType.AnimationClip,
+            HurtAnimationRUID = ResourceType.AnimationClip,
             DieAnimationRUID = ResourceType.AnimationClip,
+            AttackEffectRUID = ResourceType.AnimationClip,
             HitEffectRUID = ResourceType.AnimationClip,
             AttackSoundRUID = ResourceType.AudioClip,
-            OnHitSoundRUID = ResourceType.AudioClip,
+            HurtSoundRUID = ResourceType.AudioClip,
             DieSoundRUID = ResourceType.AudioClip,
         }
         for _, fieldName in ipairs(assetFields) do
@@ -189,19 +191,19 @@ script MonsterCatalog extends Component
             end
         end
 
-        local hitClip = self:ReadPresentationClip(profile.HitAnimationRUID, monsterId, "HitAnimationRUID")
+        local hitClip = self:ReadPresentationClip(profile.HurtAnimationRUID, monsterId, "HurtAnimationRUID")
         if hitClip == nil then return nil end
         profile.HitAnimationDurationSeconds = hitClip.duration
         profile.ImpactDelaySeconds = 0
         profile.AttackAnimationDurationSeconds = 0
         local attackClip = self:ReadPresentationClip(profile.AttackAnimationRUID, monsterId, "AttackAnimationRUID")
         if attackClip == nil then return nil end
-        if profile.AttackImpactFrame > #attackClip.frames then
-            self:SetError("AttackImpactFrame exceeds attack clip for " .. monsterId)
+        if profile.AttackDamageFrame > #attackClip.frames then
+            self:SetError("AttackDamageFrame exceeds attack clip for " .. monsterId)
             return nil
         end
         profile.AttackAnimationDurationSeconds = attackClip.duration
-        for frameIndex = 1, profile.AttackImpactFrame - 1 do
+        for frameIndex = 1, profile.AttackDamageFrame - 1 do
             profile.ImpactDelaySeconds = profile.ImpactDelaySeconds + attackClip.frames[frameIndex].Delay
         end
         profile.ImpactDelaySeconds = profile.ImpactDelaySeconds / attackClip.playRate
@@ -254,11 +256,11 @@ script MonsterCatalog extends Component
         if dataset == nil then return self:SetError("MonsterData table unavailable") end
         local requiredColumns = {
             "MonsterId", "MonsterName", "MonsterType", "ModelId", "MaxHp", "MoveSpeed", "AttackDamageMin", "AttackDamageMax",
-            "AttackIntervalSeconds", "AttackRange", "AttackRangeY", "AttackImpactFrame", "RetargetIntervalSeconds",
+            "AttackIntervalSeconds", "AttackRange", "AttackRangeY", "AttackDamageFrame", "RetargetIntervalSeconds",
             "HitStopDurationSeconds",
             "KnockbackDistance", "StandAnimationRUID", "MoveAnimationRUID", "AttackAnimationRUID",
-            "HitAnimationRUID", "DieAnimationRUID", "HitEffectRUID", "AttackSoundRUID",
-            "OnHitSoundRUID", "DieSoundRUID",
+            "HurtAnimationRUID", "DieAnimationRUID", "AttackEffectRUID", "HitEffectRUID", "AttackSoundRUID",
+            "HurtSoundRUID", "DieSoundRUID",
         }
         for _, columnName in ipairs(requiredColumns) do
             if dataset:GetColumn(columnName) == nil then

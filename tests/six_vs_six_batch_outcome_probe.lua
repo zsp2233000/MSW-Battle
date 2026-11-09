@@ -183,7 +183,7 @@ local runOk, runDetail = pcall(function()
         check(session:TryStartBattle(), "two attacker scene starts through the session command")
         local damageSerial = target.DamageTakenSerial
         local soundSerial = target.OnHitSoundSerial
-        local soundRUID = target.OnHitSoundRUID
+        local soundRUID = target.HurtSoundRUID
         first:DriveAttack(targetEntity, true)
         second:DriveAttack(targetEntity, true)
         first:AdvanceAttack(0)

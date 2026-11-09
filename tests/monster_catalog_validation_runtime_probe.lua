@@ -61,12 +61,19 @@ local ok, detail = pcall(function()
     local verticalRange = parse("monster_tank", { AttackRangeY = "0.125" })
     check(verticalRange ~= nil and verticalRange.AttackRangeY == 0.125, "positive AttackRangeY is preserved")
     for _, id in ipairs({ "monster_tank", "monster_warrior", "monster_shooter" }) do
-        check(parse(id, { AttackImpactFrame = "" }) == nil, id .. " rejects blank impact frame")
+        check(parse(id, { AttackDamageFrame = "" }) == nil, id .. " rejects blank impact frame")
         check(parse(id, { AttackAnimationRUID = "" }) == nil, id .. " rejects blank attack animation")
-        check(parse(id, { AttackImpactFrame = "0" }) == nil, id .. " rejects zero impact frame")
-        check(parse(id, { AttackImpactFrame = "99999" }) == nil, id .. " rejects an impact frame beyond the actual clip")
+        check(parse(id, { AttackDamageFrame = "0" }) == nil, id .. " rejects zero impact frame")
+        check(parse(id, { AttackDamageFrame = "99999" }) == nil, id .. " rejects an impact frame beyond the actual clip")
     end
     local renamed = parse("monster_tank", { MonsterName = "RenamedOnly" })
+    local blankEffect = parse("monster_tank", { AttackEffectRUID = "" })
+    check(blankEffect ~= nil and blankEffect.AttackEffectRUID == "", "blank attack effect is optional")
+    local effectRUID = rows.monster_warrior:GetItem("HitEffectRUID")
+    local attackEffect = parse("monster_tank", { AttackEffectRUID = effectRUID })
+    check(attackEffect ~= nil and attackEffect.AttackEffectRUID == effectRUID, "attack effect preserves its animation clip")
+    check(parse("monster_tank", { AttackEffectRUID = rows.monster_warrior:GetItem("AttackSoundRUID") }) == nil,
+        "attack effect rejects audio resources")
     check(renamed ~= nil and renamed.MonsterName == "RenamedOnly" and renamed.MonsterType == "TANK",
         "name edits do not select a different combat type")
     local reused = parse("monster_tank", { MonsterName = "SharedResources" })

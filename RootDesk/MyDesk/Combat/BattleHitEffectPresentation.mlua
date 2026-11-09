@@ -3,13 +3,19 @@ script BattleHitEffectPresentation extends Component
 
     @ExecSpace("Multicast")
     method void PlayHitEffect(string effectRUID)
-        -- Deliver every successful non-tank hit with its attacker's exact effect RUID.
-        self:PlayAtTarget(effectRUID)
+        -- Deliver each hit effect on the defender that owns this component.
+        self:PlayAttachedEffect(effectRUID, "HIT")
+    end
+
+    @ExecSpace("Multicast")
+    method void PlayAttackEffect(string effectRUID)
+        -- Deliver one effect on the attacker for each accepted attack start.
+        self:PlayAttachedEffect(effectRUID, "ATTACK")
     end
 
     @ExecSpace("ClientOnly")
-    method void PlayAtTarget(string effectRUID)
-        -- Attach the hit effect to the defender, never to the attacking entity.
+    method void PlayAttachedEffect(string effectRUID, string effectKind)
+        -- Attach to the owner's visible representation, including mirrored match views.
         if effectRUID == nil or effectRUID == "" or effectRUID == "TBD" or effectRUID == "N/A" then return end
         if not isvalid(self.Entity) then return end
         local target = self.Entity
@@ -19,7 +25,15 @@ script BattleHitEffectPresentation extends Component
             target = view:GetVisual(self.Entity)
             if not isvalid(target) then return end
         end
-        local serial = _EffectService:PlayEffectAttached(effectRUID, target, Vector3(0, 0, 0), 0, Vector3(1, 1, 1), false)
+        local options = nil
+        if effectKind == "ATTACK" then options = { SyncFlip = true } end
+        local serial = _EffectService:PlayEffectAttached(effectRUID, target, Vector3(0, 0, 0), 0, Vector3(1, 1, 1), false, options)
+        if serial == 0 then
+            log_error("[VRF][BattleEffect] CREATE_FAILED kind=" .. effectKind .. " owner=" .. self.Entity.Name .. ", ruid=" .. effectRUID)
+            return
+        end
+        log("[VRF][BattleEffect] kind=" .. effectKind .. " owner=" .. self.Entity.Name
+            .. " target=" .. target.Name .. " ruid=" .. effectRUID .. " serial=" .. tostring(serial))
         if isvalid(view) and view:GetLocalFaction() ~= "" then
             log("[VRF][BattleView] EFFECT target=" .. target.Name .. " serial=" .. tostring(serial)
                 .. " position=" .. tostring(target.TransformComponent.WorldPosition))

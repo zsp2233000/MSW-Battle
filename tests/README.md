@@ -38,6 +38,8 @@ After a normal match admits both players, set the same isolated formation key in
 
 ## Maker runtime procedure
 
+Before running the `template` combat probes, move the test player from the default `formationlobby` to `template` using the existing server teleport flow, then confirm the client's `LocalPlayer.CurrentMap.Name` is `template`. A server-only probe can pass while the client remains in the lobby and cannot receive the template actors' effect RPCs. Attack-effect acceptance requires the client `[VRF][BattleEffect]` playback records as well as the server probe result.
+
 For each combat runtime probe listed below, use a fresh Play test. Stop, clear logs, Refresh, read build logs, then Play and wait until `template` reaches `DEPLOYMENT`. Pass the entire Lua file to `maker_execute_script` with `context=server_main`, except the client probes identified below. A successful script dispatch is not a passing test: read normal logs until that probe's final `PASS` or `FAILURES=...` marker appears. Inspect all build and normal Error / Warning entries. The only expected diagnostic in this suite is the single `unsupported attack profile` message intentionally caused by the first invalid-profile case in `attack_execution_runtime_probe.lua`. Stop after each combat probe.
 
 | Probe | Runtime role | Clock / evidence |
@@ -45,6 +47,7 @@ For each combat runtime probe listed below, use a fresh Play test. Stop, clear l
 | `deployment_runtime_probe.lua` | Formal deployment bounds, capacity, removal, and registration | Production `TryDeployMonster` / removal commands; server side |
 | `attack_execution_runtime_probe.lua` | Native attacks, accepted-hit policy, cancellation, reconfiguration, death, hit stop, and result | Owns and releases its manual clock; includes a later native HitEvent delivered to a dead defender while BATTLE remains active, and the one intentional unsupported-profile diagnostic |
 | `attack_clock_runtime_probe.lua` | Manual-clock ownership, automatic/manual exclusion, and restored automatic attacks | Owns and releases its manual clock; confirm the release paths in logs |
+| `attack_effect_runtime_probe.lua` | All three attack kinds, repeated start requests, multi-target tank hits and whiffs | Owns and releases its manual clock; require final `PASS` plus exactly one successful client `[VRF][BattleEffect] kind=ATTACK` per named actor. Check mirrored position/facing separately in a matched battle. Catalog validation also checks blank, valid clip and invalid audio values for `AttackEffectRUID`. |
 | `tank_contact_runtime_probe.lua` | Animated frontal tank sweep, shared swing interval, whiffs, hit effects, and knockback during attack, with the displaced attack hitting or whiffing from its new position | Manual clock for hit sequencing; real Maker frames for movement / knockback evidence |
 | `attack_range_preview_runtime_probe.lua` | The catalog's published `attackRange`, `attackRangeY` and body centre are the rectangle `GetAttackShape` attacks with (the editor draws its range preview from them) | Manual clock; no stepping, shape read from real units (`server_main`) |
 | `shooter_runtime_probe.lua` | Native shooter movement, impact timing, hitscan, and natural result | Manual clock for attack timing; real Maker frames for movement evidence |

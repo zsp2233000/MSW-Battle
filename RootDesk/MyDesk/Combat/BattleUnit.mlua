@@ -10,9 +10,9 @@ script BattleUnit extends Component
     @Sync property string StandAnimationRUID = ""
     @Sync property string MoveAnimationRUID = ""
     @Sync property string AttackAnimationRUID = ""
-    @Sync property string HitAnimationRUID = ""
+    @Sync property string HurtAnimationRUID = ""
     @Sync property string AttackSoundRUID = ""
-    @Sync property string OnHitSoundRUID = ""
+    @Sync property string HurtSoundRUID = ""
     @Sync property string DeathSoundRUID = ""
     @Sync property number AttackAnimationDuration = 0
     @Sync property number HitAnimationDuration = 0
@@ -257,9 +257,9 @@ script BattleUnit extends Component
         local map = self.Entity.CurrentMap
         local view = isvalid(map) and map:GetComponent("script.BattleView") or nil
         if isvalid(view) and view:HasParticipants() then view:PresentDamage(self.Entity, amount) end
-        if self.OnHitSoundRUID ~= nil and self.OnHitSoundRUID ~= "" then
+        if self.HurtSoundRUID ~= nil and self.HurtSoundRUID ~= "" then
             self.OnHitSoundSerial = self.OnHitSoundSerial + 1
-            self:PlayCombatSound(self.OnHitSoundRUID)
+            self:PlayCombatSound(self.HurtSoundRUID)
         end
         if hitEffectRUID ~= nil and hitEffectRUID ~= "" then
             self.LastHitEffectRUID = hitEffectRUID
@@ -297,9 +297,9 @@ script BattleUnit extends Component
         self.StandAnimationRUID = profile.StandAnimationRUID
         self.MoveAnimationRUID = profile.MoveAnimationRUID
         self.AttackAnimationRUID = profile.AttackAnimationRUID
-        self.HitAnimationRUID = profile.HitAnimationRUID
+        self.HurtAnimationRUID = profile.HurtAnimationRUID
         self.AttackSoundRUID = profile.AttackSoundRUID
-        self.OnHitSoundRUID = profile.OnHitSoundRUID
+        self.HurtSoundRUID = profile.HurtSoundRUID
         self.DeathSoundRUID = profile.DieSoundRUID
         self.AttackAnimationDuration = profile.AttackAnimationDurationSeconds
         self.HitAnimationDuration = profile.HitAnimationDurationSeconds
@@ -365,7 +365,7 @@ script BattleUnit extends Component
                 self:PlayPresentationAnimation(self.AttackAnimationRUID, "ATTACK", true)
             end
         elseif damageChanged or (self.CombatState == "ON_HIT" and stateChanged) then
-            self:PlayPresentationAnimation(self.HitAnimationRUID, "ON_HIT", damageChanged)
+            self:PlayPresentationAnimation(self.HurtAnimationRUID, "ON_HIT", damageChanged)
         elseif self._T.presentationAction == "ON_HIT" then
             -- Keep the hit clip visible while server movement continues during knockback.
             self._T.lastPresentationState = "ON_HIT"
@@ -418,7 +418,7 @@ script BattleUnit extends Component
         local sprite = self.Entity:GetComponent("SpriteRendererComponent")
         if not isvalid(sprite) then return end
         local actionRUID = self.AttackAnimationRUID
-        if action == "ON_HIT" then actionRUID = self.HitAnimationRUID end
+        if action == "ON_HIT" then actionRUID = self.HurtAnimationRUID end
         if sprite.SpriteRUID ~= actionRUID then return end
         self._T.presentationAction = ""
         self._T.presentationActionPlayer = nil
@@ -541,7 +541,7 @@ script BattleUnit extends Component
             local action = self._T.presentationAction
             if action ~= nil and action ~= "" then
                 local actionRUID = self.AttackAnimationRUID
-                if action == "ON_HIT" then actionRUID = self.HitAnimationRUID end
+                if action == "ON_HIT" then actionRUID = self.HurtAnimationRUID end
                 local actionSprite = self.Entity:GetComponent("SpriteRendererComponent")
                 if isvalid(actionSprite) and actionSprite.SpriteRUID == actionRUID then
                     self._T.presentationActionPlayer = event.AnimPlayer

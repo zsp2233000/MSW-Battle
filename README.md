@@ -17,8 +17,9 @@ CSV 是方便編輯與檢視的檔案；執行時讀取的是 Maker 中的 UserD
 - `MonsterType` 只接受 `TANK`、`ASSAULT`、`SHOOTER`。固定敵軍的六個 ID 也會依位置要求相符的種類。
 - `ModelId` 必須是專案內可生成的 Model ID；`MonsterName` 與 `ModelId` 不可空白。
 - 數值欄位都必須提供有效數字，以下另列可用範圍。空白不會自動沿用其他列或程式預設值。
-- `StandAnimationRUID`、`MoveAnimationRUID`、`AttackAnimationRUID`、`HitAnimationRUID`、`DieAnimationRUID` 目前都必須非空。載入器會確認資源類型、載入攻擊與受擊動畫，並驗證影格與播放時間。
-- `HitEffectRUID`、`AttackSoundRUID`、`OnHitSoundRUID`、`DieSoundRUID` 可以留空。CSV 中用空欄表示，不必填 `TBD`。這四欄的空值會正規化為空字串。
+- `StandAnimationRUID`、`MoveAnimationRUID`、`AttackAnimationRUID`、`HurtAnimationRUID`、`DieAnimationRUID` 目前都必須非空。載入器會確認資源類型、載入攻擊與受擊動畫，並驗證影格與播放時間。
+- `AttackEffectRUID`、`HitEffectRUID`、`AttackSoundRUID`、`HurtSoundRUID`、`DieSoundRUID` 可以留空。CSV 中用空欄表示，不必填 `TBD`。這五欄的空值會正規化為空字串。
+- `AttackEffectRUID` 留空時不顯示出手特效；填值時必須為 AnimationClip，與攻擊動畫一起播放，不等待 `AttackDamageFrame`。
 - `HitEffectRUID` 留空時不顯示命中特效。任一音效欄留空時，只略過該音效。
 - 非空動畫與音效 RUID 必須符合資源類型；無法載入攻擊或受擊動畫時，沿用 `CONFIG_ERROR` 流程。
 
@@ -37,24 +38,25 @@ CSV 是方便編輯與檢視的檔案；執行時讀取的是 Maker 中的 UserD
 | `AttackIntervalSeconds`   | 攻擊間隔秒數；大於 0。                                                     |
 | `AttackRange`             | 從身體中心往前延伸的水平射程，必須大於 0；與目標受擊碰撞框重疊即在範圍內。 |
 | `AttackRangeY`            | 前方攻擊矩形從身體中心往上、往下各延伸的距離，必須大於 0。               |
-| `AttackImpactFrame`       | 所有種類結算命中的影格；必填正整數，從 1 開始，不可超過攻擊動畫影格數。 |
+| `AttackDamageFrame`       | 所有種類結算命中的影格；必填正整數，從 1 開始，不可超過攻擊動畫影格數。 |
 | `RetargetIntervalSeconds` | 重新尋找目標的間隔秒數；大於 0。                                           |
 | `HitStopDurationSeconds`  | 受擊停頓秒數；大於或等於 0。                                               |
 | `KnockbackDistance`       | 坦克命中擊退距離；坦克必須大於 0，其他種類可填 `0`。                       |
 | `StandAnimationRUID`      | 待機動畫 RUID；必填，也用於怪物選項肖像。                                  |
 | `MoveAnimationRUID`       | 移動動畫 RUID；目前坦克展示會使用。必填。                                  |
 | `AttackAnimationRUID`     | 攻擊動畫 RUID；所有種類必填。                                        |
-| `HitAnimationRUID`        | 受擊動畫 RUID；目前坦克展示會使用。必填。                                  |
+| `HurtAnimationRUID`        | 受擊動畫 RUID；目前坦克展示會使用。必填。                                  |
 | `DieAnimationRUID`        | 死亡動畫 RUID；目前坦克展示會使用。必填。                                  |
+| `AttackEffectRUID`       | 出手時附著在攻擊者身上的特效 RUID；可空白。每次出手播放一次，揮空仍播放，依顯示實體同步朝向。 |
 | `HitEffectRUID`           | 命中特效 RUID；可空白，空白時不顯示特效。                            |
 | `AttackSoundRUID`         | 攻擊音效 RUID；可空白，空白時不播放攻擊音效。                              |
-| `OnHitSoundRUID`          | 受擊音效 RUID；可空白，空白時不播放受擊音效。                              |
+| `HurtSoundRUID`          | 受擊音效 RUID；可空白，空白時不播放受擊音效。                              |
 | `DieSoundRUID`            | 死亡音效 RUID；可空白，空白時不播放死亡音效。                              |
 
 ## 數值規則摘要
 
 - 所有種類：`MaxHp`、`AttackDamageMin`、`AttackDamageMax` 為正整數，且 Max ≥ Min；`MoveSpeed`、`AttackIntervalSeconds`、`AttackRange`、`AttackRangeY`、`RetargetIntervalSeconds` 必須大於 0；`HitStopDurationSeconds` 不可小於 0。
-- 所有種類：`AttackImpactFrame` 必須介於 1 與攻擊 clip 影格數之間。
+- 所有種類：`AttackDamageFrame` 必須介於 1 與攻擊 clip 影格數之間。
 - `TANK`：`KnockbackDistance` 必須大於 0，其他種類可填 0。坦克的每次範圍攻擊共用一個攻擊間隔，每個目標各自抽取傷害。
 
 三種怪物的走位、出手與命中共用前方矩形判定。水平範圍外直線接近，水平已重疊時只上下對齊；進入範圍後站定，出手朝向維持到攻擊動畫結束。命中影格不重新轉向。戰士與射手只打出手時鎖定的目標；坦克打命中影格時範圍內的所有敵方存活單位，每個目標一次，走路不造成傷害。坦克命中一律擊退（含攻擊中的目標），不造成受擊停頓；被擊退者繼續攻擊並從新位置判定命中。

@@ -140,6 +140,8 @@ script BattleAttackComposition extends Component
         unit:BeginAttackPoise()
         unit.AttackSerial = unit.AttackSerial + 1
         unit:PlayCombatSound(self._T.profile.AttackSoundRUID)
+        local presentation = self.Entity:GetComponent("script.BattleHitEffectPresentation")
+        if isvalid(presentation) then presentation:PlayAttackEffect(self._T.profile.AttackEffectRUID) end
         session:EmitPresentation("ATTACK_START", self.Entity, target, 0)
     end
 

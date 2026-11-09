@@ -104,7 +104,7 @@ local runOk, runDetail = pcall(function()
     unit:DriveAttack(first, true)
     unit:AdvanceAttack(formal.ImpactDelaySeconds - 0.001)
     session:AdvanceForTest(0.0001)
-    check(formal.AttackImpactFrame == 8 and a.Hp == 220,
+    check(formal.AttackDamageFrame == 8 and a.Hp == 220,
         "formal frame 8 leaves HP unchanged before the configured impact")
     unit:AdvanceAttack(0.002)
     session:AdvanceForTest(0.0001)

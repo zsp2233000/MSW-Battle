@@ -90,7 +90,7 @@ function createTemporaryFixtureBuffer(originalBytes, variantStats = {}) {
   variantCells[nameIndex] = "VariantTank";
   const numericFields = new Set([
     "MaxHp", "MoveSpeed", "AttackDamageMin", "AttackDamageMax", "AttackIntervalSeconds", "AttackRange", "AttackRangeY",
-    "AttackImpactFrame", "RetargetIntervalSeconds", "HitStopDurationSeconds",
+    "AttackDamageFrame", "RetargetIntervalSeconds", "HitStopDurationSeconds",
     "KnockbackDistance",
   ]);
   for (const [field, value] of Object.entries(variantStats)) {

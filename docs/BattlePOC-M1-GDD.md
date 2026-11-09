@@ -86,8 +86,9 @@
 | 每隻怪物的動畫 | 坦克填 `stand`、`move`、`hit`、`die`；戰士／射手另填 `attack` AnimationClip RUID | RUID 存於怪物資料列；不同怪物可填相同 RUID，坦克不需 `attack` |
 | HP 條 | 背景與填充值各 1 個 Sprite RUID | 顯示於單位上方；系統只依 HP 比例縮放填充值 |
 | 傷害數字 | 1 個 DamageSkin RUID | 每次成功傷害顯示固定傷害值 |
+| 出手特效 | `AttackEffectRUID` 可留空 | 每次出手時在攻擊者身上播放一次，揮空仍播放；範圍攻擊不因命中多人而重複；支援鏡像顯示與朝向 |
 | 命中特效 | `HitEffectRUID` 可留空 | 有值時由攻擊者的怪物資料列決定，特效掛在被擊中的目標 Entity 上；空白時使用攻擊器的預設特效，若預設為 `TBD` 則略過；可重複使用相同 RUID |
-| 音效 | `AttackSoundRUID`、`OnHitSoundRUID`、`DieSoundRUID` 可各自留空 | 有值時由怪物資料列決定並播放；空白時略過該音效，不依種類推導 |
+| 音效 | `AttackSoundRUID`、`HurtSoundRUID`、`DieSoundRUID` 可各自留空 | 有值時由怪物資料列決定並播放；空白時略過該音效，不依種類推導 |
 
 - 戰士與射手的傷害在 `attack` 動畫命中影格發生，不以整段動畫結束時間代替。
 - 系統依 AnimationClip 影格時間換算命中時間。
@@ -188,9 +189,9 @@
 ## 7. 怪物資料契約
 
 - M1 建立一份 `MonsterData` UserDataSet／CSV，每個 `MonsterId` 一列；初始三列分別顯示為坦克、戰士、射手。`MonsterId` 是不隨名稱變更的查找鍵，`MonsterName` 可修改，`MonsterType` 目前只接受 `TANK`、`ASSAULT`（顯示為戰士）、`SHOOTER`。
-- 每列獨立保存 `MaxHp`、`MoveSpeed`、`AttackDamageMin`、`AttackDamageMax`、`AttackIntervalSeconds`、`AttackRange`、`AttackRangeY`、`AttackImpactFrame`、`KnockbackDistance`，以及該怪物的 `stand`／`move`／`attack`／`hit`／`die` 動畫、命中特效、攻擊／受擊／死亡音效 RUID。三種攻擊共用同一套傷害區間與範圍欄位；坦克沒有接觸欄位。`HitEffectRUID` 與三個 SFX 欄位可各自留空；其他欄位仍依資料驗證規則處理。各欄分開保存；不同怪物可重複使用相同 RUID，不從種類繼承數值或資產。
-- `AttackAnimationRUID` 與 `AttackImpactFrame` 對三種怪物都必填；命中影格從 1 開始，不可為 0，也不可超過攻擊 clip 的影格數，否則載入時 `CONFIG_ERROR`。傷害仍由伺服器權威結算，須在 Maker Play 驗證動畫影格到伺服器命中時間的換算，不能以固定秒數冒充命中影格。
-- 怪物資料列缺少 `MonsterId`、重複 ID、種類非法或必要數值無效時拒絕使用並給出明確錯誤。`HitEffectRUID`、`AttackSoundRUID`、`OnHitSoundRUID`、`DieSoundRUID` 可留空；資料表欄位仍須保留。其他資產不由程式搜尋、生成或猜測。
+- 每列獨立保存 `MaxHp`、`MoveSpeed`、`AttackDamageMin`、`AttackDamageMax`、`AttackIntervalSeconds`、`AttackRange`、`AttackRangeY`、`AttackDamageFrame`、`KnockbackDistance`，以及該怪物的 `stand`／`move`／`attack`／`hit`／`die` 動畫、命中特效、攻擊／受擊／死亡音效 RUID。三種攻擊共用同一套傷害區間與範圍欄位；坦克沒有接觸欄位。`AttackEffectRUID`、`HitEffectRUID` 與三個 SFX 欄位可各自留空；其他欄位仍依資料驗證規則處理。各欄分開保存；不同怪物可重複使用相同 RUID，不從種類繼承數值或資產。
+- `AttackAnimationRUID` 與 `AttackDamageFrame` 對三種怪物都必填；命中影格從 1 開始，不可為 0，也不可超過攻擊 clip 的影格數，否則載入時 `CONFIG_ERROR`。傷害仍由伺服器權威結算，須在 Maker Play 驗證動畫影格到伺服器命中時間的換算，不能以固定秒數冒充命中影格。
+- 怪物資料列缺少 `MonsterId`、重複 ID、種類非法或必要數值無效時拒絕使用並給出明確錯誤。`AttackEffectRUID`、`HitEffectRUID`、`AttackSoundRUID`、`HurtSoundRUID`、`DieSoundRUID` 可留空；資料表欄位仍須保留。其他資產不由程式搜尋、生成或猜測。
 - 玩家與敵軍可引用同一個 `MonsterId`。玩家從依資料列產生的名稱選單選怪物；預配置實體在 Maker 指定 `MonsterId`、`Faction` 與位置，戰鬥數值和外觀仍全部由 `MonsterData` 覆蓋，不建立編隊 dataset。
 - HP 條與 DamageSkin 目前各只有一種固定樣式，由既有／人類交付的 component 配置，不放入怪物 dataset，也不建立共用呈現 dataset。
 - 死亡時伺服器立即停止玩法行為；客戶端依死亡動畫結束事件隱藏。怪物資料表不要求手填死亡秒數。
