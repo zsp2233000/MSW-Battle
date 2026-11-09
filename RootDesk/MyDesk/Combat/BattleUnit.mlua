@@ -4,6 +4,7 @@ script BattleUnit extends Component
     @Sync property string Faction = ""
     @Sync property string MonsterId = ""
     @Sync property string MonsterName = ""
+    @Sync property integer DeploymentOrder = 0
     @Sync property string UnitKind = "ASSAULT"
     @Sync property string CombatState = "IDLE"
     @Sync property string DeathAnimationRUID = ""

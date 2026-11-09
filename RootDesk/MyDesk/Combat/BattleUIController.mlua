@@ -103,6 +103,7 @@ script BattleUIController extends Logic
     method void SetResult(string result)
         -- Keep exactly the local viewer's result entity enabled.
         if result == "" then
+            self:ClearResultCards()
             self._T.pendingResult = nil
             self._T.resultDisplayAt = nil
         else
@@ -120,6 +121,65 @@ script BattleUIController extends Logic
         self:SetEnabled(self.resultDraw, result == "DRAW")
         self:SetEnabled(self.result, result ~= "")
         if result ~= "" then log("[VRF][BattleUI] result=" .. result) end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ClearResultCards()
+        -- Release result-only clones on leaving a result, changing sessions or ending Play.
+        for _, card in ipairs(self._T.resultCards or {}) do
+            if isvalid(card) then card:Destroy() end
+        end
+        self._T.resultCards = {}
+        self._T.resultCardsKey = ""
+    end
+
+    @ExecSpace("ClientOnly")
+    method void RenderResultCards(Entity map, string ownFaction, integer expected)
+        -- Read synchronized survivors rather than parsing the diagnostic snapshot string.
+        if self.OwnResult == "" or self.OwnResult == "DRAW" then
+            self:ClearResultCards()
+            return
+        end
+        local faction = ownFaction
+        local side = -1
+        if self.OwnResult == "LOSE" then
+            faction = ownFaction == "PLAYER" and "ENEMY" or "PLAYER"
+            side = 1
+        end
+        local units = {}
+        for _, unit in ipairs(map:GetChildComponentsByTypeName("script.BattleUnit", false)) do
+            if unit.Faction == faction and not unit.IsDead and unit.Hp > 0 then
+                if unit.DeploymentOrder <= 0 or unit.MaxHp <= 0 or unit.StandAnimationRUID == "" then return end
+                table.insert(units, unit)
+            end
+        end
+        -- Phase and unit properties may arrive on different frames; retry until the roster agrees.
+        if #units ~= expected then return end
+        table.sort(units, function(a, b) return a.DeploymentOrder < b.DeploymentOrder end)
+        local parts = { self.OwnResult, ownFaction }
+        for _, unit in ipairs(units) do
+            table.insert(parts, table.concat({ tostring(unit.DeploymentOrder), unit.MonsterId, unit.MonsterName,
+                tostring(unit.Hp), tostring(unit.MaxHp), unit.StandAnimationRUID }, "|"))
+        end
+        local key = table.concat(parts, "\n")
+        if key == self._T.resultCardsKey then return end
+        local template = self.result:GetChildByName("CardTemplate", false)
+        if not isvalid(template) then return end
+        self:ClearResultCards()
+        for index, unit in ipairs(units) do
+            local card = template:Clone("Survivor_" .. tostring(index))
+            card.UITransformComponent.anchoredPosition = Vector2(side * 620 + ((index - 1) % 3 - 1) * 165,
+                210 - math.floor((index - 1) / 3) * 240)
+            self:SetText(card:GetChildByName("MonsterName", true), unit.MonsterName)
+            self:SetText(card:GetChildByName("Identity", true), tostring(unit.Hp) .. " / " .. tostring(unit.MaxHp))
+            local portrait = card:GetChildByName("Portrait", true)
+            portrait.SpriteGUIRendererComponent.ImageRUID = DataRef("thumbnail://" .. unit.StandAnimationRUID)
+            portrait.SpriteGUIRendererComponent.Color = Color.white
+            card:SetEnable(true)
+            table.insert(self._T.resultCards, card)
+        end
+        self._T.resultCardsKey = key
+        log("[VRF][ResultCards] result=" .. self.OwnResult .. " side=" .. tostring(side) .. " count=" .. tostring(#units))
     end
 
     @ExecSpace("ClientOnly")
@@ -155,10 +215,12 @@ script BattleUIController extends Logic
         local playerAlive, enemyAlive = session.PlayerAlive, session.EnemyAlive
         local initialPlayer, initialEnemy = session.InitialPlayerAlive, session.InitialEnemyAlive
         local viewerResult = ""
+        local ownFaction = "PLAYER"
         local ready = session.SessionGeneration > 0 and (phase == "DEPLOYMENT" or phase == "BATTLE" or phase == "RESULT")
         if matched then
             local profile = isvalid(player.PlayerComponent) and player.PlayerComponent.ProfileCode or ""
             if profile ~= "" and session.AwayProfile == profile then
+                ownFaction = "ENEMY"
                 playerAlive, enemyAlive = enemyAlive, playerAlive
                 initialPlayer, initialEnemy = initialEnemy, initialPlayer
             elseif profile == "" or session.HomeProfile ~= profile then
@@ -169,6 +231,7 @@ script BattleUIController extends Logic
             viewerResult = session.Result
         end
         self:SetResult(viewerResult)
+        self:RenderResultCards(map, ownFaction, self.OwnResult == "WIN" and playerAlive or enemyAlive)
         local own = ready and tostring(playerAlive) or "—"
         local opponent = ready and tostring(enemyAlive) or "—"
         local key = map.Name .. ":" .. tostring(session.SessionGeneration) .. ":" .. phase .. ":" .. own .. ":" .. opponent .. ":" .. tostring(showDeployment) .. ":" .. tostring(initialPlayer) .. ":" .. tostring(initialEnemy)

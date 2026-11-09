@@ -866,6 +866,7 @@ script BattleSession extends Component
         end
         unit:ConfigurePresentation(profile)
         local record = { entity = entity, unit = unit, faction = faction, monsterId = profile.MonsterId, monsterName = profile.MonsterName, unitKind = profile.MonsterType, dead = false, removable = false }
+        unit.DeploymentOrder = #self._T.units + 1
         table.insert(self._T.units, record)
         if faction == "PLAYER" then
             self.PlayerAlive = self.PlayerAlive + 1
