@@ -26,6 +26,7 @@ script BattleSession extends Component
     @Sync property string MatchKey = ""
     @Sync property string HomeProfile = ""
     @Sync property string AwayProfile = ""
+    @Sync property string ResultDeaths = ""
     property number EnemyOpeningDelay = 0.12 -- Deterministic M1 lead; DRAW remains for same-batch edge cases.
     property number ArenaMinX = -15
     property number ArenaMaxX = 15
@@ -115,6 +116,9 @@ script BattleSession extends Component
         self._T.nextDeploymentOrder = 0
         self._T.eventHistory = {}
         self._T.resultEntered = false
+        self._T.deaths = { PLAYER = {}, ENEMY = {} }
+        self._T.settlements = {}
+        self.ResultDeaths = ""
         self._T.configurationErrorDetail = ""
         self.Result = ""
         self.ConfigurationError = ""
@@ -163,6 +167,7 @@ script BattleSession extends Component
     @ExecSpace("ServerOnly")
     method void OnEndPlay()
         -- Release session-only references when the map instance ends.
+        for _, operation in pairs(self._T.settlements or {}) do _MonsterLevelStorage:Finish(operation, "FAILED") end
         if self.RequireMatchedFormations and self.Phase ~= "RESULT" and self.Phase ~= "ABORTED" then
             self.Phase = "ABORTED"
             self.Result = ""
@@ -601,6 +606,22 @@ script BattleSession extends Component
         return ""
     end
 
+    @ExecSpace("ServerOnly")
+    method table GetExperienceResults()
+        -- Return detached settlement status and level changes, including departed participants.
+        local results = {}
+        for profile, operation in pairs(self._T.settlements or {}) do
+            local monsters = {}
+            for id, change in pairs(operation.monsters) do
+                monsters[id] = { gained = change.gained,
+                    before = { level = change.before.level, experience = change.before.experience },
+                    after = { level = change.after.level, experience = change.after.experience } }
+            end
+            results[profile] = { status = operation.status, matchId = operation.matchId, monsters = monsters }
+        end
+        return results
+    end
+
     method table BuildPlacedRoster()
         -- Read every Maker-placed unit before spawning, so a bad placement cannot create a partial roster.
         local roster = {}
@@ -998,6 +1019,17 @@ script BattleSession extends Component
                 for _, record in ipairs(self._T.units) do
                     if isvalid(record.unit) then record.unit:StopForResult() end
                 end
+                local deaths = {}
+                for _, faction in ipairs({ "PLAYER", "ENEMY" }) do
+                    local counts = self._T.deaths[faction]
+                    local encoded = next(counts) == nil and "{}" or _HttpService:JSONEncode(counts)
+                    table.insert(deaths, '"' .. faction .. '":' .. encoded)
+                end
+                self.ResultDeaths = "{" .. table.concat(deaths, ",") .. "}"
+                if self.RequireMatchedFormations and self.MatchKey ~= "" and self.HomeProfile ~= "" and self.AwayProfile ~= "" then
+                    self._T.settlements[self.HomeProfile] = _MonsterLevelStorage:Settle(self.HomeProfile, self.MatchKey, self._T.deaths.PLAYER)
+                    self._T.settlements[self.AwayProfile] = _MonsterLevelStorage:Settle(self.AwayProfile, self.MatchKey, self._T.deaths.ENEMY)
+                end
                 self:EmitPresentation("RESULT", nil, nil, 0)
                 log("[M1][BattleSession] RESULT=" .. result)
             end
@@ -1025,6 +1057,8 @@ script BattleSession extends Component
         for _, record in ipairs(self._T.units) do
             if record.entity == entity and record.dead ~= true and isvalid(record.unit) and record.unit.IsDead == true then
                 record.dead = true
+                local deaths = self._T.deaths[record.faction]
+                deaths[record.monsterId] = (deaths[record.monsterId] or 0) + 1
                 if record.faction == "PLAYER" then
                     self.PlayerAlive = math.max(0, self.PlayerAlive - 1)
                 else
