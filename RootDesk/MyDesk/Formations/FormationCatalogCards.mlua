@@ -39,13 +39,23 @@ script FormationCatalogCards extends Logic
     end
 
     @ExecSpace("ClientOnly")
+    method string ProgressLabel(table option)
+        -- Keep card and tooltip progress text identical, including unavailable and MAX states.
+        if option == nil or option.level == nil then
+            return _FormationEditSession.Snapshot.levelLoadState == "ERROR" and "等級讀取失敗" or "等級讀取中"
+        end
+        local experience = option.level == 30 and "MAX" or (tostring(option.experience) .. "/" .. tostring(option.level))
+        return "Lv." .. tostring(option.level) .. " " .. experience
+    end
+
+    @ExecSpace("ClientOnly")
     method void BuildOptions(table options)
         -- Rebuild catalog cards only when server-published identity, art or intelligence changes.
         local parts = {}
         for _, option in ipairs(options) do
             table.insert(parts, table.concat({ option.monsterId, option.monsterName, option.standRuid, option.monsterType,
                 tostring(option.maxHp), tostring(option.attackDamageMin), tostring(option.attackDamageMax),
-                tostring(option.attackInterval), tostring(option.attackRange) }, "|"))
+                tostring(option.attackInterval), tostring(option.attackRange), self:ProgressLabel(option) }, "|"))
         end
         local key = table.concat(parts, "\n")
         if key == self._T.optionsKey then return end
@@ -81,7 +91,7 @@ script FormationCatalogCards extends Logic
                 if isvalid(check) then check.SpriteGUIRendererComponent.RaycastTarget = false end
             end
             local identity = card:GetChildByName("Identity", true)
-            if isvalid(identity) then identity.TextGUIRendererComponent.Text = self:KindLabel(option.monsterType) end
+            if isvalid(identity) then identity.TextGUIRendererComponent.Text = self:KindLabel(option.monsterType) .. " " .. self:ProgressLabel(option) end
             -- Selection follows MonsterId; hovering only previews and never selects.
             local callback = card:ConnectEvent(ButtonClickEvent, function()
                 _FormationEditSession:SelectMonster(monsterId)
@@ -135,7 +145,7 @@ script FormationCatalogCards extends Logic
         -- Share the same catalog values between selected intelligence and hover previews.
         _FormationLobby:SetText(target .. "/Name", option ~= nil and option.monsterName or "等待怪物目錄")
         local kind = option ~= nil and self:KindLabel(option.monsterType) or ""
-        _FormationLobby:SetText(target .. "/Kind", (option ~= nil and kind == "") and "—" or kind)
+        _FormationLobby:SetText(target .. "/Kind", kind .. " " .. self:ProgressLabel(option))
         local stats = {
             { "Health", "maxHp", "" },
             { "Damage", nil, "" },
@@ -147,9 +157,9 @@ script FormationCatalogCards extends Logic
             _FormationLobby:SetEnabled(path, option ~= nil)
             local value = ""
             if option ~= nil and stat[1] == "Damage" then
-                value = string.format("%d～%d", option.attackDamageMin, option.attackDamageMax)
+                value = option.level ~= nil and string.format("%d～%d", option.attackDamageMin, option.attackDamageMax) or "—"
             elseif option ~= nil then
-                value = tostring(option[stat[2]]) .. stat[3]
+                value = option[stat[2]] ~= nil and (tostring(option[stat[2]]) .. stat[3]) or "—"
             end
             _FormationLobby:SetText(path .. "/Value", value)
         end

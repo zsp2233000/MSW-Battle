@@ -37,7 +37,7 @@ script FormationService extends Logic
         local profile = player.PlayerComponent.ProfileCode
         if profile == nil or profile == "" then return nil end
         -- Unsaved edits live only in the owning client; the server keeps confirmed content and the selection.
-        record = { userId = forUserId, profile = profile, owner = player, sessionId = _UtilLogic:NewGuid(), loadState = "NOT_LOADED", editSlot = 1, sequence = 0, pending = false, pendingSlot = 0, pendingKind = "", initialized = false, raw = "", saved = _FormationSchema:EmptyDocument(), message = "", result = nil }
+        record = { userId = forUserId, profile = profile, owner = player, sessionId = _UtilLogic:NewGuid(), loadState = "NOT_LOADED", levelLoadState = "NOT_LOADED", editSlot = 1, sequence = 0, pending = false, pendingSlot = 0, pendingKind = "", initialized = false, raw = "", saved = _FormationSchema:EmptyDocument(), message = "", result = nil }
         self._T.sessions[forUserId] = record
         return record
     end
@@ -50,6 +50,16 @@ script FormationService extends Logic
         local catalog = self:GetCatalog()
         local options = {}
         if catalog ~= nil then options = catalog:GetDeploymentOptions() end
+        for _, option in ipairs(options) do
+            if record.levelLoadState == "READY" then
+                local progress = record.levels[option.monsterId] or { level = 1, experience = 0 }
+                local stats = _MonsterProgression:CalculateStats(catalog:GetProfile(option.monsterId), progress.level)
+                option.level, option.experience = progress.level, progress.experience
+                option.maxHp, option.attackDamageMin, option.attackDamageMax = stats.MaxHp, stats.AttackDamageMin, stats.AttackDamageMax
+            else
+                option.maxHp, option.attackDamageMin, option.attackDamageMax = nil, nil, nil
+            end
+        end
         local slots = {}
         for index = 1, 5 do
             local key = tostring(index)
@@ -60,7 +70,7 @@ script FormationService extends Logic
         if record.result ~= nil then
             result = { requestId = record.result.requestId, kind = record.result.kind, slotId = record.result.slotId, status = record.result.status, code = record.result.code }
         end
-        local snapshot = { loadState = record.loadState, editSlot = record.editSlot, slots = slots, saved = _FormationSchema:CopyDocument(record.saved), message = record.message, options = options, pending = record.pending, pendingSlot = record.pendingSlot, pendingKind = record.pendingKind, uncertain = record.uncertain ~= nil, result = result }
+        local snapshot = { loadState = record.loadState, levelLoadState = record.levelLoadState, editSlot = record.editSlot, slots = slots, saved = _FormationSchema:CopyDocument(record.saved), message = record.message, options = options, pending = record.pending, pendingSlot = record.pendingSlot, pendingKind = record.pendingKind, uncertain = record.uncertain ~= nil, result = result }
         self:Receive(snapshot, record.sequence, record.userId)
     end
 
@@ -75,6 +85,7 @@ script FormationService extends Logic
         -- A client can load only its own session; repeated opens never discard confirmed content.
         local record = self:GetSession(senderUserId)
         if record == nil then return end
+        if record.levelLoadState ~= "LOADING" then self:LoadLevels(record) end
         if record.loadState == "NOT_LOADED" then self:Load(record) else self:Publish(record) end
     end
 
@@ -83,7 +94,34 @@ script FormationService extends Logic
         -- Explicitly reconcile failed or unconfirmed writes by reading the durable content again.
         local record = self:GetSession(senderUserId)
         if record == nil or _FormationHandoff:IsLocked(record.profile) or record.pending or record.loadState == "LOADING" then return end
+        self:LoadLevels(record)
         self:Load(record)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void LoadLevels(table record)
+        -- Fence timeouts and superseded reads; a failed read never publishes Lv1 defaults.
+        record.levelEpoch = (record.levelEpoch or 0) + 1
+        local epoch = record.levelEpoch
+        record.levelLoadState, record.levels = "LOADING", nil
+        self:Publish(record)
+        local timeout = 0
+        local complete = function(code, document)
+            if self._T.sessions[record.userId] ~= record or record.levelEpoch ~= epoch then return end
+            record.levelEpoch = epoch + 1
+            _TimerService:ClearTimer(timeout)
+            self._T.saveTimers[timeout] = nil
+            record.levelLoadState = code == 0 and "READY" or "ERROR"
+            record.levels = code == 0 and document.monsters or nil
+            log("[VRF][LobbyLevels] load=" .. record.levelLoadState .. " user=" .. record.userId)
+            self:Publish(record)
+        end
+        timeout = _TimerService:SetTimerOnce(function()
+            self._T.saveTimers[timeout] = nil
+            complete(1000004, nil)
+        end, math.max(1, math.min(10, self.SaveTimeoutSeconds)))
+        self._T.saveTimers[timeout] = true
+        _MonsterLevelStorage:Read(record.profile, complete)
     end
 
     @ExecSpace("ServerOnly")
@@ -384,6 +422,7 @@ script FormationService extends Logic
         record.loadState = transfer.loadState or "READY"
         record.uncertain = transfer.uncertain and { expected = record.raw } or nil
         record.message = transfer.message or "已還原為配對前儲存的隊伍"
+        self:LoadLevels(record)
         self:Publish(record)
         if record.uncertain ~= nil then self:Load(record) end
         record.restoredTickets = record.restoredTickets or {}
