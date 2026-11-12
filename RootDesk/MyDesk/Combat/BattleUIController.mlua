@@ -17,12 +17,25 @@ script BattleUIController extends Logic
     property Entity resultEnemyCount = "585aa74a-1ef0-4897-9885-4b996eb49840"
     property string OwnResult = ""
     property number ResultDisplayDelaySeconds = 2
+    -- shortcut: confirmed personalityLevelUP frames 3–8; extend when the remaining frame RUIDs are available.
+    property table LevelUpFrames = {
+        { "f21addcaf0054647a4dd392d08edc743", 90, 108, 38, -27 },
+        { "62b80ffee5dd4453b1c395c05825a3f8", 84, 115, 35, -19 },
+        { "91365655e5734f8e81d12af6fea355cb", 84, 117, 36, -19 },
+        { "802075a9e4e64b0dbb5e637d5e2b5d4d", 85, 119, 38, -19 },
+        { "9211a66dd12a46f5b5247bc89b7fd88a", 78, 86, 32, -19 },
+        { "3977759a260e48b699d22643d7bd9773", 78, 80, 32, -25 }
+    }
 
     @ExecSpace("ClientOnly")
     method void OnBeginPlay()
         -- One client owner presents whichever battle map the local player currently occupies.
         self._T.hudKey = ""
         self._T.healthGeometry = {}
+        self._T.levelUpEffects = {}
+        local frames = {}
+        for _, frame in ipairs(self.LevelUpFrames) do table.insert(frames, frame[1]) end
+        _ResourceService:PreloadAsync(frames, function() end)
         self:SetEnabled(self.root, false)
         self:SetEnabled(self.configErrorGroup, false)
         log("[VRF][BattlePresentation] UI controller ready")
@@ -169,6 +182,7 @@ script BattleUIController extends Logic
         self:ClearResultCards()
         for index, unit in ipairs(units) do
             local card = template:Clone("Survivor_" .. tostring(index))
+            self:SetEnabled(card:GetChildByName("LevelUpEffect"), false)
             card.UITransformComponent.anchoredPosition = Vector2(side * 620 + ((index - 1) % 3 - 1) * 165,
                 210 - math.floor((index - 1) / 3) * 240)
             self:SetText(card:GetChildByName("MonsterName", true), unit.MonsterName)
@@ -186,11 +200,62 @@ script BattleUIController extends Logic
     @ExecSpace("ClientOnly")
     method void ClearExperienceCards()
         -- Own these clones separately so survivor refreshes never erase confirmed experience.
+        if self._T.levelUpTimer ~= nil then _TimerService:ClearTimer(self._T.levelUpTimer) end
+        self._T.levelUpTimer = nil
+        self._T.levelUpEffects = {}
         for _, card in ipairs(self._T.experienceCards or {}) do
             if isvalid(card) then card:Destroy() end
         end
         self._T.experienceCards = {}
         self._T.experienceReceipt = nil
+    end
+
+    @ExecSpace("ClientOnly")
+    method void PlayCardLevelUp(Entity card)
+        -- Keep the numbered frames aligned to their original sprite pivots.
+        local effect = card:GetChildByName("LevelUpEffect")
+        if not isvalid(effect) then return end
+        self:SetEnabled(card:GetChildByName("Progression"), false)
+        self:SetEnabled(card:GetChildByName("Identity"), false)
+        self._T.levelUpEffects[card.Id] = { card = card, effect = effect, started = _UtilLogic.ElapsedSeconds }
+        self:UpdateCardLevelUps()
+        if self._T.levelUpTimer == nil then
+            self._T.levelUpTimer = _TimerService:SetTimerRepeat(function() self:UpdateCardLevelUps() end, 1 / 60)
+        end
+        log("[VRF][CardLevelUp] START card=" .. card.Name)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void UpdateCardLevelUps()
+        -- Play once, then reveal the confirmed stat changes without replaying on UI refresh.
+        for id, animation in pairs(self._T.levelUpEffects) do
+            local elapsed = _UtilLogic.ElapsedSeconds - animation.started
+            if not isvalid(animation.card) or elapsed >= 1.5 then
+                if isvalid(animation.card) then
+                    self:SetEnabled(animation.effect, false)
+                    self:SetEnabled(animation.card:GetChildByName("Progression"), true)
+                    self:SetEnabled(animation.card:GetChildByName("Identity"), true)
+                    log("[VRF][CardLevelUp] END card=" .. animation.card.Name)
+                end
+                self._T.levelUpEffects[id] = nil
+            else
+                local index = math.min(#self.LevelUpFrames, math.floor(elapsed / 0.15) + 1)
+                local frame = self.LevelUpFrames[index]
+                local transform = animation.effect.UITransformComponent
+                if animation.frame ~= index then
+                    animation.effect.SpriteGUIRendererComponent.ImageRUID = DataRef(frame[1])
+                    transform.RectSize = Vector2(frame[2], frame[3])
+                    animation.frame = index
+                end
+                transform.anchoredPosition = Vector2(frame[2] / 2 - frame[4] - 8, frame[3] / 2 - frame[5] - 115 + elapsed * 10)
+                animation.effect.CanvasGroupComponent.GroupAlpha = math.min(1, (1.5 - elapsed) / 0.3)
+                self:SetEnabled(animation.effect, true)
+            end
+        end
+        if next(self._T.levelUpEffects) == nil and self._T.levelUpTimer ~= nil then
+            _TimerService:ClearTimer(self._T.levelUpTimer)
+            self._T.levelUpTimer = nil
+        end
     end
 
     @ExecSpace("ClientOnly")
@@ -213,6 +278,7 @@ script BattleUIController extends Logic
         local side = self.OwnResult == "WIN" and 1 or -1
         for index, entry in ipairs(receipt.monsters) do
             local card = template:Clone("Experience_" .. tostring(index))
+            self:SetEnabled(card:GetChildByName("LevelUpEffect"), false)
             card.UITransformComponent.anchoredPosition = Vector2(side * 620 + ((index - 1) % 3 - 1) * 165,
                 210 - math.floor((index - 1) / 3) * 240)
             self:SetText(card:GetChildByName("MonsterName"), entry.name)
@@ -233,6 +299,7 @@ script BattleUIController extends Logic
             end
             card:SetEnable(true)
             table.insert(self._T.experienceCards, card)
+            if upgraded and entry.after.level > entry.before.level then self:PlayCardLevelUp(card) end
         end
         self._T.experienceReceipt = receipt
         log("[VRF][ResultExperience] displayed count=" .. tostring(#receipt.monsters))
