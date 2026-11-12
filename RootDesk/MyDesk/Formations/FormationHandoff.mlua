@@ -306,6 +306,25 @@ script FormationHandoff extends Logic
         if type(request) ~= "table" or type(request.attempt) ~= "string" or type(request.requestId) ~= "string" then return false end
         local transfer = _FormationService:ExportConfirmed(forUserId)
         if transfer == nil then return false end
+        record.opening = true
+        local done, code, levels = false, -1, nil
+        _MonsterLevelStorage:Read(ticket.profile, function(result, document)
+            code, levels, done = result, document ~= nil and document.monsters or nil, true
+        end)
+        local remaining = math.max(1, math.min(10, _FormationService.SaveTimeoutSeconds))
+        while not done and remaining > 0 and self:Current(ticket, record) do wait(0.05) remaining = remaining - 0.05 end
+        record.opening = false
+        if not done or code ~= 0 then
+            ticket.failure = "MONSTER_LEVELS_READ_FAILED"
+            log("[VRF][Handoff] level read failed; queue rejected")
+            return false
+        end
+        if not self:Current(ticket, record) or not _FormationService:ProfileOwnedBy(forUserId, ticket.profile) then return false end
+        transfer.levels = {}
+        for _, unit in ipairs(formation.units) do
+            local progress = levels[unit.monsterId]
+            transfer.levels[unit.monsterId] = progress ~= nil and progress.level or 1
+        end
         local previous = { attempt = record.attempt, metadata = record.metadata, transfer = record.transfer }
         transfer.fixed = _HttpService:JSONEncode(formation.units)
         local metadata = { schema = 1, profile = ticket.profile, attempt = request.attempt, requestId = request.requestId,
@@ -333,7 +352,7 @@ script FormationHandoff extends Logic
         end
         self:Publish(ticket, record)
         if outcome ~= "OK" then ticket.failure = "RESERVATION_SAVE_FAILED" return false end
-        log("[VRF][Handoff] reserved fixed roster")
+        log("[VRF][Handoff] reserved fixed roster and levels")
         return true
     end
 
@@ -393,6 +412,7 @@ script FormationHandoff extends Logic
         end
         if latest == nil or not current() then return false end
         latest.fixed = record.transfer.fixed
+        latest.levels = record.transfer.levels
         record.transfer = latest
         record.sealed = true
         self:Retain(record, ticket.id)
@@ -570,6 +590,12 @@ script FormationHandoff extends Logic
             return _FormationSchema:ValidateDocument(_HttpService:JSONDecode(transfer.saved), catalog), _FormationSchema:ValidateUnits(_HttpService:JSONDecode(transfer.fixed), catalog, false)
         end)
         if not ok or doc == nil or fixed == nil then return nil end
+        if transfer.levels ~= nil and type(transfer.levels) ~= "table" then return nil end
+        for _, unit in ipairs(fixed) do
+            local level = transfer.levels == nil and 1 or transfer.levels[unit.monsterId]
+            if not _FormationSchema:IsFinite(level) or level % 1 ~= 0 or level < 1 or level > 30 then return nil end
+            unit.level = level
+        end
         return { document = doc, units = fixed }
     end
 

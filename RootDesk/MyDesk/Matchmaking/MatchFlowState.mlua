@@ -84,6 +84,7 @@ script MatchFlowState extends Logic
             label = snapshot.busy and "返回中…" or "重試返回"
         end
         if snapshot.reasonCode == "NEED_LOADED_VALID_ACTIVE_FORMATION_AND_NO_PENDING_SAVE" then text = "請先儲存隊伍並設為出戰，儲存完成後再試。" end
+        if snapshot.reasonCode == "MONSTER_LEVELS_READ_FAILED" then text = "讀取怪物等級失敗，請稍後重新配對。" end
         if snapshot.reasonCode == "MATCHMAKING_NOT_CONFIGURED" then text = "目前無法配對，請稍後再試。" end
         if snapshot.reasonCode == "DISABLED_OR_NOT_PUBLISHED" then text = "配對尚未開放，或此帳號未獲授權" end
         if snapshot.reasonCode == "DUPLICATE_PROFILE" then text = "同一帳號無法互相配對，請使用不同模擬玩家" end
