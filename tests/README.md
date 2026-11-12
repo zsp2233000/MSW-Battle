@@ -44,6 +44,16 @@ The earlier five-slot, empty-return, delayed / failure / relogin and handoff-lat
 
 The two-player battle HUD, own result and return flow are recorded in [Issue #51](../docs/Issue-51-Battle-HUD.md). `matched_battle_result_ui_runtime_probe.lua` runs in `client` and must be dispatched after the player enters the match, because moving rooms resets the client context.
 
+For #68, start a fresh lobby Play with one real player and `add_virtual_player -profile_code hf6802`. Run `matched_result_experience_fixture.lua` with `MODE="SETUP"` in `server_main` and leave that script running. It owns disposable formation/level keys and logs the original handoff bytes as `BACKUP` before queueing three natural matches. In each new matched server, arm the listed mode before the result; then dispatch `matched_battle_result_ui_runtime_probe.lua` with the listed client mode. Return only after that client probe passes.
+
+| Match | Instance fixture MODE | Client probe MODE | Instance return MODE |
+|---|---|---|---|
+| Timeout followed by confirmed save | `ARM` | `EXPERIENCE` | `RETURN` |
+| Exhausted write retries | `FAIL` | `EXPERIENCE` | `RETURN_FAIL` |
+| Level 30 deaths and survivors | `MAX` | `EXPERIENCE_MAX` | `RETURN` |
+
+Require `EXPERIENCE_PASS`, `EXPERIENCE_FAILED_PASS`, `EXPERIENCE_MAX_PASS` and fixture `CLEANUP_PASS` before stopping Play. The success case requires an actual upgrade and literal tank +2 / Lv1 → Lv2 / HP400 → 413; MAX requires +0 and no upgrade. Failed writes intentionally emit settlement errors. Setup restores the original storage keys and handoff bytes and removes its disposable keys after all three returns; do not interrupt it or dispatch another script into `server_main`. The client also checks candidate rows stay hidden while pending/failed and that foreign/stale receipts cannot replace confirmed results. These checks do not cover published worlds or two real accounts.
+
 Lobby-only matchmaking, waiting/cancellation locks, five saved groups and the full return flow are recorded in [Issue #52](../docs/Issue-52-Match-Flow.md). `match_flow_runtime_probe.lua` runs in `client`; `match_flow_roundtrip_runtime_probe.lua` runs in `server_main` after the real client's queue is confirmed. The latter retains detached expectations until both players have returned and their formation sessions are initialized. Use the same handoff storage key in every room, isolate formation saves, and reset every injected fault afterwards. Native screenshots and real-mouse / published-instance acceptance limits are listed in that document.
 
 `match_recovery_runtime_probe.lua` runs in `server_main` with one lobby player, owns unique formation/handoff keys, and restores its faults and keys afterwards. Run `RESERVE` and `CANCEL` to check cancellation retries after a late durable write without an intervening status/read. For a silent formation save, run `editor_save_failure_runtime_probe.lua` phase 1, reset the fault, then run phase 3 to confirm, discard and return without saving again. Repeat with `EXISTING=true` and an isolated saved one-unit group 1 to cover `READY` as well as `NEW`. `edit_session_runtime_probe.lua` also checks that pending/failed reconciliation keeps leaving blocked.

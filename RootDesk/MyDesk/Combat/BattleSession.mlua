@@ -27,6 +27,7 @@ script BattleSession extends Component
     @Sync property string HomeProfile = ""
     @Sync property string AwayProfile = ""
     @Sync property string ResultDeaths = ""
+    property table ExperienceResult = {}
     property number EnemyOpeningDelay = 0.12 -- Deterministic M1 lead; DRAW remains for same-batch edge cases.
     property number ArenaMinX = -15
     property number ArenaMaxX = 15
@@ -118,6 +119,8 @@ script BattleSession extends Component
         self._T.resultEntered = false
         self._T.deaths = { PLAYER = {}, ENEMY = {} }
         self._T.settlements = {}
+        self._T.experienceSent = {}
+        self.ExperienceResult = {}
         self.ResultDeaths = ""
         self._T.configurationErrorDetail = ""
         self.Result = ""
@@ -159,6 +162,7 @@ script BattleSession extends Component
         -- Advance the live server simulation without bypassing native movement or hit resolution.
         self:DisableDefaultPlayer()
         if self._T.initialized ~= true then return end
+        if self.Phase == "RESULT" then self:PublishExperienceResults() end
         if self._T.manualSimulation == true then return end
         if self.Phase == "CONFIG_ERROR" then self:CheckConfigurationReentry() end
         self:StepSimulation(delta)
@@ -625,6 +629,55 @@ script BattleSession extends Component
             results[profile] = { status = operation.status, matchId = operation.matchId, monsters = monsters }
         end
         return results
+    end
+
+    @ExecSpace("ServerOnly")
+    method void PublishExperienceResults()
+        -- Send each participant only their own receipt, once per status and player entity.
+        for _, user in ipairs(_UserService.UserEntities.Values) do
+            if isvalid(user) and user.CurrentMap == self.Entity then
+                local profile = user.PlayerComponent.ProfileCode
+                local operation = self._T.settlements[profile]
+                if operation ~= nil and self._T.experienceSent[user] ~= operation.status then
+                    local receipt = { matchId = self.MatchKey, profile = profile, status = operation.status, monsters = {} }
+                    if operation.status == "SAVED" then
+                        local faction = profile == self.HomeProfile and "PLAYER" or "ENEMY"
+                        local seen = {}
+                        for _, record in ipairs(self._T.units) do
+                            local unit = record.unit
+                            if isvalid(unit) and unit.Faction == faction and not seen[unit.MonsterId] then
+                                seen[unit.MonsterId] = true
+                                local change = operation.monsters[unit.MonsterId]
+                                local beforeLevel = change ~= nil and change.before.level or unit.Level
+                                local gained = beforeLevel == 30 and 0 or (operation.deaths[unit.MonsterId] or 0)
+                                local entry = { monsterId = unit.MonsterId, name = unit.MonsterName,
+                                    ruid = unit.StandAnimationRUID, gained = gained }
+                                if change ~= nil and change.after.level > change.before.level then
+                                    local base = self:GetMonsterProfile(unit.MonsterId)
+                                    entry.before = _MonsterProgression:CalculateStats(base, change.before.level)
+                                    entry.before.level = change.before.level
+                                    entry.after = _MonsterProgression:CalculateStats(base, change.after.level)
+                                    entry.after.level = change.after.level
+                                end
+                                table.insert(receipt.monsters, entry)
+                            end
+                        end
+                    end
+                    self:ReceiveExperienceResult(receipt, user.PlayerComponent.UserId)
+                    self._T.experienceSent[user] = operation.status
+                    log("[VRF][ResultExperience] sent profile=" .. profile .. " status=" .. receipt.status .. " count=" .. tostring(#receipt.monsters))
+                end
+            end
+        end
+    end
+
+    @ExecSpace("Client")
+    method void ReceiveExperienceResult(table receipt)
+        -- Retain early targeted receipts until player/map synchronization catches up.
+        local player = _UserService.LocalPlayer
+        if isvalid(player) and player.PlayerComponent.ProfileCode ~= "" and receipt.profile ~= player.PlayerComponent.ProfileCode then return end
+        if self.MatchKey ~= "" and receipt.matchId ~= self.MatchKey then return end
+        self.ExperienceResult = receipt
     end
 
     method table BuildPlacedRoster()
