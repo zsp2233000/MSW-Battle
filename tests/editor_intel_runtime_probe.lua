@@ -1,4 +1,9 @@
--- Client: production card events, formal catalog snapshot and map selection; no storage writes.
+-- Client; SEEDED=true after editor_levels_fixture.lua SEEDED, false after NEW.
+local SEEDED = true
+local expected = SEEDED and {
+    monster_tank = {5, 3, 456, 9, 13}, monster_shooter = {30, 0, 241, 64, 96},
+    monster_warrior = {1, 0, 220, 20, 30},
+} or {monster_tank = {1, 0, 400, 8, 12}, monster_shooter = {1, 0, 120, 32, 48}, monster_warrior = {1, 0, 220, 20, 30}}
 local l = _FormationLobby
 local function await(predicate)
     for _ = 1, 100 do if predicate() then return true end wait(0.1) end
@@ -7,6 +12,7 @@ end
 local function click(path) l:Ui(path):SendEvent(ButtonClickEvent()) end
 local ok, detail = pcall(function()
     assert(await(function() return #(_FormationEditSession.Snapshot.options or {}) > 0 end), 'catalog loaded')
+    assert(await(function() return _FormationEditSession.Snapshot.levelLoadState == 'READY' end), 'personal levels loaded')
     if _UserService.LocalPlayer.CurrentMapName == 'formationlobby' then click('Lobby/Edit') end
     assert(await(function() return _UserService.LocalPlayer.CurrentMapName == 'formationsim' end), 'formal editor entered')
     wait(0.3)
@@ -19,7 +25,13 @@ local ok, detail = pcall(function()
     end
     local kinds = { TANK='坦克', ASSAULT='戰士', SHOOTER='射手' }
     for index, option in ipairs(_FormationEditSession.Snapshot.options) do
+        local progress = assert(expected[option.monsterId], 'formal fixture monster')
+        assert(option.level == progress[1] and option.experience == progress[2], 'isolated saved progress, including absent Lv1')
+        assert(option.maxHp == progress[3] and option.attackDamageMin == progress[4] and option.attackDamageMax == progress[5], 'literal scaled stats')
+        local label = 'Lv.'..progress[1]..' '..(progress[1] == 30 and 'MAX' or (progress[2]..'/'..progress[1]))
         click('Editor/Catalog/Monster' .. tostring(index))
+        assert(string.find(l:Ui('Editor/Catalog/Monster'..index..'/Identity').TextGUIRendererComponent.Text, label, 1, true), 'card level and experience')
+        assert(string.find(l:Ui('Editor/Intel/Kind').TextGUIRendererComponent.Text, label, 1, true), 'selected level and experience')
         assert(_FormationEditSession.SelectedMonsterId == option.monsterId and _FormationEditSession.SelectedUnit == 0, 'card selects stable MonsterId')
         for otherIndex, other in ipairs(_FormationEditSession.Snapshot.options) do
             local card = l:Ui('Editor/Catalog/Monster' .. tostring(otherIndex))

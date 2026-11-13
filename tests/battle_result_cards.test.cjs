@@ -16,3 +16,13 @@ test('result cards provide an initially hidden, noninteractive portrait, name an
     if (sprite) assert.equal(sprite.RaycastTarget, false);
   }
 });
+
+test('the existing result card has a hidden text area for confirmed level changes', () => {
+  const ui = UIBuilder.read('ui/BattleGroup.ui');
+  const path = 'BattleResultPanel/CardTemplate/Progression';
+  assert.equal(ui.find(path)?.jsonString.enable, false);
+  const label = ui.getComponent(path, 'MOD.Core.TextGUIRendererComponent');
+  assert.ok(label, 'progression uses the existing card rather than a new screen');
+  assert.equal(label.IsRichText, false);
+  assert.equal(ui.getComponent(path, 'MOD.Core.ButtonComponent'), null);
+});

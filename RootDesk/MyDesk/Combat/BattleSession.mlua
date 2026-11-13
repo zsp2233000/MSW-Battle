@@ -26,6 +26,8 @@ script BattleSession extends Component
     @Sync property string MatchKey = ""
     @Sync property string HomeProfile = ""
     @Sync property string AwayProfile = ""
+    @Sync property string ResultDeaths = ""
+    property table ExperienceResult = {}
     property number EnemyOpeningDelay = 0.12 -- Deterministic M1 lead; DRAW remains for same-batch edge cases.
     property number ArenaMinX = -15
     property number ArenaMaxX = 15
@@ -115,6 +117,11 @@ script BattleSession extends Component
         self._T.nextDeploymentOrder = 0
         self._T.eventHistory = {}
         self._T.resultEntered = false
+        self._T.deaths = { PLAYER = {}, ENEMY = {} }
+        self._T.settlements = {}
+        self._T.experienceSent = {}
+        self.ExperienceResult = {}
+        self.ResultDeaths = ""
         self._T.configurationErrorDetail = ""
         self.Result = ""
         self.ConfigurationError = ""
@@ -155,6 +162,7 @@ script BattleSession extends Component
         -- Advance the live server simulation without bypassing native movement or hit resolution.
         self:DisableDefaultPlayer()
         if self._T.initialized ~= true then return end
+        if self.Phase == "RESULT" then self:PublishExperienceResults() end
         if self._T.manualSimulation == true then return end
         if self.Phase == "CONFIG_ERROR" then self:CheckConfigurationReentry() end
         self:StepSimulation(delta)
@@ -163,6 +171,7 @@ script BattleSession extends Component
     @ExecSpace("ServerOnly")
     method void OnEndPlay()
         -- Release session-only references when the map instance ends.
+        for _, operation in pairs(self._T.settlements or {}) do _MonsterLevelStorage:Finish(operation, "FAILED") end
         if self.RequireMatchedFormations and self.Phase ~= "RESULT" and self.Phase ~= "ABORTED" then
             self.Phase = "ABORTED"
             self.Result = ""
@@ -432,6 +441,7 @@ script BattleSession extends Component
         if count < minimumCount or count > maximumCount or count ~= highestIndex then return nil end
 
         local allowedOverrides = {
+            Level = true,
             MonsterName = true,
             MaxHp = true,
             AttackDamageMin = true,
@@ -461,6 +471,8 @@ script BattleSession extends Component
                     if type(key) ~= "string" or allowedOverrides[key] ~= true then return nil end
                     if key == "MonsterName" then
                         if type(value) ~= "string" or value:match("%S") == nil then return nil end
+                    elseif key == "Level" then
+                        if not self:IsFiniteTestNumber(value) or value < 1 or value > 30 or value % 1 ~= 0 then return nil end
                     elseif key == "MaxHp" then
                         if not self:IsFiniteTestNumber(value) or value < 1 or value % 1 ~= 0 then return nil end
                     elseif key == "AttackDamageMin" or key == "AttackDamageMax" then
@@ -523,7 +535,7 @@ script BattleSession extends Component
 
     @ExecSpace("ServerOnly")
     method table PrepareMatchedRoster(table units, boolean away)
-        -- Accept only catalog identities and relative positions, never test overrides or client stats.
+        -- Accept catalog identities, relative positions and server-sealed levels, never client stats.
         local count = _FormationSchema:ArrayCount(units, 6)
         if count < 1 then return nil end
         local tiles = self:GetRectTileMapComponent()
@@ -536,9 +548,11 @@ script BattleSession extends Component
         for _, entry in ipairs(units) do
             if type(entry) ~= "table" then return nil end
             for key, _ in pairs(entry) do
-                if key ~= "monsterId" and key ~= "x" and key ~= "y" then return nil end
+                if key ~= "monsterId" and key ~= "x" and key ~= "y" and key ~= "level" then return nil end
             end
             if type(entry.monsterId) ~= "string" or not _FormationSchema:IsFinite(entry.x) or not _FormationSchema:IsFinite(entry.y) then return nil end
+            local level = entry.level == nil and 1 or entry.level
+            if not _FormationSchema:IsFinite(level) or level % 1 ~= 0 or level < 1 or level > 30 then return nil end
             local profile = self:GetMonsterProfile(entry.monsterId)
             local position = _FormationMapLayout:BattlePosition(entry.x, entry.y, away)
             if profile == nil or position == nil then return nil end
@@ -548,7 +562,10 @@ script BattleSession extends Component
                 return nil
             end
             if check.reason ~= "" then return nil end
-            table.insert(prepared, { profile = profile, position = position })
+            local configured = {}
+            for key, value in pairs(profile) do configured[key] = value end
+            configured.Level = level
+            table.insert(prepared, { profile = configured, position = position })
             table.insert(points, position)
         end
         return prepared
@@ -596,6 +613,71 @@ script BattleSession extends Component
         if self.Result == "WIN" then return "LOSE" end
         if self.Result == "LOSE" then return "WIN" end
         return ""
+    end
+
+    @ExecSpace("ServerOnly")
+    method table GetExperienceResults()
+        -- Return detached settlement status and level changes, including departed participants.
+        local results = {}
+        for profile, operation in pairs(self._T.settlements or {}) do
+            local monsters = {}
+            for id, change in pairs(operation.monsters) do
+                monsters[id] = { gained = change.gained,
+                    before = { level = change.before.level, experience = change.before.experience },
+                    after = { level = change.after.level, experience = change.after.experience } }
+            end
+            results[profile] = { status = operation.status, matchId = operation.matchId, monsters = monsters }
+        end
+        return results
+    end
+
+    @ExecSpace("ServerOnly")
+    method void PublishExperienceResults()
+        -- Send each participant only their own receipt, once per status and player entity.
+        for _, user in ipairs(_UserService.UserEntities.Values) do
+            if isvalid(user) and user.CurrentMap == self.Entity then
+                local profile = user.PlayerComponent.ProfileCode
+                local operation = self._T.settlements[profile]
+                if operation ~= nil and self._T.experienceSent[user] ~= operation.status then
+                    local receipt = { matchId = self.MatchKey, profile = profile, status = operation.status, monsters = {} }
+                    if operation.status == "SAVED" then
+                        local faction = profile == self.HomeProfile and "PLAYER" or "ENEMY"
+                        local seen = {}
+                        for _, record in ipairs(self._T.units) do
+                            local unit = record.unit
+                            if isvalid(unit) and unit.Faction == faction and not seen[unit.MonsterId] then
+                                seen[unit.MonsterId] = true
+                                local change = operation.monsters[unit.MonsterId]
+                                local beforeLevel = change ~= nil and change.before.level or unit.Level
+                                local gained = beforeLevel == 30 and 0 or (operation.deaths[unit.MonsterId] or 0)
+                                local entry = { monsterId = unit.MonsterId, name = unit.MonsterName,
+                                    ruid = unit.StandAnimationRUID, gained = gained }
+                                if change ~= nil and change.after.level > change.before.level then
+                                    local base = self:GetMonsterProfile(unit.MonsterId)
+                                    entry.before = _MonsterProgression:CalculateStats(base, change.before.level)
+                                    entry.before.level = change.before.level
+                                    entry.after = _MonsterProgression:CalculateStats(base, change.after.level)
+                                    entry.after.level = change.after.level
+                                end
+                                table.insert(receipt.monsters, entry)
+                            end
+                        end
+                    end
+                    self:ReceiveExperienceResult(receipt, user.PlayerComponent.UserId)
+                    self._T.experienceSent[user] = operation.status
+                    log("[VRF][ResultExperience] sent profile=" .. profile .. " status=" .. receipt.status .. " count=" .. tostring(#receipt.monsters))
+                end
+            end
+        end
+    end
+
+    @ExecSpace("Client")
+    method void ReceiveExperienceResult(table receipt)
+        -- Retain early targeted receipts until player/map synchronization catches up.
+        local player = _UserService.LocalPlayer
+        if isvalid(player) and player.PlayerComponent.ProfileCode ~= "" and receipt.profile ~= player.PlayerComponent.ProfileCode then return end
+        if self.MatchKey ~= "" and receipt.matchId ~= self.MatchKey then return end
+        self.ExperienceResult = receipt
     end
 
     method table BuildPlacedRoster()
@@ -837,6 +919,14 @@ script BattleSession extends Component
         end
         local map = self:GetMapEntity()
         if not isvalid(map) then return nil end
+        local level = 1
+        if self.RequireMatchedFormations or Environment:IsMakerPlay() then level = profile.Level or 1 end
+        local stats = _MonsterProgression:CalculateStats(profile, level)
+        if stats == nil then return nil end
+        local configured = {}
+        for key, value in pairs(profile) do configured[key] = value end
+        for key, value in pairs(stats) do configured[key] = value end
+        configured.Level = level
         local entity = _SpawnService:SpawnByModelId(modelId, name, position, map)
         if not isvalid(entity) then
             log_error("[M1][BattleSession] SpawnByModelId returned nil for " .. modelId)
@@ -860,12 +950,14 @@ script BattleSession extends Component
         if faction == "ENEMY" then openingDelay = self.EnemyOpeningDelay end
         unit:BindAttackExecution(attackExecution)
         unit:SetMonsterIdentity(profile.MonsterId, profile.MonsterName, profile.HitEffectRUID)
-        if not unit:Configure(faction, profile.MonsterName, profile, openingDelay) then
+        if not unit:Configure(faction, profile.MonsterName, configured, openingDelay) then
             log_error("[M1][BattleSession] combat execution configuration failed on " .. name)
             entity:Destroy()
             return nil
         end
         unit:ConfigurePresentation(profile)
+        log("[VRF][MonsterLevel] SPAWN " .. name .. " level=" .. tostring(unit.Level)
+            .. " hp=" .. tostring(unit.MaxHp) .. " damage=" .. tostring(unit.AttackDamageMin) .. "~" .. tostring(unit.AttackDamageMax))
         local record = { entity = entity, unit = unit, faction = faction, monsterId = profile.MonsterId, monsterName = profile.MonsterName, unitKind = profile.MonsterType, dead = false, removable = false }
         self._T.nextDeploymentOrder = (self._T.nextDeploymentOrder or 0) + 1
         unit.DeploymentOrder = self._T.nextDeploymentOrder
@@ -985,6 +1077,17 @@ script BattleSession extends Component
                 for _, record in ipairs(self._T.units) do
                     if isvalid(record.unit) then record.unit:StopForResult() end
                 end
+                local deaths = {}
+                for _, faction in ipairs({ "PLAYER", "ENEMY" }) do
+                    local counts = self._T.deaths[faction]
+                    local encoded = next(counts) == nil and "{}" or _HttpService:JSONEncode(counts)
+                    table.insert(deaths, '"' .. faction .. '":' .. encoded)
+                end
+                self.ResultDeaths = "{" .. table.concat(deaths, ",") .. "}"
+                if self.RequireMatchedFormations and self.MatchKey ~= "" and self.HomeProfile ~= "" and self.AwayProfile ~= "" then
+                    self._T.settlements[self.HomeProfile] = _MonsterLevelStorage:Settle(self.HomeProfile, self.MatchKey, self._T.deaths.PLAYER)
+                    self._T.settlements[self.AwayProfile] = _MonsterLevelStorage:Settle(self.AwayProfile, self.MatchKey, self._T.deaths.ENEMY)
+                end
                 self:EmitPresentation("RESULT", nil, nil, 0)
                 log("[M1][BattleSession] RESULT=" .. result)
             end
@@ -1012,6 +1115,8 @@ script BattleSession extends Component
         for _, record in ipairs(self._T.units) do
             if record.entity == entity and record.dead ~= true and isvalid(record.unit) and record.unit.IsDead == true then
                 record.dead = true
+                local deaths = self._T.deaths[record.faction]
+                deaths[record.monsterId] = (deaths[record.monsterId] or 0) + 1
                 if record.faction == "PLAYER" then
                     self.PlayerAlive = math.max(0, self.PlayerAlive - 1)
                 else

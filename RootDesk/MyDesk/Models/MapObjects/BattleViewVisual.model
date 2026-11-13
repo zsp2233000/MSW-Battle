@@ -146,7 +146,43 @@
         }
       ],
       "EventLinks": [],
-      "Children": []
+      "Children": [
+        {
+          "Id": "17fcd79d-fd69-4e5f-92ca-b5ba670854f9",
+          "ParentId": "battleviewvisual",
+          "Name": "NameTag",
+          "Model": {
+            "Version": 1,
+            "Name": "NameTag",
+            "BaseModelId": "battlenametag",
+            "Id": "17fcd79d-fd69-4e5f-92ca-b5ba670854f9",
+            "Components": [],
+            "Properties": [],
+            "Values": [
+              {
+                "TargetType": "MOD.Core.MODEntity",
+                "Name": "Enable",
+                "ValueType": {
+                  "$type": "MODNativeType",
+                  "type": "System.Boolean, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089"
+                },
+                "Value": true
+              },
+              {
+                "TargetType": "MOD.Core.MODEntity",
+                "Name": "Visible",
+                "ValueType": {
+                  "$type": "MODNativeType",
+                  "type": "System.Boolean, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089"
+                },
+                "Value": true
+              }
+            ],
+            "EventLinks": [],
+            "Children": []
+          }
+        }
+      ]
     }
   }
 }

@@ -1,0 +1,157 @@
+@Logic
+script MonsterLevelStorage extends Logic
+
+    property string StorageKey = "MonsterLevelsV1"
+    property integer MaxAttempts = 5
+    property number TimeoutSeconds = 5
+
+    method string Encode(table document)
+        -- Native JSONEncode rejects empty Lua collections; preserve their JSON object/array shapes.
+        local monsters = next(document.monsters) == nil and "{}" or _HttpService:JSONEncode(document.monsters)
+        local settled = #document.settled == 0 and "[]" or _HttpService:JSONEncode(document.settled)
+        return '{"schema":1,"monsters":' .. monsters .. ',"settled":' .. settled .. '}'
+    end
+
+    method table Decode(string raw)
+        -- Reject unfamiliar or damaged documents instead of silently resetting progression.
+        local ok, document = pcall(function() return _HttpService:JSONDecode(raw) end)
+        if not ok or type(document) ~= "table" or document.schema ~= 1
+            or type(document.monsters) ~= "table" or type(document.settled) ~= "table" then return nil end
+        for key, _ in pairs(document) do
+            if key ~= "schema" and key ~= "monsters" and key ~= "settled" then return nil end
+        end
+        for id, progress in pairs(document.monsters) do
+            if type(id) ~= "string" or id == "" or type(progress) ~= "table" then return nil end
+            for key, _ in pairs(progress) do
+                if key ~= "level" and key ~= "experience" then return nil end
+            end
+            local level, experience = progress.level, progress.experience
+            if type(level) ~= "number" or type(experience) ~= "number"
+                or level < 1 or level > 30 or level % 1 ~= 0
+                or experience < 0 or experience % 1 ~= 0
+                or (level < 30 and experience >= level) or (level == 30 and experience ~= 0) then return nil end
+        end
+        local count = _FormationSchema:ArrayCount(document.settled, 20)
+        if count < 0 then return nil end
+        local seen = {}
+        for _, matchId in ipairs(document.settled) do
+            if type(matchId) ~= "string" or matchId == "" or seen[matchId] then return nil end
+            seen[matchId] = true
+        end
+        return document
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Read(string profile, any complete)
+        -- An absent key is a read-only Lv1 default; errors never become writable defaults.
+        _FormationStorage:Read(profile, self.StorageKey, function(code, key, raw)
+            if code == 1000002 or (code == 0 and raw == nil) then
+                complete(0, { schema = 1, monsters = {}, settled = {} }, "")
+            elseif code ~= 0 then
+                complete(code, nil, nil)
+            else
+                local document = self:Decode(raw)
+                if document == nil then
+                    log_error("[VRF][MonsterLevels] invalid document profile=" .. profile)
+                    complete(2000001, nil, nil)
+                else
+                    complete(0, document, raw)
+                end
+            end
+        end)
+    end
+
+    @ExecSpace("ServerOnly")
+    method table Settle(string profile, string matchId, table deaths)
+        -- Capture immutable input and return a retained result for the future result presentation.
+        local operation = { profile = profile, matchId = matchId, key = self.StorageKey,
+            deaths = {}, monsters = {}, status = "PENDING", attempts = 0, token = 0 }
+        if profile == "" or matchId == "" then operation.status = "FAILED" return operation end
+        for id, count in pairs(deaths) do
+            if type(id) ~= "string" or id == "" or type(count) ~= "number"
+                or count < 0 or count > 6 or count % 1 ~= 0 then operation.status = "FAILED" return operation end
+            operation.deaths[id] = count
+        end
+        self._T.operations = self._T.operations or {}
+        self._T.operations[operation] = true
+        self:Attempt(operation)
+        return operation
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Finish(table operation, string status)
+        -- Finish once; stale callbacks cannot resurrect a reclaimed or failed operation.
+        if operation.status ~= "PENDING" then return end
+        operation.status = status
+        if operation.timer ~= nil then _TimerService:ClearTimer(operation.timer) operation.timer = nil end
+        self._T.operations[operation] = nil
+        if status == "FAILED" then
+            log_error("[VRF][MonsterLevels] settlement failed match=" .. operation.matchId .. " profile=" .. operation.profile)
+        else
+            log("[VRF][MonsterLevels] saved match=" .. operation.matchId .. " profile=" .. operation.profile .. " attempts=" .. tostring(operation.attempts))
+        end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Retry(table operation)
+        -- Bound retries, including missing callbacks; every attempt re-reads before recomputing.
+        if operation.status ~= "PENDING" then return end
+        operation.token = operation.token + 1
+        if operation.timer ~= nil then _TimerService:ClearTimer(operation.timer) end
+        if operation.attempts >= self.MaxAttempts then self:Finish(operation, "FAILED") return end
+        operation.timer = _TimerService:SetTimerOnce(function() self:Attempt(operation) end, 1)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Attempt(table operation)
+        -- CAS conflicts and ambiguous timeouts converge through the same match-ID deduplication.
+        if operation.status ~= "PENDING" then return end
+        operation.attempts = operation.attempts + 1
+        operation.token = operation.token + 1
+        local token = operation.token
+        operation.timer = _TimerService:SetTimerOnce(function() self:Retry(operation) end, self.TimeoutSeconds)
+        _FormationStorage:Read(operation.profile, operation.key, function(code, key, raw)
+            if operation.status ~= "PENDING" or operation.token ~= token then return end
+            local document = nil
+            if code == 1000002 or (code == 0 and raw == nil) then
+                document = { schema = 1, monsters = {}, settled = {} }
+                raw = ""
+            elseif code == 0 then
+                document = self:Decode(raw)
+                if document == nil then self:Finish(operation, "FAILED") return end
+            else
+                self:Retry(operation)
+                return
+            end
+            for _, settled in ipairs(document.settled) do
+                if settled == operation.matchId then
+                    operation.duplicate = true
+                    self:Finish(operation, "SAVED")
+                    return
+                end
+            end
+            local changes = {}
+            for id, gained in pairs(operation.deaths) do
+                local before = document.monsters[id] or { level = 1, experience = 0 }
+                local after = _MonsterProgression:ApplyExperience(before.level, before.experience, gained)
+                changes[id] = { gained = gained, before = before, after = after }
+                document.monsters[id] = after
+            end
+            table.insert(document.settled, operation.matchId)
+            while #document.settled > 20 do table.remove(document.settled, 1) end
+            local encoded = self:Encode(document)
+            if #encoded > 4000 then self:Finish(operation, "FAILED") return end
+            operation.monsters = changes
+            _FormationStorage:Write(operation.profile, operation.key, raw, encoded, function(writeCode)
+                if operation.status ~= "PENDING" or operation.token ~= token then return end
+                if writeCode == 0 then self:Finish(operation, "SAVED") else self:Retry(operation) end
+            end)
+        end)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void OnEndPlay()
+        -- Reclamation abandons pending work without issuing shutdown storage writes.
+        for operation, _ in pairs(self._T.operations or {}) do self:Finish(operation, "FAILED") end
+    end
+end

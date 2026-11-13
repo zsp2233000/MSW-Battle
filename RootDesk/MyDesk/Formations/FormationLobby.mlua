@@ -89,7 +89,6 @@ script FormationLobby extends Logic
                     self:Render()
                 end)
             end
-            _FormationService:RequestOpen()
             log("[VRF][FormationUI] connected lobby and five-slot editor")
         end
         local mapName = player.CurrentMapName
@@ -100,6 +99,7 @@ script FormationLobby extends Logic
             self._T.editWhenSelected = 0
             _FormationEditorSlide:Expand()
             _FormationEditSession:ResetForMap()
+            if mapName == "formationlobby" or _FormationEditSession.Snapshot.loadState == nil then _FormationService:RequestOpen() end
             self:Render()
         end
     end
@@ -279,7 +279,8 @@ script FormationLobby extends Logic
         local edit = self:Ui("Lobby/Edit")
         if isvalid(edit) then edit.ButtonComponent.Enable = writable and not busy and view.confirmKind == "" end
         self:SetButton("Lobby/Legacy", writable and not busy and view.confirmKind == "")
-        local needsRetry = view.needsRetry
+        local levelsFailed = state.levelLoadState == "ERROR"
+        local needsRetry = view.needsRetry or levelsFailed
         local retryLabel = view.unconfirmed and "確認結果" or "重新讀取"
         self:SetEnabled("Retry", inLobby and needsRetry)
         self:SetEnabled("EditorControls/Retry", inEditor and needsRetry)
@@ -298,6 +299,11 @@ script FormationLobby extends Logic
         local note = state.message or "正在讀取個人隊伍"
         -- Surface why the primary save is unavailable whenever it matters; "no change" needs no explanation.
         if inEditor and saveReason ~= "" and saveReason ~= "沒有變更" and (dirty or needsRetry or load ~= "READY") then note = saveReason end
+        if levelsFailed then
+            note = "怪物等級讀取失敗；請重新讀取"
+        elseif state.levelLoadState ~= "READY" then
+            note = "正在讀取怪物等級…"
+        end
         if not _MatchFlowInput:AllowsFormationActions() then note = "配對處理中；取消完成或返回大廳後可繼續整備" end
         self:SetStatus(text .. "    " .. note)
         self:RenderConfirmation(view)

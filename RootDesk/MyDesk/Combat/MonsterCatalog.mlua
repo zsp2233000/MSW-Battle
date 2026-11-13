@@ -133,6 +133,8 @@ script MonsterCatalog extends Component
             ModelId = modelId,
         }
         profile.MaxHp = self:ReadInteger(row:GetItem("MaxHp"), "MaxHp", monsterId, 1)
+        profile.MaxHpGrowthRate = self:ReadNumber(row:GetItem("MaxHpGrowthRate"), "MaxHpGrowthRate", monsterId, 0)
+        profile.AttackDamageGrowthRate = self:ReadNumber(row:GetItem("AttackDamageGrowthRate"), "AttackDamageGrowthRate", monsterId, 0)
         profile.MoveSpeed = self:ReadNumber(row:GetItem("MoveSpeed"), "MoveSpeed", monsterId, 0.0001)
         profile.AttackDamageMin = self:ReadInteger(row:GetItem("AttackDamageMin"), "AttackDamageMin", monsterId, 1)
         profile.AttackDamageMax = self:ReadInteger(row:GetItem("AttackDamageMax"), "AttackDamageMax", monsterId, 1)
@@ -255,6 +257,7 @@ script MonsterCatalog extends Component
         local dataset = _DataService:GetTable(datasetName)
         if dataset == nil then return self:SetError("MonsterData table unavailable") end
         local requiredColumns = {
+            "MaxHpGrowthRate", "AttackDamageGrowthRate",
             "MonsterId", "MonsterName", "MonsterType", "ModelId", "MaxHp", "MoveSpeed", "AttackDamageMin", "AttackDamageMax",
             "AttackIntervalSeconds", "AttackRange", "AttackRangeY", "AttackDamageFrame", "RetargetIntervalSeconds",
             "HitStopDurationSeconds",

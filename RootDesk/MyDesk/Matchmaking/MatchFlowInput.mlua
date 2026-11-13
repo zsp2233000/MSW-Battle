@@ -96,6 +96,7 @@ script MatchFlowInput extends Logic
         self.Snapshot = snapshot
         self._T.pending = false
         if snapshot.eventCode == "NEED_LOADED_VALID_ACTIVE_FORMATION_AND_NO_PENDING_SAVE" then _UIToast:ShowMessage("請先儲存隊伍並設為出戰，儲存完成後再試。") end
+        if snapshot.eventCode == "MONSTER_LEVELS_READ_FAILED" then _UIToast:ShowMessage("讀取怪物等級失敗，請稍後重新配對。") end
         if snapshot.eventCode == "MATCHMAKING_NOT_CONFIGURED" then _UIToast:ShowMessage("線上配對服務尚未設定") end
         self:Render()
         log("[VRF][MatchFlowUI] snapshot state=" .. snapshot.state .. " reason=" .. snapshot.reasonCode)

@@ -119,6 +119,11 @@ local function settleOneHit(outcome, side)
         outcome == "WIN" and "one accepted lethal hit produces WIN" or "one accepted lethal hit produces LOSE")
     check(countEvents("RESULT") == 1 and damageAndDeathPrecedeResult(),
         outcome .. " publishes one RESULT after DAMAGE and DEAD")
+    local deaths = _HttpService:JSONDecode(session.ResultDeaths)
+    check((deaths.PLAYER.monster_warrior or 0) == 1 - expectedPlayers
+        and (deaths.ENEMY.monster_warrior or 0) == 1 - expectedEnemies,
+        "result counts only the dead unit's faction and MonsterId")
+    check(next(session:GetExperienceResults()) == nil, "Maker test battle never settles experience")
 end
 
 local function settleDraw(playerFirst)
@@ -142,6 +147,9 @@ local function settleDraw(playerFirst)
     check(countEvents("RESULT") == 1 and countEvents("DAMAGE") == 2
         and countEvents("DEAD") == 2 and damageAndDeathPrecedeResult(),
         "DRAW publishes both DAMAGE and DEAD observations before one RESULT")
+    local deaths = _HttpService:JSONDecode(session.ResultDeaths)
+    check(deaths.PLAYER.monster_warrior == 1 and deaths.ENEMY.monster_warrior == 1,
+        "same-batch draw includes both factions' deaths")
     local beforeEventSerial = session.EventSerial
     local beforeHistory = session.EventHistory
     local deploymentAccepted = session:TryDeployMonster("monster_warrior", Vector3(-3, 0, 0))

@@ -1,12 +1,27 @@
 @Logic
 script FormationCatalogCards extends Logic
 
+    -- skill/40001.img/skill/400011011, number/icon1 through number/icon30.
+    property table LevelIcons = {
+        "fa590b89cb0c415281ab4afc4daca364", "81afe3a0ccf942f2826f140e15290ca6", "b409e39abb8d4152b988830e0f34b205",
+        "0c22a447ef6e4a969edfa45d9ec31f21", "b609a4616c71495da44e4c804f43a133", "3e9125597f0a4bfaa17a9b567a63aeb9",
+        "5de0886ecfea49dfb1937fbe99e9bc4e", "78b13403d87c49298c69910d73c7de18", "780340c56e6f4343b3246ca7f3298712",
+        "2cb378ff0ed54e8498c29ae1f51251c4", "4444b563acf6485d8c3cb06d1e7d1e98", "708dc9afb72c49b387cbefc3c5ca3a60",
+        "28ef2d6a640b40538298773d4c9b69f5", "2a0202c492744f5992c62c92e7e48c1b", "c1bf78d7214247369635b51cdca6e394",
+        "a967c57f449e4bada288cc317673e461", "27871383ff8b476fa5ca9c193cf3e38b", "dc23fba14ab64965813f021d35d6cfb3",
+        "e22db34372944e1da7f760e892a58739", "beb3267974ff4741a2022760a7b7511b", "c14f2bc500104683883bd0ce89d5651c",
+        "9c2612e76006457ca1d60fd51c6a28bd", "169143a32ddd4dd7b27f95742adcd08d", "615c9af528194e9dbb3e8836f033b786",
+        "48a4f5da72c249f5af212767fccc47b1", "75f16c5a3801471aa74f486712b61229", "76937900b8114390ad12833996df93ea",
+        "063af0edbd1246f3b000afbc8d3115d4", "7490da9fc6404ccdad942572685ffdeb", "9d16fa8e416147dabc758ba9c22210a4",
+    }
+
     @ExecSpace("ClientOnly")
     method void OnBeginPlay()
         -- Own the runtime monster cards, their hover tooltip and the intelligence panel.
         self._T.cards = {}
         self._T.hoverCard = nil
         self._T.optionsKey = ""
+        self._T.levelSizes = {}
         _FormationLobby:SetEnabled("CardTooltip", false)
         log("[VRF][CatalogCards] ready")
     end
@@ -14,6 +29,12 @@ script FormationCatalogCards extends Logic
     @ExecSpace("ClientOnly")
     method void OnUpdate(number delta)
         -- The tooltip follows the cursor and closes as soon as its card stops being usable.
+        for _, card in ipairs(self._T.cards or {}) do
+            if isvalid(card.entity) and card.width ~= card.entity.UITransformComponent.RectSize.x then
+                self:RenderProgress(card.entity, card.option)
+                card.width = card.entity.UITransformComponent.RectSize.x
+            end
+        end
         self:UpdateCardTooltip()
     end
 
@@ -39,13 +60,60 @@ script FormationCatalogCards extends Logic
     end
 
     @ExecSpace("ClientOnly")
+    method string ProgressLabel(table option)
+        -- Keep detailed progress text for tooltips and unavailable-state hints.
+        if option == nil or option.level == nil then
+            return _FormationEditSession.Snapshot.levelLoadState == "ERROR" and "等級讀取失敗" or "等級讀取中"
+        end
+        local experience = option.level == 30 and "MAX" or (tostring(option.experience) .. "/" .. tostring(option.level))
+        return "Lv." .. tostring(option.level) .. " " .. experience
+    end
+
+    @ExecSpace("ClientOnly")
+    method void RenderProgress(Entity target, table option)
+        -- Skill digits have off-image pivots; size the rect from native dimensions without preserving that pivot.
+        local badge = target:GetChildByName("LevelBadge")
+        local bar = target:GetChildByName("ExperienceBar")
+        local ready = option ~= nil and option.level ~= nil
+        badge:SetEnable(ready)
+        bar:SetEnable(ready)
+        if not ready then return end
+        local ruid = self.LevelIcons[option.level]
+        local size = self._T.levelSizes[option.level]
+        if size == nil then
+            local sprite = _ResourceService:LoadSpriteAndWait(ruid)
+            size = Vector2(sprite.Width, sprite.Height)
+            self._T.levelSizes[option.level] = size
+        end
+        badge.SpriteGUIRendererComponent.ImageRUID = DataRef(ruid)
+        local height = badge.UITransformComponent.RectSize.y
+        badge.UITransformComponent.RectSize = Vector2(height * size.x / size.y, height)
+        local ratio = option.level == 30 and 1 or math.max(0, math.min(1, option.experience / option.level))
+        local barSize = bar.UITransformComponent.RectSize
+        if isvalid(target:GetChildByName("Identity")) then
+            barSize = Vector2(target.UITransformComponent.RectSize.x - 24, barSize.y)
+            bar.UITransformComponent.RectSize = barSize
+        end
+        local track = bar:GetChildByName("Track")
+        local fill = track:GetChildByName("Fill")
+        -- Explicit sizes prevent cloned stretch children from rendering their 100x100 authoring defaults.
+        track.UITransformComponent.RectSize = Vector2(barSize.x - 6, barSize.y - 4)
+        fill.UITransformComponent.RectSize = Vector2((barSize.x - 6) * ratio, barSize.y - 4)
+        fill:SetEnable(ratio > 0)
+        local value = bar:GetChildByName("Value")
+        if isvalid(value) then
+            value.TextGUIRendererComponent.Text = option.level == 30 and "MAX" or tostring(option.experience) .. "/" .. tostring(option.level)
+        end
+    end
+
+    @ExecSpace("ClientOnly")
     method void BuildOptions(table options)
         -- Rebuild catalog cards only when server-published identity, art or intelligence changes.
         local parts = {}
         for _, option in ipairs(options) do
             table.insert(parts, table.concat({ option.monsterId, option.monsterName, option.standRuid, option.monsterType,
                 tostring(option.maxHp), tostring(option.attackDamageMin), tostring(option.attackDamageMax),
-                tostring(option.attackInterval), tostring(option.attackRange) }, "|"))
+                tostring(option.attackInterval), tostring(option.attackRange), self:ProgressLabel(option) }, "|"))
         end
         local key = table.concat(parts, "\n")
         if key == self._T.optionsKey then return end
@@ -80,8 +148,9 @@ script FormationCatalogCards extends Logic
                 local check = glow:GetChildByName("Check", true)
                 if isvalid(check) then check.SpriteGUIRendererComponent.RaycastTarget = false end
             end
-            local identity = card:GetChildByName("Identity", true)
-            if isvalid(identity) then identity.TextGUIRendererComponent.Text = self:KindLabel(option.monsterType) end
+            local identity = card:GetChildByName("Identity")
+            identity.TextGUIRendererComponent.Text = option.level ~= nil and self:KindLabel(option.monsterType) or self:ProgressLabel(option)
+            self:RenderProgress(card, option)
             -- Selection follows MonsterId; hovering only previews and never selects.
             local callback = card:ConnectEvent(ButtonClickEvent, function()
                 _FormationEditSession:SelectMonster(monsterId)
@@ -99,7 +168,7 @@ script FormationCatalogCards extends Logic
                 end
             end)
             table.insert(self._T.cards, { entity = card, callback = callback, enterCallback = enterCallback,
-                exitCallback = exitCallback, monsterId = monsterId, glow = glow, frame = frame })
+                exitCallback = exitCallback, monsterId = monsterId, glow = glow, frame = frame, option = option })
             card:SetEnable(true)
         end
         local catalog = _FormationLobby:Ui("Editor/Catalog")
@@ -107,7 +176,7 @@ script FormationCatalogCards extends Logic
             local layout = catalog:GetComponent("ScrollLayoutGroupComponent")
             if isvalid(layout) then layout:ResetScrollPosition(UITransformAxis.Vertical) end
         end
-        log("[VRF][FormationUI] cards=" .. tostring(#options) .. " scroll=vertical")
+        log("[VRF][FormationUI] cards=" .. tostring(#options) .. " scroll=vertical progress=number-art/exp-bar")
     end
 
     @ExecSpace("ClientOnly")
@@ -135,7 +204,8 @@ script FormationCatalogCards extends Logic
         -- Share the same catalog values between selected intelligence and hover previews.
         _FormationLobby:SetText(target .. "/Name", option ~= nil and option.monsterName or "等待怪物目錄")
         local kind = option ~= nil and self:KindLabel(option.monsterType) or ""
-        _FormationLobby:SetText(target .. "/Kind", (option ~= nil and kind == "") and "—" or kind)
+        _FormationLobby:SetText(target .. "/Kind", option ~= nil and option.level ~= nil and kind or self:ProgressLabel(option))
+        self:RenderProgress(_FormationLobby:Ui(target), option)
         local stats = {
             { "Health", "maxHp", "" },
             { "Damage", nil, "" },
@@ -147,9 +217,9 @@ script FormationCatalogCards extends Logic
             _FormationLobby:SetEnabled(path, option ~= nil)
             local value = ""
             if option ~= nil and stat[1] == "Damage" then
-                value = string.format("%d～%d", option.attackDamageMin, option.attackDamageMax)
+                value = option.level ~= nil and string.format("%d～%d", option.attackDamageMin, option.attackDamageMax) or "—"
             elseif option ~= nil then
-                value = tostring(option[stat[2]]) .. stat[3]
+                value = option[stat[2]] ~= nil and (tostring(option[stat[2]]) .. stat[3]) or "—"
             end
             _FormationLobby:SetText(path .. "/Value", value)
         end
