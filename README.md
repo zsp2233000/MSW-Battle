@@ -32,9 +32,11 @@ CSV 是方便編輯與檢視的檔案；執行時讀取的是 Maker 中的 UserD
 | `MonsterType`             | `TANK`、`ASSAULT` 或 `SHOOTER`，決定戰鬥行為與攻擊器。                     |
 | `ModelId`                 | 生成時使用的專案 Model ID；不可空白。                                      |
 | `MaxHp`                   | 最大生命值；正整數。                                                       |
+| `MaxHpGrowthRate`         | 每級最大生命成長率；Lv1 基礎值的比例，有限數字且大於或等於 0。初始三隻怪物皆為 `0.035`。 |
 | `MoveSpeed`               | 移動速度；大於 0。                                                         |
 | `AttackDamageMin`         | 傷害區間下限；正整數，每個命中目標各自等機率抽取整數，包含上下限。                       |
 | `AttackDamageMax`         | 傷害區間上限；正整數，不可小於下限。                       |
+| `AttackDamageGrowthRate`  | 每級傷害成長率；上下限共用，有限數字且大於或等於 0。初始三隻怪物皆為 `0.035`。 |
 | `AttackIntervalSeconds`   | 攻擊間隔秒數；大於 0。                                                     |
 | `AttackRange`             | 從身體中心往前延伸的水平射程，必須大於 0；與目標受擊碰撞框重疊即在範圍內。 |
 | `AttackRangeY`            | 前方攻擊矩形從身體中心往上、往下各延伸的距離，必須大於 0。               |
@@ -57,6 +59,7 @@ CSV 是方便編輯與檢視的檔案；執行時讀取的是 Maker 中的 UserD
 
 - 所有種類：`MaxHp`、`AttackDamageMin`、`AttackDamageMax` 為正整數，且 Max ≥ Min；`MoveSpeed`、`AttackIntervalSeconds`、`AttackRange`、`AttackRangeY`、`RetargetIntervalSeconds` 必須大於 0；`HitStopDurationSeconds` 不可小於 0。
 - 所有種類：`AttackDamageFrame` 必須介於 1 與攻擊 clip 影格數之間。
+- 怪物等級為 Lv1–30，只有最大生命與傷害區間隨等級成長，各自套用 `floor(基礎值 × (1 + 成長率 × (等級 − 1)))`。成長率可為 0；不改變移動速度、攻擊間隔或攻擊範圍。
 - `TANK`：`KnockbackDistance` 必須大於 0，其他種類可填 0。坦克的每次範圍攻擊共用一個攻擊間隔，每個目標各自抽取傷害。
 
 三種怪物的走位、出手與命中共用前方矩形判定。水平範圍外直線接近，水平已重疊時只上下對齊；進入範圍後站定，出手朝向維持到攻擊動畫結束。命中影格不重新轉向。戰士與射手只打出手時鎖定的目標；坦克打命中影格時範圍內的所有敵方存活單位，每個目標一次，走路不造成傷害。坦克命中一律擊退（含攻擊中的目標），不造成受擊停頓；被擊退者繼續攻擊並從新位置判定命中。
