@@ -44,7 +44,7 @@ test("attack effects are optional clips dispatched once at attack start on the o
   const { parseMonsterCsv } = require("./monster_catalog_csv_fixture.cjs");
   const csv = parseMonsterCsv(fs.readFileSync(path.resolve(combat, "../Data/MonsterData.csv")));
   assert.equal(csv.header[csv.header.indexOf("HitEffectRUID") - 1], "AttackEffectRUID");
-  for (const row of csv.records) assert.equal(row.AttackEffectRUID, "");
+  for (const row of csv.records) assert.match(row.AttackEffectRUID, /^(?:[a-f0-9]{32})?$/);
 
   const catalog = read("MonsterCatalog.mlua");
   assert.match(catalog, /local requiredColumns = \{[\s\S]*?"AttackEffectRUID"/);

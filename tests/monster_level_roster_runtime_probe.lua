@@ -15,7 +15,7 @@ local ok, detail = pcall(function()
     checkBase(map:GetChildByName("M1_Player_1"):GetComponent("script.BattleUnit"))
     for _, away in ipairs({ false, true }) do
         local prepared = session:PrepareMatchedRoster({ { monsterId = "monster_tank", x = -4, y = 0 } }, away)
-        assert(prepared ~= nil and prepared[1].profile.Level == nil and prepared[1].profile.MaxHp == 400, "matched roster remains base")
+        assert(prepared ~= nil and prepared[1].profile.Level == 1 and prepared[1].profile.MaxHp == 400, "legacy matched roster defaults to Lv1")
         assert(session:PrepareMatchedRoster({ { monsterId = "monster_tank", x = -4, y = 0, Level = 30 } }, away) == nil,
             "matched input rejects Maker level")
     end
