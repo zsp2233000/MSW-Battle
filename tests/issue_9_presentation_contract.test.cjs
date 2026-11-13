@@ -40,21 +40,35 @@ test("each successful hit keeps its damage event and target sound", () => {
   assert.doesNotMatch(unit, /lastPresentation(?:Attack|Damage)Serial/);
 });
 
-test("attack effects are optional clips dispatched once at attack start on the owner's visual", () => {
+test("attack effects are optional clips dispatched once at the configured attack frame", () => {
   const { parseMonsterCsv } = require("./monster_catalog_csv_fixture.cjs");
   const csv = parseMonsterCsv(fs.readFileSync(path.resolve(combat, "../Data/MonsterData.csv")));
-  assert.equal(csv.header[csv.header.indexOf("HitEffectRUID") - 1], "AttackEffectRUID");
-  for (const row of csv.records) assert.equal(row.AttackEffectRUID, "");
+  assert.equal(csv.header[csv.header.indexOf("AttackEffectRUID") + 1], "AttackEffectFrame");
+  assert.equal(csv.header[csv.header.indexOf("AttackEffectFrame") + 1], "HitEffectRUID");
+  for (const row of csv.records) assert.equal(row.AttackEffectFrame, "1");
+  assert.notEqual(csv.records.find((row) => row.MonsterId === "monster_tank").AttackEffectRUID, "");
 
   const catalog = read("MonsterCatalog.mlua");
   assert.match(catalog, /local requiredColumns = \{[\s\S]*?"AttackEffectRUID"/);
+  assert.match(catalog, /local requiredColumns = \{[\s\S]*?"AttackEffectFrame"/);
+  assert.match(catalog, /AttackEffectFrame exceeds attack clip/);
+  assert.match(catalog, /profile\.AttackEffectDelaySeconds = profile\.AttackEffectDelaySeconds \/ attackClip\.playRate/);
   assert.match(catalog, /local optionalAssetFields = \{[\s\S]*?AttackEffectRUID = true/);
   assert.match(catalog, /AttackEffectRUID = ResourceType\.AnimationClip/);
 
   const attack = read("BattleAttackComposition.mlua");
-  const start = attack.slice(attack.indexOf("method void PublishAttackStart("), attack.indexOf("method number GetTargetDirection("));
+  const start = attack.slice(attack.indexOf("method void PublishAttackStart("), attack.indexOf("method void ArmAttackEffect("));
+  assert.match(start, /self:ArmAttackEffect\(\)/);
+  assert.doesNotMatch(start, /PlayAttackEffect\(/);
+  const arm = attack.slice(attack.indexOf("method void ArmAttackEffect("), attack.indexOf("method void DispatchAttackEffect("));
+  assert.match(arm, /AttackEffectDelaySeconds or 0/);
+  assert.match(arm, /if delay > 0 then[\s\S]*self\._T\.effectRemaining = delay/);
+  assert.match(arm, /self:DispatchAttackEffect\(\)/);
+  const advance = attack.slice(attack.indexOf("method void Advance("), attack.indexOf("method void Cancel("));
+  assert.match(advance, /self:DispatchAttackEffect\(\)[\s\S]*ResolveImpact\(target\)/);
+  const cancel = attack.slice(attack.indexOf("method void Cancel("), attack.indexOf("method void OnNativeHit("));
+  assert.match(cancel, /self\._T\.effectRemaining = -1/);
   assert.equal((attack.match(/presentation:PlayAttackEffect\(/g) || []).length, 1);
-  assert.match(start, /unit:FaceTarget\(target\)[\s\S]*?presentation:PlayAttackEffect\(self\._T\.profile\.AttackEffectRUID\)/);
   const effect = read("BattleHitEffectPresentation.mlua");
   assert.match(effect, /@ExecSpace\("Multicast"\)\s+method void PlayAttackEffect\(string effectRUID\)[\s\S]*?self:PlayAttachedEffect\(effectRUID, "ATTACK"\)/);
   assert.match(effect, /self:PlayAttachedEffect\(effectRUID, "HIT"\)/);

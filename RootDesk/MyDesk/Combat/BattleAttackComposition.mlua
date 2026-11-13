@@ -95,11 +95,20 @@ script BattleAttackComposition extends Component
             return
         end
         self._T.cooldownRemaining = math.max(0, (self._T.cooldownRemaining or 0) - delta)
-        if self._T.pendingTarget == nil then return end
+        local effectPending = (self._T.effectRemaining or -1) >= 0
+        if self._T.pendingTarget == nil and effectPending ~= true then return end
         if not isvalid(self:GetActiveSession()) then
             self:Cancel()
             return
         end
+        if effectPending == true then
+            self._T.effectRemaining = self._T.effectRemaining - delta
+            if self._T.effectRemaining <= 0 then
+                self._T.effectRemaining = -1
+                self:DispatchAttackEffect()
+            end
+        end
+        if self._T.pendingTarget == nil then return end
         self._T.impactRemaining = self._T.impactRemaining - delta
         if self._T.impactRemaining > 0 then return end
         local target = self._T.pendingTarget
@@ -116,6 +125,7 @@ script BattleAttackComposition extends Component
         if isvalid(unit) then unit:EndAttackPoise() end
         self._T.pendingTarget = nil
         self._T.impactRemaining = -1
+        self._T.effectRemaining = -1
         if isvalid(self._T.adapter) then self._T.adapter:ResetTarget() end
         self._T.cooldownRemaining = 0
     end
@@ -140,9 +150,37 @@ script BattleAttackComposition extends Component
         unit:BeginAttackPoise()
         unit.AttackSerial = unit.AttackSerial + 1
         unit:PlayCombatSound(self._T.profile.AttackSoundRUID)
+        self:ArmAttackEffect()
+        session:EmitPresentation("ATTACK_START", self.Entity, target, 0)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void ArmAttackEffect()
+        -- Frame 1 is immediate. A later frame stays armed after impact so only Cancel drops it.
+        self._T.effectRemaining = -1
+        local profile = self._T.profile
+        if profile == nil then return end
+        local ruid = profile.AttackEffectRUID
+        if ruid == nil or ruid == "" then return end
+        local delay = profile.AttackEffectDelaySeconds or 0
+        if delay > 0 then
+            self._T.effectRemaining = delay
+            return
+        end
+        self:DispatchAttackEffect()
+    end
+
+    @ExecSpace("ServerOnly")
+    method void DispatchAttackEffect()
+        self._T.effectRequests = (self._T.effectRequests or 0) + 1
+        log("[VRF][BattleAttack] EFFECT_REQUEST owner=" .. self.Entity.Name)
         local presentation = self.Entity:GetComponent("script.BattleHitEffectPresentation")
         if isvalid(presentation) then presentation:PlayAttackEffect(self._T.profile.AttackEffectRUID) end
-        session:EmitPresentation("ATTACK_START", self.Entity, target, 0)
+    end
+
+    @ExecSpace("ServerOnly")
+    method integer GetAttackEffectRequestCount()
+        return self._T.effectRequests or 0
     end
 
     @ExecSpace("ServerOnly")

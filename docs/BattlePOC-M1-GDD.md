@@ -86,7 +86,7 @@
 | 每隻怪物的動畫 | 坦克填 `stand`、`move`、`hit`、`die`；戰士／射手另填 `attack` AnimationClip RUID | RUID 存於怪物資料列；不同怪物可填相同 RUID，坦克不需 `attack` |
 | HP 條 | 背景與填充值各 1 個 Sprite RUID | 顯示於單位上方；系統只依 HP 比例縮放填充值 |
 | 傷害數字 | 1 個 DamageSkin RUID | 每次成功傷害顯示固定傷害值 |
-| 出手特效 | `AttackEffectRUID` 可留空 | 每次出手時在攻擊者身上播放一次，揮空仍播放；範圍攻擊不因命中多人而重複；支援鏡像顯示與朝向 |
+| 出手特效 | `AttackEffectRUID` 可留空 | 依 `AttackEffectFrame` 在攻擊動畫該影格播放一次，第 1 格即出手當下；揮空仍播放，攻擊在該影格前取消則不播放；範圍攻擊不因命中多人而重複；支援鏡像顯示與朝向 |
 | 命中特效 | `HitEffectRUID` 可留空 | 有值時由攻擊者的怪物資料列決定，特效掛在被擊中的目標 Entity 上；空白時使用攻擊器的預設特效，若預設為 `TBD` 則略過；可重複使用相同 RUID |
 | 音效 | `AttackSoundRUID`、`HurtSoundRUID`、`DieSoundRUID` 可各自留空 | 有值時由怪物資料列決定並播放；空白時略過該音效，不依種類推導 |
 

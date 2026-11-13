@@ -154,6 +154,7 @@ test("Issue #5 publishes one strict MonsterData dataset for the three initial mo
     "HurtAnimationRUID",
     "DieAnimationRUID",
     "AttackEffectRUID",
+    "AttackEffectFrame",
     "HitEffectRUID",
     "AttackSoundRUID",
     "HurtSoundRUID",
