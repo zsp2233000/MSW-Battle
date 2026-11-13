@@ -146,6 +146,7 @@ script MonsterCatalog extends Component
         profile.AttackRangeY = self:ReadNumber(row:GetItem("AttackRangeY"), "AttackRangeY", monsterId, 0)
         if profile.AttackRangeY <= 0 then self:SetError("invalid numeric value AttackRangeY for " .. monsterId) end
         profile.AttackDamageFrame = self:ReadInteger(row:GetItem("AttackDamageFrame"), "AttackDamageFrame", monsterId, 1)
+        profile.AttackEffectFrame = self:ReadInteger(row:GetItem("AttackEffectFrame"), "AttackEffectFrame", monsterId, 1)
         profile.RetargetIntervalSeconds = self:ReadNumber(row:GetItem("RetargetIntervalSeconds"), "RetargetIntervalSeconds", monsterId, 0.0001)
         profile.HitStopDurationSeconds = self:ReadNumber(row:GetItem("HitStopDurationSeconds"), "HitStopDurationSeconds", monsterId, 0)
         if self.ErrorMessage ~= "" then return nil end
@@ -204,11 +205,25 @@ script MonsterCatalog extends Component
             self:SetError("AttackDamageFrame exceeds attack clip for " .. monsterId)
             return nil
         end
+        if profile.AttackEffectFrame > #attackClip.frames then
+            self:SetError("AttackEffectFrame exceeds attack clip for " .. monsterId)
+            return nil
+        end
         profile.AttackAnimationDurationSeconds = attackClip.duration
-        for frameIndex = 1, profile.AttackDamageFrame - 1 do
-            profile.ImpactDelaySeconds = profile.ImpactDelaySeconds + attackClip.frames[frameIndex].Delay
+        profile.AttackEffectDelaySeconds = 0
+        local lastFrame = profile.AttackDamageFrame
+        if profile.AttackEffectFrame > lastFrame then lastFrame = profile.AttackEffectFrame end
+        for frameIndex = 1, lastFrame - 1 do
+            local delay = attackClip.frames[frameIndex].Delay
+            if frameIndex < profile.AttackDamageFrame then
+                profile.ImpactDelaySeconds = profile.ImpactDelaySeconds + delay
+            end
+            if frameIndex < profile.AttackEffectFrame then
+                profile.AttackEffectDelaySeconds = profile.AttackEffectDelaySeconds + delay
+            end
         end
         profile.ImpactDelaySeconds = profile.ImpactDelaySeconds / attackClip.playRate
+        profile.AttackEffectDelaySeconds = profile.AttackEffectDelaySeconds / attackClip.playRate
         return profile
     end
 
@@ -262,7 +277,7 @@ script MonsterCatalog extends Component
             "AttackIntervalSeconds", "AttackRange", "AttackRangeY", "AttackDamageFrame", "RetargetIntervalSeconds",
             "HitStopDurationSeconds",
             "KnockbackDistance", "StandAnimationRUID", "MoveAnimationRUID", "AttackAnimationRUID",
-            "HurtAnimationRUID", "DieAnimationRUID", "AttackEffectRUID", "HitEffectRUID", "AttackSoundRUID",
+            "HurtAnimationRUID", "DieAnimationRUID", "AttackEffectRUID", "AttackEffectFrame", "HitEffectRUID", "AttackSoundRUID",
             "HurtSoundRUID", "DieSoundRUID",
         }
         for _, columnName in ipairs(requiredColumns) do

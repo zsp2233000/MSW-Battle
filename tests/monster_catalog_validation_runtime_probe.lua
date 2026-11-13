@@ -74,6 +74,14 @@ local ok, detail = pcall(function()
         check(parse(id, { AttackDamageFrame = "0" }) == nil, id .. " rejects zero impact frame")
         check(parse(id, { AttackDamageFrame = "99999" }) == nil, id .. " rejects an impact frame beyond the actual clip")
     end
+    for _, id in ipairs({ "monster_tank", "monster_warrior", "monster_shooter" }) do
+        check(parse(id, { AttackEffectFrame = "" }) == nil, id .. " rejects blank attack effect frame")
+        check(parse(id, { AttackEffectFrame = "0" }) == nil, id .. " rejects zero attack effect frame")
+        check(parse(id, { AttackEffectFrame = "99999" }) == nil, id .. " rejects an attack effect frame beyond the actual clip")
+        local startFrame = parse(id, { AttackEffectFrame = "1" })
+        check(startFrame ~= nil and startFrame.AttackEffectFrame == 1 and startFrame.AttackEffectDelaySeconds == 0,
+            id .. " frame 1 plays at attack start")
+    end
     local renamed = parse("monster_tank", { MonsterName = "RenamedOnly" })
     local blankEffect = parse("monster_tank", { AttackEffectRUID = "" })
     check(blankEffect ~= nil and blankEffect.AttackEffectRUID == "", "blank attack effect is optional")
@@ -98,6 +106,8 @@ local ok, detail = pcall(function()
             and profile.AttackDamageMax == expected[7]
             and profile.AttackIntervalSeconds == expected[5] and profile.AttackRange == expected[6],
             expected[1] .. " loads the current formal CSV's independent numeric values")
+        check(profile ~= nil and profile.AttackEffectFrame == 1 and profile.AttackEffectDelaySeconds == 0,
+            expected[1] .. " keeps the attack effect on frame 1")
     end
 end)
 if not ok then check(false, "probe raised: " .. tostring(detail)) end
