@@ -266,6 +266,11 @@ script BattleUIController extends Logic
 			self:ClearResultCards()
 			return
 		end
+		-- Once settled, own survivors are merged into the experience rows instead of listing the same monsters twice.
+		if self.OwnResult == "WIN" and self._T.ownMerged == true then
+			self:ClearResultCards()
+			return
+		end
 		local faction = ownFaction
 		local side = -1
 		if self.OwnResult == "LOSE" then
@@ -394,10 +399,23 @@ script BattleUIController extends Logic
 	end
 
 	@ExecSpace("ClientOnly")
-	method void RenderExperienceResult(BattleSession session, integer ownSurvivorRows)
-		-- Own experience always sits on the left under the own survivors; the right side is the opponent's only.
+	method integer CountUnits(Entity map, string faction, string monsterId, boolean aliveOnly)
+		-- Instances of one monster kind on a side; dead units stay in the map so deployed totals remain readable.
+		local count = 0
+		for _, unit in ipairs(map:GetChildComponentsByTypeName("script.BattleUnit", false)) do
+			if unit.Faction == faction and unit.MonsterId == monsterId and (not aliveOnly or (not unit.IsDead and unit.Hp > 0)) then
+				count = count + 1
+			end
+		end
+		return count
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RenderExperienceResult(BattleSession session, Entity map, string ownFaction)
+		-- One merged own list on the left (one row per monster kind); the right side is the opponent's only.
 		-- Reuse the result caption and row builder; never preview an unconfirmed upgrade.
 		local caption = self.result:GetChildByName("Window"):GetChildByName("Caption")
+		self._T.ownMerged = false
 		if self.OwnResult == "" or not session.RequireMatchedFormations then
 			self:ClearExperienceCards()
 			self:SetText(caption, "戰鬥結果")
@@ -408,20 +426,24 @@ script BattleUIController extends Logic
 		local status = receipt.matchId == session.MatchKey and receipt.profile == player.PlayerComponent.ProfileCode and receipt.status or "PENDING"
 		self:SetText(caption, status == "SAVED" and "本局怪物經驗" or (status == "FAILED" and "怪物經驗結算失敗" or "怪物經驗結算處理中…"))
 		if status ~= "SAVED" then self:ClearExperienceCards()return end
+		self._T.ownMerged = self.OwnResult == "WIN"
 		if self._T.experienceReceipt == receipt then return end
 		self:ClearExperienceCards()
 		-- Clone can yield across UI updates; claim the receipt before building any cards.
 		self._T.experienceReceipt = receipt
 		if not isvalid(self.result:GetChildByName("RowTemplate")) then return end
 		local side = -1
-		-- Only as many rows as still fit on the screen below the survivor rows.
-		local capacity = math.max(0, self.ResultRowScreenMax - ownSurvivorRows)
 		local levelUps = {}
 		local stillCurrent = function() return self._T.experienceReceipt == receipt end
 		for index, entry in ipairs(receipt.monsters) do
-			if index > capacity then break end
+			if index > self.ResultRowScreenMax then break end
 			local data = self:ExperienceRowData(entry)
-			local row = self:BuildResultRow("Experience_" .. tostring(index), side, ownSurvivorRows + index, data, stillCurrent)
+			-- Survivor information rides on the name: alive / deployed instances of this kind.
+			local deployed = entry.monsterId ~= nil and self:CountUnits(map, ownFaction, entry.monsterId, false) or 0
+			if deployed > 0 then
+				data.name = data.name .. "  存活 " .. tostring(self:CountUnits(map, ownFaction, entry.monsterId, true)) .. "/" .. tostring(deployed)
+			end
+			local row = self:BuildResultRow("Experience_" .. tostring(index), side, index, data, stillCurrent)
 			if not isvalid(row) then return end
 			table.insert(self._T.experienceCards, row)
 			if data.levelUp then table.insert(levelUps, row) end
@@ -479,9 +501,9 @@ script BattleUIController extends Logic
 			viewerResult = session.Result
 		end
 		self:SetResult(viewerResult)
+		-- Experience first: once settled it absorbs the own survivor rows, so the order decides which list shows.
+		self:RenderExperienceResult(session, map, ownFaction)
 		self:RenderResultCards(map, ownFaction, self.OwnResult == "WIN" and playerAlive or enemyAlive)
-		-- Survivor rows only exist on the left after a win; experience rows continue below them.
-		self:RenderExperienceResult(session, self.OwnResult == "WIN" and math.min(playerAlive, self.ResultRowMax) or 0)
 		local own = ready and tostring(playerAlive) or "—"
 		local opponent = ready and tostring(enemyAlive) or "—"
 		local key = map.Name .. ":" .. tostring(session.SessionGeneration) .. ":" .. phase .. ":" .. own .. ":" .. opponent .. ":" .. tostring(showDeployment) .. ":" .. tostring(initialPlayer) .. ":" .. tostring(initialEnemy)

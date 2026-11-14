@@ -53,15 +53,19 @@ local ok, detail = pcall(function()
             assert(want and not seen[entry.monsterId] and entry.gained == want.deaths, "own deaths alone grant experience")
             seen[entry.monsterId] = true
             local card = ui.result:GetChildByName("Experience_" .. index)
-            assert(text(card:GetChildByName("MonsterName", true)) == want.name, "own monster name")
-            -- Own experience is always on the left (the opponent's side is the right), under any own survivor rows.
-            local alive = 0
+            -- Merged own list: the name carries alive / deployed instances of this kind.
+            local alive, deployed = 0, 0
             for _, unit in ipairs(player.CurrentMap:GetChildComponentsByTypeName("script.BattleUnit", false)) do
-                if unit.Faction == own and not unit.IsDead and unit.Hp > 0 then alive = alive + 1 end
+                if unit.Faction == own and unit.MonsterId == entry.monsterId then
+                    deployed = deployed + 1
+                    if not unit.IsDead and unit.Hp > 0 then alive = alive + 1 end
+                end
             end
-            local offset = ui.OwnResult == "WIN" and math.min(alive, 6) or 0
+            assert(text(card:GetChildByName("MonsterName", true)) == want.name .. "  存活 " .. alive .. "/" .. deployed, "own monster name with survivors")
+            -- Own experience is always on the left (the opponent's side is the right); no separate own survivor rows.
             local at = card.UITransformComponent.anchoredPosition
-            assert(at.x == -640 and at.y == 288 - (offset + index - 1) * 92, "experience row sits on the own side below the survivor rows")
+            assert(at.x == -640 and at.y == 288 - (index - 1) * 92, "experience row sits at the top of the own side")
+            assert(not isvalid(ui.result:GetChildByName("Survivor_1", false)) or ui.OwnResult ~= "WIN", "own survivors are merged, not listed twice")
             assert(at.y - 42 >= -540, "experience row fits the screen")
             -- #70: the receipt carries the settled level, in-level experience, requirement and stats.
             assert(entry.level and entry.experience and entry.required and entry.stats, "receipt carries progress fields")

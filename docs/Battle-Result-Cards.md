@@ -41,7 +41,7 @@
 - `BattleUIController` 是現有結果畫面的唯一控制者；配對戰透過 `ResultForProfile` 取得觀看者自己的結果，單人 POC 使用 `session.Result`。
 - 單位具有同步的 `MonsterId`、`MonsterName`、`Hp` 與 `MaxHp`；session 的單位紀錄同時保留死亡與存活單位，新增卡片時須按存活狀態過濾，並保留每隻實例的身分。
 - `UnitSnapshots` 是診斷字串，含死亡單位且缺最大 HP，不直接作為卡片資料契約。
-- #70 起，結果畫面的卡片改為清單：`BattleResultPanel/RowTemplate`（580×84，無按鈕、圖片不攔截點擊）。每列有圖像、名稱、怪物等級、進度條、進度文字與數值文字；存活清單與經驗清單共用 `BattleUIController:BuildResultRow`。左側永遠是我方：勝利時先放我方存活列，經驗列（含 LEVEL UP）接在其下；失敗時只有經驗列。右側永遠是敵方：失敗時放對手存活列，只顯示等級與血量，不顯示經驗或升級；勝利與平手時為空。
+- #70 起，結果畫面的卡片改為清單：`BattleResultPanel/RowTemplate`（580×84，無按鈕、圖片不攔截點擊）。每列有圖像、名稱、怪物等級、進度條、進度文字與數值文字；存活清單與經驗清單共用 `BattleUIController:BuildResultRow`。左側永遠是我方，且只有一份清單：經驗結算完成後，每個種類一列（含 LEVEL UP），名稱後加「存活 N/M」（存活／出戰實例數），不再另列存活卡；結算進行中或失敗時，勝利方暫以存活卡（逐隻 HP）顯示，結算完成即由經驗列取代。右側永遠是敵方：失敗時放對手存活列，只顯示等級與血量，不顯示經驗或升級；勝利與平手時為空。
 - 單位新增同步的 `DeploymentOrder`，由 session 在加入 roster 時指定，供卡片保留出戰順序。
 
 ## 2026-11-09 驗證
