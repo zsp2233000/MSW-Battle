@@ -26,16 +26,23 @@ local ok, detail = pcall(function()
     assert(count == #units, "one visible card per surviving instance")
     for index, unit in ipairs(units) do
         local card = ui.result:GetChildByName("Survivor_" .. tostring(index), false)
-        assert(isvalid(card) and card.EnabledInHierarchy, "survivor card is visible")
-        assert(card:GetChildByName("MonsterName", true).TextGUIRendererComponent.Text == unit.MonsterName, "name follows deployment order")
-        assert(card:GetChildByName("Identity", true).TextGUIRendererComponent.Text == tostring(unit.Hp) .. " / " .. tostring(unit.MaxHp), "each instance retains its HP")
-        assert(card:GetChildByName("Portrait", true).SpriteGUIRendererComponent.ImageRUID.DataId == "thumbnail://" .. unit.StandAnimationRUID, "portrait belongs to the survivor")
+        assert(isvalid(card) and card.EnabledInHierarchy, "survivor row is visible")
+        local label = function(name) return card:GetChildByName(name, true).TextGUIRendererComponent.Text end
+        assert(label("MonsterName") == unit.MonsterName, "name follows deployment order")
+        assert(label("Level") == "Lv." .. tostring(unit.Level), "survivor monster level")
+        assert(label("ProgressText") == "HP " .. tostring(unit.Hp) .. " / " .. tostring(unit.MaxHp), "each instance retains its HP")
+        assert(label("StatsText") == "", "survivors carry no stats line")
+        local fill = card:GetChildByName("BarFill", true)
+        local ratio = unit.Hp / unit.MaxHp
+        assert(fill.Enable and math.abs(fill.UITransformComponent.RectSize.x - 480 * ratio) < 0.5, "health bar follows remaining HP")
+        local portrait = card:GetChildByName("Portrait", true)
+        assert(portrait.EnabledInHierarchy and portrait.SpriteGUIRendererComponent.ImageRUID.DataId == "thumbnail://" .. unit.StandAnimationRUID, "portrait belongs to the survivor")
+        assert(not card:GetChildByName("LevelUpEffect").EnabledInHierarchy, "survivors never play LEVEL UP")
         local pos = card.UITransformComponent.anchoredPosition
-        assert((expected == "WIN" and pos.x < -330) or (expected == "LOSE" and pos.x > 330), "viewer-relative winning side")
-        if index == 4 then
-            local first = ui.result:GetChildByName("Survivor_1", false).UITransformComponent.anchoredPosition
-            assert(pos.x == first.x and pos.y < first.y, "fourth card starts the second row")
-        end
+        assert((expected == "WIN" and pos.x == -640) or (expected == "LOSE" and pos.x == 640), "viewer-relative winning side")
+        assert(pos.y == 288 - (index - 1) * 92, "one row per instance, top to bottom")
+        assert(math.abs(pos.x) + 290 <= 960 and pos.y - 42 >= -540, "row fits the screen")
+        assert(math.abs(pos.x) - 290 >= 330, "row stays clear of the centre window")
     end
     log("[VRF][ResultCardsProbe] PASS result=" .. expected .. " count=" .. tostring(count) .. " own=" .. own)
 end)

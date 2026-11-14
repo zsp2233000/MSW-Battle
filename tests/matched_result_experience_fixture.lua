@@ -90,7 +90,8 @@ local ok, detail = pcall(function()
                 end
             end
             for _, p in ipairs(participants) do
-                local monsters = p.profile == "hf6802" and {monster_tank={level=30,experience=0}} or {}
+                -- #70: the real player's shooter is seeded at Lv5 with 2 experience to prove stored progress is shown.
+                local monsters = p.profile == "hf6802" and {monster_tank={level=30,experience=0}} or {monster_shooter={level=5,experience=2}}
                 if round == 3 then
                     for _, id in ipairs({"monster_tank", "monster_warrior", "monster_shooter"}) do monsters[id]={level=30,experience=0} end
                 end

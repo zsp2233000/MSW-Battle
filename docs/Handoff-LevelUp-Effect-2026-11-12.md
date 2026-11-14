@@ -14,7 +14,7 @@
 - [領域用語](../CONTEXT.md)、[養成決策](adr/0005-monster-level-per-player-exp-on-death.md)。
 - 基礎結算功能：提交 `8900d61`（#68）；凍結本局等級：提交 `415521b`（#67）。不要重做既有經驗結算或保存流程。
 - [BattleUIController.mlua](../RootDesk/MyDesk/Combat/BattleUIController.mlua)：`LevelUpFrames`、`PlayCardLevelUp`、`UpdateCardLevelUps`，以及經驗卡、存活卡建立與清理方法。實際 RUID、影格尺寸、pivot 與播放條件均以程式為準，不在此複製。
-- [BattleGroup.ui](../ui/BattleGroup.ui)：透過 UIBuilder 查看 `BattleResultPanel/CardTemplate/LevelUpEffect`。
+- [BattleGroup.ui](../ui/BattleGroup.ui)：透過 UIBuilder 查看 `BattleResultPanel/RowTemplate/LevelUpEffect`（#70 起由卡片改為列）。
 - [測試說明](../tests/README.md)、[結算卡測試](../tests/battle_result_cards.test.cjs)、[存活卡 fixture](../tests/result_cards_fixture.lua)、[存活卡探針](../tests/result_cards_runtime_probe.lua)。
 
 ## 本次觀察與限制
