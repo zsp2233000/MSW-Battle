@@ -32,7 +32,7 @@ local ok, detail = pcall(function()
 
     _MatchFlow:QueueForUser(userId)
     assert(_MatchFlow:IsFormationLocked(userId), 'queued')
-    _MatchFlow:ConfigureMakerCancelFaults(0, 2)
+    _MatchFaults:ConfigureCancel(0, 2)
     _TimerService:SetTimerOnce(function() _MatchFlow:Depart(userId) end, 0.1)
     wait(0.5)
     reconnect()
@@ -49,7 +49,7 @@ local ok, detail = pcall(function()
     log('[VRF][Reconnect52] PASS DURABLE cancel releases busy')
 
     -- Reconnected while the failing cancellation is in flight: the queue stays live and locked, and a retry can finish it.
-    _MatchFlow:ConfigureMakerCancelFaults(1, 2)
+    _MatchFaults:ConfigureCancel(1, 2)
     _MatchFlow:QueueForUser(userId)
     assert(_MatchFlow:IsFormationLocked(userId), 'queued again')
     _TimerService:SetTimerOnce(function() _MatchFlow:Depart(userId) end, 0.1)
@@ -57,13 +57,13 @@ local ok, detail = pcall(function()
     reconnect()
     wait(2.5)
     assert(_MatchFlow:IsFormationLocked(userId) and _MatchFlow:StateForUser(userId) == 'QUEUED', 'failed cleanup keeps an online player locked on the live queue')
-    _MatchFlow:ConfigureMakerCancelFaults(0, 0)
+    _MatchFaults:ConfigureCancel(0, 0)
     _MatchFlow:CancelForUser(userId)
     assert(not _MatchFlow:IsFormationLocked(userId), 'retry after failed cleanup unlocks')
     log('[VRF][Reconnect52] PASS FAILED_ONLINE queue retained; retry confirmed')
 
     -- Failed while still offline: the ticket stays locked until the reconnect resolves it.
-    _MatchFlow:ConfigureMakerCancelFaults(1, 0)
+    _MatchFaults:ConfigureCancel(1, 0)
     _MatchFlow:QueueForUser(userId)
     _MatchFlow:Depart(userId)
     assert(_MatchFlow:IsFormationLocked(userId), 'failed offline cleanup keeps the ticket locked')
@@ -75,7 +75,7 @@ local ok, detail = pcall(function()
     end, 60), 'reconnect resolves the retained ticket')
     log('[VRF][Reconnect52] PASS FAILED_OFFLINE locked until reconnect recovery')
 end)
-_MatchFlow:ConfigureMakerCancelFaults(0, 0)
+_MatchFaults:ConfigureCancel(0, 0)
 if not ok then log('[VRF][Reconnect52] FAIL ' .. tostring(detail)) end
 if userId ~= nil then _MatchFlow._T.offline[userId] = nil _MatchFlow._T.busy[userId] = nil _MatchFlow._T.records[userId] = nil end
 _FormationService.StorageKey, _FormationHandoff.StorageKey = previousKey, previousTransfer

@@ -1,0 +1,110 @@
+@Logic
+script MatchQueueNative extends Logic
+
+    @ExecSpace("ServerOnly")
+    method string Kind()
+        -- Stamped on every ticket, so a restored ticket says which adapter wrote it.
+        return "native"
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean Configured(string leaderboardId)
+        -- The native service cannot be asked for a match without a leaderboard.
+        return leaderboardId ~= ""
+    end
+
+    @ExecSpace("ServerOnly")
+    method string Classify(string result)
+        -- Translate a native result code into the outcome vocabulary every adapter shares.
+        if result == tostring(MatchmakingResultCode.Ok) or result == tostring(MatchmakingResultCode.AlreadyMatched) then return "MATCHED" end
+        if result == tostring(MatchmakingResultCode.MatchingExpired) or result == tostring(MatchmakingResultCode.NotMatched)
+            or result == tostring(MatchmakingResultCode.NotMatching) or result == tostring(MatchmakingResultCode.RequestNotFound) then return "EXPIRED" end
+        return "FAILED"
+    end
+
+    @ExecSpace("ServerOnly")
+    method table Enqueue(table request, any deliver)
+        -- Own one native registration until it completes; its callback may outlive this call and reports through deliver.
+        local extras = _HttpService:JSONEncode({ schema = 1, attempt = request.requestId, source = request.source })
+        local code = _MatchmakingService:RequestMatchingAndWait(request.leaderboardId, request.queueName, request.profile, extras, function(info)
+            local result = info ~= nil and tostring(info.ResultCode) or "MISSING"
+            deliver(self:Classify(result), result)
+        end)
+        if code ~= MatchmakingResultCode.Ok then
+            local result = tostring(code)
+            return { accepted = false, outcome = self:Classify(result), code = result }
+        end
+        return { accepted = true, report = "QUEUED" }
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean Poll()
+        -- The native service pushes its results, so there is nothing to pair here.
+        return false
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean Cancel(string profile)
+        -- True only when the service confirms the player is no longer matching.
+        local code = _MatchmakingService:CancelMatchingAndWait(profile)
+        log("[VRF][MatchCancel] native code=" .. tostring(code))
+        return code == MatchmakingResultCode.Ok or code == MatchmakingResultCode.NotMatching or code == MatchmakingResultCode.AlreadyMatched
+            or code == MatchmakingResultCode.RequestNotFound or code == MatchmakingResultCode.MatchingExpired
+    end
+
+    @ExecSpace("ServerOnly")
+    method any ParseExtras(string extras)
+        -- Treat native extras as metadata only and validate every field before using it as an identifier.
+        local ok, value = pcall(function() return _HttpService:JSONDecode(extras) end)
+        if not ok or type(value) ~= "table" or value.schema ~= 1 then return nil end
+        if type(value.attempt) ~= "string" or #value.attempt ~= 32 or not string.match(value.attempt, "^%x+$") then return nil end
+        if type(value.source) ~= "string" or value.source == "" then return nil end
+        return value
+    end
+
+    @ExecSpace("ServerOnly")
+    method any Lookup(string profile)
+        -- Resolve the two participants and their attempt generations from the native match.
+        local code, users = _MatchmakingService:GetMatchUserInfosAndWait(profile)
+        if code ~= MatchmakingResultCode.Ok or users == nil or #users ~= 2 then return nil end
+        local home, away = users[1], users[2]
+        if home.ProfileCode == away.ProfileCode or (profile ~= home.ProfileCode and profile ~= away.ProfileCode) then return nil end
+        local h, a = self:ParseExtras(home.Extras), self:ParseExtras(away.Extras)
+        if h == nil or a == nil then return nil end
+        return { key = "m30-" .. h.attempt .. "-" .. a.attempt, home = home.ProfileCode, away = away.ProfileCode, homeAttempt = h.attempt, awayAttempt = a.attempt, homeSource = h.source, awaySource = a.source, differentSources = h.source ~= a.source }
+    end
+
+    @ExecSpace("ServerOnly")
+    method table Destinations(table matched)
+        -- Each participant's source instance runs its own coordinator and needs one readiness hint.
+        local destinations = { matched.homeSource }
+        if matched.awaySource ~= matched.homeSource then table.insert(destinations, matched.awaySource) end
+        return destinations
+    end
+
+    @ExecSpace("ServerOnly")
+    method any Warp(string profile)
+        -- Ask the native service to move the matched pair; the service decides which side travels.
+        return _MatchmakingService:WarpMatchUser(profile)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Withdraw(string userId)
+        -- The native registration survives a disconnect and is cancelled through Cancel, so nothing is dropped here.
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Release(string profile)
+        -- The native service owns match lifetime; there is no local copy to drop.
+    end
+
+    @ExecSpace("ServerOnly")
+    method any Reclaim(string userId, table data, boolean live)
+        -- Judge a reservation held in memory (live) or restored from storage; returns HELD, RENEW, FAIL, or nil to read on.
+        if live then return "HELD" end
+        if data.state == "RENEWING" then return "RENEW" end
+        -- A restored reservation has no live callback owner; never present it as a healthy queue.
+        if data.state == "QUEUED" or data.state == "SAVING" or data.state == "QUEUE_ERROR" then return "FAIL" end
+        return nil
+    end
+end

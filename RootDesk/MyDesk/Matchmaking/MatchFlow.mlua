@@ -15,8 +15,6 @@ script MatchFlow extends Logic
         self._T.records = {}
         self._T.busy = {}
         self._T.rooms = {}
-        self._T.localQueue = {}
-        self._T.localMatches = {}
         self._T.pendingRecover = {}
         self._T.recoveryTimers = {}
         self._T.notifyTimers = {}
@@ -29,7 +27,29 @@ script MatchFlow extends Logic
         self._T.progressTimers = {}
         self._T.closedMatches = {}
         self._T.ended = false
-        log("[VRF][MatchFlow] ready enabled=" .. tostring(self.Enabled) .. " room=" .. _RoomService.RoomKey)
+        -- Maker plays against an in-process FIFO; a published world uses the native matchmaking service.
+        self._T.queue = Environment:IsMakerPlay() and _MatchQueueLocal or _MatchQueueNative
+        self._T.transfer = _MatchTransfer
+        log("[VRF][MatchFlow] ready enabled=" .. tostring(self.Enabled) .. " room=" .. _RoomService.RoomKey .. " adapter=" .. self._T.queue:Kind())
+    end
+
+    @ExecSpace("ServerOnly")
+    method any QueueAdapter()
+        -- The matching backend: enqueue, cancel, look up the pairing. Every environment difference lives behind it.
+        return self._T.queue
+    end
+
+    @ExecSpace("ServerOnly")
+    method any TransferAdapter()
+        -- The room movement boundary used for entering a match and returning to the lobby.
+        return self._T.transfer
+    end
+
+    @ExecSpace("ServerOnly")
+    method void UseAdapters(any queue, any transfer)
+        -- Replace either adapter without touching the flow; the flow never inspects what it was given.
+        self._T.queue = queue
+        self._T.transfer = transfer
     end
 
     @ExecSpace("ServerOnly")
@@ -104,29 +124,6 @@ script MatchFlow extends Logic
     end
 
     @ExecSpace("ServerOnly")
-    method any ParseExtras(string extras)
-        -- Treat native extras as metadata only and validate every field before using it as an identifier.
-        local ok, value = pcall(function() return _HttpService:JSONDecode(extras) end)
-        if not ok or type(value) ~= "table" or value.schema ~= 1 then return nil end
-        if type(value.attempt) ~= "string" or #value.attempt ~= 32 or not string.match(value.attempt, "^%x+$") then return nil end
-        if type(value.source) ~= "string" or value.source == "" then return nil end
-        return value
-    end
-
-    @ExecSpace("ServerOnly")
-    method any Match(string profile)
-        -- Resolve server-owned participants and their attempt generation from the selected adapter.
-        if Environment:IsMakerPlay() then return self._T.localMatches[profile] end
-        local code, users = _MatchmakingService:GetMatchUserInfosAndWait(profile)
-        if code ~= MatchmakingResultCode.Ok or users == nil or #users ~= 2 then return nil end
-        local home, away = users[1], users[2]
-        if home.ProfileCode == away.ProfileCode or (profile ~= home.ProfileCode and profile ~= away.ProfileCode) then return nil end
-        local h, a = self:ParseExtras(home.Extras), self:ParseExtras(away.Extras)
-        if h == nil or a == nil then return nil end
-        return { key = "m30-" .. h.attempt .. "-" .. a.attempt, home = home.ProfileCode, away = away.ProfileCode, homeAttempt = h.attempt, awayAttempt = a.attempt, homeSource = h.source, awaySource = a.source, differentSources = h.source ~= a.source }
-    end
-
-    @ExecSpace("ServerOnly")
     method boolean Belongs(table data, table matched)
         -- A stale successful notification cannot authorize another attempt or a cancelled ticket.
         local requestId = data.requestId or data.attempt
@@ -172,7 +169,7 @@ script MatchFlow extends Logic
         local player = self:Player(userId)
         if player == nil then self:Report(userId, { code = "DISABLED_OR_NOT_PUBLISHED" }) return end
         if player.CurrentMapName ~= "formationlobby" then self:Report(userId, { code = "LOBBY_ONLY" }) return end
-        if not Environment:IsMakerPlay() and self.LeaderboardId == "" then self:Report(userId, { code = "MATCHMAKING_NOT_CONFIGURED" }) return end
+        if not self:QueueAdapter():Configured(self.LeaderboardId) then self:Report(userId, { code = "MATCHMAKING_NOT_CONFIGURED" }) return end
         if _RoomService:IsInstanceRoom() or self._T.busy[userId] or self._T.records[userId] ~= nil then return end
         self._T.busy[userId] = true
         local ticket = _FormationHandoff:OpenForUser(userId)
@@ -188,7 +185,7 @@ script MatchFlow extends Logic
             self:Report(userId, { code = "EXISTING_TICKET_USE_STATUS_OR_CANCEL" })
             return
         end
-        local request = { attempt = _UtilLogic:NewGuid(), requestId = _UtilLogic:NewGuid(), source = _WorldInstanceService.WorldInstanceId, adapter = Environment:IsMakerPlay() and "local" or "native" }
+        local request = { attempt = _UtilLogic:NewGuid(), requestId = _UtilLogic:NewGuid(), source = _WorldInstanceService.WorldInstanceId, adapter = self:QueueAdapter():Kind() }
         self._T.records[userId] = ticket
         if not self:Finish(userId, ticket, "QUEUED", function() return _FormationHandoff:Reserve(userId, ticket, request) end) then
             if ticket.failure ~= "RESERVATION_SAVE_FAILED" then self._T.records[userId] = nil end
@@ -198,39 +195,33 @@ script MatchFlow extends Logic
         end
         if self._T.records[userId] ~= ticket or self:Player(userId) == nil or ticket.data.state ~= "QUEUED" then self._T.busy[userId] = nil return end
         self._T.busy[userId] = nil
-        if Environment:IsMakerPlay() then
-            table.insert(self._T.localQueue, userId)
-            self:Report(userId, { code = "QUEUED_LOCAL" })
-            self:TryLocalMatch()
-            return
-        end
         self:SubmitQueue(userId, ticket)
     end
 
     @ExecSpace("ServerOnly")
     method void SubmitQueue(string userId, table ticket)
-        -- Own one native registration until it completes; map changes never submit a second request.
+        -- Own one registration until the adapter accepts it; map changes never submit a second request.
         if self._T.records[userId] ~= ticket or ticket.data.state ~= "QUEUED" or ticket.submitting then return end
-        if Environment:IsMakerPlay() then
-            self:Report(userId, { code = "QUEUED_LOCAL" })
-            self:TryLocalMatch()
-            return
-        end
         local requestId = ticket.data.requestId
-        local extras = _HttpService:JSONEncode({ schema = 1, attempt = requestId, source = ticket.data.source })
+        local request = { userId = userId, profile = ticket.data.profile, requestId = requestId, attempt = ticket.data.attempt,
+            source = ticket.data.source, leaderboardId = self.LeaderboardId, queueName = self.QueueName,
+            live = function()
+                return self._T.records[userId] == ticket and ticket.data ~= nil and ticket.data.state == "QUEUED" and self:Player(userId) ~= nil
+            end }
         ticket.submitting = true
         self:Report(userId, { code = "SUBMITTING" })
-        local code = _MatchmakingService:RequestMatchingAndWait(self.LeaderboardId, self.QueueName, ticket.data.profile, extras, function(info)
-            local result = info ~= nil and tostring(info.ResultCode) or "MISSING"
-            self:QueueResult(userId, ticket, requestId, result)
+        local submitted = self:QueueAdapter():Enqueue(request, function(outcome, code)
+            self:QueueResult(userId, ticket, requestId, outcome, code)
         end)
         ticket.submitting = false
         if self._T.records[userId] ~= ticket or ticket.data.requestId ~= requestId or ticket.data.state ~= "QUEUED" then return end
-        if code ~= MatchmakingResultCode.Ok then
-            self:QueueResult(userId, ticket, requestId, tostring(code))
-        else
-            self:Report(userId, { code = "QUEUED" })
+        if not submitted.accepted then
+            self:QueueResult(userId, ticket, requestId, submitted.outcome, submitted.code)
+            return
         end
+        self:Report(userId, { code = submitted.report })
+        -- An in-process adapter pairs here; a pushing adapter answers false and reports through its callback instead.
+        if self:QueueAdapter():Poll() then self:AdvancePending() end
     end
 
     @ExecSpace("ServerOnly")
@@ -265,13 +256,16 @@ script MatchFlow extends Logic
     end
 
     @ExecSpace("ServerOnly")
-    method void QueueResult(string userId, table ticket, string requestId, string result)
+    method void QueueResult(string userId, table ticket, string requestId, string outcome, string code)
         -- Ignore stale generations and duplicate completion; expiry renews the same frozen game attempt.
         if self._T.records[userId] ~= ticket or ticket.data.requestId ~= requestId or ticket.data.state ~= "QUEUED" then return end
-        if result == tostring(MatchmakingResultCode.Ok) or result == tostring(MatchmakingResultCode.AlreadyMatched) then
+        if outcome == "MATCHED" then
             self:Matched(userId, ticket)
-        elseif result == tostring(MatchmakingResultCode.MatchingExpired) or result == tostring(MatchmakingResultCode.NotMatched)
-            or result == tostring(MatchmakingResultCode.NotMatching) or result == tostring(MatchmakingResultCode.RequestNotFound) then
+        elseif outcome == "REJECTED" then
+            -- The adapter refused this ticket; close it so the player can start over, and say why.
+            if self:Finish(userId, ticket, "CANCELLED", function() return _FormationHandoff:Close(userId, ticket, "CANCELLED") end) then self._T.records[userId] = nil end
+            self:Report(userId, { code = code })
+        elseif outcome == "EXPIRED" then
             self:Report(userId, { code = "QUEUE_RENEWING" })
             local expiredRequestId = requestId
             self._T.queueTimers[userId] = _TimerService:SetTimerOnce(function()
@@ -291,37 +285,8 @@ script MatchFlow extends Logic
             self._T.busy[userId] = true
             self:Finish(userId, ticket, "QUEUE_ERROR", function() return _FormationHandoff:FailQueue(userId, ticket) end)
             self._T.busy[userId] = nil
-            self:Report(userId, { code = "QUEUE_SERVICE_FAILED", details = { serviceCode = result } })
+            self:Report(userId, { code = "QUEUE_SERVICE_FAILED", details = { serviceCode = code } })
         end
-    end
-
-    @ExecSpace("ServerOnly")
-    method void TryLocalMatch()
-        -- Match two connected queued Maker players through a real FIFO, never a fabricated native callback.
-        if not Environment:IsMakerPlay() then return end
-        local available = {}
-        local seen = {}
-        for _, userId in ipairs(self._T.localQueue) do
-            local ticket = self._T.records[userId]
-            if not seen[userId] and ticket ~= nil and ticket.data.state == "QUEUED" and self:Player(userId) ~= nil then table.insert(available, userId) seen[userId] = true end
-        end
-        self._T.localQueue = available
-        if #available < 2 then return end
-        local firstId = table.remove(self._T.localQueue, 1)
-        local secondId = table.remove(self._T.localQueue, 1)
-        local first, second = self._T.records[firstId], self._T.records[secondId]
-        if first.data.profile == second.data.profile then
-            table.insert(self._T.localQueue, firstId)
-            if self:Finish(secondId, second, "CANCELLED", function() return _FormationHandoff:Close(secondId, second, "CANCELLED") end) then self._T.records[secondId] = nil end
-            self:Report(secondId, { code = "DUPLICATE_PROFILE" })
-            return
-        end
-        local matched = { key = "local-" .. _UtilLogic:NewGuid(), home = first.data.profile, away = second.data.profile, homeAttempt = first.data.requestId or first.data.attempt, awayAttempt = second.data.requestId or second.data.attempt, homeSource = first.data.source, awaySource = second.data.source, differentSources = false }
-        self._T.localMatches[first.data.profile] = matched
-        self._T.localMatches[second.data.profile] = matched
-        self:Matched(firstId, first)
-        if self._T.records[secondId] == second and second.data.state == "QUEUED" then self:Matched(secondId, second) end
-        self:AdvancePending()
     end
 
     @ExecSpace("ServerOnly")
@@ -346,7 +311,7 @@ script MatchFlow extends Logic
         end
         self._T.failures[userId] = nil
         self:PublishState(userId, "MATCHED")
-        local matched = self:Match(ticket.data.profile)
+        local matched = self:QueueAdapter():Lookup(ticket.data.profile)
         if self._T.records[userId] ~= ticket or ticket.data.state ~= "SAVING" then return end
         if matched == nil or not self:Belongs(ticket.data, matched) then
             self._T.busy[userId] = true
@@ -388,10 +353,10 @@ script MatchFlow extends Logic
 
     @ExecSpace("ServerOnly")
     method void NotifyReady(table matched)
-        -- Wake both source coordinators once; readiness events are hints and admission revalidates stored authority.
-        if Environment:IsMakerPlay() then return end
-        self:SendReady(matched.key, matched.homeSource, 0)
-        if matched.awaySource ~= matched.homeSource then self:SendReady(matched.key, matched.awaySource, 0) end
+        -- Wake every other source coordinator once; readiness events are hints and admission revalidates stored authority.
+        for _, destination in ipairs(self:QueueAdapter():Destinations(matched)) do
+            self:SendReady(matched.key, destination, 0)
+        end
     end
 
     @ExecSpace("ServerOnly")
@@ -459,27 +424,11 @@ script MatchFlow extends Logic
     end
 
     @ExecSpace("ServerOnly")
-    method void ConfigureMakerCancelFaults(integer failures, number delaySeconds)
-        -- Inject only the cancellation response, leaving the shared state machine and storage real.
-        if not Environment:IsMakerPlay() then return end
-        self._T.cancelFailures = math.max(0, failures)
-        self._T.cancelDelay = math.max(0, math.min(10, delaySeconds))
-    end
-
-    @ExecSpace("ServerOnly")
     method boolean CancelMatching(string profile)
-        -- Share native cancellation confirmation between visible retries and disconnect cleanup.
-        local code = MatchmakingResultCode.Ok
-        if Environment:IsMakerPlay() then
-            local fail = (self._T.cancelFailures or 0) > 0
-            if fail then self._T.cancelFailures = self._T.cancelFailures - 1 end
-            if (self._T.cancelDelay or 0) > 0 then wait(self._T.cancelDelay) end
-            if fail then code = MatchmakingResultCode.InternalError end
-        else
-            code = _MatchmakingService:CancelMatchingAndWait(profile)
-        end
-        log("[VRF][MatchCancel] native code=" .. tostring(code))
-        return code == MatchmakingResultCode.Ok or code == MatchmakingResultCode.NotMatching or code == MatchmakingResultCode.AlreadyMatched or code == MatchmakingResultCode.RequestNotFound or code == MatchmakingResultCode.MatchingExpired
+        -- Share the adapter's cancellation confirmation between visible retries and disconnect cleanup.
+        local confirmed = self:QueueAdapter():Cancel(profile)
+        log("[VRF][MatchCancel] confirmed=" .. tostring(confirmed))
+        return confirmed
     end
 
     @ExecSpace("ServerOnly")
@@ -549,21 +498,11 @@ script MatchFlow extends Logic
         -- A reply deferred while offline continues now that its failed cancellation left the match valid.
         if current ~= nil and current.matchPending then self:ResumeDeferredMatch(userId, current) return end
         if current ~= nil and (current.data.state == "QUEUED" or current.data.state == "SAVING" or current.data.state == "RENEWING" or current.data.state == "QUEUE_ERROR") then
-            local localAdapter = Environment:IsMakerPlay() and (current.data.adapter == "local" or current.data.adapter == nil)
-            if not localAdapter then
+            if self:QueueAdapter():Reclaim(userId, current.data, true) == "HELD" then
                 if (current.data.state == "RENEWING" or current.renewRequestId ~= nil) and not current.renewPending and self._T.queueTimers[userId] == nil then self:ResumeRenew(userId, current, "") end
                 return
             end
-            local activeLocalTicket = false
-            if current.data.state == "QUEUED" then
-                for _, queuedUserId in ipairs(self._T.localQueue or {}) do
-                    if queuedUserId == userId then activeLocalTicket = true break end
-                end
-            else
-                activeLocalTicket = self._T.localMatches[current.data.profile] ~= nil
-            end
-            if activeLocalTicket then return end
-            -- A local ticket without its FIFO/match entry is stale; reload storage and retry cleanup.
+            -- The adapter no longer holds this live ticket; reload storage and settle it from there.
         end
         self._T.busy[userId] = true
         local ticket = _FormationHandoff:OpenForUser(userId)
@@ -583,16 +522,18 @@ script MatchFlow extends Logic
                 return
             end
             self._T.records[userId] = ticket
-            if not Environment:IsMakerPlay() and data.state == "RENEWING" then
+            -- The adapter knows whether anything still stands behind a stored reservation or match.
+            local verdict = self:QueueAdapter():Reclaim(userId, data, false)
+            if verdict == "RENEW" then
                 self._T.busy[userId] = nil
                 self:ResumeRenew(userId, ticket, "")
                 return
-            elseif not Environment:IsMakerPlay() and (data.state == "QUEUED" or data.state == "SAVING" or data.state == "QUEUE_ERROR") then
+            elseif verdict == "FAIL" then
                 -- A restored reservation has no live callback owner; never present it as a healthy queue.
                 if not self:Finish(userId, ticket, "QUEUE_ERROR", function() return _FormationHandoff:FailQueue(userId, ticket) end) then self._T.busy[userId] = nil self:Report(userId, { code = "QUEUE_SERVICE_FAILED" }) return end
                 self:Report(userId, { code = "QUEUE_OWNER_LOST" })
-            elseif Environment:IsMakerPlay() and (data.adapter == "local" or data.adapter == nil) and (data.state == "QUEUED" or data.state == "SAVING" or data.state == "RENEWING" or data.state == "QUEUE_ERROR") then
-                -- A Maker Play restart discards its local FIFO, so stale queue reservations cannot resume.
+            elseif verdict == "CANCEL" then
+                -- The adapter's queue died with its session, so a stale queue reservation cannot resume.
                 if self:Finish(userId, ticket, "CANCELLED", function() return _FormationHandoff:Close(userId, ticket, "CANCELLED") end) then
                     self._T.records[userId] = nil
                     log("[VRF][MatchFlow] stale local queue cancelled=true")
@@ -600,8 +541,8 @@ script MatchFlow extends Logic
                 else
                     self:Report(userId, { code = "STALE_QUEUE_CLEANUP_FAILED" })
                 end
-            elseif Environment:IsMakerPlay() and self._T.localMatches[data.profile] == nil and (data.adapter == "local" or string.sub(data.matchKey, 1, 6) == "local-") and (data.state == "COMMITTING" or data.state == "TRANSFER") then
-                -- Restore a local match only after its Maker session has lost the in-memory match entry.
+            elseif verdict == "RETURN" then
+                -- The adapter lost the match this ticket was sealed for, so send the player back with their saved formation.
                 if self:Finish(userId, ticket, "RETURNING", function() return _FormationHandoff:BeginReturn(userId, ticket) end) then
                     self:Report(userId, { code = "STALE_MATCH_RECOVERY" })
                     self:RestoreReturning(userId, ticket)
@@ -616,7 +557,7 @@ script MatchFlow extends Logic
                     self:Report(userId, { code = "RETURN_SAVE_FAILED" })
                 end
             elseif data.state == "COMMITTING" and data.expires > DateTime.UtcNow.Elapsed and not _RoomService:IsInstanceRoom() then
-                local matched = self:Match(data.profile)
+                local matched = self:QueueAdapter():Lookup(data.profile)
                 if matched ~= nil and self:Belongs(data, matched) and data.matchKey == matched.key then
                     if _FormationHandoff:Commit(userId, ticket, matched, self.TransferLifetimeSeconds) then
                         self:Rendezvous(userId, ticket, matched)
@@ -625,7 +566,7 @@ script MatchFlow extends Logic
                     end
                 end
             elseif data.state == "TRANSFER" and data.expires > DateTime.UtcNow.Elapsed and not _RoomService:IsInstanceRoom() then
-                local matched = self:Match(data.profile)
+                local matched = self:QueueAdapter():Lookup(data.profile)
                 if matched ~= nil and self:Belongs(data, matched) and data.matchKey == matched.key then
                     self:Rendezvous(userId, ticket, matched)
                 end
@@ -665,7 +606,7 @@ script MatchFlow extends Logic
             if self._T.records[userId] ~= ticket or self:Player(userId) == nil then return end
             if stored then
                 self._T.records[userId] = nil
-                self._T.localMatches[ticket.data.profile] = nil
+                self:QueueAdapter():Release(ticket.data.profile)
                 self:Report(userId, { code = "RETURN_COMPLETED" })
                 return
             end
@@ -707,7 +648,7 @@ script MatchFlow extends Logic
                 if ticket.data ~= nil and ticket.data.warpIssued then self:Report(userId, { code = "WARP_ALREADY_ISSUED_WAIT_OR_RETURN" }) end
                 return
             end
-            local code = _MatchmakingService:WarpMatchUser(ticket.data.profile)
+            local code = self:QueueAdapter():Warp(ticket.data.profile)
             self:Report(userId, { code = "WARP", details = { serviceCode = code, matchKey = matched.key } })
             local timer = 0
             timer = _TimerService:SetTimerOnce(function()
@@ -754,9 +695,7 @@ script MatchFlow extends Logic
         end
         self._T.pendingRecover[userId] = nil
         self._T.failures[userId] = nil
-        for index = #self._T.localQueue, 1, -1 do
-            if self._T.localQueue[index] == userId then table.remove(self._T.localQueue, index) end
-        end
+        self:QueueAdapter():Withdraw(userId)
         self._T.queueCommands[userId] = nil
         local ticket = self._T.records[userId]
         if ticket == nil then return end
@@ -805,7 +744,7 @@ script MatchFlow extends Logic
         if self:Player(userId) == nil or self._T.records[userId] ~= ticket or ticket.data.state ~= "TRANSFER" then return end
         if not self:Finish(userId, ticket, "IN_ROOM", function() return _FormationHandoff:Admit(userId, ticket) end) then self:Report(userId, { code = "ADMISSION_SAVE_FAILED" }) return end
         if self:Player(userId) == nil or self._T.records[userId] ~= ticket then return end
-        local moved = self:MoveToMatch(slot.room, userId)
+        local moved = self:TransferAdapter():MoveToMatch(slot.room, userId)
         log("[VRF][MatchTransfer] match=" .. matched.key .. " entry=" .. tostring(moved))
         if self._T.records[userId] ~= ticket then return end
         if not moved then self:Finish(userId, ticket, "TRANSFER", function() return _FormationHandoff:WithdrawAdmission(userId, ticket) end) end
@@ -821,7 +760,7 @@ script MatchFlow extends Logic
         self:Recover(userId)
         local ticket = self._T.records[userId]
         if ticket ~= nil and ticket.data.state == "TRANSFER" then
-            local matched = self:Match(ticket.data.profile)
+            local matched = self:QueueAdapter():Lookup(ticket.data.profile)
             if matched ~= nil then self:NotifyReady(matched) end
         end
         local state = ticket ~= nil and ticket.data.state or "IDLE"
@@ -838,34 +777,6 @@ script MatchFlow extends Logic
     end
 
     @ExecSpace("ServerOnly")
-    method void ConfigureMakerTransferFaults(integer entryFailures, integer returnFailures)
-        -- Fail only the native movement boundary, keeping admission, tickets and restore real.
-        if not Environment:IsMakerPlay() then return end
-        self._T.entryFailures = math.max(0, entryFailures)
-        self._T.returnFailures = math.max(0, returnFailures)
-    end
-
-    @ExecSpace("ServerOnly")
-    method boolean MoveToMatch(any room, string userId)
-        -- Preserve native admission while allowing a bounded Maker movement failure.
-        if Environment:IsMakerPlay() and (self._T.entryFailures or 0) > 0 then
-            self._T.entryFailures = self._T.entryFailures - 1
-            return false
-        end
-        return room:MoveUser(userId, "matchprobe")
-    end
-
-    @ExecSpace("ServerOnly")
-    method boolean MoveToLobby(string userId)
-        -- Preserve the return capsule until native movement and restoration both succeed.
-        if Environment:IsMakerPlay() and (self._T.returnFailures or 0) > 0 then
-            self._T.returnFailures = self._T.returnFailures - 1
-            return false
-        end
-        return _RoomService:MoveUserToStaticRoom(userId, "formationlobby")
-    end
-
-    @ExecSpace("ServerOnly")
     method void ReturnForUser(string userId)
         -- Return is shared by the visible button and authenticated server recovery.
         local player = self:Player(userId)
@@ -878,7 +789,7 @@ script MatchFlow extends Logic
             local profile = player.PlayerComponent.ProfileCode
             if isvalid(battle) and battle:IsBattleActive() and (profile == battle.HomeProfile or profile == battle.AwayProfile) then self:Report(userId, { code = "BATTLE_IN_PROGRESS" }) return end
             if ticket == nil or ticket.data.state == "CANCELLED" or ticket.data.state == "RETURNED" then
-                local moved = self:MoveToLobby(userId)
+                local moved = self:TransferAdapter():MoveToLobby(userId)
                 self:Report(userId, { code = moved and "RETURN_MOVE_OK" or "RETURN_MOVE_FAILED", details = { moved = moved } })
                 return
             end
@@ -902,7 +813,7 @@ script MatchFlow extends Logic
         if ticket.data.state == "RETURNING" then
             -- A prior move may have failed after RETURNING was durably stored; keep the visible retry usable.
             self._T.busy[userId] = true
-            local moved = self:MoveToLobby(userId)
+            local moved = self:TransferAdapter():MoveToLobby(userId)
             self._T.busy[userId] = nil
             self:Report(userId, { code = moved and "RETURN_RETRY_MOVE_OK" or "RETURN_RETRY_MOVE_FAILED", details = { moved = moved } })
             return
@@ -915,7 +826,7 @@ script MatchFlow extends Logic
                 self:Report(userId, { code = "ROOM_MISMATCH_SAVE_FAILED" })
                 return
             end
-            local moved = self:MoveToLobby(userId)
+            local moved = self:TransferAdapter():MoveToLobby(userId)
             self._T.busy[userId] = nil
             if not moved then
                 self:Report(userId, { code = "ROOM_MISMATCH_RETURN_FAILED" })
@@ -932,7 +843,7 @@ script MatchFlow extends Logic
             self:Report(userId, { code = "RETURN_SAVE_FAILED" })
             return
         end
-        local moved = self:MoveToLobby(userId)
+        local moved = self:TransferAdapter():MoveToLobby(userId)
         self._T.busy[userId] = nil
         self:Report(userId, { code = moved and "RETURN_MOVE_OK" or "RETURN_MOVE_FAILED", details = { moved = moved } })
     end
