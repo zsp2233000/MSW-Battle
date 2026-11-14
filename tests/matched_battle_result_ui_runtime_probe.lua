@@ -54,6 +54,15 @@ local ok, detail = pcall(function()
             seen[entry.monsterId] = true
             local card = ui.result:GetChildByName("Experience_" .. index)
             assert(text(card:GetChildByName("MonsterName", true)) == want.name, "own monster name")
+            -- Own experience is always on the left (the opponent's side is the right), under any own survivor rows.
+            local alive = 0
+            for _, unit in ipairs(player.CurrentMap:GetChildComponentsByTypeName("script.BattleUnit", false)) do
+                if unit.Faction == own and not unit.IsDead and unit.Hp > 0 then alive = alive + 1 end
+            end
+            local offset = ui.OwnResult == "WIN" and math.min(alive, 6) or 0
+            local at = card.UITransformComponent.anchoredPosition
+            assert(at.x == -640 and at.y == 288 - (offset + index - 1) * 92, "experience row sits on the own side below the survivor rows")
+            assert(at.y - 42 >= -540, "experience row fits the screen")
             -- #70: the receipt carries the settled level, in-level experience, requirement and stats.
             assert(entry.level and entry.experience and entry.required and entry.stats, "receipt carries progress fields")
             local portrait = card:GetChildByName("Portrait", true)

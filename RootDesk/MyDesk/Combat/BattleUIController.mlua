@@ -24,6 +24,8 @@ script BattleUIController extends Logic
 	property number ResultRowBarWidth = 480
 	property number ResultRowBarHeight = 8
 	property integer ResultRowMax = 6
+	-- Rows from the first centre (y=288) down to one whose bottom edge still clears -540: nine fit.
+	property integer ResultRowScreenMax = 9
 	property Color ResultAccentColor = Color(0.933333, 0.780392, 0.560784, 1)
 	property Color ResultLevelUpColor = Color(1, 0.84, 0.25, 1)
 	property Color ResultHealthColor = Color(0.3, 0.85, 0.4, 1)
@@ -392,7 +394,8 @@ script BattleUIController extends Logic
 	end
 
 	@ExecSpace("ClientOnly")
-	method void RenderExperienceResult(BattleSession session)
+	method void RenderExperienceResult(BattleSession session, integer ownSurvivorRows)
+		-- Own experience always sits on the left under the own survivors; the right side is the opponent's only.
 		-- Reuse the result caption and row builder; never preview an unconfirmed upgrade.
 		local caption = self.result:GetChildByName("Window"):GetChildByName("Caption")
 		if self.OwnResult == "" or not session.RequireMatchedFormations then
@@ -410,13 +413,15 @@ script BattleUIController extends Logic
 		-- Clone can yield across UI updates; claim the receipt before building any cards.
 		self._T.experienceReceipt = receipt
 		if not isvalid(self.result:GetChildByName("RowTemplate")) then return end
-		local side = self.OwnResult == "WIN" and 1 or -1
+		local side = -1
+		-- Only as many rows as still fit on the screen below the survivor rows.
+		local capacity = math.max(0, self.ResultRowScreenMax - ownSurvivorRows)
 		local levelUps = {}
 		local stillCurrent = function() return self._T.experienceReceipt == receipt end
 		for index, entry in ipairs(receipt.monsters) do
-			if index > self.ResultRowMax then break end
+			if index > capacity then break end
 			local data = self:ExperienceRowData(entry)
-			local row = self:BuildResultRow("Experience_" .. tostring(index), side, index, data, stillCurrent)
+			local row = self:BuildResultRow("Experience_" .. tostring(index), side, ownSurvivorRows + index, data, stillCurrent)
 			if not isvalid(row) then return end
 			table.insert(self._T.experienceCards, row)
 			if data.levelUp then table.insert(levelUps, row) end
@@ -475,7 +480,8 @@ script BattleUIController extends Logic
 		end
 		self:SetResult(viewerResult)
 		self:RenderResultCards(map, ownFaction, self.OwnResult == "WIN" and playerAlive or enemyAlive)
-		self:RenderExperienceResult(session)
+		-- Survivor rows only exist on the left after a win; experience rows continue below them.
+		self:RenderExperienceResult(session, self.OwnResult == "WIN" and math.min(playerAlive, self.ResultRowMax) or 0)
 		local own = ready and tostring(playerAlive) or "—"
 		local opponent = ready and tostring(enemyAlive) or "—"
 		local key = map.Name .. ":" .. tostring(session.SessionGeneration) .. ":" .. phase .. ":" .. own .. ":" .. opponent .. ":" .. tostring(showDeployment) .. ":" .. tostring(initialPlayer) .. ":" .. tostring(initialEnemy)
