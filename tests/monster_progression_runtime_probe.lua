@@ -14,6 +14,12 @@ local ok, detail = pcall(function()
         local progress = _MonsterProgression:ApplyExperience(case[1], case[2], case[3])
         assert(progress.level == case[4] and progress.experience == case[5], "experience case " .. table.concat(case, ","))
     end
+    -- Literal #70 expectations: one experience point per current level, nothing at MAX.
+    assert(_MonsterProgression:RequiredExperience(1) == 1, "Lv1 needs 1")
+    assert(_MonsterProgression:RequiredExperience(29) == 29, "Lv29 needs 29")
+    assert(_MonsterProgression:RequiredExperience(30) == 0, "Lv30 is MAX and needs 0")
+    assert(_MonsterProgression:RequiredExperience(0) == nil and _MonsterProgression:RequiredExperience(31) == nil,
+        "levels outside 1-30 are rejected")
     assert(_MonsterProgression:ApplyExperience(0, 0, 1) == nil, "invalid level rejected")
     assert(_MonsterProgression:ApplyExperience(1, -1, 1) == nil, "negative experience rejected")
     assert(_MonsterProgression:ApplyExperience(1, 0, -1) == nil, "negative grant rejected")

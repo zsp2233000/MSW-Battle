@@ -652,12 +652,21 @@ script BattleSession extends Component
                                 local gained = beforeLevel == 30 and 0 or (operation.deaths[unit.MonsterId] or 0)
                                 local entry = { monsterId = unit.MonsterId, name = unit.MonsterName,
                                     ruid = unit.StandAnimationRUID, gained = gained }
-                                if change ~= nil and change.after.level > change.before.level then
-                                    local base = self:GetMonsterProfile(unit.MonsterId)
-                                    entry.before = _MonsterProgression:CalculateStats(base, change.before.level)
-                                    entry.before.level = change.before.level
-                                    entry.after = _MonsterProgression:CalculateStats(base, change.after.level)
-                                    entry.after.level = change.after.level
+                                -- Settled progress wins; monsters absent from the stored document start from the match level.
+                                local progress = change ~= nil and change.after or operation.levels[unit.MonsterId]
+                                    or { level = unit.Level, experience = 0 }
+                                entry.level = progress.level
+                                entry.experience = progress.experience
+                                entry.required = _MonsterProgression:RequiredExperience(progress.level)
+                                local base = self:GetMonsterProfile(unit.MonsterId)
+                                if base ~= nil then
+                                    entry.stats = _MonsterProgression:CalculateStats(base, progress.level)
+                                    if change ~= nil and change.after.level > change.before.level then
+                                        entry.before = _MonsterProgression:CalculateStats(base, change.before.level)
+                                        entry.before.level = change.before.level
+                                        entry.after = _MonsterProgression:CalculateStats(base, change.after.level)
+                                        entry.after.level = change.after.level
+                                    end
                                 end
                                 table.insert(receipt.monsters, entry)
                             end

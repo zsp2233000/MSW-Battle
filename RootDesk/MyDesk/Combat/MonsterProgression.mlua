@@ -1,14 +1,21 @@
 @Logic
 script MonsterProgression extends Logic
 
+    method integer RequiredExperience(integer level)
+        -- The single rule for the points needed to leave this level: one per current level, none at MAX.
+        if level < 1 or level > 30 or level % 1 ~= 0 then return nil end
+        if level == 30 then return 0 end
+        return level
+    end
+
     method table ApplyExperience(integer level, integer experience, integer gained)
-        -- Normalize progress with one point requirement per current level; MAX stores no experience.
+        -- Normalize progress with the shared per-level requirement; MAX stores no experience.
         if level < 1 or level > 30 or level % 1 ~= 0
             or experience < 0 or experience >= math.huge or experience % 1 ~= 0
             or gained < 0 or gained >= math.huge or gained % 1 ~= 0 then return nil end
         local remaining = experience + gained
         while level < 30 do
-            local required = level
+            local required = self:RequiredExperience(level)
             if remaining < required then break end
             remaining = remaining - required
             level = level + 1

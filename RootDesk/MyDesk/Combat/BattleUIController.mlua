@@ -17,6 +17,17 @@ script BattleUIController extends Logic
 	property Entity resultEnemyCount = "585aa74a-1ef0-4897-9885-4b996eb49840"
 	property string OwnResult = ""
 	property number ResultDisplayDelaySeconds = 2
+	-- Result list layout: rows are 580x84 and centred 640 left/right of the screen, clear of the centre window.
+	property number ResultRowCenterX = 640
+	property number ResultRowFirstY = 288
+	property number ResultRowSpacing = 92
+	property number ResultRowBarWidth = 480
+	property number ResultRowBarHeight = 8
+	property integer ResultRowMax = 6
+	property Color ResultAccentColor = Color(0.933333, 0.780392, 0.560784, 1)
+	property Color ResultLevelUpColor = Color(1, 0.84, 0.25, 1)
+	property Color ResultHealthColor = Color(0.3, 0.85, 0.4, 1)
+	property Color ResultExperienceColor = Color(0.35, 0.65, 1, 1)
 	property table LevelUpFrames = {
 		{"2ceec4e669494d0db387e37dd57e5264", 8, 7, -2, -93},
 		{"8aaf42c3fcab4069807a576223618ba2", 12, 12, 0, -91},
@@ -140,6 +151,103 @@ script BattleUIController extends Logic
 	end
 
 	@ExecSpace("ClientOnly")
+	method void SetLabel(Entity entity, string value, Color color)
+		-- Rows restyle their labels per state, so write text and colour together and only on change.
+		if not isvalid(entity) then return end
+		local label = entity.TextGUIRendererComponent
+		if not isvalid(label) then return end
+		if label.Text ~= value then label.Text = value end
+		label.FontColor = color
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetBar(Entity row, number ratio, Color color)
+		-- The fill grows from its left edge by width; an empty bar hides the fill entirely.
+		local fill = row:GetChildByName("BarFill", true)
+		if not isvalid(fill) then return end
+		ratio = math.max(0, math.min(1, ratio))
+		self:SetEnabled(fill, ratio > 0)
+		if ratio <= 0 then return end
+		fill.UITransformComponent.RectSize = Vector2(self.ResultRowBarWidth * ratio, self.ResultRowBarHeight)
+		fill.SpriteGUIRendererComponent.Color = color
+	end
+
+	@ExecSpace("ClientOnly")
+	method Entity BuildResultRow(string name, integer side, integer index, table data, any alive)
+		-- One shared builder for survivor and experience lists: clone, place and fill a row from plain row data.
+		local template = self.result:GetChildByName("RowTemplate")
+		if not isvalid(template) then return nil end
+		local row = template:Clone(name)
+		-- Clone can yield; a superseded list must not leave a stray row behind.
+		if not isvalid(row) then return nil end
+		if alive ~= nil and not alive() then row:Destroy() return nil end
+		-- Cloning enables every authored child, so the effect has to be hidden again explicitly.
+		self:SetEnabled(row:GetChildByName("LevelUpEffect"), false)
+		row.UITransformComponent.anchoredPosition = Vector2(side * self.ResultRowCenterX,
+			self.ResultRowFirstY - (index - 1) * self.ResultRowSpacing)
+		self:SetText(row:GetChildByName("MonsterName", true), data.name)
+		self:SetLabel(row:GetChildByName("Level", true), data.levelText, data.levelColor)
+		self:SetLabel(row:GetChildByName("ProgressText", true), data.progressText, self.ResultAccentColor)
+		self:SetLabel(row:GetChildByName("StatsText", true), data.statsText, data.statsColor)
+		self:SetBar(row, data.ratio, data.barColor)
+		local portrait = row:GetChildByName("Portrait", true)
+		portrait.SpriteGUIRendererComponent.ImageRUID = DataRef("thumbnail://" .. data.ruid)
+		portrait.SpriteGUIRendererComponent.Color = Color.white
+		row:SetEnable(true)
+		return row
+	end
+
+	@ExecSpace("ClientOnly")
+	method table SurvivorRowData(any unit)
+		-- Survivors show their remaining and maximum health on the same bar layout.
+		local ratio = unit.MaxHp > 0 and unit.Hp / unit.MaxHp or 0
+		return { name = unit.MonsterName, ruid = unit.StandAnimationRUID,
+			levelText = "Lv." .. tostring(unit.Level), levelColor = self.ResultAccentColor,
+			ratio = ratio, barColor = self.ResultHealthColor,
+			progressText = "HP " .. tostring(unit.Hp) .. " / " .. tostring(unit.MaxHp),
+			statsText = "", statsColor = self.ResultAccentColor, levelUp = false }
+	end
+
+	@ExecSpace("ClientOnly")
+	method string SignedDelta(integer value)
+		-- Increments are always shown with their sign so a gain reads as "+30".
+		return (value >= 0 and "+" or "") .. tostring(value)
+	end
+
+	@ExecSpace("ClientOnly")
+	method table ExperienceRowData(table entry)
+		-- Every experience-text rule lives here; receipts from older servers simply leave the new fields blank.
+		local row = { name = entry.name, ruid = entry.ruid, levelText = "", levelColor = self.ResultAccentColor,
+			ratio = 0, barColor = self.ResultExperienceColor,
+			progressText = "經驗 +" .. tostring(entry.gained), statsText = "", statsColor = self.ResultAccentColor,
+			levelUp = false }
+		if entry.level == nil then return row end
+		local upgraded = entry.before ~= nil and entry.after ~= nil and entry.after.level > entry.before.level
+		local maxed = entry.required == 0
+		row.levelText = maxed and ("Lv." .. tostring(entry.level) .. " MAX") or ("Lv." .. tostring(entry.level))
+		if maxed then
+			row.ratio = 1
+		elseif entry.required ~= nil and entry.required > 0 then
+			row.ratio = (entry.experience or 0) / entry.required
+			row.progressText = row.progressText .. "（" .. tostring(entry.experience or 0) .. "/" .. tostring(entry.required) .. "）"
+		end
+		if upgraded then
+			row.levelUp = true
+			row.levelText = "LEVEL UP  Lv." .. tostring(entry.before.level) .. " → Lv." .. tostring(entry.after.level)
+			row.levelColor = self.ResultLevelUpColor
+			row.statsColor = self.ResultLevelUpColor
+			row.statsText = "生命 " .. tostring(entry.after.MaxHp) .. " (" .. self:SignedDelta(entry.after.MaxHp - entry.before.MaxHp) .. ")"
+				.. "  傷害 " .. tostring(entry.after.AttackDamageMin) .. "～" .. tostring(entry.after.AttackDamageMax)
+				.. " (" .. self:SignedDelta(entry.after.AttackDamageMin - entry.before.AttackDamageMin) .. "～"
+				.. self:SignedDelta(entry.after.AttackDamageMax - entry.before.AttackDamageMax) .. ")"
+		elseif entry.stats ~= nil then
+			row.statsText = "生命 " .. tostring(entry.stats.MaxHp)
+				.. "  傷害 " .. tostring(entry.stats.AttackDamageMin) .. "～" .. tostring(entry.stats.AttackDamageMax)
+		end
+		return row
+	end
+
+	@ExecSpace("ClientOnly")
 	method void ClearResultCards()
 		-- Release result-only clones on leaving a result, changing sessions or ending Play.
 		for _, card in ipairs(self._T.resultCards or {}) do
@@ -175,25 +283,16 @@ script BattleUIController extends Logic
 		local parts = {self.OwnResult, ownFaction}
 		for _, unit in ipairs(units) do
 			table.insert(parts, table.concat({tostring(unit.DeploymentOrder), unit.MonsterId, unit.MonsterName,
-				tostring(unit.Hp), tostring(unit.MaxHp), unit.StandAnimationRUID}, "|"))
+				tostring(unit.Level), tostring(unit.Hp), tostring(unit.MaxHp), unit.StandAnimationRUID}, "|"))
 		end
 		local key = table.concat(parts, "\n")
 		if key == self._T.resultCardsKey then return end
-		local template = self.result:GetChildByName("CardTemplate", false)
-		if not isvalid(template) then return end
+		if not isvalid(self.result:GetChildByName("RowTemplate", false)) then return end
 		self:ClearResultCards()
 		for index, unit in ipairs(units) do
-			local card = template:Clone("Survivor_" .. tostring(index))
-			self:SetEnabled(card:GetChildByName("LevelUpEffect"), false)
-			card.UITransformComponent.anchoredPosition = Vector2(side * 620 + ((index - 1) % 3 - 1) * 165,
-				210 - math.floor((index - 1) / 3) * 240)
-			self:SetText(card:GetChildByName("MonsterName", true), unit.MonsterName)
-			self:SetText(card:GetChildByName("Identity", true), tostring(unit.Hp) .. " / " .. tostring(unit.MaxHp))
-			local portrait = card:GetChildByName("Portrait", true)
-			portrait.SpriteGUIRendererComponent.ImageRUID = DataRef("thumbnail://" .. unit.StandAnimationRUID)
-			portrait.SpriteGUIRendererComponent.Color = Color.white
-			card:SetEnable(true)
-			table.insert(self._T.resultCards, card)
+			if index > self.ResultRowMax then break end
+			local row = self:BuildResultRow("Survivor_" .. tostring(index), side, index, self:SurvivorRowData(unit), nil)
+			if isvalid(row) then table.insert(self._T.resultCards, row) end
 		end
 		self._T.resultCardsKey = key
 		log("[VRF][ResultCards] result=" .. self.OwnResult .. " side=" .. tostring(side) .. " count=" .. tostring(#units))
@@ -241,8 +340,6 @@ script BattleUIController extends Logic
 			self:SetEnabled(image, false)
 			frames[index] = image
 		end
-		self:SetEnabled(card:GetChildByName("Progression"), false)
-		self:SetEnabled(card:GetChildByName("Identity"), false)
 		self._T.levelUpEffects[card.Id] = {card = card, effect = template, container = effect, motion = motion, frames = frames}
 		if self._T.levelUpTimer == nil then
 			self._T.levelUpTimer = _TimerService:SetTimerRepeat(function() self:UpdateCardLevelUps() end, 1 / 60)
@@ -252,7 +349,7 @@ script BattleUIController extends Logic
 
 	@ExecSpace("ClientOnly")
 	method void UpdateCardLevelUps()
-		-- Play once, then reveal the confirmed stat changes without replaying on UI refresh.
+		-- Play once over the portrait; row text and image stay visible and the effect never replays on UI refresh.
 		for id, animation in pairs(self._T.levelUpEffects) do
 			if not isvalid(animation.card) then
 				self._T.levelUpEffects[id] = nil
@@ -272,8 +369,6 @@ script BattleUIController extends Logic
 				if isvalid(animation.card) then
 					self:SetEnabled(animation.container, false)
 					self:SetEnabled(animation.effect, false)
-					self:SetEnabled(animation.card:GetChildByName("Progression"), true)
-					self:SetEnabled(animation.card:GetChildByName("Identity"), true)
 					log("[VRF][CardLevelUp] END card=" .. animation.card.Name)
 				end
 				self._T.levelUpEffects[id] = nil
@@ -298,7 +393,7 @@ script BattleUIController extends Logic
 
 	@ExecSpace("ClientOnly")
 	method void RenderExperienceResult(BattleSession session)
-		-- Reuse the result caption and card artwork; never preview an unconfirmed upgrade.
+		-- Reuse the result caption and row builder; never preview an unconfirmed upgrade.
 		local caption = self.result:GetChildByName("Window"):GetChildByName("Caption")
 		if self.OwnResult == "" or not session.RequireMatchedFormations then
 			self:ClearExperienceCards()
@@ -314,36 +409,19 @@ script BattleUIController extends Logic
 		self:ClearExperienceCards()
 		-- Clone can yield across UI updates; claim the receipt before building any cards.
 		self._T.experienceReceipt = receipt
-		local template = self.result:GetChildByName("CardTemplate")
+		if not isvalid(self.result:GetChildByName("RowTemplate")) then return end
 		local side = self.OwnResult == "WIN" and 1 or -1
 		local levelUps = {}
+		local stillCurrent = function() return self._T.experienceReceipt == receipt end
 		for index, entry in ipairs(receipt.monsters) do
-			local card = template:Clone("Experience_" .. tostring(index))
-			if self._T.experienceReceipt ~= receipt then card:Destroy()return end
-			self:SetEnabled(card:GetChildByName("LevelUpEffect"), false)
-			card.UITransformComponent.anchoredPosition = Vector2(side * 620 + ((index - 1) % 3 - 1) * 165,
-				210 - math.floor((index - 1) / 3) * 240)
-			self:SetText(card:GetChildByName("MonsterName"), entry.name)
-			self:SetText(card:GetChildByName("Identity"), "經驗 +" .. tostring(entry.gained))
-			local upgraded = entry.before ~= nil and entry.after ~= nil
-			self:SetEnabled(card:GetChildByName("PortraitViewport"), not upgraded)
-			local detail = card:GetChildByName("Progression")
-			self:SetEnabled(detail, upgraded)
-			if upgraded then
-				self:SetText(detail, "Lv." .. tostring(entry.before.level) .. " → Lv." .. tostring(entry.after.level)
-					.. "\n生命 " .. tostring(entry.before.MaxHp) .. " → " .. tostring(entry.after.MaxHp)
-					.. "\n傷害 " .. tostring(entry.before.AttackDamageMin) .. "～" .. tostring(entry.before.AttackDamageMax)
-					.. "\n→ " .. tostring(entry.after.AttackDamageMin) .. "～" .. tostring(entry.after.AttackDamageMax))
-			else
-				local portrait = card:GetChildByName("Portrait", true)
-				portrait.SpriteGUIRendererComponent.ImageRUID = DataRef("thumbnail://" .. entry.ruid)
-				portrait.SpriteGUIRendererComponent.Color = Color.white
-			end
-			card:SetEnable(true)
-			table.insert(self._T.experienceCards, card)
-			if upgraded and entry.after.level > entry.before.level then table.insert(levelUps, card) end
+			if index > self.ResultRowMax then break end
+			local data = self:ExperienceRowData(entry)
+			local row = self:BuildResultRow("Experience_" .. tostring(index), side, index, data, stillCurrent)
+			if not isvalid(row) then return end
+			table.insert(self._T.experienceCards, row)
+			if data.levelUp then table.insert(levelUps, row) end
 		end
-		for _, card in ipairs(levelUps) do self:PlayCardLevelUp(card) end
+		for _, row in ipairs(levelUps) do self:PlayCardLevelUp(row) end
 		log("[VRF][ResultExperience] displayed count=" .. tostring(#receipt.monsters))
 	end
 

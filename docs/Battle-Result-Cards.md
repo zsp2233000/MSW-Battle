@@ -41,7 +41,7 @@
 - `BattleUIController` 是現有結果畫面的唯一控制者；配對戰透過 `ResultForProfile` 取得觀看者自己的結果，單人 POC 使用 `session.Result`。
 - 單位具有同步的 `MonsterId`、`MonsterName`、`Hp` 與 `MaxHp`；session 的單位紀錄同時保留死亡與存活單位，新增卡片時須按存活狀態過濾，並保留每隻實例的身分。
 - `UnitSnapshots` 是診斷字串，含死亡單位且缺最大 HP，不直接作為卡片資料契約。
-- 結果畫面的 `CardTemplate` 沿用編輯介面的卡片外觀，移除按鈕及選取元件；名稱與 HP 以純文字顯示。
+- #70 起，結果畫面的卡片改為清單：`BattleResultPanel/RowTemplate`（580×84，無按鈕、圖片不攔截點擊）。每列有圖像、名稱、怪物等級、進度條、進度文字與數值文字；存活清單與經驗清單共用 `BattleUIController:BuildResultRow`。
 - 單位新增同步的 `DeploymentOrder`，由 session 在加入 roster 時指定，供卡片保留出戰順序。
 
 ## 2026-11-09 驗證

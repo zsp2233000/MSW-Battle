@@ -65,7 +65,7 @@ script MonsterLevelStorage extends Logic
     method table Settle(string profile, string matchId, table deaths)
         -- Capture immutable input and return a retained result for the future result presentation.
         local operation = { profile = profile, matchId = matchId, key = self.StorageKey,
-            deaths = {}, monsters = {}, status = "PENDING", attempts = 0, token = 0 }
+            deaths = {}, monsters = {}, levels = {}, status = "PENDING", attempts = 0, token = 0 }
         if profile == "" or matchId == "" then operation.status = "FAILED" return operation end
         for id, count in pairs(deaths) do
             if type(id) ~= "string" or id == "" or type(count) ~= "number"
@@ -126,6 +126,7 @@ script MonsterLevelStorage extends Logic
             for _, settled in ipairs(document.settled) do
                 if settled == operation.matchId then
                     operation.duplicate = true
+                    operation.levels = document.monsters
                     self:Finish(operation, "SAVED")
                     return
                 end
@@ -142,6 +143,8 @@ script MonsterLevelStorage extends Logic
             local encoded = self:Encode(document)
             if #encoded > 4000 then self:Finish(operation, "FAILED") return end
             operation.monsters = changes
+            -- Keep the whole document's progress so monsters that did not die still report their stored level.
+            operation.levels = document.monsters
             _FormationStorage:Write(operation.profile, operation.key, raw, encoded, function(writeCode)
                 if operation.status ~= "PENDING" or operation.token ~= token then return end
                 if writeCode == 0 then self:Finish(operation, "SAVED") else self:Retry(operation) end

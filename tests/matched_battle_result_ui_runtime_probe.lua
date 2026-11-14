@@ -2,6 +2,7 @@
 -- player-visible HUD and result through the formal UI, waits for the natural result, optionally for a
 -- server-side identity swap, then clicks return. The context ends on return, so log before dispatch.
 local MODE = "FLOW" -- EXPERIENCE observes the isolated #68 fixture and leaves return to its owner.
+local SEEDED_SHOOTER = true -- the #70 fixture seeds the real player's shooter at Lv5 with 2 experience (false for MAX).
 local ok, detail = pcall(function()
     local player = _UserService.LocalPlayer
     assert(player.CurrentMapName == "matchprobe", "client is in the match")
@@ -52,17 +53,43 @@ local ok, detail = pcall(function()
             assert(want and not seen[entry.monsterId] and entry.gained == want.deaths, "own deaths alone grant experience")
             seen[entry.monsterId] = true
             local card = ui.result:GetChildByName("Experience_" .. index)
-            assert(text(card:GetChildByName("MonsterName")) == want.name, "own monster name")
-            assert(text(card:GetChildByName("Identity")) == "經驗 +" .. entry.gained, "confirmed experience displayed")
+            assert(text(card:GetChildByName("MonsterName", true)) == want.name, "own monster name")
+            -- #70: the receipt carries the settled level, in-level experience, requirement and stats.
+            assert(entry.level and entry.experience and entry.required and entry.stats, "receipt carries progress fields")
+            local portrait = card:GetChildByName("Portrait", true)
+            assert(portrait.EnabledInHierarchy and portrait.SpriteGUIRendererComponent.ImageRUID.DataId == "thumbnail://" .. entry.ruid,
+                "portrait stays visible, upgraded or not")
+            local fill = card:GetChildByName("BarFill", true)
+            local progress = "經驗 +" .. entry.gained
+            if entry.required > 0 then progress = progress .. "（" .. entry.experience .. "/" .. entry.required .. "）" end
+            assert(text(card:GetChildByName("ProgressText", true)) == progress, "confirmed experience and progress displayed")
+            local ratio = entry.required == 0 and 1 or entry.experience / entry.required
+            assert(ratio == 0 and not fill.Enable or (fill.Enable and math.abs(fill.UITransformComponent.RectSize.x - 480 * ratio) < 0.5),
+                "progress bar width follows the experience ratio")
             if entry.before then
                 upgrades = upgrades + 1
-                local detail = card:GetChildByName("Progression")
-                local wanted = "Lv." .. entry.before.level .. " → Lv." .. entry.after.level
-                    .. "\n生命 " .. entry.before.MaxHp .. " → " .. entry.after.MaxHp
-                    .. "\n傷害 " .. entry.before.AttackDamageMin .. "～" .. entry.before.AttackDamageMax
-                    .. "\n→ " .. entry.after.AttackDamageMin .. "～" .. entry.after.AttackDamageMax
-                assert(detail.EnabledInHierarchy and text(detail) == wanted, "both levels, maximum HP and damage endpoints")
-                assert(detail.TextGUIRendererComponent:GetPreferredHeight(wanted, 117) <= 126, "upgrade details fit the existing card")
+                local delta = function(a, b) return (a - b >= 0 and "+" or "") .. (a - b) end
+                assert(text(card:GetChildByName("Level", true)) == "LEVEL UP  Lv." .. entry.before.level .. " → Lv." .. entry.after.level, "both levels")
+                assert(text(card:GetChildByName("StatsText", true)) == "生命 " .. entry.after.MaxHp .. " (" .. delta(entry.after.MaxHp, entry.before.MaxHp) .. ")"
+                    .. "  傷害 " .. entry.after.AttackDamageMin .. "～" .. entry.after.AttackDamageMax
+                    .. " (" .. delta(entry.after.AttackDamageMin, entry.before.AttackDamageMin) .. "～"
+                    .. delta(entry.after.AttackDamageMax, entry.before.AttackDamageMax) .. ")", "maximum HP and damage with increments")
+            elseif entry.required == 0 then
+                assert(text(card:GetChildByName("Level", true)) == "Lv.30 MAX" and fill.Enable, "MAX row")
+                assert(text(card:GetChildByName("ProgressText", true)) == "經驗 +0", "MAX shows no requirement")
+            else
+                assert(text(card:GetChildByName("Level", true)) == "Lv." .. entry.level, "current monster level")
+                assert(text(card:GetChildByName("StatsText", true)) == "生命 " .. entry.stats.MaxHp
+                    .. "  傷害 " .. entry.stats.AttackDamageMin .. "～" .. entry.stats.AttackDamageMax, "current stats")
+                -- Literal Lv1 stats for monsters that neither died nor were seeded; the seeded shooter is Lv5 with 2 progress.
+                if entry.gained == 0 and entry.monsterId == "monster_warrior" then
+                    assert(entry.level == 1 and text(card:GetChildByName("StatsText", true)) == "生命 220  傷害 20～30", "stored Lv1 warrior")
+                end
+                if entry.gained == 0 and entry.monsterId == "monster_shooter" and SEEDED_SHOOTER then
+                    assert(text(card:GetChildByName("Level", true)) == "Lv.5"
+                        and text(card:GetChildByName("ProgressText", true)) == "經驗 +0（2/5）"
+                        and text(card:GetChildByName("StatsText", true)) == "生命 136  傷害 36～54", "survivor shows stored level and progress")
+                end
             end
         end
         if MODE == "EXPERIENCE_MAX" then
@@ -90,8 +117,10 @@ local ok, detail = pcall(function()
             battle:ReceiveExperienceResult({profile=receipt.profile, matchId=receipt.matchId, status="SAVED",
                 monsters={{monsterId=zero.monsterId,name=zero.name,ruid=zero.ruid,gained=0}}})
             wait(0.1)
-            assert(#cards() == 1 and text(cards()[1]:GetChildByName("Identity")) == "經驗 +0", "survivor earns zero")
-            assert(not cards()[1]:GetChildByName("Progression").Enable, "zero gain has no upgrade")
+            assert(#cards() == 1 and text(cards()[1]:GetChildByName("ProgressText", true)) == "經驗 +0", "survivor earns zero")
+            assert(text(cards()[1]:GetChildByName("Level", true)) == "" and not cards()[1]:GetChildByName("BarFill", true).Enable,
+                "an old-format receipt leaves level, stats and bar blank without an error")
+            assert(cards()[1]:GetChildByName("Portrait", true).EnabledInHierarchy, "old-format rows keep their portrait")
             battle:ReceiveExperienceResult({profile=receipt.profile, matchId="stale-match", status="SAVED", monsters=receipt.monsters})
             wait(0.1)
             assert(#cards() == 1 and battle.ExperienceResult.matchId == receipt.matchId, "stale receipt cannot replace this match's confirmed data")
@@ -102,6 +131,32 @@ local ok, detail = pcall(function()
         wait(0.1)
         assert(ran, failure)
         assert(#cards() == unique, "confirmed cards restored without duplicates")
+        -- The restored receipt rebuilt every row: only upgraded rows play LEVEL UP, once, with text and image still showing.
+        local sawEffect = false
+        for _ = 1, 30 do
+            for _, card in ipairs(cards()) do
+                local level = card:GetChildByName("Level", true)
+                if card:GetChildByName("LevelUpEffect").EnabledInHierarchy then
+                    assert(string.sub(text(level), 1, 8) == "LEVEL UP", "only upgraded rows play the effect")
+                    assert(card:GetChildByName("MonsterName", true).EnabledInHierarchy and level.EnabledInHierarchy
+                        and card:GetChildByName("Portrait", true).EnabledInHierarchy, "row text and image stay visible during the effect")
+                    sawEffect = true
+                end
+            end
+            wait(0.05)
+        end
+        assert(upgrades == 0 or sawEffect, "the upgraded row played the effect over its portrait")
+        wait(1.5)
+        local ids = {}
+        for _, card in ipairs(cards()) do table.insert(ids, card.Id) end
+        battle:ReceiveExperienceResult(receipt)
+        for _ = 1, 20 do
+            for index, card in ipairs(cards()) do
+                assert(card.Id == ids[index] and not card:GetChildByName("LevelUpEffect").EnabledInHierarchy,
+                    "the same result neither rebuilds rows nor replays the effect")
+            end
+            wait(0.05)
+        end
         local marker = MODE == "EXPERIENCE_MAX" and "EXPERIENCE_MAX_PASS" or "EXPERIENCE_PASS"
         log("[VRF][MatchedResultUI] " .. marker .. " own monsters=" .. unique .. "; merged deaths; levels/HP/damage; pending/failure; +0; foreign/stale receipts")
         return
