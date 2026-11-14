@@ -73,7 +73,7 @@ local ok, detail = pcall(function()
                 assert(text(card:GetChildByName("StatsText", true)) == "生命 " .. entry.after.MaxHp .. " (" .. delta(entry.after.MaxHp, entry.before.MaxHp) .. ")"
                     .. "  傷害 " .. entry.after.AttackDamageMin .. "～" .. entry.after.AttackDamageMax
                     .. " (" .. delta(entry.after.AttackDamageMin, entry.before.AttackDamageMin) .. "～"
-                    .. delta(entry.after.AttackDamageMax, entry.before.AttackDamageMax) .. ")", "maximum HP and damage with increments")
+                    .. (entry.after.AttackDamageMax - entry.before.AttackDamageMax) .. ")", "maximum HP and damage with increments")
             elseif entry.required == 0 then
                 assert(text(card:GetChildByName("Level", true)) == "Lv.30 MAX" and fill.Enable, "MAX row")
                 assert(text(card:GetChildByName("ProgressText", true)) == "經驗 +0", "MAX shows no requirement")

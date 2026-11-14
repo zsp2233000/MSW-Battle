@@ -239,7 +239,7 @@ script BattleUIController extends Logic
 			row.statsText = "生命 " .. tostring(entry.after.MaxHp) .. " (" .. self:SignedDelta(entry.after.MaxHp - entry.before.MaxHp) .. ")"
 				.. "  傷害 " .. tostring(entry.after.AttackDamageMin) .. "～" .. tostring(entry.after.AttackDamageMax)
 				.. " (" .. self:SignedDelta(entry.after.AttackDamageMin - entry.before.AttackDamageMin) .. "～"
-				.. self:SignedDelta(entry.after.AttackDamageMax - entry.before.AttackDamageMax) .. ")"
+				.. tostring(entry.after.AttackDamageMax - entry.before.AttackDamageMax) .. ")"
 		elseif entry.stats ~= nil then
 			row.statsText = "生命 " .. tostring(entry.stats.MaxHp)
 				.. "  傷害 " .. tostring(entry.stats.AttackDamageMin) .. "～" .. tostring(entry.stats.AttackDamageMax)
