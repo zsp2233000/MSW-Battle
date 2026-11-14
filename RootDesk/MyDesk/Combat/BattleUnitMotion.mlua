@@ -41,6 +41,10 @@ script BattleUnitMotion extends Component
         local unit = self._T.unit
         local session = self._T.session
         if not isvalid(attacker) or not isvalid(unit) or not unit:IsAlive() then return false end
+        if unit.AttackPoiseActive then
+            log("[VRF][BattleUnitMotion] KNOCKBACK_IMMUNE " .. self.Entity.Name)
+            return false
+        end
         local attackerUnit = attacker:GetComponent("script.BattleUnit")
         local attackerTransform = attacker.TransformComponent
         local defenderTransform = self.Entity.TransformComponent
@@ -281,6 +285,14 @@ script BattleUnitMotion extends Component
         -- Apply the validated knockback step through the kinematic body's collision-aware velocity.
         local unit = self._T.unit
         if unit.IsDead or self._T.knockbackRemaining <= 0 or delta <= 0 then return end
+        if unit.AttackPoiseActive then
+            self._T.knockbackStepX = 0
+            self._T.knockbackStepY = 0
+            self._T.knockbackRemaining = 0
+            unit.KnockbackActive = false
+            log("[VRF][BattleUnitMotion] KNOCKBACK_CANCELLED_FOR_ATTACK " .. self.Entity.Name)
+            return
+        end
         local kinematic = self.Entity:GetComponent("KinematicbodyComponent")
         local transform = self.Entity:GetComponent("TransformComponent")
         if not isvalid(kinematic) or not isvalid(transform) then return end

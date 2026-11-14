@@ -1,391 +1,433 @@
 @Logic
 script BattleUIController extends Logic
 
-    property Entity root = "00bb16a7-f6b2-460b-9f01-bcb5d8a11965"
-    property Entity hud = "5861735e-bf7d-4f58-b4b2-a2d85393af74"
-    property Entity deployment = "7d847e11-5404-42fb-8650-92f19590dbc1"
-    property Entity result = "0ef318f3-194b-4a52-9b1d-62fa14756a5c"
-    property Entity phaseText = "0520e489-e0d2-46a9-9aa7-f2da9cb9943a"
-    property Entity phaseHint = "899225eb-db2f-4d8c-8606-e76f503ae893"
-    property Entity playerCount = "e0503105-2f34-4b5c-9277-4479fe444482"
-    property Entity enemyCount = "74377a90-4118-4205-8354-1545a024002f"
-    property Entity configErrorGroup = "b54bf636-0511-441c-9947-d1a0f3c3fe34"
-    property Entity resultWin = "a9f0b63c-5b21-4fae-8c6c-b3ba51c02dfe"
-    property Entity resultLose = "2f8dc490-baa5-4c2c-907d-9559612ea990"
-    property Entity resultDraw = "36bfb65f-5d84-4014-b644-73c4ca3e8f2b"
-    property Entity resultPlayerCount = "506bb73b-00a6-4313-ba14-ba1d3189f3a9"
-    property Entity resultEnemyCount = "585aa74a-1ef0-4897-9885-4b996eb49840"
-    property string OwnResult = ""
-    property number ResultDisplayDelaySeconds = 2
-    -- shortcut: confirmed personalityLevelUP frames 3–8; extend when the remaining frame RUIDs are available.
-    property table LevelUpFrames = {
-        { "f21addcaf0054647a4dd392d08edc743", 90, 108, 38, -27 },
-        { "62b80ffee5dd4453b1c395c05825a3f8", 84, 115, 35, -19 },
-        { "91365655e5734f8e81d12af6fea355cb", 84, 117, 36, -19 },
-        { "802075a9e4e64b0dbb5e637d5e2b5d4d", 85, 119, 38, -19 },
-        { "9211a66dd12a46f5b5247bc89b7fd88a", 78, 86, 32, -19 },
-        { "3977759a260e48b699d22643d7bd9773", 78, 80, 32, -25 }
-    }
+	property Entity root = "00bb16a7-f6b2-460b-9f01-bcb5d8a11965"
+	property Entity hud = "5861735e-bf7d-4f58-b4b2-a2d85393af74"
+	property Entity deployment = "7d847e11-5404-42fb-8650-92f19590dbc1"
+	property Entity result = "0ef318f3-194b-4a52-9b1d-62fa14756a5c"
+	property Entity phaseText = "0520e489-e0d2-46a9-9aa7-f2da9cb9943a"
+	property Entity phaseHint = "899225eb-db2f-4d8c-8606-e76f503ae893"
+	property Entity playerCount = "e0503105-2f34-4b5c-9277-4479fe444482"
+	property Entity enemyCount = "74377a90-4118-4205-8354-1545a024002f"
+	property Entity configErrorGroup = "b54bf636-0511-441c-9947-d1a0f3c3fe34"
+	property Entity resultWin = "a9f0b63c-5b21-4fae-8c6c-b3ba51c02dfe"
+	property Entity resultLose = "2f8dc490-baa5-4c2c-907d-9559612ea990"
+	property Entity resultDraw = "36bfb65f-5d84-4014-b644-73c4ca3e8f2b"
+	property Entity resultPlayerCount = "506bb73b-00a6-4313-ba14-ba1d3189f3a9"
+	property Entity resultEnemyCount = "585aa74a-1ef0-4897-9885-4b996eb49840"
+	property string OwnResult = ""
+	property number ResultDisplayDelaySeconds = 2
+	property table LevelUpFrames = {
+		{"2ceec4e669494d0db387e37dd57e5264", 8, 7, -2, -93},
+		{"8aaf42c3fcab4069807a576223618ba2", 12, 12, 0, -91},
+		{"c41241479866462799cbe7087e9b3ded", 24, 25, 6, -84},
+		{"f21addcaf0054647a4dd392d08edc743", 90, 108, 38, -27},
+		{"62b80ffee5dd4453b1c395c05825a3f8", 84, 115, 35, -19},
+		{"91365655e5734f8e81d12af6fea355cb", 84, 117, 36, -19},
+		{"802075a9e4e64b0dbb5e637d5e2b5d4d", 85, 119, 38, -19},
+		{"9211a66dd12a46f5b5247bc89b7fd88a", 78, 86, 32, -19},
+		{"3977759a260e48b699d22643d7bd9773", 78, 80, 32, -25}
+	}
 
-    @ExecSpace("ClientOnly")
-    method void OnBeginPlay()
-        -- One client owner presents whichever battle map the local player currently occupies.
-        self._T.hudKey = ""
-        self._T.healthGeometry = {}
-        self._T.levelUpEffects = {}
-        local frames = {}
-        for _, frame in ipairs(self.LevelUpFrames) do table.insert(frames, frame[1]) end
-        _ResourceService:PreloadAsync(frames, function() end)
-        self:SetEnabled(self.root, false)
-        self:SetEnabled(self.configErrorGroup, false)
-        log("[VRF][BattlePresentation] UI controller ready")
-    end
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		-- One client owner presents whichever battle map the local player currently occupies.
+		self._T.hudKey = ""
+		self._T.healthGeometry = {}
+		self._T.levelUpEffects = {}
+		local frames = {}
+		for _, frame in ipairs(self.LevelUpFrames) do table.insert(frames, frame[1]) end
+		_ResourceService:PreloadAsync(frames, function() end)
+		self:SetEnabled(self.root, false)
+		self:SetEnabled(self.configErrorGroup, false)
+		log("[VRF][BattlePresentation] UI controller ready")
+	end
 
-    @ExecSpace("ClientOnly")
-    method any GetHealthBarGeometry(string ruid)
-        -- Load each standing resource once, and retry incomplete resources without blocking each frame.
-        if ruid == nil or ruid == "" then return nil end
-        local cache = self._T.healthGeometry
-        if cache == nil then return nil end
-        local entry = cache[ruid]
-        if entry == nil then entry = {}; cache[ruid] = entry end
-        if entry.geometry ~= nil then return entry.geometry end
-        local now = _UtilLogic.ElapsedSeconds
-        if entry.pending and now - entry.attempt < 5 then return nil end
-        if not entry.pending and entry.attempt ~= nil and now - entry.attempt < 1 then return nil end
-        entry.pending = true
-        entry.attempt = now
-        _ResourceService:PreloadAsync({ ruid }, function()
-            local ok, geometry = pcall(function()
-                local maximum = nil
-                local left = nil
-                local right = nil
-                local function include(sprite)
-                    if isvalid(sprite) and sprite.IsLoadComplete ~= true then
-                        sprite = _ResourceService:LoadSpriteAndWait(sprite.RUID)
-                    end
-                    if not isvalid(sprite) or sprite.IsLoadComplete ~= true or sprite.Width <= 0 or sprite.Height <= 0 or sprite.PixelPerUnit <= 0 then return false end
-                    local edge = (sprite.Height - sprite.PivotPixel.y) / sprite.PixelPerUnit
-                    if maximum == nil or edge > maximum then maximum = edge end
-                    local frameLeft = -sprite.PivotPixel.x / sprite.PixelPerUnit
-                    local frameRight = (sprite.Width - sprite.PivotPixel.x) / sprite.PixelPerUnit
-                    if left == nil or frameLeft < left then left = frameLeft end
-                    if right == nil or frameRight > right then right = frameRight end
-                    return true
-                end
-                local resourceType = _ResourceService:GetTypeAndWait(ruid)
-                if resourceType == ResourceType.AnimationClip then
-                    local clip = _ResourceService:LoadAnimationClipAndWait(ruid)
-                    if not isvalid(clip) or clip.IsLoadComplete ~= true then return nil end
-                    for _, frame in ipairs(clip.Frames:ToTable()) do
-                        if not include(frame.FrameSprite) then return nil end
-                    end
-                elseif resourceType == ResourceType.Sprite then
-                    if not include(_ResourceService:LoadSpriteAndWait(ruid)) then return nil end
-                end
-                if maximum == nil then return nil end
-                return { top = maximum, centerX = (left + right) * 0.5 }
-            end)
-            entry.pending = false
-            if ok and geometry ~= nil then
-                entry.geometry = geometry
-                log("[VRF][BattleHPBar] GEOMETRY ruid=" .. ruid .. " top=" .. tostring(geometry.top) .. " centerX=" .. tostring(geometry.centerX))
-            elseif not entry.loggedFailure then
-                entry.loggedFailure = true
-                log("[VRF][BattleHPBar] GEOMETRY_WAIT ruid=" .. ruid .. " detail=" .. tostring(geometry))
-            end
-        end)
-        return nil
-    end
+	@ExecSpace("ClientOnly")
+	method any GetHealthBarGeometry(string ruid)
+		-- Load each standing resource once, and retry incomplete resources without blocking each frame.
+		if ruid == nil or ruid == "" then return nil end
+		local cache = self._T.healthGeometry
+		if cache == nil then return nil end
+		local entry = cache[ruid]
+		if entry == nil then entry = {};cache[ruid] = entry end
+		if entry.geometry ~= nil then return entry.geometry end
+		local now = _UtilLogic.ElapsedSeconds
+		if entry.pending and now - entry.attempt < 5 then return nil end
+		if not entry.pending and entry.attempt ~= nil and now - entry.attempt < 1 then return nil end
+		entry.pending = true
+		entry.attempt = now
+		_ResourceService:PreloadAsync({ruid}, function()
+			local ok, geometry = pcall(function()
+				local maximum = nil
+				local left = nil
+				local right = nil
+				local function include(sprite)
+					if isvalid(sprite) and sprite.IsLoadComplete ~= true then
+						sprite = _ResourceService:LoadSpriteAndWait(sprite.RUID)
+					end
+					if not isvalid(sprite) or sprite.IsLoadComplete ~= true or sprite.Width <= 0 or sprite.Height <= 0 or sprite.PixelPerUnit <= 0 then return false end
+					local edge = (sprite.Height - sprite.PivotPixel.y) / sprite.PixelPerUnit
+					if maximum == nil or edge > maximum then maximum = edge end
+					local frameLeft = -sprite.PivotPixel.x / sprite.PixelPerUnit
+					local frameRight = (sprite.Width - sprite.PivotPixel.x) / sprite.PixelPerUnit
+					if left == nil or frameLeft < left then left = frameLeft end
+					if right == nil or frameRight > right then right = frameRight end
+					return true
+				end
+				local resourceType = _ResourceService:GetTypeAndWait(ruid)
+				if resourceType == ResourceType.AnimationClip then
+					local clip = _ResourceService:LoadAnimationClipAndWait(ruid)
+					if not isvalid(clip) or clip.IsLoadComplete ~= true then return nil end
+					for _, frame in ipairs(clip.Frames:ToTable()) do
+						if not include(frame.FrameSprite) then return nil end
+					end
+				elseif resourceType == ResourceType.Sprite then
+					if not include(_ResourceService:LoadSpriteAndWait(ruid)) then return nil end
+				end
+				if maximum == nil then return nil end
+				return {top = maximum, centerX = (left + right) * 0.5}
+			end)
+			entry.pending = false
+			if ok and geometry ~= nil then
+				entry.geometry = geometry
+				log("[VRF][BattleHPBar] GEOMETRY ruid=" .. ruid .. " top=" .. tostring(geometry.top) .. " centerX=" .. tostring(geometry.centerX))
+			elseif not entry.loggedFailure then
+				entry.loggedFailure = true
+				log("[VRF][BattleHPBar] GEOMETRY_WAIT ruid=" .. ruid .. " detail=" .. tostring(geometry))
+			end
+		end)
+		return nil
+	end
 
-    @ExecSpace("ClientOnly")
-    method void SetEnabled(Entity entity, boolean enabled)
-        -- Avoid redundant hierarchy changes while owning all shared panel visibility.
-        if isvalid(entity) and entity.Enable ~= enabled then entity:SetEnable(enabled) end
-    end
+	@ExecSpace("ClientOnly")
+	method void SetEnabled(Entity entity, boolean enabled)
+		-- Avoid redundant hierarchy changes while owning all shared panel visibility.
+		if isvalid(entity) and entity.Enable ~= enabled then entity:SetEnable(enabled) end
+	end
 
-    @ExecSpace("ClientOnly")
-    method void SetText(Entity entity, string value)
-        -- Update authored labels only when the visible value changes.
-        if not isvalid(entity) then return end
-        local label = entity.TextGUIRendererComponent
-        if isvalid(label) and label.Text ~= value then label.Text = value end
-    end
+	@ExecSpace("ClientOnly")
+	method void SetText(Entity entity, string value)
+		-- Update authored labels only when the visible value changes.
+		if not isvalid(entity) then return end
+		local label = entity.TextGUIRendererComponent
+		if isvalid(label) and label.Text ~= value then label.Text = value end
+	end
 
-    @ExecSpace("ClientOnly")
-    method void SetResult(string result)
-        -- Keep exactly the local viewer's result entity enabled.
-        if result == "" then
-            self:ClearResultCards()
-            self:ClearExperienceCards()
-            self._T.pendingResult = nil
-            self._T.resultDisplayAt = nil
-        else
-            if self._T.pendingResult ~= result then
-                self._T.pendingResult = result
-                self._T.resultDisplayAt = _UtilLogic.ElapsedSeconds + self.ResultDisplayDelaySeconds
-                log("[VRF][BattleUI] result delay started=" .. result)
-            end
-            if _UtilLogic.ElapsedSeconds < self._T.resultDisplayAt then result = "" end
-        end
-        if self.OwnResult == result then return end
-        self.OwnResult = result
-        self:SetEnabled(self.resultWin, result == "WIN")
-        self:SetEnabled(self.resultLose, result == "LOSE")
-        self:SetEnabled(self.resultDraw, result == "DRAW")
-        self:SetEnabled(self.result, result ~= "")
-        if result ~= "" then log("[VRF][BattleUI] result=" .. result) end
-    end
+	@ExecSpace("ClientOnly")
+	method void SetResult(string result)
+		-- Keep exactly the local viewer's result entity enabled.
+		if result == "" then
+			self:ClearResultCards()
+			self:ClearExperienceCards()
+			self._T.pendingResult = nil
+			self._T.resultDisplayAt = nil
+		else
+			if self._T.pendingResult ~= result then
+				self._T.pendingResult = result
+				self._T.resultDisplayAt = _UtilLogic.ElapsedSeconds + self.ResultDisplayDelaySeconds
+				log("[VRF][BattleUI] result delay started=" .. result)
+			end
+			if _UtilLogic.ElapsedSeconds < self._T.resultDisplayAt then result = "" end
+		end
+		if self.OwnResult == result then return end
+		self.OwnResult = result
+		self:SetEnabled(self.resultWin, result == "WIN")
+		self:SetEnabled(self.resultLose, result == "LOSE")
+		self:SetEnabled(self.resultDraw, result == "DRAW")
+		self:SetEnabled(self.result, result ~= "")
+		if result ~= "" then log("[VRF][BattleUI] result=" .. result) end
+	end
 
-    @ExecSpace("ClientOnly")
-    method void ClearResultCards()
-        -- Release result-only clones on leaving a result, changing sessions or ending Play.
-        for _, card in ipairs(self._T.resultCards or {}) do
-            if isvalid(card) then card:Destroy() end
-        end
-        self._T.resultCards = {}
-        self._T.resultCardsKey = ""
-    end
+	@ExecSpace("ClientOnly")
+	method void ClearResultCards()
+		-- Release result-only clones on leaving a result, changing sessions or ending Play.
+		for _, card in ipairs(self._T.resultCards or {}) do
+			if isvalid(card) then card:Destroy() end
+		end
+		self._T.resultCards = {}
+		self._T.resultCardsKey = ""
+	end
 
-    @ExecSpace("ClientOnly")
-    method void RenderResultCards(Entity map, string ownFaction, integer expected)
-        -- Read synchronized survivors rather than parsing the diagnostic snapshot string.
-        if self.OwnResult == "" or self.OwnResult == "DRAW" then
-            self:ClearResultCards()
-            return
-        end
-        local faction = ownFaction
-        local side = -1
-        if self.OwnResult == "LOSE" then
-            faction = ownFaction == "PLAYER" and "ENEMY" or "PLAYER"
-            side = 1
-        end
-        local units = {}
-        for _, unit in ipairs(map:GetChildComponentsByTypeName("script.BattleUnit", false)) do
-            if unit.Faction == faction and not unit.IsDead and unit.Hp > 0 then
-                if unit.DeploymentOrder <= 0 or unit.MaxHp <= 0 or unit.StandAnimationRUID == "" then return end
-                table.insert(units, unit)
-            end
-        end
-        -- Phase and unit properties may arrive on different frames; retry until the roster agrees.
-        if #units ~= expected then return end
-        table.sort(units, function(a, b) return a.DeploymentOrder < b.DeploymentOrder end)
-        local parts = { self.OwnResult, ownFaction }
-        for _, unit in ipairs(units) do
-            table.insert(parts, table.concat({ tostring(unit.DeploymentOrder), unit.MonsterId, unit.MonsterName,
-                tostring(unit.Hp), tostring(unit.MaxHp), unit.StandAnimationRUID }, "|"))
-        end
-        local key = table.concat(parts, "\n")
-        if key == self._T.resultCardsKey then return end
-        local template = self.result:GetChildByName("CardTemplate", false)
-        if not isvalid(template) then return end
-        self:ClearResultCards()
-        for index, unit in ipairs(units) do
-            local card = template:Clone("Survivor_" .. tostring(index))
-            self:SetEnabled(card:GetChildByName("LevelUpEffect"), false)
-            card.UITransformComponent.anchoredPosition = Vector2(side * 620 + ((index - 1) % 3 - 1) * 165,
-                210 - math.floor((index - 1) / 3) * 240)
-            self:SetText(card:GetChildByName("MonsterName", true), unit.MonsterName)
-            self:SetText(card:GetChildByName("Identity", true), tostring(unit.Hp) .. " / " .. tostring(unit.MaxHp))
-            local portrait = card:GetChildByName("Portrait", true)
-            portrait.SpriteGUIRendererComponent.ImageRUID = DataRef("thumbnail://" .. unit.StandAnimationRUID)
-            portrait.SpriteGUIRendererComponent.Color = Color.white
-            card:SetEnable(true)
-            table.insert(self._T.resultCards, card)
-        end
-        self._T.resultCardsKey = key
-        log("[VRF][ResultCards] result=" .. self.OwnResult .. " side=" .. tostring(side) .. " count=" .. tostring(#units))
-    end
+	@ExecSpace("ClientOnly")
+	method void RenderResultCards(Entity map, string ownFaction, integer expected)
+		-- Read synchronized survivors rather than parsing the diagnostic snapshot string.
+		if self.OwnResult == "" or self.OwnResult == "DRAW" then
+			self:ClearResultCards()
+			return
+		end
+		local faction = ownFaction
+		local side = -1
+		if self.OwnResult == "LOSE" then
+			faction = ownFaction == "PLAYER" and "ENEMY" or "PLAYER"
+			side = 1
+		end
+		local units = {}
+		for _, unit in ipairs(map:GetChildComponentsByTypeName("script.BattleUnit", false)) do
+			if unit.Faction == faction and not unit.IsDead and unit.Hp > 0 then
+				if unit.DeploymentOrder <= 0 or unit.MaxHp <= 0 or unit.StandAnimationRUID == "" then return end
+				table.insert(units, unit)
+			end
+		end
+		-- Phase and unit properties may arrive on different frames; retry until the roster agrees.
+		if #units ~= expected then return end
+		table.sort(units, function(a, b) return a.DeploymentOrder < b.DeploymentOrder end)
+		local parts = {self.OwnResult, ownFaction}
+		for _, unit in ipairs(units) do
+			table.insert(parts, table.concat({tostring(unit.DeploymentOrder), unit.MonsterId, unit.MonsterName,
+				tostring(unit.Hp), tostring(unit.MaxHp), unit.StandAnimationRUID}, "|"))
+		end
+		local key = table.concat(parts, "\n")
+		if key == self._T.resultCardsKey then return end
+		local template = self.result:GetChildByName("CardTemplate", false)
+		if not isvalid(template) then return end
+		self:ClearResultCards()
+		for index, unit in ipairs(units) do
+			local card = template:Clone("Survivor_" .. tostring(index))
+			self:SetEnabled(card:GetChildByName("LevelUpEffect"), false)
+			card.UITransformComponent.anchoredPosition = Vector2(side * 620 + ((index - 1) % 3 - 1) * 165,
+				210 - math.floor((index - 1) / 3) * 240)
+			self:SetText(card:GetChildByName("MonsterName", true), unit.MonsterName)
+			self:SetText(card:GetChildByName("Identity", true), tostring(unit.Hp) .. " / " .. tostring(unit.MaxHp))
+			local portrait = card:GetChildByName("Portrait", true)
+			portrait.SpriteGUIRendererComponent.ImageRUID = DataRef("thumbnail://" .. unit.StandAnimationRUID)
+			portrait.SpriteGUIRendererComponent.Color = Color.white
+			card:SetEnable(true)
+			table.insert(self._T.resultCards, card)
+		end
+		self._T.resultCardsKey = key
+		log("[VRF][ResultCards] result=" .. self.OwnResult .. " side=" .. tostring(side) .. " count=" .. tostring(#units))
+	end
 
-    @ExecSpace("ClientOnly")
-    method void ClearExperienceCards()
-        -- Own these clones separately so survivor refreshes never erase confirmed experience.
-        if self._T.levelUpTimer ~= nil then _TimerService:ClearTimer(self._T.levelUpTimer) end
-        self._T.levelUpTimer = nil
-        self._T.levelUpEffects = {}
-        for _, card in ipairs(self._T.experienceCards or {}) do
-            if isvalid(card) then card:Destroy() end
-        end
-        self._T.experienceCards = {}
-        self._T.experienceReceipt = nil
-    end
+	@ExecSpace("ClientOnly")
+	method void ClearExperienceCards()
+		-- Own these clones separately so survivor refreshes never erase confirmed experience.
+		if self._T.levelUpTimer ~= nil then _TimerService:ClearTimer(self._T.levelUpTimer) end
+		self._T.levelUpTimer = nil
+		self._T.levelUpEffects = {}
+		for _, card in ipairs(self._T.experienceCards or {}) do
+			if isvalid(card) then card:Destroy() end
+		end
+		self._T.experienceCards = {}
+		self._T.experienceReceipt = nil
+	end
 
-    @ExecSpace("ClientOnly")
-    method void PlayCardLevelUp(Entity card)
-        -- Keep the numbered frames aligned to their original sprite pivots.
-        local effect = card:GetChildByName("LevelUpEffect")
-        if not isvalid(effect) then return end
-        self:SetEnabled(card:GetChildByName("Progression"), false)
-        self:SetEnabled(card:GetChildByName("Identity"), false)
-        self._T.levelUpEffects[card.Id] = { card = card, effect = effect, started = _UtilLogic.ElapsedSeconds }
-        self:UpdateCardLevelUps()
-        if self._T.levelUpTimer == nil then
-            self._T.levelUpTimer = _TimerService:SetTimerRepeat(function() self:UpdateCardLevelUps() end, 1 / 60)
-        end
-        log("[VRF][CardLevelUp] START card=" .. card.Name)
-    end
+	@ExecSpace("ClientOnly")
+	method void PlayCardLevelUp(Entity card)
+		-- Keep each texture and its geometry together; image replacement can complete after layout changes.
+		local effect = card:GetChildByName("LevelUpEffect")
+		local motion = isvalid(effect) and effect:GetChildByName("Motion") or nil
+		local template = isvalid(motion) and motion:GetChildByName("FrameTemplate") or nil
+		if not isvalid(template) then return end
+		self._T.levelUpEffects[card.Id] = nil
+		self:SetEnabled(effect, false)
+		self:SetEnabled(template, false)
+		motion.UITransformComponent.anchoredPosition = Vector2(0, 0)
+		effect.CanvasGroupComponent.GroupAlpha = 1
+		local frames = {}
+		for index, frame in ipairs(self.LevelUpFrames) do
+			local name = "LevelUpFrame_" .. tostring(index - 1)
+			local image = motion:GetChildByName(name)
+			if not isvalid(image) then
+				image = template:Clone(name)
+				if not isvalid(card) then
+					if isvalid(image) then image:Destroy() end
+					return
+				end
+				image.SpriteGUIRendererComponent.ImageRUID = DataRef(frame[1])
+				image.UITransformComponent.RectSize = Vector2(frame[2], frame[3])
+				image.UITransformComponent.anchoredPosition = Vector2(frame[2] / 2 - frame[4], frame[3] / 2 - frame[5])
+			end
+			self:SetEnabled(image, false)
+			frames[index] = image
+		end
+		self:SetEnabled(card:GetChildByName("Progression"), false)
+		self:SetEnabled(card:GetChildByName("Identity"), false)
+		self._T.levelUpEffects[card.Id] = {card = card, effect = template, container = effect, motion = motion, frames = frames}
+		if self._T.levelUpTimer == nil then
+			self._T.levelUpTimer = _TimerService:SetTimerRepeat(function() self:UpdateCardLevelUps() end, 1 / 60)
+		end
+		log("[VRF][CardLevelUp] QUEUED card=" .. card.Name)
+	end
 
-    @ExecSpace("ClientOnly")
-    method void UpdateCardLevelUps()
-        -- Play once, then reveal the confirmed stat changes without replaying on UI refresh.
-        for id, animation in pairs(self._T.levelUpEffects) do
-            local elapsed = _UtilLogic.ElapsedSeconds - animation.started
-            if not isvalid(animation.card) or elapsed >= 1.5 then
-                if isvalid(animation.card) then
-                    self:SetEnabled(animation.effect, false)
-                    self:SetEnabled(animation.card:GetChildByName("Progression"), true)
-                    self:SetEnabled(animation.card:GetChildByName("Identity"), true)
-                    log("[VRF][CardLevelUp] END card=" .. animation.card.Name)
-                end
-                self._T.levelUpEffects[id] = nil
-            else
-                local index = math.min(#self.LevelUpFrames, math.floor(elapsed / 0.15) + 1)
-                local frame = self.LevelUpFrames[index]
-                local transform = animation.effect.UITransformComponent
-                if animation.frame ~= index then
-                    animation.effect.SpriteGUIRendererComponent.ImageRUID = DataRef(frame[1])
-                    transform.RectSize = Vector2(frame[2], frame[3])
-                    animation.frame = index
-                end
-                transform.anchoredPosition = Vector2(frame[2] / 2 - frame[4] - 8, frame[3] / 2 - frame[5] - 115 + elapsed * 10)
-                animation.effect.CanvasGroupComponent.GroupAlpha = math.min(1, (1.5 - elapsed) / 0.3)
-                self:SetEnabled(animation.effect, true)
-            end
-        end
-        if next(self._T.levelUpEffects) == nil and self._T.levelUpTimer ~= nil then
-            _TimerService:ClearTimer(self._T.levelUpTimer)
-            self._T.levelUpTimer = nil
-        end
-    end
+	@ExecSpace("ClientOnly")
+	method void UpdateCardLevelUps()
+		-- Play once, then reveal the confirmed stat changes without replaying on UI refresh.
+		for id, animation in pairs(self._T.levelUpEffects) do
+			if not isvalid(animation.card) then
+				self._T.levelUpEffects[id] = nil
+				continue
+			end
+			-- Hierarchy activation settles after card creation; hidden time must not consume the effect.
+			if not animation.card.EnabledInHierarchy then
+				animation.started = nil
+				continue
+			end
+			if animation.started == nil then
+				animation.started = _UtilLogic.ElapsedSeconds
+				log("[VRF][CardLevelUp] START card=" .. animation.card.Name)
+			end
+			local elapsed = _UtilLogic.ElapsedSeconds - animation.started
+			if elapsed >= 1.5 then
+				if isvalid(animation.card) then
+					self:SetEnabled(animation.container, false)
+					self:SetEnabled(animation.effect, false)
+					self:SetEnabled(animation.card:GetChildByName("Progression"), true)
+					self:SetEnabled(animation.card:GetChildByName("Identity"), true)
+					log("[VRF][CardLevelUp] END card=" .. animation.card.Name)
+				end
+				self._T.levelUpEffects[id] = nil
+			else
+				local index = math.min(#self.LevelUpFrames, math.floor(elapsed / 0.15) + 1)
+				if animation.frame ~= index then
+					self:SetEnabled(animation.effect, false)
+					animation.effect = animation.frames[index]
+					animation.frame = index
+				end
+				animation.motion.UITransformComponent.anchoredPosition = Vector2(0, elapsed * 5)
+				animation.container.CanvasGroupComponent.GroupAlpha = math.min(1, (1.5 - elapsed) / 0.3)
+				self:SetEnabled(animation.effect, true)
+				self:SetEnabled(animation.container, true)
+			end
+		end
+		if next(self._T.levelUpEffects) == nil and self._T.levelUpTimer ~= nil then
+			_TimerService:ClearTimer(self._T.levelUpTimer)
+			self._T.levelUpTimer = nil
+		end
+	end
 
-    @ExecSpace("ClientOnly")
-    method void RenderExperienceResult(BattleSession session)
-        -- Reuse the result caption and card artwork; never preview an unconfirmed upgrade.
-        local caption = self.result:GetChildByName("Window"):GetChildByName("Caption")
-        if self.OwnResult == "" or not session.RequireMatchedFormations then
-            self:ClearExperienceCards()
-            self:SetText(caption, "戰鬥結果")
-            return
-        end
-        local receipt = session.ExperienceResult
-        local player = _UserService.LocalPlayer
-        local status = receipt.matchId == session.MatchKey and receipt.profile == player.PlayerComponent.ProfileCode and receipt.status or "PENDING"
-        self:SetText(caption, status == "SAVED" and "本局怪物經驗" or (status == "FAILED" and "怪物經驗結算失敗" or "怪物經驗結算處理中…"))
-        if status ~= "SAVED" then self:ClearExperienceCards() return end
-        if self._T.experienceReceipt == receipt then return end
-        self:ClearExperienceCards()
-        local template = self.result:GetChildByName("CardTemplate")
-        local side = self.OwnResult == "WIN" and 1 or -1
-        for index, entry in ipairs(receipt.monsters) do
-            local card = template:Clone("Experience_" .. tostring(index))
-            self:SetEnabled(card:GetChildByName("LevelUpEffect"), false)
-            card.UITransformComponent.anchoredPosition = Vector2(side * 620 + ((index - 1) % 3 - 1) * 165,
-                210 - math.floor((index - 1) / 3) * 240)
-            self:SetText(card:GetChildByName("MonsterName"), entry.name)
-            self:SetText(card:GetChildByName("Identity"), "經驗 +" .. tostring(entry.gained))
-            local upgraded = entry.before ~= nil and entry.after ~= nil
-            self:SetEnabled(card:GetChildByName("PortraitViewport"), not upgraded)
-            local detail = card:GetChildByName("Progression")
-            self:SetEnabled(detail, upgraded)
-            if upgraded then
-                self:SetText(detail, "Lv." .. tostring(entry.before.level) .. " → Lv." .. tostring(entry.after.level)
-                    .. "\n生命 " .. tostring(entry.before.MaxHp) .. " → " .. tostring(entry.after.MaxHp)
-                    .. "\n傷害 " .. tostring(entry.before.AttackDamageMin) .. "～" .. tostring(entry.before.AttackDamageMax)
-                    .. "\n→ " .. tostring(entry.after.AttackDamageMin) .. "～" .. tostring(entry.after.AttackDamageMax))
-            else
-                local portrait = card:GetChildByName("Portrait", true)
-                portrait.SpriteGUIRendererComponent.ImageRUID = DataRef("thumbnail://" .. entry.ruid)
-                portrait.SpriteGUIRendererComponent.Color = Color.white
-            end
-            card:SetEnable(true)
-            table.insert(self._T.experienceCards, card)
-            if upgraded and entry.after.level > entry.before.level then self:PlayCardLevelUp(card) end
-        end
-        self._T.experienceReceipt = receipt
-        log("[VRF][ResultExperience] displayed count=" .. tostring(#receipt.monsters))
-    end
+	@ExecSpace("ClientOnly")
+	method void RenderExperienceResult(BattleSession session)
+		-- Reuse the result caption and card artwork; never preview an unconfirmed upgrade.
+		local caption = self.result:GetChildByName("Window"):GetChildByName("Caption")
+		if self.OwnResult == "" or not session.RequireMatchedFormations then
+			self:ClearExperienceCards()
+			self:SetText(caption, "戰鬥結果")
+			return
+		end
+		local receipt = session.ExperienceResult
+		local player = _UserService.LocalPlayer
+		local status = receipt.matchId == session.MatchKey and receipt.profile == player.PlayerComponent.ProfileCode and receipt.status or "PENDING"
+		self:SetText(caption, status == "SAVED" and "本局怪物經驗" or (status == "FAILED" and "怪物經驗結算失敗" or "怪物經驗結算處理中…"))
+		if status ~= "SAVED" then self:ClearExperienceCards()return end
+		if self._T.experienceReceipt == receipt then return end
+		self:ClearExperienceCards()
+		-- Clone can yield across UI updates; claim the receipt before building any cards.
+		self._T.experienceReceipt = receipt
+		local template = self.result:GetChildByName("CardTemplate")
+		local side = self.OwnResult == "WIN" and 1 or -1
+		local levelUps = {}
+		for index, entry in ipairs(receipt.monsters) do
+			local card = template:Clone("Experience_" .. tostring(index))
+			if self._T.experienceReceipt ~= receipt then card:Destroy()return end
+			self:SetEnabled(card:GetChildByName("LevelUpEffect"), false)
+			card.UITransformComponent.anchoredPosition = Vector2(side * 620 + ((index - 1) % 3 - 1) * 165,
+				210 - math.floor((index - 1) / 3) * 240)
+			self:SetText(card:GetChildByName("MonsterName"), entry.name)
+			self:SetText(card:GetChildByName("Identity"), "經驗 +" .. tostring(entry.gained))
+			local upgraded = entry.before ~= nil and entry.after ~= nil
+			self:SetEnabled(card:GetChildByName("PortraitViewport"), not upgraded)
+			local detail = card:GetChildByName("Progression")
+			self:SetEnabled(detail, upgraded)
+			if upgraded then
+				self:SetText(detail, "Lv." .. tostring(entry.before.level) .. " → Lv." .. tostring(entry.after.level)
+					.. "\n生命 " .. tostring(entry.before.MaxHp) .. " → " .. tostring(entry.after.MaxHp)
+					.. "\n傷害 " .. tostring(entry.before.AttackDamageMin) .. "～" .. tostring(entry.before.AttackDamageMax)
+					.. "\n→ " .. tostring(entry.after.AttackDamageMin) .. "～" .. tostring(entry.after.AttackDamageMax))
+			else
+				local portrait = card:GetChildByName("Portrait", true)
+				portrait.SpriteGUIRendererComponent.ImageRUID = DataRef("thumbnail://" .. entry.ruid)
+				portrait.SpriteGUIRendererComponent.Color = Color.white
+			end
+			card:SetEnable(true)
+			table.insert(self._T.experienceCards, card)
+			if upgraded and entry.after.level > entry.before.level then table.insert(levelUps, card) end
+		end
+		for _, card in ipairs(levelUps) do self:PlayCardLevelUp(card) end
+		log("[VRF][ResultExperience] displayed count=" .. tostring(#receipt.monsters))
+	end
 
-    @ExecSpace("ClientOnly")
-    method void OnUpdate(number delta)
-        -- Follow current-map synchronization, map policy and the local player's battle side.
-        local player = _UserService.LocalPlayer
-        local map = isvalid(player) and player.CurrentMap or nil
-        local session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
-        local presentation = isvalid(map) and map:GetComponent("script.BattlePresentation") or nil
-        local active = isvalid(session)
-        if self._T.resultSession ~= session or (active and self._T.resultGeneration ~= session.SessionGeneration) then
-            self:SetResult("")
-            self._T.resultSession = session
-            self._T.resultGeneration = active and session.SessionGeneration or nil
-        end
-        self:SetEnabled(self.root, active)
-        if not active then
-            self:SetEnabled(self.hud, false)
-            self:SetEnabled(self.deployment, false)
-            self:SetResult("")
-            self:SetEnabled(self.configErrorGroup, false)
-            self._T.hudKey = ""
-            return
-        end
-        local phase = session.Phase
-        local matched = session.RequireMatchedFormations
-        local showDeployment = isvalid(presentation) and presentation.ShowDeploymentUI and phase == "DEPLOYMENT"
-        local poc = not matched and isvalid(map:GetComponent("script.BattleDeploymentInput"))
-        self:SetEnabled(self.hud, phase ~= "CONFIG_ERROR")
-        self:SetEnabled(self.deployment, showDeployment)
-        self:SetEnabled(self.configErrorGroup, poc and phase == "CONFIG_ERROR")
+	@ExecSpace("ClientOnly")
+	method void OnUpdate(number delta)
+		-- Follow current-map synchronization, map policy and the local player's battle side.
+		local player = _UserService.LocalPlayer
+		local map = isvalid(player) and player.CurrentMap or nil
+		local session = isvalid(map) and map:GetComponent("script.BattleSession") or nil
+		local presentation = isvalid(map) and map:GetComponent("script.BattlePresentation") or nil
+		local active = isvalid(session)
+		if self._T.resultSession ~= session or (active and self._T.resultGeneration ~= session.SessionGeneration) then
+			self:SetResult("")
+			self._T.resultSession = session
+			self._T.resultGeneration = active and session.SessionGeneration or nil
+		end
+		self:SetEnabled(self.root, active)
+		if not active then
+			self:SetEnabled(self.hud, false)
+			self:SetEnabled(self.deployment, false)
+			self:SetResult("")
+			self:SetEnabled(self.configErrorGroup, false)
+			self._T.hudKey = ""
+			return
+		end
+		local phase = session.Phase
+		local matched = session.RequireMatchedFormations
+		local showDeployment = isvalid(presentation) and presentation.ShowDeploymentUI and phase == "DEPLOYMENT"
+		local poc = not matched and isvalid(map:GetComponent("script.BattleDeploymentInput"))
+		self:SetEnabled(self.hud, phase ~= "CONFIG_ERROR")
+		self:SetEnabled(self.deployment, showDeployment)
+		self:SetEnabled(self.configErrorGroup, poc and phase == "CONFIG_ERROR")
 
-        local playerAlive, enemyAlive = session.PlayerAlive, session.EnemyAlive
-        local initialPlayer, initialEnemy = session.InitialPlayerAlive, session.InitialEnemyAlive
-        local viewerResult = ""
-        local ownFaction = "PLAYER"
-        local ready = session.SessionGeneration > 0 and (phase == "DEPLOYMENT" or phase == "BATTLE" or phase == "RESULT")
-        if matched then
-            local profile = isvalid(player.PlayerComponent) and player.PlayerComponent.ProfileCode or ""
-            if profile ~= "" and session.AwayProfile == profile then
-                ownFaction = "ENEMY"
-                playerAlive, enemyAlive = enemyAlive, playerAlive
-                initialPlayer, initialEnemy = initialEnemy, initialPlayer
-            elseif profile == "" or session.HomeProfile ~= profile then
-                ready = false
-            end
-            if profile ~= "" then viewerResult = session:ResultForProfile(profile) end
-        elseif poc and phase == "RESULT" then
-            viewerResult = session.Result
-        end
-        self:SetResult(viewerResult)
-        self:RenderResultCards(map, ownFaction, self.OwnResult == "WIN" and playerAlive or enemyAlive)
-        self:RenderExperienceResult(session)
-        local own = ready and tostring(playerAlive) or "—"
-        local opponent = ready and tostring(enemyAlive) or "—"
-        local key = map.Name .. ":" .. tostring(session.SessionGeneration) .. ":" .. phase .. ":" .. own .. ":" .. opponent .. ":" .. tostring(showDeployment) .. ":" .. tostring(initialPlayer) .. ":" .. tostring(initialEnemy)
-        if self._T.hudKey == key then return end
-        self._T.hudKey = key
-        local title, hint = "準備中", "等待戰場就緒"
-        if phase == "DEPLOYMENT" then
-            title, hint = "部署階段", "選擇怪物，組成你的隊伍"
-        elseif phase == "BATTLE" then
-            title, hint = "戰鬥進行中", "雙方隊伍自動交戰"
-        elseif phase == "RESULT" then
-            title, hint = "戰鬥結束", "本次對戰已結算"
-        elseif phase == "ABORTED" then
-            title, hint = "對局已中止", "請返回大廳重新配對"
-        end
-        self:SetText(self.phaseText, title)
-        self:SetText(self.phaseHint, hint)
-        self:SetText(self.playerCount, own)
-        self:SetText(self.enemyCount, opponent)
-        self:SetText(self.resultPlayerCount, tostring(playerAlive) .. " / " .. tostring(initialPlayer))
-        self:SetText(self.resultEnemyCount, tostring(enemyAlive) .. " / " .. tostring(initialEnemy))
-        log("[VRF][BattlePresentation] map=" .. map.Name .. " phase=" .. phase .. " own=" .. own .. " enemy=" .. opponent .. " deployment=" .. tostring(showDeployment) .. " result=" .. self.OwnResult)
-    end
+		local playerAlive, enemyAlive = session.PlayerAlive, session.EnemyAlive
+		local initialPlayer, initialEnemy = session.InitialPlayerAlive, session.InitialEnemyAlive
+		local viewerResult = ""
+		local ownFaction = "PLAYER"
+		local ready = session.SessionGeneration > 0 and (phase == "DEPLOYMENT" or phase == "BATTLE" or phase == "RESULT")
+		if matched then
+			local profile = isvalid(player.PlayerComponent) and player.PlayerComponent.ProfileCode or ""
+			if profile ~= "" and session.AwayProfile == profile then
+				ownFaction = "ENEMY"
+				playerAlive, enemyAlive = enemyAlive, playerAlive
+				initialPlayer, initialEnemy = initialEnemy, initialPlayer
+			elseif profile == "" or session.HomeProfile ~= profile then
+				ready = false
+			end
+			if profile ~= "" then viewerResult = session:ResultForProfile(profile) end
+		elseif poc and phase == "RESULT" then
+			viewerResult = session.Result
+		end
+		self:SetResult(viewerResult)
+		self:RenderResultCards(map, ownFaction, self.OwnResult == "WIN" and playerAlive or enemyAlive)
+		self:RenderExperienceResult(session)
+		local own = ready and tostring(playerAlive) or "—"
+		local opponent = ready and tostring(enemyAlive) or "—"
+		local key = map.Name .. ":" .. tostring(session.SessionGeneration) .. ":" .. phase .. ":" .. own .. ":" .. opponent .. ":" .. tostring(showDeployment) .. ":" .. tostring(initialPlayer) .. ":" .. tostring(initialEnemy)
+		if self._T.hudKey == key then return end
+		self._T.hudKey = key
+		local title, hint = "準備中", "等待戰場就緒"
+		if phase == "DEPLOYMENT" then
+			title, hint = "部署階段", "選擇怪物，組成你的隊伍"
+		elseif phase == "BATTLE" then
+			title, hint = "戰鬥進行中", "雙方隊伍自動交戰"
+		elseif phase == "RESULT" then
+			title, hint = "戰鬥結束", "本次對戰已結算"
+		elseif phase == "ABORTED" then
+			title, hint = "對局已中止", "請返回大廳重新配對"
+		end
+		self:SetText(self.phaseText, title)
+		self:SetText(self.phaseHint, hint)
+		self:SetText(self.playerCount, own)
+		self:SetText(self.enemyCount, opponent)
+		self:SetText(self.resultPlayerCount, tostring(playerAlive) .. " / " .. tostring(initialPlayer))
+		self:SetText(self.resultEnemyCount, tostring(enemyAlive) .. " / " .. tostring(initialEnemy))
+		log("[VRF][BattlePresentation] map=" .. map.Name .. " phase=" .. phase .. " own=" .. own .. " enemy=" .. opponent .. " deployment=" .. tostring(showDeployment) .. " result=" .. self.OwnResult)
+	end
 
-    @ExecSpace("ClientOnly")
-    method void OnEndPlay()
-        -- Release shared presentation when this client session ends.
-        self:SetResult("")
-        self:SetEnabled(self.root, false)
-        self:SetEnabled(self.configErrorGroup, false)
-        self._T.hudKey = ""
-    end
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		-- Release shared presentation when this client session ends.
+		self:SetResult("")
+		self:SetEnabled(self.root, false)
+		self:SetEnabled(self.configErrorGroup, false)
+		self._T.hudKey = ""
+	end
 end
