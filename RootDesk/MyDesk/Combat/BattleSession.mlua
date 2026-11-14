@@ -472,7 +472,7 @@ script BattleSession extends Component
                     if key == "MonsterName" then
                         if type(value) ~= "string" or value:match("%S") == nil then return nil end
                     elseif key == "Level" then
-                        if not self:IsFiniteTestNumber(value) or value < 1 or value > 30 or value % 1 ~= 0 then return nil end
+                        if not _MonsterProgression:IsValidLevel(value) then return nil end
                     elseif key == "MaxHp" then
                         if not self:IsFiniteTestNumber(value) or value < 1 or value % 1 ~= 0 then return nil end
                     elseif key == "AttackDamageMin" or key == "AttackDamageMax" then
@@ -551,8 +551,8 @@ script BattleSession extends Component
                 if key ~= "monsterId" and key ~= "x" and key ~= "y" and key ~= "level" then return nil end
             end
             if type(entry.monsterId) ~= "string" or not _FormationSchema:IsFinite(entry.x) or not _FormationSchema:IsFinite(entry.y) then return nil end
-            local level = entry.level == nil and 1 or entry.level
-            if not _FormationSchema:IsFinite(level) or level % 1 ~= 0 or level < 1 or level > 30 then return nil end
+            local level = entry.level == nil and _MonsterProgression.DefaultLevel or entry.level
+            if not _MonsterProgression:IsValidLevel(level) then return nil end
             local profile = self:GetMonsterProfile(entry.monsterId)
             local position = _FormationMapLayout:BattlePosition(entry.x, entry.y, away)
             if profile == nil or position == nil then return nil end
@@ -649,7 +649,7 @@ script BattleSession extends Component
                                 seen[unit.MonsterId] = true
                                 local change = operation.monsters[unit.MonsterId]
                                 local beforeLevel = change ~= nil and change.before.level or unit.Level
-                                local gained = beforeLevel == 30 and 0 or (operation.deaths[unit.MonsterId] or 0)
+                                local gained = _MonsterProgression:RequiredExperience(beforeLevel) == 0 and 0 or (operation.deaths[unit.MonsterId] or 0)
                                 local entry = { monsterId = unit.MonsterId, name = unit.MonsterName,
                                     ruid = unit.StandAnimationRUID, gained = gained }
                                 -- Settled progress wins; monsters absent from the stored document start from the match level.
@@ -928,8 +928,8 @@ script BattleSession extends Component
         end
         local map = self:GetMapEntity()
         if not isvalid(map) then return nil end
-        local level = 1
-        if self.RequireMatchedFormations or Environment:IsMakerPlay() then level = profile.Level or 1 end
+        local level = _MonsterProgression.DefaultLevel
+        if self.RequireMatchedFormations or Environment:IsMakerPlay() then level = profile.Level or level end
         local stats = _MonsterProgression:CalculateStats(profile, level)
         if stats == nil then return nil end
         local configured = {}

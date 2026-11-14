@@ -65,7 +65,8 @@ script FormationCatalogCards extends Logic
         if option == nil or option.level == nil then
             return _FormationEditSession.Snapshot.levelLoadState == "ERROR" and "等級讀取失敗" or "等級讀取中"
         end
-        local experience = option.level == 30 and "MAX" or (tostring(option.experience) .. "/" .. tostring(option.level))
+        local required = _MonsterProgression:RequiredExperience(option.level)
+        local experience = required == 0 and "MAX" or (tostring(option.experience) .. "/" .. tostring(required))
         return "Lv." .. tostring(option.level) .. " " .. experience
     end
 
@@ -88,7 +89,8 @@ script FormationCatalogCards extends Logic
         badge.SpriteGUIRendererComponent.ImageRUID = DataRef(ruid)
         local height = badge.UITransformComponent.RectSize.y
         badge.UITransformComponent.RectSize = Vector2(height * size.x / size.y, height)
-        local ratio = option.level == 30 and 1 or math.max(0, math.min(1, option.experience / option.level))
+        local required = _MonsterProgression:RequiredExperience(option.level)
+        local ratio = required == 0 and 1 or math.max(0, math.min(1, option.experience / required))
         local barSize = bar.UITransformComponent.RectSize
         if isvalid(target:GetChildByName("Identity")) then
             barSize = Vector2(target.UITransformComponent.RectSize.x - 24, barSize.y)
@@ -102,7 +104,7 @@ script FormationCatalogCards extends Logic
         fill:SetEnable(ratio > 0)
         local value = bar:GetChildByName("Value")
         if isvalid(value) then
-            value.TextGUIRendererComponent.Text = option.level == 30 and "MAX" or tostring(option.experience) .. "/" .. tostring(option.level)
+            value.TextGUIRendererComponent.Text = required == 0 and "MAX" or tostring(option.experience) .. "/" .. tostring(required)
         end
     end
 

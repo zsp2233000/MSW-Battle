@@ -93,7 +93,7 @@ script BattleUnit extends Component
         log("[VRF][BattleUnit] DEFAULT_FACING " .. self.Entity.Name .. ", faction=" .. faction
             .. ", scaleX=" .. tostring(self.Entity.TransformComponent.Scale.x))
         self.MonsterName = displayName
-        self.Level = profile.Level or 1
+        self.Level = profile.Level or _MonsterProgression.DefaultLevel
         self.UnitKind = unitKind
         self.MaxHp = maxHp
         self.Hp = maxHp

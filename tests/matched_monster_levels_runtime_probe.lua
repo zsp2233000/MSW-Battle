@@ -38,7 +38,10 @@ local ok, detail = pcall(function()
     local catalog = _FormationService:GetCatalog()
     local legacy = _FormationHandoff:DecodeTransfer(transfer, catalog)
     assert(legacy and legacy.units[1].level == 1 and legacy.units[3].level == 1, 'old in-flight transfers default to Lv1')
-    for _, invalid in ipairs({false, {}, {monster_tank=0,monster_warrior=8}, {monster_tank=31,monster_warrior=8}, {monster_tank=1.5,monster_warrior=8}}) do
+    for _, invalid in ipairs({false, {}, {monster_tank=0,monster_warrior=8}, {monster_tank=31,monster_warrior=8},
+        {monster_tank=1.5,monster_warrior=8}, {monster_tank="5",monster_warrior=8},
+        {monster_tank=false,monster_warrior=8}, {monster_tank=math.huge,monster_warrior=8},
+        {monster_tank=0/0,monster_warrior=8}, {monster_tank=5}}) do
         transfer.levels = invalid
         assert(_FormationHandoff:DecodeTransfer(transfer, catalog) == nil, 'invalid new level snapshots fail closed')
     end
