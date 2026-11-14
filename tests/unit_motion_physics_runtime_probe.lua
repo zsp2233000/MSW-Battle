@@ -47,11 +47,10 @@ local function contact(attackerEntity, attacker)
     for _, entity in ipairs(session:GetTargetCandidates()) do
         local unit = entity:GetComponent("script.BattleUnit")
         if unit.Faction ~= attacker.Faction and unit.AttackDamageMax == 0 then
-            unit:DriveAttack(attackerEntity, true)
-            unit:AdvanceAttack(0.2)
-            unit:DriveAttack(attackerEntity, true)
-            unit:Tick(unit.AttackAnimationDuration + 0.01)
-            unit:AdvanceAttack(unit.AttackAnimationDuration + 0.01)
+            unit.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(attackerEntity, true)
+            unit.Entity:GetComponent("script.BattleAttackComposition"):Advance(0.2)
+            unit.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(attackerEntity, true)
+            unit.Entity:GetComponent("script.BattleAttackComposition"):Advance(unit.AttackAnimationDuration + 0.01)
         end
     end
     configureAttack(attackerEntity, "monster_tank", 1)
@@ -59,8 +58,8 @@ local function contact(attackerEntity, attacker)
     for _, candidate in ipairs(session:GetTargetCandidates()) do
         if candidate:GetComponent("script.BattleUnit").Faction ~= attacker.Faction then target = candidate; break end
     end
-    attacker:DriveAttack(target, true)
-    attacker:AdvanceAttack(0.02)
+    attacker.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(target, true)
+    attacker.Entity:GetComponent("script.BattleAttackComposition"):Advance(0.02)
     -- Change future intent while preserving the already accepted contact and knockback batch.
     configureAttack(attackerEntity, "monster_shooter", 0)
     step()
@@ -223,8 +222,8 @@ local ok, detail = pcall(function()
     local hitEntity, hitUnit = actor("PauseHit")
 
     configureAttack(hitEntity, "monster_shooter", 1)
-    hitUnit:DriveAttack(pausedEntity, true)
-    hitUnit:AdvanceAttack(0.02)
+    hitUnit.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(pausedEntity, true)
+    hitUnit.Entity:GetComponent("script.BattleAttackComposition"):Advance(0.02)
     contact(contactEntity, contactUnit)
     check(paused.CombatState == "ON_HIT" and paused.KnockbackActive, "hit stop and knockback coexist after native hits")
     local before = position(pausedEntity)

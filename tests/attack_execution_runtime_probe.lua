@@ -42,8 +42,8 @@ local function quietProfile(maxHp)
 end
 
 local function consumeEnemyOpeningDelay(unit, target, label)
-    unit:DriveAttack(target, true)
-    unit:AdvanceAttack(session.EnemyOpeningDelay + 0.02)
+    unit.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(target, true)
+    unit.Entity:GetComponent("script.BattleAttackComposition"):Advance(session.EnemyOpeningDelay + 0.02)
     check(unit.AttackSerial == 0, label .. " consumes the configured enemy opening delay before attacking")
 end
 
@@ -169,7 +169,7 @@ for _, kind in ipairs({ "monster_warrior", "monster_shooter" }) do
                 session:AdvanceForTest(0.001)
                 check(actor.AttackSerial == (edge[4] and 1 or 0), label .. " movement and engagement agree")
                 -- Even an explicit in-range hint cannot bypass the shared overlap query.
-                actor:DriveAttack(targetEntity, true)
+                actor.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(targetEntity, true)
                 session:AdvanceForTest(0.016)
                 check(target.Hp == (edge[4] and 185 or 220), label .. " agrees with native impact")
             end) then return end
@@ -184,14 +184,18 @@ for _, kind in ipairs({ "monster_warrior", "monster_shooter" }) do
     }, function()
         local source, actor = getUnit("HitchActor")
         local targetEntity, target = getUnit("HitchTarget")
-        actor:DriveAttack(targetEntity, true)
+        actor.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(targetEntity, true)
+        actor.Entity:GetComponent("script.BattleAttackComposition"):Advance(-0.5)
+        check(actor.AttackSerial == 1 and actor.AttackPoiseActive and target.DamageTakenSerial == 0,
+            kind .. " rejects a negative step without advancing a committed strike")
         local facing = source.TransformComponent.Scale.x
         targetEntity.KinematicbodyComponent:SetWorldPosition(Vector2(-0.5, 0))
         local elapsed = actor.AttackAnimationDuration + 0.01
-        actor:Tick(elapsed)
+        actor.Entity:GetComponent("script.BattleAttackComposition"):Advance(elapsed)
         check(source.TransformComponent.Scale.x == facing,
             kind .. " long frame holds facing before resolving the crossed impact deadline")
-        actor:AdvanceAttack(elapsed)
+        check(not actor.AttackPoiseActive,
+            kind .. " releases the animation lock in the same step after resolving impact")
         session:AdvanceForTest(0.001)
         check(target.Hp == 220 and target.DamageTakenSerial == 0,
             kind .. " long frame cannot turn a behind-target miss into a hit")
@@ -231,7 +235,7 @@ for _, kind in ipairs({ "monster_warrior", "monster_shooter" }) do
     }, function()
         local actorEntity, actor = getUnit("EdgeActor")
         local targetEntity, target = getUnit("EdgeTarget")
-        actor:DriveAttack(targetEntity, true)
+        actor.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(targetEntity, true)
         session:AdvanceForTest(0.02)
         check(target.Hp == 185 and target.DamageTakenSerial == 1,
             kind .. " native hit includes the collider at the frontal edge")
@@ -262,10 +266,9 @@ for _, kind in ipairs({ "monster_warrior", "monster_shooter", "monster_tank" }) 
             decoyEntity.KinematicbodyComponent:SetWorldPosition(Vector2(-0.5, 0.15))
             local before, beforeDecoy = target.Hp, decoy.Hp
             if index > 1 then
-                unit:Tick(unit.AttackAnimationDuration + 0.01)
-                unit:AdvanceAttack(101)
+                unit.Entity:GetComponent("script.BattleAttackComposition"):Advance(101)
             end
-            unit:DriveAttack(targetEntity, true)
+            unit.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(targetEntity, true)
             session:AdvanceForTest(0.02)
             local damage = before - target.Hp
             local decoyDamage = beforeDecoy - decoy.Hp
@@ -304,8 +307,8 @@ for _, kind in ipairs({ "monster_warrior", "monster_shooter" }) do
         local targetEntity, target = getUnit(targetName)
         local _, decoy = getUnit(decoyName)
         local attack = getAttack(actorEntity)
-        unit:DriveAttack(targetEntity, true)
-        unit:DriveAttack(targetEntity, true)
+        unit.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(targetEntity, true)
+        unit.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(targetEntity, true)
         check(unit.AttackSerial == 1, suffix .. " accepts one attack intent")
         session:AdvanceForTest(0.05)
         check(target.Hp == 220 and target.DamageTakenSerial == 0,
@@ -337,15 +340,17 @@ for _, kind in ipairs({ "monster_warrior", "monster_shooter" }) do
         row("monster_warrior", targetName, -0.5, 0, quietProfile()),
     }, function()
         local actor, unit = getUnit(actorName)
-        local _, target = getUnit(targetName)
-        unit:DriveAttack(_EntityService:GetEntityByPath("/maps/template/" .. targetName), true)
+        local targetEntity, target = getUnit(targetName)
+        unit.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(_EntityService:GetEntityByPath("/maps/template/" .. targetName), true)
         session:AdvanceForTest(0.05)
-        unit:CancelAttack()
-        unit:AdvanceAttack(0.2)
+        unit.Entity:GetComponent("script.BattleAttackComposition"):Cancel()
+        targetEntity.KinematicbodyComponent:SetWorldPosition(Vector2(3.4, 1.4))
+        unit.Entity:GetComponent("script.BattleAttackComposition"):Advance(0.2)
         session:AdvanceForTest(0.001)
         check(target.Hp == 220 and target.DamageTakenSerial == 0,
             suffix .. " cancellation removes an unaccepted hit")
-        unit:DriveAttack(_EntityService:GetEntityByPath("/maps/template/" .. targetName), true)
+        targetEntity.KinematicbodyComponent:SetWorldPosition(Vector2(-0.5, 0))
+        unit.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(_EntityService:GetEntityByPath("/maps/template/" .. targetName), true)
         check(unit.AttackSerial == 2,
             suffix .. " stopping clears the interval regardless of attack type")
         check(isvalid(actor), suffix .. " remains available after cancelling pending work")
@@ -366,7 +371,7 @@ for _, kind in ipairs({ "monster_warrior", "monster_shooter" }) do
         local _, unit = getUnit(actorName)
         local targetEntity, target = getUnit(targetName)
         local _, decoy = getUnit(decoyName)
-        unit:DriveAttack(targetEntity, true)
+        unit.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(targetEntity, true)
         targetEntity.KinematicbodyComponent:SetWorldPosition(Vector2(3.5, 0))
         session:AdvanceForTest(0.03)
         check(target.Hp == 220 and target.DamageTakenSerial == 0,
@@ -380,10 +385,10 @@ for _, kind in ipairs({ "monster_warrior", "monster_shooter" }) do
         session:AdvanceForTest(0.03)
         check(not unit.AttackPoiseActive, suffix .. " whiff releases the attack when the animation ends")
         targetEntity.KinematicbodyComponent:SetWorldPosition(Vector2(-0.5, 0))
-        unit:DriveAttack(targetEntity, true)
+        unit.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(targetEntity, true)
         check(unit.AttackSerial == 1, suffix .. " whiff consumes the attack interval")
-        unit:AdvanceAttack(101)
-        unit:DriveAttack(targetEntity, true)
+        unit.Entity:GetComponent("script.BattleAttackComposition"):Advance(101)
+        unit.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(targetEntity, true)
         check(unit.AttackSerial == 2, suffix .. " attacks again once the interval elapses")
     end) then return end
 end
@@ -398,7 +403,7 @@ do
     }, function()
         local actor, unit = getUnit(actorName)
         local targetEntity, target = getUnit(targetName)
-        unit:DriveAttack(targetEntity, true)
+        unit.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(targetEntity, true)
         targetEntity.KinematicbodyComponent:SetWorldPosition(Vector2(-0.17, 0))
         session:AdvanceForTest(0.2)
         check(target.Hp == 220 and target.DamageTakenSerial == 0,
@@ -420,14 +425,13 @@ for _, kind in ipairs({ "monster_warrior", "monster_shooter" }) do
         local targetEntity, target = getUnit(targetName)
         local attack = getAttack(actor)
         local data = catalogProfile(kind)
-        unit:DriveAttack(targetEntity, true)
+        unit.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(targetEntity, true)
         session:AdvanceForTest(0.05)
         check(attack:Configure(data, 0), suffix .. " can reconfigure on its existing actor")
-        unit:AdvanceAttack(0.2)
         session:AdvanceForTest(0.001)
         check(target.Hp == 220 and unit.AttackSerial == 2,
             suffix .. " discards pending work and allows a new autonomous attack")
-        unit:DriveAttack(targetEntity, true)
+        unit.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(targetEntity, true)
         check(unit.AttackSerial == 2, suffix .. " accepts the replacement attack intent")
         session:AdvanceForTest(data.ImpactDelaySeconds + 0.02)
         local expectedHp = kind == "monster_warrior" and 185 or 190
@@ -448,14 +452,13 @@ do
         local targetEntity, target = getUnit(targetName)
         local attack = getAttack(actor)
         local warrior = catalogProfile("monster_warrior")
-        unit:DriveAttack(targetEntity, true)
+        unit.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(targetEntity, true)
         check(attack:Configure(warrior, 0) and unit.UnitKind == "ASSAULT",
             "same actor can replace its shooter adapter with the warrior adapter")
-        unit:AdvanceAttack(0.2)
         session:AdvanceForTest(0.001)
         check(target.Hp == 220 and unit.AttackSerial == 2,
             "adapter replacement cancels the unaccepted shot")
-        unit:DriveAttack(targetEntity, true)
+        unit.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(targetEntity, true)
         session:AdvanceForTest(warrior.ImpactDelaySeconds + 0.02)
         check(target.Hp == 185 and target.DamageTakenSerial == 1 and unit.AttackSerial == 2,
             "replacement adapter alone delivers its native hit")
@@ -478,16 +481,20 @@ do
         local attack = getAttack(actor)
         local tank = catalogProfile("monster_tank")
         local shooter = catalogProfile("monster_shooter")
+        consumeEnemyOpeningDelay(firstTarget, actor, "tank-switch receiver")
+        local receiverAttack = getAttack(firstTargetEntity)
+        receiverAttack:TryEngage(actor, true)
+        receiverAttack:Advance(firstTarget.AttackAnimationDuration + 0.01)
         check(attack:Configure(tank, 0) and unit.UnitKind == "TANK",
             "switch to tank updates installed attack classification")
-        unit:DriveAttack(firstTargetEntity, true)
+        unit.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(firstTargetEntity, true)
         session:AdvanceForTest(tank.ImpactDelaySeconds + 0.02)
         check(firstTarget.Hp == 180 and firstTarget.DamageTakenSerial == 1 and firstTarget.KnockbackActive,
             "reconfigured tank preserves area damage and native knockback")
         check(attack:Configure(shooter, 0) and unit.UnitKind == "SHOOTER",
             "switch from tank restores shooter classification")
         replacementEntity.KinematicbodyComponent:SetWorldPosition(Vector2(-0.5, 0))
-        unit:DriveAttack(replacementEntity, true)
+        unit.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(replacementEntity, true)
         session:AdvanceForTest(shooter.ImpactDelaySeconds + 0.02)
         check(replacement.Hp == 190 and replacement.DamageTakenSerial == 1
             and not replacement.KnockbackActive,
@@ -511,15 +518,15 @@ do
         local attack = getAttack(actor)
         local shooter = catalogProfile("monster_shooter")
         local warrior = catalogProfile("monster_warrior")
-        unit:DriveAttack(targetEntity, true)
+        unit.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(targetEntity, true)
         check(attack:Configure({ MonsterType = "INVALID" }, 0) == false,
             "invalid attack configuration is rejected explicitly")
         session:AdvanceForTest(1)
-        unit:DriveAttack(targetEntity, true)
+        unit.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(targetEntity, true)
         check(target.Hp == 220 and unit.AttackSerial == 1,
             "rejected configuration leaves no active attack work")
         check(attack:Configure(warrior, 0), "configuration recovers with another native adapter")
-        unit:DriveAttack(targetEntity, true)
+        unit.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(targetEntity, true)
         session:AdvanceForTest(warrior.ImpactDelaySeconds + 0.02)
         check(target.Hp == 185 and decoy.Hp == 220
             and target.DamageTakenSerial == 1 and decoy.DamageTakenSerial == 0,
@@ -544,9 +551,9 @@ do
         local shooter = catalogProfile("monster_shooter")
         local tank = catalogProfile("monster_tank")
         local acceptedEffect = unit:GetHitEffectRUID()
-        unit:DriveAttack(targetEntity, true)
+        unit.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(targetEntity, true)
         -- Emit one real adapter HitEvent; the following AdvanceForTest applies the complete damage batch.
-        unit:AdvanceAttack(0.2)
+        unit.Entity:GetComponent("script.BattleAttackComposition"):Advance(0.2)
         check(unit.AttackSerial == 1 and target.Hp == 220,
             "native shooter hit is accepted before the session batch is advanced")
         check(attack:Configure(tank, 0) and unit.UnitKind == "TANK",
@@ -578,8 +585,8 @@ do
         local shooter = catalogProfile("monster_shooter")
         local shooterEffect = shooter.HitEffectRUID
         unit:SetMonsterIdentity(unit.MonsterId, unit.MonsterName, shooterEffect)
-        unit:DriveAttack(targetEntity, true)
-        unit:AdvanceAttack(0.19)
+        unit.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(targetEntity, true)
+        unit.Entity:GetComponent("script.BattleAttackComposition"):Advance(0.19)
         check(unit.AttackSerial == 1 and target.Hp == 220,
             "native tank contact is accepted before the session batch is advanced")
         check(attack:Configure(shooter, 0) and unit.UnitKind == "SHOOTER",
@@ -615,22 +622,22 @@ do
         actorEntity.KinematicbodyComponent.Enable = false
         firstTankEntity.KinematicbodyComponent:SetWorldPosition(Vector2(-1, 0))
         consumeEnemyOpeningDelay(actor, firstTankEntity, "attack poise actor")
-        actor:DriveAttack(firstTankEntity, true)
+        actor.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(firstTankEntity, true)
         check(actor.AttackSerial == 1 and actor.AttackPoiseActive and actor.AttackAnimationDuration > 0,
             "accepted attack starts poise for its full animation")
 
         local startPosition = actorEntity.TransformComponent.WorldPosition
-        firstTank:DriveAttack(actorEntity, true)
+        firstTank.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(actorEntity, true)
         session:AdvanceForTest(0.02)
         local afterTankHit = actorEntity.TransformComponent.WorldPosition
         check(actor.Hp == 180 and actor.DamageTakenSerial == 1,
             "tank damage still applies during attack poise")
-        check(actor.AttackPoiseActive and actor.CombatState == "ATTACK" and actor.KnockbackActive
+        check(actor.AttackPoiseActive and actor.CombatState == "ATTACK" and not actor.KnockbackActive
             and samePosition(startPosition, afterTankHit),
-            "tank knockback does not interrupt an active attack")
+            "attack poise rejects tank knockback without interrupting the attack")
 
         shooterEntity.KinematicbodyComponent:SetWorldPosition(Vector2(-1, 0.2))
-        shooter:DriveAttack(actorEntity, true)
+        shooter.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(actorEntity, true)
         session:AdvanceForTest(0.02)
         check(actor.Hp == 150 and actor.DamageTakenSerial == 2 and actor.AttackPoiseActive
             and actor.CombatState == "ATTACK",
@@ -639,18 +646,18 @@ do
         session:AdvanceForTest(math.max(0, actor.AttackAnimationDuration - 0.08))
         local beforeLateHit = actorEntity.TransformComponent.WorldPosition
         lateTankEntity.KinematicbodyComponent:SetWorldPosition(Vector2(-1, 0))
-        lateTank:DriveAttack(actorEntity, true)
+        lateTank.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(actorEntity, true)
         session:AdvanceForTest(0.02)
         check(actor.Hp == 110 and actor.DamageTakenSerial == 3 and actor.AttackPoiseActive
-            and actor.KnockbackActive and samePosition(beforeLateHit, actorEntity.TransformComponent.WorldPosition),
-            "a hit near the end of the attack animation still deals damage with knockback")
+            and not actor.KnockbackActive and samePosition(beforeLateHit, actorEntity.TransformComponent.WorldPosition),
+            "a hit near the end of the attack animation deals damage without knockback")
 
         session:AdvanceForTest(0.1)
         check(not actor.AttackPoiseActive and not actor.KnockbackActive,
             "attack poise expires after the complete attack animation without deferred knockback")
 
         recoveryTankEntity.KinematicbodyComponent:SetWorldPosition(Vector2(-1, 0))
-        recoveryTank:DriveAttack(actorEntity, true)
+        recoveryTank.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(actorEntity, true)
         session:AdvanceForTest(0.02)
         check(actor.Hp == 70 and actor.DamageTakenSerial == 4 and actor.KnockbackActive,
             "a new tank hit after recovery applies normal knockback")
@@ -672,10 +679,10 @@ do
     }, function()
         local actorEntity, actor = getUnit(actorName)
         local tankEntity, tank = getUnit(tankName)
-        actor:DriveAttack(tankEntity, true)
+        actor.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(tankEntity, true)
         consumeEnemyOpeningDelay(tank, actorEntity, "lethal tank")
-        tank:DriveAttack(actorEntity, true)
-        tank:AdvanceAttack(0.19)
+        tank.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(actorEntity, true)
+        tank.Entity:GetComponent("script.BattleAttackComposition"):Advance(0.19)
         session:AdvanceForTest(0.02)
         check(actor.Hp == 0 and actor.IsDead and actor.CombatState == "DEAD"
             and actor.DamageTakenSerial == 1,
@@ -701,8 +708,8 @@ do
         local targetEntity, target = getUnit(targetName)
         local hitterEntity, hitter = getUnit(hitterName)
         consumeEnemyOpeningDelay(hitter, actorEntity, "hit-stop enemy shooter")
-        actor:DriveAttack(targetEntity, true)
-        hitter:DriveAttack(actorEntity, true)
+        actor.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(targetEntity, true)
+        hitter.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(actorEntity, true)
         session:AdvanceForTest(0.02)
         check(actor.DamageTakenSerial == 1 and actor.CombatState == "ATTACK" and actor.AttackPoiseActive,
             "opposing native hit applies damage without interrupting attack poise")
@@ -739,8 +746,8 @@ do
         local acceptedEffect = actor:GetHitEffectRUID()
 
         consumeEnemyOpeningDelay(actor, targetEntity, "same-batch dying shooter")
-        killer:DriveAttack(actorEntity, true)
-        actor:DriveAttack(targetEntity, true)
+        killer.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(actorEntity, true)
+        actor.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(targetEntity, true)
         session:AdvanceForTest(0.05)
 
         check(actor.AttackSerial == 1 and killer.AttackSerial == 1,
@@ -786,8 +793,8 @@ do
         local targetEntity, target = getUnit(targetName)
         local killerEntity, killer = getUnit(killerName)
         consumeEnemyOpeningDelay(killer, actorEntity, "pending-shot killer")
-        actor:DriveAttack(targetEntity, true)
-        killer:DriveAttack(actorEntity, true)
+        actor.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(targetEntity, true)
+        killer.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(actorEntity, true)
         session:AdvanceForTest(0.05)
         check(actor.IsDead and actor.Hp == 0 and actor.DamageTakenSerial == 1,
             "enemy attack kills the pending shooter through the battle step")
@@ -820,8 +827,8 @@ for _, kind in ipairs({ "monster_warrior", "monster_shooter" }) do
         local _, target = getUnit(targetName)
         local _, reserve = getUnit(reserveName)
         local targetEntity = _EntityService:GetEntityByPath("/maps/template/" .. targetName)
-        actor:DriveAttack(targetEntity, true)
-        killer:DriveAttack(targetEntity, true)
+        actor.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(targetEntity, true)
+        killer.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(targetEntity, true)
         session:AdvanceForTest(0.05)
         check(target.IsDead and target.Hp == 0 and target.DamageTakenSerial == 1,
             "killer attack kills the locked target before the actor impact")
@@ -858,12 +865,11 @@ for _, kind in ipairs({ "monster_warrior", "monster_shooter" }) do
             "dead defender rejects a later native HitEvent without damage, sound, effect, or semantic events")
         local reserveEntity = _EntityService:GetEntityByPath("/maps/template/" .. reserveName)
         reserveEntity.KinematicbodyComponent:SetWorldPosition(Vector2(-0.5, 0))
-        actor:Tick(actor.AttackAnimationDuration + 0.01)
-        actor:AdvanceAttack(0.001)
-        actor:DriveAttack(reserveEntity, true)
+        actor.Entity:GetComponent("script.BattleAttackComposition"):Advance(actor.AttackAnimationDuration + 0.011)
+        actor.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(reserveEntity, true)
         check(actor.AttackSerial == 1, suffix .. " whiff on a dead target consumes the attack interval")
-        actor:AdvanceAttack(101)
-        actor:DriveAttack(reserveEntity, true)
+        actor.Entity:GetComponent("script.BattleAttackComposition"):Advance(101)
+        actor.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(reserveEntity, true)
         check(actor.AttackSerial == 2, suffix .. " attacks again once the interval elapses")
     end) then return end
 end
@@ -884,17 +890,17 @@ do
         local firstEntity, first = getUnit(firstName)
         local _, second = getUnit(secondName)
         local thirdEntity, third = getUnit(thirdName)
-        unit:DriveAttack(firstEntity, true)
+        unit.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(firstEntity, true)
         session:AdvanceForTest(0.19)
         check(first.Hp == 180 and second.Hp == 180 and third.Hp == 220
             and unit.AttackSerial == 1,
             "one tank swing damages every in-range defender")
-        unit:DriveAttack(firstEntity, true)
+        unit.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(firstEntity, true)
         session:AdvanceForTest(0.02)
         check(first.Hp == 180 and second.Hp == 180 and unit.AttackSerial == 1,
             "every defender shares the swing interval")
         thirdEntity.KinematicbodyComponent:SetWorldPosition(Vector2(-0.8, 0.2))
-        unit:DriveAttack(firstEntity, true)
+        unit.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(firstEntity, true)
         session:AdvanceForTest(0.02)
         check(third.Hp == 220 and third.DamageTakenSerial == 0 and unit.AttackSerial == 1,
             "a new defender cannot bypass the swing interval")
@@ -916,13 +922,13 @@ for _, kind in ipairs({ "monster_warrior", "monster_shooter" }) do
         local attack = getAttack(actor)
         local data = catalogProfile(kind)
         check(attack:Configure(data, 0.12), suffix .. " accepts the configured opening delay")
-        unit:DriveAttack(targetEntity, true)
+        unit.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(targetEntity, true)
         check(unit.AttackSerial == 0, suffix .. " does not announce before opening delay elapses")
         session:AdvanceForTest(0.05)
-        unit:DriveAttack(targetEntity, true)
+        unit.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(targetEntity, true)
         check(unit.AttackSerial == 0, suffix .. " keeps the opening delay during early steps")
         session:AdvanceForTest(0.08)
-        unit:DriveAttack(targetEntity, true)
+        unit.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(targetEntity, true)
         check(unit.AttackSerial == 1, suffix .. " consumes the opening delay once")
         session:AdvanceForTest(data.ImpactDelaySeconds + 0.02)
         local expectedHp = kind == "monster_warrior" and 185 or 190
@@ -943,7 +949,7 @@ do
         local targetEntity, target = getUnit(targetName)
         local actorBefore = actorEntity.TransformComponent.WorldPosition
         local targetBeforeHp = target.Hp
-        actor:DriveAttack(targetEntity, true)
+        actor.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(targetEntity, true)
         session:AdvanceForTest(0.05)
         check(target.Hp == targetBeforeHp and actor.AttackSerial == 1,
             "terminal target remains alive before the lethal attack impact")
@@ -964,7 +970,7 @@ do
         local eventHistory = session.EventHistory
         local actorPosition = actorEntity.TransformComponent.WorldPosition
         local targetPosition = targetEntity.TransformComponent.WorldPosition
-        actor:DriveAttack(targetEntity, true)
+        actor.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(targetEntity, true)
         session:AdvanceForTest(0.5)
         local actorAfter = actorEntity.TransformComponent.WorldPosition
         local targetAfter = targetEntity.TransformComponent.WorldPosition

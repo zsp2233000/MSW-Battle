@@ -32,19 +32,21 @@ local ok, detail = pcall(function()
             local profile = {}
             for key, value in pairs(session:GetMonsterProfile(id)) do profile[key] = value end
             profile.AttackEffectRUID = ruid
+            profile.AttackEffectFrame = 1
+            profile.AttackEffectDelaySeconds = 0
             profile.ImpactDelaySeconds = 0.25
             check(attack:Configure(profile, 0), "effect profile configured")
-            unit:DriveAttack(target, false)
+            unit.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(target, false)
             check(unit.AttackSerial == 0, "rejected attack has no start or effect")
-            unit:DriveAttack(target, true)
-            unit:DriveAttack(target, true)
+            unit.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(target, true)
+            unit.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(target, true)
             check(unit.AttackSerial == 1, "repeated request produces one start and one ATTACK effect log for " .. name)
             check(attack:GetAttackEffectRequestCount() == 1, "frame 1 effect is requested at attack start for " .. name)
             if whiff then
                 target.KinematicbodyComponent:SetWorldPosition(Vector2(5, 0))
                 map:GetChildByName("EffectTargetB").KinematicbodyComponent:SetWorldPosition(Vector2(5, 0))
             end
-            unit:AdvanceAttack(0.3)
+            unit.Entity:GetComponent("script.BattleAttackComposition"):Advance(0.3)
             session:AdvanceForTest(0.001)
             check(unit.AttackSerial == 1, "impact does not replay the attack effect")
             check(attack:GetAttackEffectRequestCount() == 1, "later impact does not replay the attack effect for " .. name)
@@ -71,12 +73,12 @@ local ok, detail = pcall(function()
     local delayedUnit = delayed:GetComponent("script.BattleUnit")
     local delayedAttack = delayed:GetComponent("script.BattleAttackComposition")
     check(delayedAttack:Configure(delayedProfile(), 0), "delayed effect profile configured")
-    delayedUnit:DriveAttack(map:GetChildByName("EffectDelayedTarget"), true)
+    delayedUnit.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(map:GetChildByName("EffectDelayedTarget"), true)
     check(delayedUnit.AttackSerial == 1 and delayedAttack:GetAttackEffectRequestCount() == 0,
         "later frame does not play at attack start")
-    delayedUnit:AdvanceAttack(0.1)
+    delayedUnit.Entity:GetComponent("script.BattleAttackComposition"):Advance(0.1)
     check(delayedAttack:GetAttackEffectRequestCount() == 0, "effect waits through the early window and after impact")
-    delayedUnit:AdvanceAttack(0.2)
+    delayedUnit.Entity:GetComponent("script.BattleAttackComposition"):Advance(0.2)
     check(delayedAttack:GetAttackEffectRequestCount() == 1, "effect plays once its frame elapses")
     wait(0.5)
     check(session:PrepareBattleForTest({ row("monster_warrior", "Effect_cancelled", 0) }, {
@@ -87,9 +89,10 @@ local ok, detail = pcall(function()
     local cancelledUnit = cancelled:GetComponent("script.BattleUnit")
     local cancelledAttack = cancelled:GetComponent("script.BattleAttackComposition")
     check(cancelledAttack:Configure(delayedProfile(), 0), "cancelled effect profile configured")
-    cancelledUnit:DriveAttack(map:GetChildByName("EffectCancelledTarget"), true)
+    cancelledUnit.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(map:GetChildByName("EffectCancelledTarget"), true)
     cancelledAttack:Cancel()
-    cancelledUnit:AdvanceAttack(0.3)
+    map:GetChildByName("EffectCancelledTarget").KinematicbodyComponent:SetWorldPosition(Vector2(5, 0))
+    cancelledUnit.Entity:GetComponent("script.BattleAttackComposition"):Advance(0.3)
     check(cancelledUnit.AttackSerial == 1 and cancelledAttack:GetAttackEffectRequestCount() == 0,
         "cancel before the effect frame does not play it")
     wait(0.5)

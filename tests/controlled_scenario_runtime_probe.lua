@@ -229,8 +229,8 @@ manualCase("invalid input preserves the active public state and pending work", f
     local hpBeforePendingHit = enemyUnit.Hp
     local damageSerialBeforePendingHit = enemyUnit.DamageTakenSerial
     local playerUnit = playerEntity:GetComponent("script.BattleUnit")
-    playerUnit:DriveAttack(enemyEntity, true)
-    playerUnit:AdvanceAttack(0.001)
+    playerUnit.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(enemyEntity, true)
+    playerUnit.Entity:GetComponent("script.BattleAttackComposition"):Advance(0.001)
     check(enemyUnit.Hp == hpBeforePendingHit,
         "native tank contact stages hit-event damage before the next complete session step")
 
@@ -316,8 +316,8 @@ manualCase("scene switch discards queued old-scene work", function()
 
     local oldEnemyUnit = oldEnemy:GetComponent("script.BattleUnit")
     local oldPlayerUnit = oldPlayer:GetComponent("script.BattleUnit")
-    oldPlayerUnit:DriveAttack(oldEnemy, true)
-    oldPlayerUnit:AdvanceAttack(0.001)
+    oldPlayerUnit.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(oldEnemy, true)
+    oldPlayerUnit.Entity:GetComponent("script.BattleAttackComposition"):Advance(0.001)
     check(oldEnemyUnit.Hp == oldEnemyUnit.MaxHp,
         "native tank HitEvent stages old-scene damage before a complete session step")
     local generation = session.SessionGeneration

@@ -47,7 +47,6 @@ script BattleUnit extends Component
         log("[VRF][BattleUnit] BEGIN_PLAY " .. self.Entity.Name)
         self._T.motion = nil
         self._T.attackExecution = nil
-        self._T.attackConfigured = false
         self._T.deathDurationPendingRUID = ""
         self._T.deathDurationFailedRUID = ""
         self._T.deathDurationRUID = ""
@@ -62,7 +61,6 @@ script BattleUnit extends Component
         self._T.deathAnimationCompletionSource = ""
         self.KnockbackActive = false
         self.AttackPoiseActive = false
-        self._T.attackPoiseRemaining = 0
         self._T.hitEffectRUID = ""
         if self.Hp <= 0 then self.Hp = self.MaxHp end
         self.CombatState = "IDLE"
@@ -88,7 +86,8 @@ script BattleUnit extends Component
         local impact = profile.ImpactDelaySeconds
         local deathAnimationRUID = profile.DieAnimationRUID
         local hitStopDuration = profile.HitStopDurationSeconds
-        self:EndAttackPoise()
+        self._T.attackExecution = self.Entity:GetComponent("script.BattleAttackComposition")
+        if isvalid(self._T.attackExecution) then self._T.attackExecution:Cancel() end
         self.Faction = faction
         if faction == "PLAYER" then self:FaceDirection(1) else self:FaceDirection(-1) end
         log("[VRF][BattleUnit] DEFAULT_FACING " .. self.Entity.Name .. ", faction=" .. faction
@@ -114,8 +113,6 @@ script BattleUnit extends Component
         self._T.displayName = displayName
         self.KnockbackActive = false
         self.AttackPoiseActive = false
-        self._T.attackPoiseRemaining = 0
-        self._T.attackConfigured = false
         if not isvalid(self._T.attackExecution) then
             log_error("[M1][BattleUnit] attack composition missing for " .. unitKind)
             return false
@@ -127,67 +124,12 @@ script BattleUnit extends Component
             return false
         end
         self._T.motion:Configure(self, session)
-        self._T.attackConfigured = self._T.attackExecution:Configure(profile, openingDelay)
-        return self._T.attackConfigured
-    end
-
-    @ExecSpace("ServerOnly")
-    method void BindAttackExecution(Component execution)
-        -- Bind the component that owns the actor's complete attack lifecycle.
-        self._T.attackExecution = execution
-    end
-
-    method boolean HasAttackExecution()
-        -- Expose whether actor configuration successfully installed attack execution.
-        return self._T.attackConfigured == true and isvalid(self._T.attackExecution)
+        return self._T.attackExecution:Configure(profile, openingDelay)
     end
 
     method string GetHitEffectRUID()
         -- Return the attacker-owned dataset effect so the defender can render it on itself.
         return self._T.hitEffectRUID or ""
-    end
-
-    @ExecSpace("ServerOnly")
-    method void DriveAttack(Entity target, boolean targetInRange)
-        -- Drive the owned attack execution without exposing its concrete type to the unit loop.
-        if not self:HasAttackExecution() then return end
-        self._T.attackExecution:TryEngage(target, targetInRange)
-    end
-
-    @ExecSpace("ServerOnly")
-    method void AdvanceAttack(number delta)
-        -- Advance the owned attack execution through the same seam used by live and test loops.
-        if not self:HasAttackExecution() then return end
-        self._T.attackExecution:Advance(delta)
-        if self.AttackPoiseActive and self._T.attackPoiseRemaining <= 0 then
-            self:EndAttackPoise()
-            log("[VRF][BattleUnit] ATTACK_POISE_END " .. self.Entity.Name)
-        end
-    end
-
-    @ExecSpace("ServerOnly")
-    method void CancelAttack()
-        -- Cancel any pending attack work when the unit enters the terminal result state.
-        self:EndAttackPoise()
-        if not self:HasAttackExecution() then return end
-        self._T.attackExecution:Cancel()
-    end
-
-    @ExecSpace("ServerOnly")
-    method void BeginAttackPoise()
-        -- Keep damage reactions from replacing a committed attack through its full animation.
-        if self.AttackAnimationDuration <= 0 then return end
-        self._T.attackPoiseRemaining = self.AttackAnimationDuration
-        self.AttackPoiseActive = true
-        log("[VRF][BattleUnit] ATTACK_POISE_START " .. self.Entity.Name
-            .. ", duration=" .. tostring(self.AttackAnimationDuration))
-    end
-
-    @ExecSpace("ServerOnly")
-    method void EndAttackPoise()
-        -- Release the animation and facing lock when an actor stops or is reconfigured.
-        self.AttackPoiseActive = false
-        self._T.attackPoiseRemaining = 0
     end
 
     method boolean IsAlive()
@@ -243,15 +185,6 @@ script BattleUnit extends Component
     end
 
     @ExecSpace("ServerOnly")
-    method void Tick(number delta)
-        -- Hold facing through this step's impact even when a long frame also ends the animation.
-        if self._T.attackPoiseRemaining > 0 then
-            self._T.attackPoiseRemaining = math.max(0, self._T.attackPoiseRemaining - delta)
-        end
-        if isvalid(self._T.motion) then self._T.motion:Advance(delta) end
-    end
-
-    @ExecSpace("ServerOnly")
     method void ApplyResolvedDamage(integer amount, Entity attacker, boolean allowHitStop, string hitEffectRUID)
         -- Apply each successful HitEvent and transition to DEAD once at zero HP.
         if amount == nil or amount <= 0 or not self:IsAlive() then return end
@@ -282,7 +215,7 @@ script BattleUnit extends Component
         self.IsDead = true
         self.CombatState = "DEAD"
         if isvalid(self._T.motion) then self._T.motion:Stop() end
-        self:CancelAttack()
+        if isvalid(self._T.attackExecution) then self._T.attackExecution:Cancel() end
         local hit = self.Entity:GetComponent("HitComponent")
         if isvalid(hit) then hit.Enable = false end
         local body = self.Entity:GetComponent("KinematicbodyComponent")
@@ -714,7 +647,7 @@ script BattleUnit extends Component
         -- Stop all unit-side target, movement, and attack work after RESULT is entered.
         self.CombatState = "RESULT_STOP"
         if isvalid(self._T.motion) then self._T.motion:Stop() end
-        self:CancelAttack()
+        if isvalid(self._T.attackExecution) then self._T.attackExecution:Cancel() end
     end
 
 

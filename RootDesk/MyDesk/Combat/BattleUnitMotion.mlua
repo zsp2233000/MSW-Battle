@@ -175,13 +175,12 @@ script BattleUnitMotion extends Component
                 end
             end
             unit.CombatState = "MOVE"
-            unit:DriveAttack(target, false)
         else
             local movement = self.Entity:GetComponent("MovementComponent")
             if isvalid(movement) then movement:Stop() end
             unit:FaceTarget(target)
             unit.CombatState = "ATTACK"
-            unit:DriveAttack(target, true)
+            attack:TryEngage(target, true)
         end
     end
 

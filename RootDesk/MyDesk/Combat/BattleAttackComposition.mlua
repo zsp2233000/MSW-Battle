@@ -33,11 +33,12 @@ script BattleAttackComposition extends Component
             log_error("[M1][BattleAttackComposition] attack adapter missing for " .. profile.MonsterType)
             return false
         end
-        adapter:Configure(profile, self)
+        adapter:Configure(self)
         self._T.profile = {}
         for key, value in pairs(profile) do self._T.profile[key] = value end
         self._T.adapter = adapter
         self._T.adapterType = adapterType
+        self._T.motion = self.Entity:GetComponent("script.BattleUnitMotion")
         self._T.openingDelay = openingDelay or 0
         self._T.openingDelayPending = self._T.openingDelay > 0
         local unit = self.Entity:GetComponent("script.BattleUnit")
@@ -89,18 +90,20 @@ script BattleAttackComposition extends Component
 
     @ExecSpace("ServerOnly")
     method void Advance(number delta)
-        -- Advance existing work during actor hit stop using only the session clock.
+        -- Own the whole actor step: pursuit, impact and facing-lock expiry, in that order.
         if delta < 0 then
             log_warning("[M1][BattleAttackComposition] negative delta rejected")
             return
         end
-        self._T.cooldownRemaining = math.max(0, (self._T.cooldownRemaining or 0) - delta)
-        local effectPending = (self._T.effectRemaining or -1) >= 0
-        if self._T.pendingTarget == nil and effectPending ~= true then return end
         if not isvalid(self:GetActiveSession()) then
             self:Cancel()
             return
         end
+        local unit = self.Entity:GetComponent("script.BattleUnit")
+        self._T.poiseRemaining = math.max(0, (self._T.poiseRemaining or 0) - delta)
+        if isvalid(self._T.motion) then self._T.motion:Advance(delta) end
+        self._T.cooldownRemaining = math.max(0, (self._T.cooldownRemaining or 0) - delta)
+        local effectPending = (self._T.effectRemaining or -1) >= 0
         if effectPending == true then
             self._T.effectRemaining = self._T.effectRemaining - delta
             if self._T.effectRemaining <= 0 then
@@ -108,21 +111,31 @@ script BattleAttackComposition extends Component
                 self:DispatchAttackEffect()
             end
         end
-        if self._T.pendingTarget == nil then return end
-        self._T.impactRemaining = self._T.impactRemaining - delta
-        if self._T.impactRemaining > 0 then return end
-        local target = self._T.pendingTarget
-        self._T.pendingTarget = nil
-        self._T.impactRemaining = -1
-        -- A departed or dead target is a whiff: the animation and interval have already been committed.
-        self._T.adapter:ResolveImpact(target)
+        if self._T.pendingTarget ~= nil then
+            self._T.impactRemaining = self._T.impactRemaining - delta
+            if self._T.impactRemaining <= 0 then
+                local target = self._T.pendingTarget
+                self._T.pendingTarget = nil
+                self._T.impactRemaining = -1
+                -- A departed or dead target whiffs after committing the animation and interval.
+                self._T.adapter:ResolveImpact(target)
+                log("[VRF][BattleAttack] IMPACT owner=" .. self.Entity.Name)
+            end
+        end
+        -- A long frame must resolve its impact before releasing the facing held for that strike.
+        if unit.AttackPoiseActive and self._T.poiseRemaining <= 0 then
+            unit.AttackPoiseActive = false
+            log("[VRF][BattleAttack] ATTACK_POISE_END " .. self.Entity.Name)
+        end
     end
 
     @ExecSpace("ServerOnly")
     method void Cancel()
         -- Discard unresolved work when the actor stops or is reconfigured; accepted damage batches survive.
         local unit = self.Entity:GetComponent("script.BattleUnit")
-        if isvalid(unit) then unit:EndAttackPoise() end
+        if isvalid(unit) then unit.AttackPoiseActive = false end
+        self._T.poiseRemaining = 0
+        self._T.attackDirection = nil
         self._T.pendingTarget = nil
         self._T.impactRemaining = -1
         self._T.effectRemaining = -1
@@ -135,9 +148,31 @@ script BattleAttackComposition extends Component
         -- Publish hit semantics centrally while HitEvent owns damage enqueueing.
         if not self:IsCurrentAdapter(adapter) or not isvalid(defender) then return end
         local session = self:GetActiveSession()
-        if self._T.profile.MonsterType == "TANK" then
-            session:QueueKnockback(self.Entity, defender, self._T.profile.KnockbackDistance)
+        local policy = self:CaptureHitPolicy()
+        if policy.knockbackDistance > 0 then
+            session:QueueKnockback(self.Entity, defender, policy.knockbackDistance)
         end
+    end
+
+    @ExecSpace("ServerOnly")
+    method table CaptureHitPolicy()
+        -- Snapshot the attacker's rules now so accepted hits survive later reconfiguration.
+        local unit = self.Entity:GetComponent("script.BattleUnit")
+        local tank = self._T.profile ~= nil and self._T.profile.MonsterType == "TANK"
+        return { allowHitStop = not tank, knockbackDistance = tank and self._T.profile.KnockbackDistance or 0,
+            hitEffectRUID = isvalid(unit) and unit:GetHitEffectRUID() or "" }
+    end
+
+    @ExecSpace("ServerOnly")
+    method integer RollDamage()
+        -- Draw once per native defender, including both configured endpoints.
+        return math.random(self._T.profile.AttackDamageMin, self._T.profile.AttackDamageMax)
+    end
+
+    @ExecSpace("ServerOnly")
+    method number GetStrikeDirection()
+        -- Keep impact geometry tied to the direction accepted at attack start.
+        return self._T.attackDirection or self.Entity:GetComponent("script.BattleUnit"):GetFacing()
     end
 
     @ExecSpace("ServerOnly")
@@ -147,7 +182,11 @@ script BattleAttackComposition extends Component
         local session = self:GetActiveSession()
         if not isvalid(unit) or not isvalid(session) then return end
         unit:FaceTarget(target)
-        unit:BeginAttackPoise()
+        self._T.attackDirection = unit:GetFacing()
+        self._T.poiseRemaining = unit.AttackAnimationDuration
+        unit.AttackPoiseActive = self._T.poiseRemaining > 0
+        log("[VRF][BattleAttack] ATTACK_START " .. self.Entity.Name
+            .. ", duration=" .. tostring(self._T.poiseRemaining))
         unit.AttackSerial = unit.AttackSerial + 1
         unit:PlayCombatSound(self._T.profile.AttackSoundRUID)
         self:ArmAttackEffect()

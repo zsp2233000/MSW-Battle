@@ -93,13 +93,13 @@ local function damageAndDeathPrecedeResult()
 end
 
 local function acceptAttack(attacker, defenderEntity)
-    attacker:DriveAttack(defenderEntity, true)
-    attacker:AdvanceAttack(0)
+    attacker.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(defenderEntity, true)
+    attacker.Entity:GetComponent("script.BattleAttackComposition"):Advance(0)
 end
 
 local function consumeEnemyOpeningDelay(attacker, defenderEntity)
-    attacker:DriveAttack(defenderEntity, true)
-    attacker:AdvanceAttack(session.EnemyOpeningDelay + 0.01)
+    attacker.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(defenderEntity, true)
+    attacker.Entity:GetComponent("script.BattleAttackComposition"):Advance(session.EnemyOpeningDelay + 0.01)
 end
 
 local function settleOneHit(outcome, side)
@@ -130,14 +130,14 @@ local function settleDraw(playerFirst)
     local playerEntity, player, enemyEntity, enemy = prepareDuel(100, 100, 100, 100)
     if player == nil or enemy == nil then return end
     consumeEnemyOpeningDelay(enemy, playerEntity)
-    player:DriveAttack(enemyEntity, true)
-    enemy:DriveAttack(playerEntity, true)
+    player.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(enemyEntity, true)
+    enemy.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(playerEntity, true)
     if playerFirst then
-        player:AdvanceAttack(0)
-        enemy:AdvanceAttack(0)
+        player.Entity:GetComponent("script.BattleAttackComposition"):Advance(0)
+        enemy.Entity:GetComponent("script.BattleAttackComposition"):Advance(0)
     else
-        enemy:AdvanceAttack(0)
-        player:AdvanceAttack(0)
+        enemy.Entity:GetComponent("script.BattleAttackComposition"):Advance(0)
+        player.Entity:GetComponent("script.BattleAttackComposition"):Advance(0)
     end
     session:AdvanceForTest(1 / 60)
     check(session.Phase == "RESULT" and session.Result == "DRAW"
@@ -154,7 +154,7 @@ local function settleDraw(playerFirst)
     local beforeHistory = session.EventHistory
     local deploymentAccepted = session:TryDeployMonster("monster_warrior", Vector3(-3, 0, 0))
     local restartAccepted = session:TryStartBattle()
-    player:DriveAttack(enemyEntity, true)
+    player.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(enemyEntity, true)
     session:AdvanceForTest(0.1)
     check(deploymentAccepted == false and restartAccepted == false
         and session.Phase == "RESULT" and session.Result == "DRAW"
@@ -192,10 +192,10 @@ local runOk, runDetail = pcall(function()
         local damageSerial = target.DamageTakenSerial
         local soundSerial = target.OnHitSoundSerial
         local soundRUID = target.HurtSoundRUID
-        first:DriveAttack(targetEntity, true)
-        second:DriveAttack(targetEntity, true)
-        first:AdvanceAttack(0)
-        second:AdvanceAttack(0)
+        first.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(targetEntity, true)
+        second.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(targetEntity, true)
+        first.Entity:GetComponent("script.BattleAttackComposition"):Advance(0)
+        second.Entity:GetComponent("script.BattleAttackComposition"):Advance(0)
         session:AdvanceForTest(1 / 60)
         local soundDeltaMatches = soundRUID ~= nil and soundRUID ~= ""
             and target.OnHitSoundSerial == soundSerial + 2
@@ -221,7 +221,7 @@ local runOk, runDetail = pcall(function()
         }
         local deploymentAccepted = session:TryDeployMonster("monster_warrior", Vector3(-3, 0, 0))
         local restartAccepted = session:TryStartBattle()
-        winPlayer:DriveAttack(winEnemyEntity, true)
+        winPlayer.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(winEnemyEntity, true)
         session:AdvanceForTest(0.1)
         local afterPosition = winPlayerEntity:GetComponent("TransformComponent").WorldPosition
         check(deploymentAccepted == false and restartAccepted == false
