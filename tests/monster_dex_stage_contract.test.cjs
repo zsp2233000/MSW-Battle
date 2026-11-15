@@ -16,6 +16,9 @@ const STAGE = `${RIGHT}/Stage`;
 const ACTOR = `${STAGE}/Actor`;
 const TRIAL = `${LEFT}/Trial`;
 const NOTICE = `${STAGE}/Notice`;
+const ATTACK_EFFECT = `${STAGE}/AttackEffect`;
+const HIT_EFFECT = `${STAGE}/HitEffect`;
+const SCALE_LABEL = `${STAGE}/ScaleLabel`;
 const CAMERA_MODULE = 'RootDesk/MyDesk/Combat/BattleFixedCamera.mlua';
 // Left to right, as the ticket lists them.
 const TRIAL_BUTTONS = [['Idle', '待機', 'idleButton'], ['Move', '移動', 'moveButton'], ['Attack', '攻擊', 'attackButton'],
@@ -53,7 +56,7 @@ test('the stage fills the upper right page, above the resource details', () => {
 
 test('the stage shows one monster: an animation image that always faces right', () => {
   const ui = dex();
-  assert.deepEqual(childNames(ui, STAGE), ['Ground', 'Actor', 'Notice']);
+  assert.deepEqual(childNames(ui, STAGE), ['Ground', 'Actor', 'Notice', 'AttackEffect', 'HitEffect', 'ScaleLabel']);
   const sprite = ui.getComponent(ACTOR, SPRITE);
   assert.equal(sprite.FlipX, true, 'monster art faces left, the stage flips it to face right');
   assert.equal(sprite.Type, 0, 'a plain image, never sliced or tiled');
@@ -92,7 +95,7 @@ test('five trial buttons sit under the left page list, in the ticket order', () 
 test('MonsterDex binds the stage image and every trial button to the authored entities', () => {
   const source = read(MODULE);
   const ui = dex();
-  const binds = [['stageSprite', ACTOR], ...TRIAL_BUTTONS.map(([name, , property]) => [property, `${TRIAL}/${name}`])];
+  const binds = [['stageSprite', ACTOR], ['attackEffectSprite', ATTACK_EFFECT], ['hitEffectSprite', HIT_EFFECT], ['scaleLabel', SCALE_LABEL], ...TRIAL_BUTTONS.map(([name, , property]) => [property, `${TRIAL}/${name}`])];
   for (const [property, entity] of binds) {
     const declared = source.match(new RegExp(`property \\w+ ${property} = "([^"]*)"`));
     assert.ok(declared, `${property} is declared`);
@@ -129,7 +132,8 @@ test('idle and move loop, the other actions play once and return to idle on the 
   const start = methodBody(source, 'StartClip');
   assert.match(start, /SpriteAnimClipPlayType\.Loop/);
   assert.match(start, /SpriteAnimClipPlayType\.Onetime/);
-  assert.doesNotMatch(source, /SetTimer|wait\(/, 'no timer decides when the clip ends');
+  assert.doesNotMatch(source, /wait\(/, 'nothing blocks waiting');
+  for (const name of ['StartClip', 'OnAnimationEnd']) assert.doesNotMatch(methodBody(source, name), /SetTimer/, `no timer in ${name} decides when the clip ends`);
   assert.match(methodBody(source, 'OnAnimationEnd'), /StartClip\("IDLE", true\)/, 'a finished one-shot goes back to idle, as part of the logged trial');
   assert.match(methodBody(source, 'RenderStage'), /StartClip\("IDLE", false\)/, 'the idle a shown monster starts with is not a logged trial');
   const specs = methodBody(source, 'ActionSpecs');
@@ -146,8 +150,42 @@ test('attack, hurt and die play their own sound, blank sounds are skipped', () =
   assert.match(specs, /ATTACK = \{[^}]*sound = "attackSoundRuid"/);
   assert.match(specs, /HURT = \{[^}]*sound = "hurtSoundRuid"/);
   assert.match(specs, /DIE = \{[^}]*sound = "dieSoundRuid"/);
-  assert.doesNotMatch(specs, /attackEffectRuid|hitEffectRuid|projectileRuid/, 'no attack effect, hit effect or projectile yet');
+  assert.doesNotMatch(specs, /attackEffectRuid|hitEffectRuid|projectileRuid/, 'the effects are not clip fields of the stage image');
   assert.doesNotMatch(methodBody(source, 'StartClip'), /attackSoundRuid|attackEffectRuid|hitEffectRuid|projectileRuid/);
+  assert.doesNotMatch(source, /hitSoundRuid|HitSound/, 'the hit sound belongs to the defender and only plays in the hurt trial');
+});
+
+test('the attack trial takes every timing from the dex row and plays the effects on stage sprites', () => {
+  const source = read(MODULE);
+  assert.match(methodBody(source, 'StartClip'), /ArmAttackTrial\(/, 'a recorded attack arms its effects');
+  const arm = methodBody(source, 'ArmAttackTrial');
+  assert.match(arm, /attackEffectDelay/);
+  assert.match(arm, /impactDelay/);
+  assert.match(arm, /attackEffectRuid/);
+  assert.match(arm, /hitEffectRuid/);
+  assert.match(arm, /SetTimerOnce/, 'later effect frames and the hit frame are timer driven');
+  assert.doesNotMatch(arm, /attackDuration|attackEffectFrame|attackDamageFrame|\* ?0\.\d|\/ ?\d/, 'no delay is recalculated from frames or lengths');
+  assert.doesNotMatch(arm, /projectile/i, 'projectile monsters stay instant in this ticket');
+  assert.match(methodBody(source, 'ShowEffect'), /""/, 'a blank effect field is skipped');
+  assert.match(methodBody(source, 'ClearEffects'), /ClearTimer/, 'clearing drops pending timers');
+  assert.match(methodBody(source, 'ClearEffects'), /SetEnable\(false\)/, 'clearing hides the effect sprites');
+  assert.match(methodBody(source, 'ResetPlayback'), /ClearEffects\(\)/, 'selecting, closing and reopening clear in-flight effects');
+  assert.match(methodBody(source, 'Play'), /ClearEffects\(\)/, 'replaying or pressing another button clears in-flight effects');
+  assert.match(methodBody(source, 'OnEndPlay'), /DisconnectEvent\(SpriteGUIAnimPlayerEndEvent/, 'the effect end subscriptions are released');
+});
+
+test('the hit point lies one attack range in front of the attacker and shrinks the whole stage when it does not fit', () => {
+  const source = read(MODULE);
+  const geometry = methodBody(source, 'HitReach');
+  assert.match(geometry, /attackRange/, 'distance is the published attack range');
+  assert.match(geometry, /bodyOffsetX/, 'measured from the body centre like the combat rectangle');
+  assert.match(methodBody(source, 'StageFactor'), /math\.min\(1,/, 'never enlarges, only shrinks');
+  assert.match(methodBody(source, 'StageGeometry'), /HitReach\(/, 'the hit point comes from the reach');
+  assert.match(methodBody(source, 'StageLayout'), /StageFactor\(/, 'the actor scale follows the factor');
+  assert.match(source, /property string ScaleLabelFormat = "[^"]*%\.2f/, 'the multiplier is shown with two decimals');
+  assert.match(methodBody(source, 'RenderScaleLabel'), /ScaleLabelFormat/);
+  assert.match(methodBody(source, 'GetSnapshot'), /stageFactor/, 'the snapshot reports the factor');
+  assert.match(source, /property number HitPointMargin = \d+/, 'the margin is a named property');
 });
 
 test('the stage scale is read from the battle camera setting and the native screen conversion, not typed in', () => {
@@ -229,4 +267,23 @@ test('stage size follows the model scale published with the dex row', () => {
   assert.match(layout, /scaleX/);
   assert.match(layout, /scaleY/);
   assert.match(layout, /StagePixelsPerUnit/);
+});
+
+test('the attack effect, the hit effect and the scale label are authored on the stage, hidden, and never take clicks', () => {
+  const ui = dex();
+  const stage = rect(ui, STAGE);
+  for (const [entity, flip] of [[ATTACK_EFFECT, true], [HIT_EFFECT, false]]) {
+    const sprite = ui.getComponent(entity, SPRITE);
+    assert.equal(ui.find(entity).jsonString.enable, false, `${entity} is hidden until it plays`);
+    assert.equal(sprite.RaycastTarget, false, `${entity} never takes clicks`);
+    assert.equal(sprite.Type, 0, `${entity} is a plain image`);
+    assert.equal(sprite.FlipX, flip, `${entity} flips ${flip ? 'with' : 'not with'} the attacker`);
+    const box = rect(ui, entity);
+    assert.deepEqual([box.Pivot.x, box.Pivot.y], [0.5, 0.5], `${entity} is positioned by its centre like the actor`);
+  }
+  assert.equal(ui.find(SCALE_LABEL).jsonString.enable, false, 'the multiplier is hidden until the stage shrinks');
+  const label = rect(ui, SCALE_LABEL);
+  const left = label.AnchorsMin.x * stage.RectSize.x + label.anchoredPosition.x - label.Pivot.x * label.RectSize.x;
+  assert.ok(left >= 0 && left + label.RectSize.x <= stage.RectSize.x, 'the label fits the stage width');
+  assert.ok(ui.getComponent(SCALE_LABEL, TEXT), 'the label is a text');
 });

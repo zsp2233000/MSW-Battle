@@ -18,6 +18,9 @@ script MonsterDex extends Logic
     property ButtonComponent hurtButton = "56c8e073-419d-41d5-b9be-d3cd2b66104e"
     property ButtonComponent dieButton = "faee53ab-737c-4f86-a335-be3961cf6849"
     property TextGUIRendererComponent stageNotice = "8d4a31b5-500e-43ba-bdc0-7fcaabb171c5"
+    property SpriteGUIRendererComponent attackEffectSprite = "f7b6fd4b-00ba-40a2-a81a-2103a3ea9f55"
+    property SpriteGUIRendererComponent hitEffectSprite = "5e8fd714-47e4-4c60-8385-46a63b1267bd"
+    property TextGUIRendererComponent scaleLabel = "52934094-7804-4cb6-bbcd-8fa05fc9a5d3"
 
     property string LobbyMapName = "formationlobby"
     property number LoadTimeoutSeconds = 8
@@ -34,6 +37,8 @@ script MonsterDex extends Logic
     property number SoundVolume = 1
     property number PixelsPerWorldUnit = 100
     property string StageUnavailableText = "舞台無法使用：讀不到戰鬥鏡頭設定"
+    property number HitPointMargin = 24
+    property string ScaleLabelFormat = "舞台縮小 ×%.2f"
 
     @ExecSpace("ClientOnly")
     method void OnBeginPlay()
@@ -57,8 +62,12 @@ script MonsterDex extends Logic
         self._T.stageFor = nil
         self._T.oneShot = false
         self._T.endHandler = nil
-        -- Authored starting state: the book, the stage image, its notice and the three row templates are all hidden.
-        for _, component in ipairs({ self.stageSprite, self.stageNotice }) do
+        self._T.effectHandlers = {}
+        self._T.timers = {}
+        self._T.trialSerial = 0
+        self._T.stageFactor = 1
+        -- Authored starting state: the book, the stage image, its notice, the two effect sprites, the scale label and the three row templates are all hidden.
+        for _, component in ipairs({ self.stageSprite, self.stageNotice, self.attackEffectSprite, self.hitEffectSprite, self.scaleLabel }) do
             if isvalid(component) then component.Entity:SetEnable(false) end
         end
         for _, entity in ipairs({ self.book, self.rowTemplate, self.headerTemplate, self.detailTemplate }) do
@@ -104,7 +113,15 @@ script MonsterDex extends Logic
             self:Bind(trial.button.Entity, function() self:Play(action) end)
         end
         self._T.endHandler = self.stageSprite.Entity:ConnectEvent(SpriteGUIAnimPlayerEndEvent, function(event) self:OnAnimationEnd(event) end)
-        log("[VRF][MonsterDex] connected lobby entry, close button, trial buttons and the stage end event")
+        for _, effect in ipairs({ self.attackEffectSprite, self.hitEffectSprite }) do
+            if isvalid(effect) then
+                -- A finished one-shot effect clip leaves the stage on its own end event.
+                local entity = effect.Entity
+                local callback = entity:ConnectEvent(SpriteGUIAnimPlayerEndEvent, function() entity:SetEnable(false) end)
+                table.insert(self._T.effectHandlers, { entity = entity, callback = callback })
+            end
+        end
+        log("[VRF][MonsterDex] connected lobby entry, close button, trial buttons, the stage end event and the effect end events")
     end
 
     @ExecSpace("ClientOnly")
@@ -163,7 +180,8 @@ script MonsterDex extends Logic
 
     @ExecSpace("ClientOnly")
     method void ResetPlayback()
-        -- Back to a quiet idle stage: idle action, empty event log, nothing in flight. A closed book or a missing row hides the stage.
+        -- Back to a quiet idle stage: idle action, empty event log, nothing in flight (no pending or showing effect). A closed book or a missing row hides the stage.
+        self:ClearEffects()
         self._T.action = "IDLE"
         self._T.events = {}
         self._T.oneShot = false
@@ -210,6 +228,7 @@ script MonsterDex extends Logic
         if not self._T.open or self._T.battleZoom == nil then return false end
         if self:GetSelectedRow() == nil or self:ActionSpecs()[action] == nil then return false end
         self._T.events = {}
+        self:ClearEffects()
         self:StartClip(action, true)
         log("[VRF][MonsterDex] trial " .. action)
         return true
@@ -230,7 +249,58 @@ script MonsterDex extends Logic
         self.stageSprite.Entity:SetEnable(true)
         if record then self:RecordEvent("ANIMATION_START", action, ruid) end
         if record and spec.sound ~= nil then self:PlaySoundOnce(action, row[spec.sound] or "") end
+        if record and action == "ATTACK" then self:ArmAttackTrial(row) end
         self:RenderTrialButtons()
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ArmAttackTrial(any row)
+        -- The attack's effects follow the dex row's own delays, never recalculated: the attack effect after attackEffectDelay on the attacker (frame 1 is immediate), the hit effect after impactDelay at the hit point (a ball is a later ticket, so every attack is instant for now). Blank effect fields are skipped; a cleared trial drops its pending timers.
+        local serial = self._T.trialSerial
+        local function arm(delay, name, effect, ruid)
+            if ruid == "" or not isvalid(effect) then return end
+            if delay <= 0 then
+                self:ShowEffect(name, effect, ruid, row)
+                return
+            end
+            local id = _TimerService:SetTimerOnce(function()
+                if serial == self._T.trialSerial then self:ShowEffect(name, effect, ruid, row) end
+            end, delay)
+            table.insert(self._T.timers, id)
+        end
+        arm(row.attackEffectDelay or 0, "ATTACK_EFFECT", self.attackEffectSprite, row.attackEffectRuid or "")
+        arm(row.impactDelay or 0, "HIT_EFFECT", self.hitEffectSprite, row.hitEffectRuid or "")
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ShowEffect(string name, any effect, string ruid, any row)
+        -- Play one effect clip once on the stage: the attack effect on the attacker at the attacker's own scale and facing, the hit effect at the hit point at the stage's art scale. A blank RUID is skipped silently.
+        if ruid == "" or not isvalid(effect) then return end
+        local geometry = self:StageGeometry(row)
+        local isAttack = name == "ATTACK_EFFECT"
+        local position = isAttack and Vector2(geometry.footX, geometry.footY) or Vector2(geometry.hitX, geometry.footY)
+        local scale = isAttack and self.stageSprite.Entity.UITransformComponent.UIScale or Vector3(geometry.pixelsPerUnit / self.PixelsPerWorldUnit, geometry.pixelsPerUnit / self.PixelsPerWorldUnit, 1)
+        effect.Entity:SetEnable(false)
+        effect.AnimClipPlayType = SpriteAnimClipPlayType.Onetime
+        effect.ImageRUID = DataRef(ruid)
+        effect.PreserveSprite = PreserveSpriteType.NativeSize
+        effect.Entity.UITransformComponent.anchoredPosition = position
+        effect.Entity.UITransformComponent.UIScale = Vector3(scale.x, scale.y, 1)
+        effect.Entity:SetEnable(true)
+        self:RecordEvent(name, "ATTACK", ruid)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ClearEffects()
+        -- Drop every pending effect timer (the serial also voids a callback already queued) and hide both effect sprites.
+        self._T.trialSerial = (self._T.trialSerial or 0) + 1
+        for _, id in ipairs(self._T.timers or {}) do
+            _TimerService:ClearTimer(id)
+        end
+        self._T.timers = {}
+        for _, effect in ipairs({ self.attackEffectSprite, self.hitEffectSprite }) do
+            if isvalid(effect) then effect.Entity:SetEnable(false) end
+        end
     end
 
     @ExecSpace("ClientOnly")
@@ -274,11 +344,37 @@ script MonsterDex extends Logic
     end
 
     @ExecSpace("ClientOnly")
+    method number HitReach(any row)
+        -- World units from the attacker's foot to its hit point: one attack range in front of the body centre. The body centre sits bodyX behind the foot as in the combat rectangle, where bodyX is the hit box offset times the model scale.
+        local bodyX = (row.bodyOffsetX or 0) * math.abs(row.scaleX)
+        return row.attackRange - bodyX
+    end
+
+    @ExecSpace("ClientOnly")
+    method number StageFactor(any row)
+        -- 1 while the hit point fits on the stage; otherwise the whole stage shrinks so that the hit point lands HitPointMargin short of the stage's right edge.
+        local foot = self.stageSprite.Entity.UITransformComponent.anchoredPosition
+        local room = self.stageSprite.Entity.Parent.UITransformComponent.RectSize.x - foot.x - self.HitPointMargin
+        local reach = self:HitReach(row) * self:StagePixelsPerUnit()
+        if reach <= room then return 1 end
+        return math.min(1, room / reach)
+    end
+
+    @ExecSpace("ClientOnly")
+    method table StageGeometry(any row)
+        -- Stage positions of one monster in canvas pixels: the attacker's foot (the authored actor position), the hit point on the ground line in front of it, and the pixels one world unit covers after any shrinking.
+        local foot = self.stageSprite.Entity.UITransformComponent.anchoredPosition
+        local pixelsPerUnit = self:StagePixelsPerUnit() * self:StageFactor(row)
+        return { footX = foot.x, footY = foot.y, hitX = foot.x + self:HitReach(row) * pixelsPerUnit, pixelsPerUnit = pixelsPerUnit }
+    end
+
+    @ExecSpace("ClientOnly")
     method any StageLayout(any row)
-        -- UI scale of the stage image for one monster: the battle view's pixels per world unit times the model's own scale. The art is drawn at its native pixels, 100 per world unit.
+        -- UI scale of the stage image for one monster: the battle view's pixels per world unit, times the stage factor, times the model's own scale. The art is drawn at its native pixels, 100 per world unit.
         if row == nil or self._T.battleZoom == nil then return nil end
-        local artScale = self:StagePixelsPerUnit() / self.PixelsPerWorldUnit
-        return { x = artScale * row.scaleX, y = artScale * row.scaleY }
+        local factor = self:StageFactor(row)
+        local artScale = self:StagePixelsPerUnit() * factor / self.PixelsPerWorldUnit
+        return { x = artScale * row.scaleX, y = artScale * row.scaleY, factor = factor }
     end
 
     @ExecSpace("ClientOnly")
@@ -289,6 +385,7 @@ script MonsterDex extends Logic
         if self._T.open then row = self:GetSelectedRow() end
         self:RenderStageNotice(row ~= nil and self._T.battleZoom == nil)
         local layout = self:StageLayout(row)
+        self:RenderScaleLabel(layout)
         if layout == nil then
             self._T.stageFor = nil
             self.stageSprite.Entity:SetEnable(false)
@@ -300,6 +397,16 @@ script MonsterDex extends Logic
         self.stageSprite.PreserveSprite = PreserveSpriteType.NativeSize
         self.stageSprite.Entity.UITransformComponent.UIScale = Vector3(layout.x, layout.y, 1)
         self:StartClip("IDLE", false)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void RenderScaleLabel(any layout)
+        -- Say how much the stage was shrunk to fit the hit point; hidden at full scale and with no stage.
+        self._T.stageFactor = layout ~= nil and layout.factor or 1
+        if not isvalid(self.scaleLabel) then return end
+        local shrunk = self._T.stageFactor < 1
+        if shrunk then self.scaleLabel.Text = string.format(self.ScaleLabelFormat, self._T.stageFactor) end
+        self.scaleLabel.Entity:SetEnable(shrunk)
     end
 
     @ExecSpace("ClientOnly")
@@ -352,7 +459,7 @@ script MonsterDex extends Logic
             open = self._T.open, loadState = self._T.loadState,
             selectedMonsterId = self._T.selectedId, selectedMonsterName = selected ~= nil and selected.monsterName or "",
             action = self._T.action, events = events, rows = rows, details = self:BuildDetails(selected),
-            stageAvailable = self._T.battleZoom ~= nil,
+            stageAvailable = self._T.battleZoom ~= nil, stageFactor = self._T.stageFactor or 1,
         }
     end
 
@@ -551,6 +658,11 @@ script MonsterDex extends Logic
             self.stageSprite.Entity:DisconnectEvent(SpriteGUIAnimPlayerEndEvent, self._T.endHandler)
             self._T.endHandler = nil
         end
+        for _, binding in ipairs(self._T.effectHandlers or {}) do
+            if isvalid(binding.entity) then binding.entity:DisconnectEvent(SpriteGUIAnimPlayerEndEvent, binding.callback) end
+        end
+        self._T.effectHandlers = {}
+        self:ClearEffects()
         self:DestroyRows()
         self:DestroyDetailRows()
     end

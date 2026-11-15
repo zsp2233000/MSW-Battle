@@ -5,7 +5,10 @@
 -- written down independently of the implementation: a 16:9 window is a 1920 unit wide canvas, the PC view is 12.8 world units wide at
 -- camera zoom 100, so the battle camera (zoom 60) shows 12.8 * 100 / 60 world units and one world unit is 1920 / that = 90 canvas units.
 -- A missing battle camera zoom is simulated at the end: the rows, the details and the selection must keep working, only the stage goes off.
--- Nothing is queued, stored or edited; the book is closed again at the end. Sounds cannot be heard here: the SOUND events record that
+-- The attack trial is checked per monster against the dex row's own delays (attackEffectDelay, impactDelay): the attack, effect and hit
+-- effect events are recorded with their times and the effect sprites are inspected the moment each event appears. The hit point is written
+-- down independently: one attack range in front of the attacker's body centre (like the combat rectangle), and the whole stage shrinks when
+-- that point would pass the stage's right edge minus a margin. Nothing is queued, stored or edited; the book is closed again at the end. Sounds cannot be heard here: the SOUND events record that
 -- the sound call was made with the row's RUID, and a blank sound field is simulated on a cached row and restored.
 local failures = 0
 local function check(condition, message)
@@ -42,7 +45,19 @@ local FIELDS = { IDLE = "standRuid", MOVE = "moveRuid", ATTACK = "attackRuid", H
 local SOUNDS = { ATTACK = "attackSoundRuid", HURT = "hurtSoundRuid", DIE = "dieSoundRuid" }
 local LOOPS = { IDLE = true, MOVE = true, ATTACK = false, HURT = false, DIE = false }
 
+local TIME_TOLERANCE = 0.12
 local function sprite() return dex.stageSprite end
+local function stageWidth() return sprite().Entity.Parent.UITransformComponent.RectSize.x end
+-- Independent geometry of one monster on the stage: the hit point is one attack range in front of the body centre, and the whole
+-- stage shrinks (factor < 1) when that point would pass the right edge minus the margin.
+local function expectedGeometry(row)
+    local foot = sprite().Entity.UITransformComponent.anchoredPosition
+    local bodyX = (row.bodyOffsetX or 0) * math.abs(row.scaleX)
+    local needed = (row.attackRange - bodyX) * PIXELS_PER_UNIT
+    local available = stageWidth() - foot.x - dex.HitPointMargin
+    local factor = needed > available and available / needed or 1
+    return { factor = factor, footX = foot.x, footY = foot.y, hitX = foot.x + (row.attackRange - bodyX) * PIXELS_PER_UNIT * factor }
+end
 local function clipRuid() return sprite().ImageRUID.DataId end
 local function isLoop() return sprite().AnimClipPlayType == SpriteAnimClipPlayType.Loop end
 local function eventsOf(name)
@@ -62,8 +77,9 @@ end
 
 local function checkScaleAndFacing(row, label)
     local transform = sprite().Entity.UITransformComponent
-    local expectedX = PIXELS_PER_UNIT / ART_PIXELS_PER_WORLD_UNIT * row.scaleX
-    local expectedY = PIXELS_PER_UNIT / ART_PIXELS_PER_WORLD_UNIT * row.scaleY
+    local factor = expectedGeometry(row).factor
+    local expectedX = PIXELS_PER_UNIT / ART_PIXELS_PER_WORLD_UNIT * row.scaleX * factor
+    local expectedY = PIXELS_PER_UNIT / ART_PIXELS_PER_WORLD_UNIT * row.scaleY * factor
     check(math.abs(transform.UIScale.x - expectedX) < SCALE_TOLERANCE and math.abs(transform.UIScale.y - expectedY) < SCALE_TOLERANCE,
         label .. ": stage scale follows the battle view and the model scale (" .. string.format("%.3f,%.3f", transform.UIScale.x, transform.UIScale.y)
         .. " vs " .. string.format("%.3f,%.3f", expectedX, expectedY) .. ")")
@@ -197,7 +213,7 @@ local ok, detail = pcall(function()
     local firstStart = eventsOf("ANIMATION_START")[1].at
     trial("ATTACK")
     local secondStart = eventsOf("ANIMATION_START")[1].at
-    check(#dex:GetSnapshot().events == 1 and secondStart > firstStart + row.attackDuration * 0.3, "replaying the same action starts a fresh trial")
+    check(#eventsOf("ANIMATION_START") == 1 and secondStart > firstStart + row.attackDuration * 0.3, "replaying the same action starts a fresh trial")
     wait(row.attackDuration * 0.55)
     check(dex:GetSnapshot().action == "ATTACK" and #eventsOf("ANIMATION_END") == 0, "the replay is still running when the first run would have ended")
     check(await(function() return dex:GetSnapshot().action == "IDLE" end, 5), "the replay ends and returns to idle")
@@ -254,6 +270,155 @@ local ok, detail = pcall(function()
     click(dex.lobbyButton.Entity)
     check(await(function() return dex:GetSnapshot().open and sprite().Entity.Enable end, 8), "reopening shows the stage again")
     stageShows(dex:GetSelectedRow(), "IDLE", "after reopening")
+
+
+    -- Attack trial timing: for every monster, the sound, the attack effect and the hit effect come at the dex row's own delays.
+    local function checkEffectSprite(effect, ruid, expectFlip, label)
+        check(effect.Entity.Enable and effect.ImageRUID.DataId == ruid, label .. ": the effect sprite shows the row's effect clip")
+        check(effect.FlipX == expectFlip, label .. ": the effect " .. (expectFlip and "faces the attacker's way" or "is not flipped"))
+        return effect.Entity.UITransformComponent
+    end
+    local function runAttack(row, label)
+        local geometry = expectedGeometry(row)
+        local wantEffect, wantHit = (row.attackEffectRuid or "") ~= "", (row.hitEffectRuid or "") ~= ""
+        trial("ATTACK")
+        local started = eventsOf("ANIMATION_START")[1]
+        local deadline = _UtilLogic.ElapsedSeconds + math.max(row.attackDuration, row.attackEffectDelay, row.impactDelay) + 1.5
+        local checkedEffect, checkedHit = false, false
+        while _UtilLogic.ElapsedSeconds < deadline do
+            if wantEffect and not checkedEffect and #eventsOf("ATTACK_EFFECT") > 0 then
+                checkedEffect = true
+                local box = checkEffectSprite(dex.attackEffectSprite, row.attackEffectRuid, true, label .. " attack effect")
+                local mine = sprite().Entity.UITransformComponent
+                check(math.abs(box.anchoredPosition.x - geometry.footX) < 1 and math.abs(box.anchoredPosition.y - geometry.footY) < 1, label .. ": the attack effect is on the attacker")
+                check(math.abs(box.UIScale.x - mine.UIScale.x) < 0.001 and math.abs(box.UIScale.y - mine.UIScale.y) < 0.001, label .. ": the attack effect is drawn at the attacker's scale")
+            end
+            if wantHit and not checkedHit and #eventsOf("HIT_EFFECT") > 0 then
+                checkedHit = true
+                local box = checkEffectSprite(dex.hitEffectSprite, row.hitEffectRuid, false, label .. " hit effect")
+                check(math.abs(box.anchoredPosition.x - geometry.hitX) < 1 and math.abs(box.anchoredPosition.y - geometry.footY) < 1,
+                    label .. ": the hit effect is at the hit point (" .. string.format("%.1f vs %.1f", box.anchoredPosition.x, geometry.hitX) .. ")")
+            end
+            if dex:GetSnapshot().action == "IDLE" and (checkedEffect or not wantEffect) and (checkedHit or not wantHit) then break end
+            wait(0.016)
+        end
+        local effects, hits = eventsOf("ATTACK_EFFECT"), eventsOf("HIT_EFFECT")
+        if wantEffect then
+            check(#effects == 1 and math.abs(effects[1].at - started.at - row.attackEffectDelay) < TIME_TOLERANCE and effects[1].ruid == row.attackEffectRuid,
+                label .. ": one attack effect at the effect-frame delay " .. string.format("%.2f", row.attackEffectDelay) .. " (" .. (#effects > 0 and string.format("%.2f", effects[1].at - started.at) or "none") .. ")")
+        else
+            check(#effects == 0 and not dex.attackEffectSprite.Entity.Enable, label .. ": a blank attack effect is skipped")
+        end
+        if wantHit then
+            check(#hits == 1 and math.abs(hits[1].at - started.at - row.impactDelay) < TIME_TOLERANCE and hits[1].ruid == row.hitEffectRuid,
+                label .. ": one hit effect at the hit-frame delay " .. string.format("%.2f", row.impactDelay) .. " (" .. (#hits > 0 and string.format("%.2f", hits[1].at - started.at) or "none") .. ")")
+        else
+            check(#hits == 0 and not dex.hitEffectSprite.Entity.Enable, label .. ": a blank hit effect is skipped")
+        end
+        local sounds = eventsOf("SOUND")
+        if (row.attackSoundRuid or "") ~= "" then
+            check(#sounds == 1 and sounds[1].action == "ATTACK" and sounds[1].ruid == row.attackSoundRuid and math.abs(sounds[1].at - started.at) < 0.02,
+                label .. ": the attack sound plays with the animation start and no hit sound follows")
+        else
+            check(#sounds == 0, label .. ": a blank attack sound plays nothing")
+        end
+        await(function() return dex:GetSnapshot().action == "IDLE" end, 5)
+        return started
+    end
+    local laterFrame, firstFrame = nil, nil
+    for index, row in ipairs(latest) do
+        click(rows[index])
+        runAttack(row, row.monsterName .. " attack")
+        if (row.attackEffectRuid or "") ~= "" then
+            if row.attackEffectDelay > 0 then laterFrame = laterFrame or index else firstFrame = firstFrame or index end
+        end
+    end
+    check(laterFrame ~= nil, "some monster has an attack effect on a later frame (" .. tostring(laterFrame) .. ")")
+    -- The data may have no frame 1 effect: simulate it on the cached row of a monster with an attack effect (delay 0 is frame 1), restored afterwards.
+    if firstFrame == nil and laterFrame ~= nil then
+        click(rows[laterFrame])
+        local frameRow = dex:GetSelectedRow()
+        local savedDelay = frameRow.attackEffectDelay
+        frameRow.attackEffectDelay = 0
+        runAttack(frameRow, frameRow.monsterName .. " effect on frame 1 (simulated)")
+        frameRow.attackEffectDelay = savedDelay
+    end
+    local withHit, withoutEffects = nil, nil
+    for index, row in ipairs(latest) do
+        if (row.hitEffectRuid or "") ~= "" then withHit = withHit or index end
+        if (row.hitEffectRuid or "") == "" and (row.attackEffectRuid or "") == "" then withoutEffects = withoutEffects or index end
+    end
+    check(withHit ~= nil, "some monster has a hit effect")
+    -- A monster with neither effect is covered by the blank-field run below when the data has none.
+
+    -- Every in-flight effect is cleared: replaying, another button, another monster and closing.
+    local timed = withHit or 1
+    local timedRow = latest[timed]
+    local otherIndex = timed == 1 and 2 or 1
+    local pending = timedRow.impactDelay + timedRow.attackEffectDelay + 0.5
+    click(rows[timed])
+    trial("ATTACK")
+    wait(timedRow.impactDelay * 0.5)
+    trial("ATTACK")
+    local replayStart = eventsOf("ANIMATION_START")[1].at
+    check(#eventsOf("HIT_EFFECT") == 0 and #eventsOf("ATTACK_EFFECT") == 0, "a replay starts with a clean event log")
+    await(function() return #eventsOf("HIT_EFFECT") > 0 end, timedRow.impactDelay + 1)
+    local replayHits = eventsOf("HIT_EFFECT")
+    check(#replayHits == 1 and math.abs(replayHits[1].at - replayStart - timedRow.impactDelay) < TIME_TOLERANCE, "a replay's hit effect comes once, one hit delay after the replay started")
+    await(function() return dex:GetSnapshot().action == "IDLE" end, 5)
+    trial("ATTACK")
+    wait(timedRow.impactDelay * 0.4)
+    trial("MOVE")
+    check(not dex.attackEffectSprite.Entity.Enable and not dex.hitEffectSprite.Entity.Enable, "another button hides the effect sprites")
+    wait(pending)
+    check(#eventsOf("HIT_EFFECT") == 0 and #eventsOf("ATTACK_EFFECT") == 0 and not dex.hitEffectSprite.Entity.Enable, "an aborted attack's pending effects never show")
+    trial("IDLE")
+    trial("ATTACK")
+    wait(timedRow.impactDelay * 0.4)
+    click(rows[otherIndex])
+    check(not dex.attackEffectSprite.Entity.Enable and not dex.hitEffectSprite.Entity.Enable and #dex:GetSnapshot().events == 0, "switching monsters clears the effects and the log")
+    wait(pending)
+    check(#dex:GetSnapshot().events == 0 and not dex.hitEffectSprite.Entity.Enable, "an abandoned attack's pending effects never show on the new monster")
+    click(rows[timed])
+    trial("ATTACK")
+    wait(timedRow.impactDelay * 0.4)
+    click(dex.closeButton.Entity)
+    check(not dex.attackEffectSprite.Entity.Enable and not dex.hitEffectSprite.Entity.Enable, "closing the book clears the effects")
+    wait(pending)
+    check(not dex.hitEffectSprite.Entity.Enable and not dex.attackEffectSprite.Entity.Enable, "pending effects cannot revive after closing")
+    click(dex.lobbyButton.Entity)
+    check(await(function() return dex:GetSnapshot().open and sprite().Entity.Enable end, 8), "the book reopens")
+    wait(0.5)
+    rows = uiRows()
+
+    -- Blank effect and sound fields are skipped silently (simulated on a cached row, restored afterwards).
+    click(rows[timed])
+    local cachedRow = dex:GetSelectedRow()
+    local saved = { cachedRow.attackEffectRuid, cachedRow.hitEffectRuid, cachedRow.attackSoundRuid }
+    cachedRow.attackEffectRuid, cachedRow.hitEffectRuid, cachedRow.attackSoundRuid = "", "", ""
+    runAttack(cachedRow, cachedRow.monsterName .. " with blank fields")
+    cachedRow.attackEffectRuid, cachedRow.hitEffectRuid, cachedRow.attackSoundRuid = saved[1], saved[2], saved[3]
+
+    -- A hit point beyond the stage shrinks the whole stage and says by how much (simulated range on the cached row, restored afterwards).
+    local longRow = dex:GetSelectedRow()
+    local normalRange = longRow.attackRange
+    check(expectedGeometry(longRow).factor == 1 and not dex.scaleLabel.Entity.Enable, "a hit point that fits keeps full scale and no multiplier label")
+    longRow.attackRange = 30
+    click(rows[otherIndex])
+    click(rows[timed])
+    local geometry = expectedGeometry(longRow)
+    check(geometry.factor < 0.95, "the simulated range does not fit the stage (factor " .. string.format("%.3f", geometry.factor) .. ")")
+    checkScaleAndFacing(longRow, "long range")
+    check(dex.scaleLabel.Entity.Enable and string.find(dex.scaleLabel.Text, string.format("%.2f", geometry.factor), 1, true) ~= nil,
+        "the multiplier is shown on screen (" .. tostring(dex.scaleLabel.Text) .. ")")
+    check(math.abs(dex:GetSnapshot().stageFactor - geometry.factor) < 0.001, "the snapshot reports the factor")
+    check(geometry.hitX <= stageWidth() - dex.HitPointMargin + 1, "the hit point lies inside the stage")
+    runAttack(longRow, "long range attack")
+    longRow.attackRange = normalRange
+    click(rows[otherIndex])
+    click(rows[timed])
+    check(not dex.scaleLabel.Entity.Enable, "back at a fitting range the multiplier label is hidden")
+    checkScaleAndFacing(longRow, "restored range")
 
     -- No battle camera zoom: only the stage is off. The list, the selection and the details keep working.
     local zoom = dex._T.battleZoom
