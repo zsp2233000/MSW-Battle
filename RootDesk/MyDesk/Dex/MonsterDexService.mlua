@@ -20,6 +20,7 @@ script MonsterDexService extends Logic
         -- Keep only the most recent reply in memory; nothing is written to any storage.
         self._T.latest = rows
         log("[VRF][MonsterDex] received rows=" .. tostring(#rows))
+        _MonsterDex:Observe(rows)
     end
 
     @ExecSpace("ClientOnly")

@@ -1,0 +1,245 @@
+@Logic
+script MonsterDex extends Logic
+
+    -- Bound by UIBuilder (ui/MonsterDexGroup.ui and the lobby button in ui/FormationGroup.ui).
+    property Entity book = "e022dc95-05c7-46b2-830f-1561b4267dbf"
+    property ButtonComponent closeButton = "16cd671f-6e16-41b3-b974-94dcebe9800b"
+    property ScrollLayoutGroupComponent listLayout = "db53d2f8-c948-41a7-b698-30d9f4d88689"
+    property Entity rowTemplate = "a04d24d8-ec76-4418-9b59-84850c171b7b"
+    property TextGUIRendererComponent statusText = "42a06858-b407-47fd-8a51-f26e0a35d853"
+    property ButtonComponent lobbyButton = "415c41cd-970f-424e-946f-37c6a3a89489"
+
+    property string LobbyMapName = "formationlobby"
+    property number LoadTimeoutSeconds = 8
+    property Color RowColor = Color(0.36, 0.29, 0.52, 0.35)
+    property Color SelectedRowColor = Color(1, 0.86, 0.5, 1)
+    property Color RowTextColor = Color(1, 1, 1, 1)
+    property Color SelectedTextColor = Color(1, 1, 1, 1)
+
+    @ExecSpace("ClientOnly")
+    method void OnBeginPlay()
+        -- Start closed with an empty cache; the buttons are wired once the authored UI exists (see EnsureBound).
+        self._T.open = false
+        self._T.openedAt = 0
+        self._T.loadState = "IDLE"
+        self._T.rows = {}
+        self._T.rowViews = {}
+        self._T.selectedId = ""
+        self._T.action = "IDLE"
+        self._T.events = {}
+        self._T.bindings = {}
+        self._T.bound = false
+        self._T.buildSerial = 0
+        self._T.entryShown = nil
+        self._T.entryEnabled = nil
+        if isvalid(self.book) then self.book:SetEnable(false) end
+        if isvalid(self.rowTemplate) then self.rowTemplate:SetEnable(false) end
+        log("[VRF][MonsterDex] ready")
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnUpdate(number delta)
+        -- Keep the lobby entry in step with the shared matchmaking lock; a match starting under an open book closes it.
+        self:EnsureBound()
+        if not isvalid(self.lobbyButton) then return end
+        local canOpen = self:CanOpen()
+        local shown = Environment:IsMakerPlay()
+        if self._T.entryShown ~= shown then
+            self._T.entryShown = shown
+            self.lobbyButton.Entity:SetEnable(shown)
+        end
+        if self._T.entryEnabled ~= canOpen then
+            self._T.entryEnabled = canOpen
+            self.lobbyButton.Enable = canOpen
+        end
+        if self._T.open and not canOpen then
+            log("[VRF][MonsterDex] closed because the lobby is no longer available")
+            self:Close()
+        end
+        if self._T.open and self._T.loadState == "LOADING" and _UtilLogic.ElapsedSeconds - self._T.openedAt > self.LoadTimeoutSeconds then
+            self._T.loadState = "FAILED"
+            self:Render()
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void EnsureBound()
+        -- The authored buttons only call the public interface below.
+        if self._T.bound or not isvalid(self.lobbyButton) or not isvalid(self.closeButton) then return end
+        self._T.bound = true
+        self:Bind(self.lobbyButton.Entity, function() self:Open() end)
+        self:Bind(self.closeButton.Entity, function() self:Close() end)
+        log("[VRF][MonsterDex] connected lobby entry and close button")
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Bind(Entity entity, any action)
+        -- Own each connection so teardown cannot leak across Play sessions.
+        local callback = entity:ConnectEvent(ButtonClickEvent, action)
+        table.insert(self._T.bindings, { entity = entity, callback = callback })
+    end
+
+    @ExecSpace("ClientOnly")
+    method boolean CanOpen()
+        -- Maker Play, the lobby map and the lobby's own matchmaking lock must all allow the book.
+        if not Environment:IsMakerPlay() then return false end
+        local player = _UserService.LocalPlayer
+        if not isvalid(player) or player.CurrentMapName ~= self.LobbyMapName then return false end
+        return _MatchFlowInput:AllowsFormationActions()
+    end
+
+    @ExecSpace("ClientOnly")
+    method boolean Open()
+        -- Show the book over the lobby and ask the server for the rows; returns whether the book is open afterwards.
+        if not Environment:IsMakerPlay() then return false end
+        if self._T.open then return true end
+        if not self:CanOpen() then return false end
+        self._T.open = true
+        self._T.openedAt = _UtilLogic.ElapsedSeconds
+        self:ResetPlayback()
+        if #self._T.rows == 0 then self._T.loadState = "LOADING" end
+        if isvalid(self.book) then self.book:SetEnable(true) end
+        _MonsterDexService:RequestRows()
+        self:Render()
+        log("[VRF][MonsterDex] opened rows=" .. tostring(#self._T.rows) .. " selected=" .. self._T.selectedId)
+        return true
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Close()
+        -- Hide the book and drop any playback; nothing else in the lobby is touched.
+        if not self._T.open then return end
+        self._T.open = false
+        self:ResetPlayback()
+        if isvalid(self.book) then self.book:SetEnable(false) end
+        log("[VRF][MonsterDex] closed")
+    end
+
+    @ExecSpace("ClientOnly")
+    method boolean Select(string monsterId)
+        -- Choosing a monster puts the stage back to idle; unknown ids and a closed book are ignored.
+        if not self._T.open or self:RowFor(monsterId) == nil then return false end
+        self._T.selectedId = monsterId
+        self:ResetPlayback()
+        self:Render()
+        log("[VRF][MonsterDex] selected " .. monsterId)
+        return true
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ResetPlayback()
+        -- Later tickets clear the stage here as well: idle action, empty event log.
+        self._T.action = "IDLE"
+        self._T.events = {}
+    end
+
+    @ExecSpace("ClientOnly")
+    method any RowFor(string monsterId)
+        -- Find one published dex row by its MonsterId.
+        for _, row in ipairs(self._T.rows) do
+            if row.monsterId == monsterId then return row end
+        end
+        return nil
+    end
+
+    @ExecSpace("ClientOnly")
+    method any GetSelectedRow()
+        -- The full server-published row of the selected monster, or nil before the first reply.
+        return self:RowFor(self._T.selectedId)
+    end
+
+    @ExecSpace("ClientOnly")
+    method table GetSnapshot()
+        -- A detached, readable copy of what the book currently shows; mutating it changes nothing.
+        local selected = self:RowFor(self._T.selectedId)
+        local rows = {}
+        for _, row in ipairs(self._T.rows) do
+            table.insert(rows, { monsterId = row.monsterId, monsterName = row.monsterName, selected = row.monsterId == self._T.selectedId })
+        end
+        local events = {}
+        for _, event in ipairs(self._T.events) do table.insert(events, event) end
+        return {
+            open = self._T.open, loadState = self._T.loadState,
+            selectedMonsterId = self._T.selectedId, selectedMonsterName = selected ~= nil and selected.monsterName or "",
+            action = self._T.action, events = events, rows = rows,
+        }
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Observe(table rows)
+        -- Replace the list with the server's latest reply; the selection survives when that monster is still listed.
+        local valid = {}
+        for _, row in ipairs(rows) do
+            if type(row.monsterId) == "string" and row.monsterId ~= "" then table.insert(valid, row) end
+        end
+        self._T.rows = valid
+        self._T.loadState = #valid > 0 and "READY" or "EMPTY"
+        if self:RowFor(self._T.selectedId) == nil then
+            self._T.selectedId = #valid > 0 and valid[1].monsterId or ""
+            self:ResetPlayback()
+        end
+        self:BuildRows()
+        self:Render()
+        log("[VRF][MonsterDex] observed rows=" .. tostring(#valid) .. " selected=" .. self._T.selectedId)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void DestroyRows()
+        -- Release every row's subscription before its entity goes away.
+        for _, view in ipairs(self._T.rowViews or {}) do
+            if isvalid(view.entity) then
+                view.entity:DisconnectEvent(ButtonClickEvent, view.callback)
+                view.entity:Destroy()
+            end
+        end
+        self._T.rowViews = {}
+    end
+
+    @ExecSpace("ClientOnly")
+    method void BuildRows()
+        -- One cloned button per dex row, in table order; a newer rebuild abandons an older one that is still cloning.
+        if not isvalid(self.rowTemplate) then return end
+        self._T.buildSerial = self._T.buildSerial + 1
+        local serial = self._T.buildSerial
+        self:DestroyRows()
+        for index, row in ipairs(self._T.rows) do
+            local monsterId = row.monsterId
+            local entity = self.rowTemplate:Clone("Row_" .. tostring(index))
+            if serial ~= self._T.buildSerial then
+                if isvalid(entity) then entity:Destroy() end
+                return
+            end
+            entity.TextGUIRendererComponent.Text = row.monsterName
+            local callback = entity:ConnectEvent(ButtonClickEvent, function() self:Select(monsterId) end)
+            table.insert(self._T.rowViews, { entity = entity, callback = callback, monsterId = monsterId })
+            entity:SetEnable(true)
+        end
+        if isvalid(self.listLayout) then self.listLayout:ResetScrollPosition(UITransformAxis.Vertical) end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Render()
+        -- Highlight the selected row; while there is no list, say why instead.
+        for _, view in ipairs(self._T.rowViews) do
+            if isvalid(view.entity) then
+                local selected = view.monsterId == self._T.selectedId
+                view.entity.SpriteGUIRendererComponent.Color = selected and self.SelectedRowColor or self.RowColor
+                view.entity.TextGUIRendererComponent.FontColor = selected and self.SelectedTextColor or self.RowTextColor
+            end
+        end
+        if not isvalid(self.statusText) then return end
+        local messages = { LOADING = "讀取中…", EMPTY = "資料表沒有怪物", FAILED = "讀取逾時，請關閉後重新開啟" }
+        local message = messages[self._T.loadState] or ""
+        self.statusText.Text = message
+        self.statusText.Entity:SetEnable(message ~= "")
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnEndPlay()
+        -- Release the authored button subscriptions at world session shutdown.
+        for _, binding in ipairs(self._T.bindings or {}) do
+            if isvalid(binding.entity) then binding.entity:DisconnectEvent(ButtonClickEvent, binding.callback) end
+        end
+        self:DestroyRows()
+    end
+end
