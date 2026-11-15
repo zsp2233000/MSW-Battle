@@ -115,17 +115,19 @@ local ok, detail = pcall(function()
         "a blank projectile keeps the instant strike without needing a speed")
     reset()
     for _, expected in ipairs({
-        { "monster_tank", 400, 0.4, 8, 5, 0.65, 12 },
-        { "monster_warrior", 220, 1, 20, 3, 0.6, 30 },
-        { "monster_shooter", 120, 0.8, 32, 2, 4, 48 },
+        { "monster_tank", 400, 0.4, 8, 5, 0.65, 12, 4 },
+        { "monster_warrior", 220, 1, 20, 3, 0.6, 30, 1 },
+        { "monster_shooter", 120, 0.8, 32, 2, 4, 48, 1 },
     }) do
         local profile = catalog:GetProfile(expected[1])
         check(profile.MaxHp == expected[2] and profile.MoveSpeed == expected[3] and profile.AttackDamageMin == expected[4]
             and profile.AttackDamageMax == expected[7]
             and profile.AttackIntervalSeconds == expected[5] and profile.AttackRange == expected[6],
             expected[1] .. " loads the current formal CSV's independent numeric values")
-        check(profile ~= nil and profile.AttackEffectFrame == 1 and profile.AttackEffectDelaySeconds == 0,
-            expected[1] .. " keeps the attack effect on frame 1")
+        -- Frame 1 plays at attack start (no delay); a later frame is delayed by the earlier frames' time.
+        check(profile ~= nil and profile.AttackEffectFrame == expected[8]
+            and (expected[8] == 1) == (profile.AttackEffectDelaySeconds == 0),
+            expected[1] .. " loads attack effect frame " .. tostring(expected[8]) .. " from the current formal CSV")
     end
 end)
 if not ok then check(false, "probe raised: " .. tostring(detail)) end
