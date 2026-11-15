@@ -15,6 +15,8 @@ const RIGHT = 'Book/Page/RightPage';
 const STAGE = `${RIGHT}/Stage`;
 const ACTOR = `${STAGE}/Actor`;
 const TRIAL = `${LEFT}/Trial`;
+const NOTICE = `${STAGE}/Notice`;
+const CAMERA_MODULE = 'RootDesk/MyDesk/Combat/BattleFixedCamera.mlua';
 // Left to right, as the ticket lists them.
 const TRIAL_BUTTONS = [['Idle', '待機', 'idleButton'], ['Move', '移動', 'moveButton'], ['Attack', '攻擊', 'attackButton'],
   ['Hurt', '受傷', 'hurtButton'], ['Die', '死亡', 'dieButton']];
@@ -51,7 +53,7 @@ test('the stage fills the upper right page, above the resource details', () => {
 
 test('the stage shows one monster: an animation image that always faces right', () => {
   const ui = dex();
-  assert.deepEqual(childNames(ui, STAGE).filter(name => name === 'Actor'), ['Actor']);
+  assert.deepEqual(childNames(ui, STAGE), ['Ground', 'Actor', 'Notice']);
   const sprite = ui.getComponent(ACTOR, SPRITE);
   assert.equal(sprite.FlipX, true, 'monster art faces left, the stage flips it to face right');
   assert.equal(sprite.Type, 0, 'a plain image, never sliced or tiled');
@@ -110,9 +112,13 @@ test('sibling order numbers around the stage are real sibling indexes', () => {
 test('trial playback goes through the public Play interface, wired to the authored buttons only', () => {
   const source = read(MODULE);
   assert.match(source, /@ExecSpace\("ClientOnly"\)\s*\n\s*method boolean Play\(string action\)/);
-  const bind = methodBody(source, 'EnsureBound');
-  for (const [, , property] of TRIAL_BUTTONS) assert.match(bind, new RegExp(`self\\.${property}\\.Entity`), `${property} is connected`);
-  for (const action of ['IDLE', 'MOVE', 'ATTACK', 'HURT', 'DIE']) assert.match(bind, new RegExp(`Play\\("${action}"\\)`), `${action} button plays ${action}`);
+  // One table maps every trial action to its button; binding and highlighting both read it.
+  const table = methodBody(source, 'TrialButtons');
+  for (const [, , property] of TRIAL_BUTTONS) assert.match(table, new RegExp(`self\\.${property}\\b`), `${property} is in the table`);
+  for (const action of ['IDLE', 'MOVE', 'ATTACK', 'HURT', 'DIE']) assert.match(table, new RegExp(`"${action}"`), `${action} is in the table`);
+  assert.match(methodBody(source, 'EnsureBound'), /TrialButtons\(\)[\s\S]*self:Play\(/, 'binding walks the shared table and plays its action');
+  assert.match(methodBody(source, 'RenderTrialButtons'), /TrialButtons\(\)/, 'highlighting walks the same table');
+  assert.doesNotMatch(methodBody(source, 'EnsureBound'), /self\.(idle|move|attack|hurt|die)Button/, 'no second hand-written button list');
   assert.match(methodBody(source, 'GetSnapshot'), /\baction\b[\s\S]*\bevents\b/, 'the snapshot still carries the action and its event log');
   assert.match(methodBody(source, 'OnEndPlay'), /SpriteGUIAnimPlayerEndEvent/, 'the end-event subscription is released with the module');
 });
@@ -146,17 +152,74 @@ test('hurt and die play their own sound, blank sounds are skipped, attack plays 
 test('the stage scale is read from the battle camera setting and the native screen conversion, not typed in', () => {
   const service = read(SERVICE);
   const module = read(MODULE);
-  assert.match(service, /BattleCameraAnchor/, 'the server reads the battle camera anchor');
   assert.match(service, /ZoomRatio/);
   assert.match(module, /ScreenToWorldPosition/, 'the client measures the world width of the screen natively');
-  assert.doesNotMatch(methodBody(module, 'StagePixelsPerUnit'), /\b(12\.8|7\.2|150|90|60|1920)\b/, 'no pixel or world scale literal');
+  assert.doesNotMatch(methodBody(module, 'StagePixelsPerUnit'), /\b(12\.8|7\.2|150|90|60|100|1920)\b/, 'no pixel or world scale literal');
   // The camera the service reads must be one single, consistent setting across every battle map.
   const zooms = ['template', 'formationsim', 'matchprobe'].map(name => {
     const map = MapBuilder.read(`map/${name}.map`);
     return map.component('BattleCameraAnchor', 'MOD.Core.CameraComponent').ZoomRatio;
   });
   assert.equal(new Set(zooms).size, 1, `all battle maps share one zoom ratio (${zooms.join(', ')})`);
-  assert.match(service, /\/maps\/template\/BattleCameraAnchor/, 'reads the template battle map, which the server holds in every Play');
+});
+
+test('the server finds the battle camera anchor the same way the battle map does', () => {
+  const service = read(SERVICE);
+  const battleLookup = read(CAMERA_MODULE).match(/map:GetChildByName\("(\w+)", false\)/);
+  assert.ok(battleLookup, 'BattleFixedCamera looks the anchor up by name among the map children');
+  const name = service.match(/property string BattleCameraAnchorName = "(\w+)"/);
+  assert.ok(name, 'the service names the anchor in one property');
+  assert.equal(name[1], battleLookup[1], 'both use the same anchor name');
+  assert.match(methodBody(service, 'ReadBattleZoom'), /GetChildByName\(self\.BattleCameraAnchorName, false\)/, 'the same direct-child lookup, with the shared name');
+  assert.match(service, /property string BattleMapPath = "\/maps\/template"/, 'reads the template battle map, which the server holds in every Play');
+  const map = MapBuilder.read('map/template.map');
+  assert.ok(map.component(name[1], 'MOD.Core.CameraComponent'), 'the template map has that anchor with a camera');
+});
+
+test('the rows are always sent: a missing battle camera only switches the stage off', () => {
+  const body = methodBody(read(SERVICE), 'RequestRows');
+  const afterZoom = body.slice(body.indexOf('ReadBattleZoom'));
+  assert.doesNotMatch(afterZoom, /\breturn\b/, 'nothing after reading the zoom may abandon the reply');
+  assert.match(afterZoom, /self:ReceiveBattleCamera\(/, 'the zoom (or its absence) is still reported');
+  assert.match(afterZoom, /self:Receive\(rows, senderUserId\)/, 'the rows are sent regardless');
+  const source = read(MODULE);
+  assert.match(methodBody(source, 'ObserveBattleCamera'), /battleZoom = nil/, 'an unreadable zoom clears the stage scale');
+  assert.match(methodBody(source, 'GetSnapshot'), /\bstageAvailable\b/, 'the snapshot reports whether the stage can run');
+});
+
+test('the stage scale uses the full screen width, never the book picture, and no bare pixel constant', () => {
+  const module = read(MODULE);
+  const pixels = methodBody(module, 'StagePixelsPerUnit');
+  assert.match(pixels, /ScreenToUIPosition/, 'canvas width comes from the screen corners in UI coordinates');
+  assert.doesNotMatch(pixels, /RectSize|\bbook\b/, 'not the size of one authored entity');
+  assert.match(module, /property number PixelsPerWorldUnit = 100/, 'art pixels per world unit is a named property');
+  assert.doesNotMatch(methodBody(module, 'StageLayout'), /\/ 100/, 'no magic 100');
+});
+
+test('the stage notice is an authored text bound to the module and hidden until the stage is unavailable', () => {
+  const source = read(MODULE);
+  const ui = dex();
+  const declared = source.match(/property \w+ stageNotice = "([^"]*)"/);
+  assert.ok(declared, 'stageNotice is declared');
+  assert.equal(declared[1], ui.getId(NOTICE));
+  assert.equal(ui.find(NOTICE).jsonString.enable, false, 'hidden until needed');
+  const message = source.match(/property string StageUnavailableText = "([^"]+)"/);
+  assert.ok(message, 'the module owns the message text');
+  assert.equal(ui.getComponent(NOTICE, TEXT).Text, message[1], 'authored text matches the module text');
+});
+
+test('the constant tables are built once and shared', () => {
+  const source = read(MODULE);
+  for (const name of ['ActionSpecs', 'DetailSpecs']) {
+    assert.match(methodBody(source, name), /if self\._T\.\w+ == nil then/, `${name} builds its table only on first use`);
+  }
+});
+
+test('BuildDetails keeps its nesting shallow', () => {
+  const body = methodBody(read(MODULE), 'BuildDetails').split('\n').filter(line => line.trim() !== '');
+  const base = body[0].match(/^ */)[0].length;
+  const depth = Math.max(...body.map(line => (line.match(/^ */)[0].length - base) / 4));
+  assert.ok(depth <= 3, `nesting depth ${depth} stays within the limit`);
 });
 
 test('stage size follows the model scale published with the dex row', () => {

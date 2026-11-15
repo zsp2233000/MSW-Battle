@@ -1,7 +1,9 @@
 @Logic
 script MonsterDexService extends Logic
 
-    property string BattleCameraAnchorPath = "/maps/template/BattleCameraAnchor"
+    -- The anchor is found the way BattleFixedCamera finds it: a direct child of the battle map, by name.
+    property string BattleMapPath = "/maps/template"
+    property string BattleCameraAnchorName = "BattleCameraAnchor"
 
     @ExecSpace("Server")
     method void RequestRows()
@@ -14,19 +16,21 @@ script MonsterDexService extends Logic
         end
         local zoom = self:ReadBattleZoom()
         if zoom == nil then
+            -- Only the stage needs the camera: the rows are still sent and the book shows its notice.
             log_warning("[VRF][MonsterDex] battle camera unavailable for user=" .. tostring(senderUserId))
-            return
         end
         local rows = catalog:GetDexRows()
         log("[VRF][MonsterDex] served rows=" .. tostring(#rows) .. " battleZoom=" .. tostring(zoom) .. " user=" .. tostring(senderUserId))
-        self:ReceiveBattleCamera(zoom, senderUserId)
+        self:ReceiveBattleCamera(zoom or 0, senderUserId)
         self:Receive(rows, senderUserId)
     end
 
     @ExecSpace("ServerOnly")
     method any ReadBattleZoom()
         -- The battle camera's zoom ratio, read from the template battle map's camera anchor (all battle maps share it); nil when it cannot be read.
-        local anchor = _EntityService:GetEntityByPath(self.BattleCameraAnchorPath)
+        local map = _EntityService:GetEntityByPath(self.BattleMapPath)
+        if not isvalid(map) then return nil end
+        local anchor = map:GetChildByName(self.BattleCameraAnchorName, false)
         if not isvalid(anchor) or not isvalid(anchor.CameraComponent) then return nil end
         local zoom = anchor.CameraComponent.ZoomRatio
         if zoom == nil or zoom <= 0 then return nil end
@@ -35,7 +39,7 @@ script MonsterDexService extends Logic
 
     @ExecSpace("Client")
     method void ReceiveBattleCamera(number zoomRatio)
-        -- The stage scale needs the battle camera's zoom; it arrives just before the rows.
+        -- The stage scale needs the battle camera's zoom (0 = unreadable); it arrives just before the rows.
         _MonsterDex:ObserveBattleCamera(zoomRatio)
     end
 

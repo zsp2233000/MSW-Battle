@@ -1,8 +1,10 @@
 -- Run in a fresh Maker Play test with context=client, after the lobby is ready (formationlobby, idle, formation loaded).
 -- Opens the monster dex through its lobby entry's connected ButtonClickEvent, then drives the stage only through the
 -- connected list-row and trial-button ButtonClickEvents and reads the stage image (ImageRUID, AnimClipPlayType, scale, flip)
--- and the public snapshot. Expected animation RUIDs come from the server's published rows; the stage scale is
--- 90 canvas pixels per world unit, i.e. a 1920 px canvas across 12.8 / (60 / 100) world units (battle zoom 60, PC view 12.8 wide at 100).
+-- and the public snapshot. Expected animation RUIDs come from the server's published rows; the stage scale expectation is
+-- written down independently of the implementation: a 16:9 window is a 1920 unit wide canvas, the PC view is 12.8 world units wide at
+-- camera zoom 100, so the battle camera (zoom 60) shows 12.8 * 100 / 60 world units and one world unit is 1920 / that = 90 canvas units.
+-- A missing battle camera zoom is simulated at the end: the rows, the details and the selection must keep working, only the stage goes off.
 -- Nothing is queued, stored or edited; the book is closed again at the end. Sounds cannot be heard here: the SOUND events record that
 -- the sound call was made with the row's RUID, and a blank sound field is simulated on a cached row and restored.
 local failures = 0
@@ -19,8 +21,12 @@ local function await(predicate, seconds)
     return predicate()
 end
 
-local PIXELS_PER_UNIT = 90
+local CANVAS_WIDTH = 1920
+local PC_WORLD_WIDTH_AT_ZOOM_100 = 12.8
+local BATTLE_ZOOM = 60
+local PIXELS_PER_UNIT = CANVAS_WIDTH / (PC_WORLD_WIDTH_AT_ZOOM_100 * 100 / BATTLE_ZOOM)
 local SCALE_TOLERANCE = 0.01
+local ART_PIXELS_PER_WORLD_UNIT = 100
 local dex = _MonsterDex
 local function click(entity) entity:SendEvent(ButtonClickEvent()) end
 local function uiRows()
@@ -56,8 +62,8 @@ end
 
 local function checkScaleAndFacing(row, label)
     local transform = sprite().Entity.UITransformComponent
-    local expectedX = PIXELS_PER_UNIT / 100 * row.scaleX
-    local expectedY = PIXELS_PER_UNIT / 100 * row.scaleY
+    local expectedX = PIXELS_PER_UNIT / ART_PIXELS_PER_WORLD_UNIT * row.scaleX
+    local expectedY = PIXELS_PER_UNIT / ART_PIXELS_PER_WORLD_UNIT * row.scaleY
     check(math.abs(transform.UIScale.x - expectedX) < SCALE_TOLERANCE and math.abs(transform.UIScale.y - expectedY) < SCALE_TOLERANCE,
         label .. ": stage scale follows the battle view and the model scale (" .. string.format("%.3f,%.3f", transform.UIScale.x, transform.UIScale.y)
         .. " vs " .. string.format("%.3f,%.3f", expectedX, expectedY) .. ")")
@@ -110,6 +116,11 @@ local ok, detail = pcall(function()
         return isvalid(_UserService.LocalPlayer) and _UserService.LocalPlayer.CurrentMapName == "formationlobby"
             and _MatchFlowInput:AllowsFormationActions() and isvalid(dex.lobbyButton) and dex.lobbyButton.Enable
     end, 40), "the lobby is ready and the dex entry is usable")
+
+    -- A 16:9 window is what the literal expectation above assumes; any other shape cannot check the absolute scale.
+    local aspect = _UILogic.ScreenWidth / _UILogic.ScreenHeight
+    check(math.abs(aspect - 16 / 9) < 0.01, "the Maker window is 16:9 (" .. string.format("%.3f", aspect) .. "), so the literal scale expectation applies")
+    check(dex:ActionSpecs() == dex:ActionSpecs() and dex:DetailSpecs() == dex:DetailSpecs(), "the constant tables are built once and shared")
 
     -- A closed book has no stage and refuses trials.
     check(not sprite().Entity.Enable, "before opening the stage image is hidden")
@@ -243,6 +254,33 @@ local ok, detail = pcall(function()
     click(dex.lobbyButton.Entity)
     check(await(function() return dex:GetSnapshot().open and sprite().Entity.Enable end, 8), "reopening shows the stage again")
     stageShows(dex:GetSelectedRow(), "IDLE", "after reopening")
+
+    -- No battle camera zoom: only the stage is off. The list, the selection and the details keep working.
+    local zoom = dex._T.battleZoom
+    check(zoom ~= nil and math.abs(zoom - BATTLE_ZOOM) < 0.001 and dex:GetSnapshot().stageAvailable, "the server published the battle zoom " .. tostring(zoom))
+    dex:ObserveBattleCamera(0)
+    dex:Observe(latest)
+    local snapshot = dex:GetSnapshot()
+    check(snapshot.stageAvailable == false and snapshot.loadState == "READY", "without a zoom the snapshot reports the stage unavailable but the list ready")
+    check(#uiRows() == #latest and #snapshot.rows == #latest, "every monster is still listed")
+    check(#snapshot.details > 0 and snapshot.details[1].value ~= "", "the details are still filled")
+    check(not sprite().Entity.Enable, "the stage image is hidden")
+    local notice = dex.stageNotice
+    check(notice.Entity.Enable and notice.Text == dex.StageUnavailableText and #notice.Text > 0, "a clear message says why the stage is off")
+    local anyEnabled = false
+    for _, property in pairs(BUTTONS) do if dex[property].Enable then anyEnabled = true end end
+    check(not anyEnabled, "the trial buttons are disabled")
+    check(dex:Play("ATTACK") == false, "a trial is refused")
+    local other = dex:GetSelectedRow().monsterId == latest[2].monsterId and 1 or 2
+    click(uiRows()[other])
+    check(dex:GetSnapshot().selectedMonsterId == latest[other].monsterId and not sprite().Entity.Enable, "selecting a monster still works, the stage stays off")
+    dex:ObserveBattleCamera(zoom)
+    dex:Render()
+    check(dex:GetSnapshot().stageAvailable and sprite().Entity.Enable and not notice.Entity.Enable, "restoring the zoom brings the stage back and hides the message")
+    local restored = dex:GetSelectedRow()
+    stageShows(restored, "IDLE", "after restoring the zoom")
+    checkScaleAndFacing(restored, "after restoring the zoom")
+    check(dex.attackButton.Enable and dex:Play("ATTACK"), "the trial buttons work again")
 end)
 if not ok then check(false, "probe raised: " .. tostring(detail)) end
 if isvalid(dex) and dex:GetSnapshot().open then dex:Close() end

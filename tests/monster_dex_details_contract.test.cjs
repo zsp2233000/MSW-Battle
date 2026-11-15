@@ -121,7 +121,7 @@ test('MonsterDex binds the detail list and templates and exposes details in its 
 test('blank optional resources, an effect frame without an effect and a speed without a projectile read 未設定', () => {
   const source = read(MODULE);
   assert.match(source, /property string UnsetText = "未設定"/);
-  const format = methodBody(source, 'BuildDetails');
+  const format = methodBody(source, 'DetailText') + methodBody(source, 'BuildDetails');
   assert.match(format, /UnsetText/);
   assert.match(format, /projectileRuid/, 'projectile speed depends on the projectile');
   assert.match(format, /attackEffectRuid/, 'effect frame depends on the effect');

@@ -17,6 +17,7 @@ script MonsterDex extends Logic
     property ButtonComponent attackButton = "b3d24340-87cd-4927-a97f-3bc930503b38"
     property ButtonComponent hurtButton = "56c8e073-419d-41d5-b9be-d3cd2b66104e"
     property ButtonComponent dieButton = "faee53ab-737c-4f86-a335-be3961cf6849"
+    property TextGUIRendererComponent stageNotice = "8d4a31b5-500e-43ba-bdc0-7fcaabb171c5"
 
     property string LobbyMapName = "formationlobby"
     property number LoadTimeoutSeconds = 8
@@ -29,7 +30,10 @@ script MonsterDex extends Logic
     property Color DetailUnsetColor = Color(0.55, 0.5, 0.62, 1)
     property Color TrialButtonColor = Color(0.36, 0.29, 0.52, 0.85)
     property Color TrialActiveColor = Color(1, 0.78, 0.3, 1)
+    property Color TrialDisabledColor = Color(0.36, 0.29, 0.52, 0.3)
     property number SoundVolume = 1
+    property number PixelsPerWorldUnit = 100
+    property string StageUnavailableText = "舞台無法使用：讀不到戰鬥鏡頭設定"
 
     @ExecSpace("ClientOnly")
     method void OnBeginPlay()
@@ -53,11 +57,13 @@ script MonsterDex extends Logic
         self._T.stageFor = nil
         self._T.oneShot = false
         self._T.endHandler = nil
-        if isvalid(self.stageSprite) then self.stageSprite.Entity:SetEnable(false) end
-        if isvalid(self.book) then self.book:SetEnable(false) end
-        if isvalid(self.rowTemplate) then self.rowTemplate:SetEnable(false) end
-        if isvalid(self.headerTemplate) then self.headerTemplate:SetEnable(false) end
-        if isvalid(self.detailTemplate) then self.detailTemplate:SetEnable(false) end
+        -- Authored starting state: the book, the stage image, its notice and the three row templates are all hidden.
+        for _, component in ipairs({ self.stageSprite, self.stageNotice }) do
+            if isvalid(component) then component.Entity:SetEnable(false) end
+        end
+        for _, entity in ipairs({ self.book, self.rowTemplate, self.headerTemplate, self.detailTemplate }) do
+            if isvalid(entity) then entity:SetEnable(false) end
+        end
         log("[VRF][MonsterDex] ready")
     end
 
@@ -93,11 +99,10 @@ script MonsterDex extends Logic
         self._T.bound = true
         self:Bind(self.lobbyButton.Entity, function() self:Open() end)
         self:Bind(self.closeButton.Entity, function() self:Close() end)
-        self:Bind(self.idleButton.Entity, function() self:Play("IDLE") end)
-        self:Bind(self.moveButton.Entity, function() self:Play("MOVE") end)
-        self:Bind(self.attackButton.Entity, function() self:Play("ATTACK") end)
-        self:Bind(self.hurtButton.Entity, function() self:Play("HURT") end)
-        self:Bind(self.dieButton.Entity, function() self:Play("DIE") end)
+        for _, trial in ipairs(self:TrialButtons()) do
+            local action = trial.action
+            self:Bind(trial.button.Entity, function() self:Play(action) end)
+        end
         self._T.endHandler = self.stageSprite.Entity:ConnectEvent(SpriteGUIAnimPlayerEndEvent, function(event) self:OnAnimationEnd(event) end)
         log("[VRF][MonsterDex] connected lobby entry, close button, trial buttons and the stage end event")
     end
@@ -168,13 +173,28 @@ script MonsterDex extends Logic
 
     @ExecSpace("ClientOnly")
     method table ActionSpecs()
-        -- What each trial action plays: the dex row field of its animation, whether it loops, and the sound it plays at its start (no sound field = silent).
+        -- What each trial action plays: the dex row field of its animation, whether it loops, and the sound it plays at its start (no sound field = silent). Built once.
+        if self._T.actionSpecs == nil then
+            self._T.actionSpecs = {
+                IDLE = { field = "standRuid", loop = true },
+                MOVE = { field = "moveRuid", loop = true },
+                ATTACK = { field = "attackRuid", loop = false },
+                HURT = { field = "hurtRuid", loop = false, sound = "hurtSoundRuid" },
+                DIE = { field = "dieRuid", loop = false, sound = "dieSoundRuid" },
+            }
+        end
+        return self._T.actionSpecs
+    end
+
+    @ExecSpace("ClientOnly")
+    method table TrialButtons()
+        -- The five authored trial buttons with the action each one plays, in bar order; binding and highlighting both read this one list.
         return {
-            IDLE = { field = "standRuid", loop = true },
-            MOVE = { field = "moveRuid", loop = true },
-            ATTACK = { field = "attackRuid", loop = false },
-            HURT = { field = "hurtRuid", loop = false, sound = "hurtSoundRuid" },
-            DIE = { field = "dieRuid", loop = false, sound = "dieSoundRuid" },
+            { action = "IDLE", button = self.idleButton },
+            { action = "MOVE", button = self.moveButton },
+            { action = "ATTACK", button = self.attackButton },
+            { action = "HURT", button = self.hurtButton },
+            { action = "DIE", button = self.dieButton },
         }
     end
 
@@ -232,27 +252,33 @@ script MonsterDex extends Logic
 
     @ExecSpace("ClientOnly")
     method void ObserveBattleCamera(number zoomRatio)
-        -- The battle camera's zoom, published by the server next to the rows; the stage scale follows it.
-        if zoomRatio > 0 then self._T.battleZoom = zoomRatio end
+        -- The battle camera's zoom, published by the server next to the rows; the stage scale follows it. Zero means the server could not read it: the list and details still work, only the stage is off.
+        if zoomRatio > 0 then
+            self._T.battleZoom = zoomRatio
+        else
+            self._T.battleZoom = nil
+        end
     end
 
     @ExecSpace("ClientOnly")
     method number StagePixelsPerUnit()
-        -- Canvas pixels that one world unit covers on the battle camera: measured from the native screen-to-world conversion of the camera in use, rescaled to the battle camera's zoom.
+        -- Canvas pixels that one world unit covers on the battle camera. Both widths come from the same full screen edges: canvas units from the native screen-to-UI conversion, world units from the screen-to-world one of the camera in use, rescaled to the battle camera's zoom.
         local screenWidth = _UILogic.ScreenWidth
-        local left = _UILogic:ScreenToWorldPosition(Vector2(0, 0))
-        local right = _UILogic:ScreenToWorldPosition(Vector2(screenWidth, 0))
+        local canvasLeft = _UILogic:ScreenToUIPosition(Vector2(0, 0))
+        local canvasRight = _UILogic:ScreenToUIPosition(Vector2(screenWidth, 0))
+        local worldLeft = _UILogic:ScreenToWorldPosition(Vector2(0, 0))
+        local worldRight = _UILogic:ScreenToWorldPosition(Vector2(screenWidth, 0))
         local currentZoom = _CameraService:GetCurrentCameraComponent().ZoomRatio
-        local unitsAcrossBattleScreen = math.abs(right.x - left.x) * currentZoom / self._T.battleZoom
-        return self.book.UITransformComponent.RectSize.x / unitsAcrossBattleScreen
+        local unitsAcrossBattleScreen = math.abs(worldRight.x - worldLeft.x) * currentZoom / self._T.battleZoom
+        return math.abs(canvasRight.x - canvasLeft.x) / unitsAcrossBattleScreen
     end
 
     @ExecSpace("ClientOnly")
     method any StageLayout(any row)
         -- UI scale of the stage image for one monster: the battle view's pixels per world unit times the model's own scale. The art is drawn at its native pixels, 100 per world unit.
         if row == nil or self._T.battleZoom == nil then return nil end
-        local pixelsPerUnit = self:StagePixelsPerUnit()
-        return { x = pixelsPerUnit / 100 * row.scaleX, y = pixelsPerUnit / 100 * row.scaleY }
+        local artScale = self:StagePixelsPerUnit() / self.PixelsPerWorldUnit
+        return { x = artScale * row.scaleX, y = artScale * row.scaleY }
     end
 
     @ExecSpace("ClientOnly")
@@ -261,6 +287,7 @@ script MonsterDex extends Logic
         if not isvalid(self.stageSprite) then return end
         local row = nil
         if self._T.open then row = self:GetSelectedRow() end
+        self:RenderStageNotice(row ~= nil and self._T.battleZoom == nil)
         local layout = self:StageLayout(row)
         if layout == nil then
             self._T.stageFor = nil
@@ -276,13 +303,22 @@ script MonsterDex extends Logic
     end
 
     @ExecSpace("ClientOnly")
+    method void RenderStageNotice(boolean unavailable)
+        -- Say why the stage is empty when the battle camera is unknown; the list and the details are unaffected.
+        if not isvalid(self.stageNotice) then return end
+        self.stageNotice.Text = self.StageUnavailableText
+        self.stageNotice.Entity:SetEnable(unavailable)
+    end
+
+    @ExecSpace("ClientOnly")
     method void RenderTrialButtons()
-        -- The running action's button is highlighted; with no stage shown none is.
+        -- The running action's button is highlighted; with no stage shown none is, and the buttons are disabled.
         local shown = self._T.stageFor ~= nil
-        local buttons = { IDLE = self.idleButton, MOVE = self.moveButton, ATTACK = self.attackButton, HURT = self.hurtButton, DIE = self.dieButton }
-        for action, button in pairs(buttons) do
-            if isvalid(button) then
-                button.Entity.SpriteGUIRendererComponent.Color = (shown and self._T.action == action) and self.TrialActiveColor or self.TrialButtonColor
+        for _, trial in ipairs(self:TrialButtons()) do
+            if isvalid(trial.button) then
+                local active = shown and self._T.action == trial.action
+                trial.button.Enable = shown
+                trial.button.Entity.SpriteGUIRendererComponent.Color = active and self.TrialActiveColor or (shown and self.TrialButtonColor or self.TrialDisabledColor)
             end
         end
     end
@@ -316,64 +352,70 @@ script MonsterDex extends Logic
             open = self._T.open, loadState = self._T.loadState,
             selectedMonsterId = self._T.selectedId, selectedMonsterName = selected ~= nil and selected.monsterName or "",
             action = self._T.action, events = events, rows = rows, details = self:BuildDetails(selected),
+            stageAvailable = self._T.battleZoom ~= nil,
         }
     end
 
     @ExecSpace("ClientOnly")
     method table DetailSpecs()
-        -- The fixed detail list in display order: an action header (group, header) then its rows. A row clones into a "Detail_<key>" entity and is filled from one dex row field.
-        return {
-            { group = "idle", header = "待機" },
-            { key = "stand", label = "待機動畫", kind = "ruid", field = "standRuid" },
-            { group = "move", header = "移動" },
-            { key = "move", label = "移動動畫", kind = "ruid", field = "moveRuid" },
-            { group = "attack", header = "攻擊" },
-            { key = "attackAnimation", label = "攻擊動畫", kind = "ruid", field = "attackRuid" },
-            { key = "attackEffect", label = "出手特效", kind = "ruid", field = "attackEffectRuid" },
-            { key = "hitEffect", label = "命中特效", kind = "ruid", field = "hitEffectRuid" },
-            { key = "projectile", label = "投射物", kind = "ruid", field = "projectileRuid" },
-            { key = "attackSound", label = "出手音效", kind = "ruid", field = "attackSoundRuid" },
-            { key = "attackEffectFrame", label = "出手特效影格", kind = "effectFrame" },
-            { key = "hitFrame", label = "命中影格", kind = "hitFrame" },
-            { key = "attackDuration", label = "攻擊動畫長度", kind = "duration" },
-            { key = "projectileSpeed", label = "投射物速度", kind = "projectileSpeed" },
-            { group = "hurt", header = "受傷" },
-            { key = "hurtAnimation", label = "受傷動畫", kind = "ruid", field = "hurtRuid" },
-            { key = "hurtSound", label = "受傷音效", kind = "ruid", field = "hurtSoundRuid" },
-            { group = "die", header = "死亡" },
-            { key = "dieAnimation", label = "死亡動畫", kind = "ruid", field = "dieRuid" },
-            { key = "dieSound", label = "死亡音效", kind = "ruid", field = "dieSoundRuid" },
-        }
+        -- The fixed detail list in display order: an action header (group, header) then its rows. A row clones into a "Detail_<key>" entity and is filled from one dex row field. Built once.
+        if self._T.detailSpecs == nil then
+            self._T.detailSpecs = {
+                { group = "idle", header = "待機" },
+                { key = "stand", label = "待機動畫", kind = "ruid", field = "standRuid" },
+                { group = "move", header = "移動" },
+                { key = "move", label = "移動動畫", kind = "ruid", field = "moveRuid" },
+                { group = "attack", header = "攻擊" },
+                { key = "attackAnimation", label = "攻擊動畫", kind = "ruid", field = "attackRuid" },
+                { key = "attackEffect", label = "出手特效", kind = "ruid", field = "attackEffectRuid" },
+                { key = "hitEffect", label = "命中特效", kind = "ruid", field = "hitEffectRuid" },
+                { key = "projectile", label = "投射物", kind = "ruid", field = "projectileRuid" },
+                { key = "attackSound", label = "出手音效", kind = "ruid", field = "attackSoundRuid" },
+                { key = "attackEffectFrame", label = "出手特效影格", kind = "effectFrame" },
+                { key = "hitFrame", label = "命中影格", kind = "hitFrame" },
+                { key = "attackDuration", label = "攻擊動畫長度", kind = "duration" },
+                { key = "projectileSpeed", label = "投射物速度", kind = "projectileSpeed" },
+                { group = "hurt", header = "受傷" },
+                { key = "hurtAnimation", label = "受傷動畫", kind = "ruid", field = "hurtRuid" },
+                { key = "hurtSound", label = "受傷音效", kind = "ruid", field = "hurtSoundRuid" },
+                { group = "die", header = "死亡" },
+                { key = "dieAnimation", label = "死亡動畫", kind = "ruid", field = "dieRuid" },
+                { key = "dieSound", label = "死亡音效", kind = "ruid", field = "dieSoundRuid" },
+            }
+        end
+        return self._T.detailSpecs
+    end
+
+    @ExecSpace("ClientOnly")
+    method table DetailText(any spec, any row)
+        -- The text and set-state of one detail value for one published row. An effect frame without an effect and a speed without a projectile are unset, like any blank optional resource.
+        local unset = { value = self.UnsetText, isSet = false }
+        if spec.kind == "ruid" then
+            local value = row[spec.field] or ""
+            return value ~= "" and { value = value, isSet = true } or unset
+        end
+        if spec.kind == "effectFrame" then
+            if (row.attackEffectRuid or "") == "" then return unset end
+            return { value = string.format("第 %d 格 (%.2f 秒)", row.attackEffectFrame, row.attackEffectDelay), isSet = true }
+        end
+        if spec.kind == "hitFrame" then
+            return { value = string.format("第 %d 格 (%.2f 秒)", row.attackDamageFrame, row.impactDelay), isSet = true }
+        end
+        if spec.kind == "duration" then
+            return { value = string.format("%.2f 秒", row.attackDuration), isSet = true }
+        end
+        if (row.projectileRuid or "") == "" or (row.projectileSpeed or 0) <= 0 then return unset end
+        return { value = string.format("%.2f 世界單位/秒", row.projectileSpeed), isSet = true }
     end
 
     @ExecSpace("ClientOnly")
     method table BuildDetails(any row)
-        -- Pure text for every value row of one published dex row. Blank optional resources, an effect frame without an effect and a speed without a projectile read as the unset text; no row yet leaves the texts empty.
+        -- Pure text for every value row of one published dex row; no row yet leaves the texts empty.
         local details = {}
         for _, spec in ipairs(self:DetailSpecs()) do
             if spec.key ~= nil then
-                local value = ""
-                local isSet = false
-                if row ~= nil then
-                    if spec.kind == "ruid" then
-                        value = row[spec.field] or ""
-                        isSet = value ~= ""
-                    elseif spec.kind == "effectFrame" then
-                        isSet = (row.attackEffectRuid or "") ~= ""
-                        if isSet then value = string.format("第 %d 格 (%.2f 秒)", row.attackEffectFrame, row.attackEffectDelay) end
-                    elseif spec.kind == "hitFrame" then
-                        isSet = true
-                        value = string.format("第 %d 格 (%.2f 秒)", row.attackDamageFrame, row.impactDelay)
-                    elseif spec.kind == "duration" then
-                        isSet = true
-                        value = string.format("%.2f 秒", row.attackDuration)
-                    elseif spec.kind == "projectileSpeed" then
-                        isSet = (row.projectileRuid or "") ~= "" and (row.projectileSpeed or 0) > 0
-                        if isSet then value = string.format("%.2f 世界單位/秒", row.projectileSpeed) end
-                    end
-                    if not isSet then value = self.UnsetText end
-                end
-                table.insert(details, { key = spec.key, value = value, isSet = isSet })
+                local text = row ~= nil and self:DetailText(spec, row) or { value = "", isSet = false }
+                table.insert(details, { key = spec.key, value = text.value, isSet = text.isSet })
             end
         end
         return details
