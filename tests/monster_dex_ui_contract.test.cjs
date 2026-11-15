@@ -71,7 +71,7 @@ test('the book background uses the specified RUID, keeps its aspect ratio and is
   assert.equal(sprite.Type, 0, 'plain image, not sliced or tiled');
 });
 
-test('the left page holds a scrollable vertical list with a hidden row template, the right page stays empty', () => {
+test('the left page holds a scrollable vertical list with a hidden row template, the right page only the details', () => {
   const ui = dex();
   assert.ok(ui.find(LEFT) && ui.find(`${PAGE}/RightPage`), 'both pages exist');
   const layout = ui.getComponent(LIST, SCROLL);
@@ -79,8 +79,9 @@ test('the left page holds a scrollable vertical list with a hidden row template,
   assert.ok([3].includes(layout.VerticalScrollBarDirection), 'a vertical scroll-bar direction value');
   assert.equal(ui.find(ROW).jsonString.enable, false, 'template is hidden');
   assert.ok(ui.getComponent(ROW, BUTTON), 'a row is a button');
-  assert.equal(ui.listEntities().filter(e => e.path.startsWith(`/ui/MonsterDexGroup/${PAGE}/RightPage/`)).length, 0,
-    'the right page is filled by later tickets');
+  assert.equal(ui.listEntities().filter(e => e.path.startsWith(`/ui/MonsterDexGroup/${PAGE}/RightPage/`)
+    && !/^\/ui\/MonsterDexGroup\/Book\/Page\/RightPage\/(DetailTitle|Details)(\/|$)/.test(e.path)).length, 0,
+    'the right page holds only the resource details (monster_dex_details_contract.test.cjs); the stage is a later ticket');
   const list = rect(ui, LIST);
   const left = rect(ui, LEFT);
   assert.ok(list.RectSize.x <= left.RectSize.x && list.RectSize.y < left.RectSize.y, 'list sits inside the left page and leaves room for the trial buttons');

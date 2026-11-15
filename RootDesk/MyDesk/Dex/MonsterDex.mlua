@@ -8,6 +8,9 @@ script MonsterDex extends Logic
     property Entity rowTemplate = "a04d24d8-ec76-4418-9b59-84850c171b7b"
     property TextGUIRendererComponent statusText = "42a06858-b407-47fd-8a51-f26e0a35d853"
     property ButtonComponent lobbyButton = "415c41cd-970f-424e-946f-37c6a3a89489"
+    property ScrollLayoutGroupComponent detailLayout = "34659be3-bdc5-4a22-8e8d-42723cdbc393"
+    property Entity headerTemplate = "9608ae32-42e0-438d-b8a2-b8a56629e208"
+    property Entity detailTemplate = "8304bc60-6f15-440d-9082-9e8939b2bbcb"
 
     property string LobbyMapName = "formationlobby"
     property number LoadTimeoutSeconds = 8
@@ -15,6 +18,9 @@ script MonsterDex extends Logic
     property Color SelectedRowColor = Color(1, 0.86, 0.5, 1)
     property Color RowTextColor = Color(1, 1, 1, 1)
     property Color SelectedTextColor = Color(1, 1, 1, 1)
+    property string UnsetText = "未設定"
+    property Color DetailValueColor = Color(0.17, 0.13, 0.28, 1)
+    property Color DetailUnsetColor = Color(0.55, 0.5, 0.62, 1)
 
     @ExecSpace("ClientOnly")
     method void OnBeginPlay()
@@ -30,10 +36,14 @@ script MonsterDex extends Logic
         self._T.bindings = {}
         self._T.bound = false
         self._T.buildSerial = 0
+        self._T.detailViews = {}
+        self._T.detailsFor = nil
         self._T.entryShown = nil
         self._T.entryEnabled = nil
         if isvalid(self.book) then self.book:SetEnable(false) end
         if isvalid(self.rowTemplate) then self.rowTemplate:SetEnable(false) end
+        if isvalid(self.headerTemplate) then self.headerTemplate:SetEnable(false) end
+        if isvalid(self.detailTemplate) then self.detailTemplate:SetEnable(false) end
         log("[VRF][MonsterDex] ready")
     end
 
@@ -161,8 +171,116 @@ script MonsterDex extends Logic
         return {
             open = self._T.open, loadState = self._T.loadState,
             selectedMonsterId = self._T.selectedId, selectedMonsterName = selected ~= nil and selected.monsterName or "",
-            action = self._T.action, events = events, rows = rows,
+            action = self._T.action, events = events, rows = rows, details = self:BuildDetails(selected),
         }
+    end
+
+    @ExecSpace("ClientOnly")
+    method table DetailSpecs()
+        -- The fixed detail list in display order: an action header (group, header) then its rows. A row clones into a "Detail_<key>" entity and is filled from one dex row field.
+        return {
+            { group = "idle", header = "待機" },
+            { key = "stand", label = "待機動畫", kind = "ruid", field = "standRuid" },
+            { group = "move", header = "移動" },
+            { key = "move", label = "移動動畫", kind = "ruid", field = "moveRuid" },
+            { group = "attack", header = "攻擊" },
+            { key = "attackAnimation", label = "攻擊動畫", kind = "ruid", field = "attackRuid" },
+            { key = "attackEffect", label = "出手特效", kind = "ruid", field = "attackEffectRuid" },
+            { key = "hitEffect", label = "命中特效", kind = "ruid", field = "hitEffectRuid" },
+            { key = "projectile", label = "投射物", kind = "ruid", field = "projectileRuid" },
+            { key = "attackSound", label = "出手音效", kind = "ruid", field = "attackSoundRuid" },
+            { key = "attackEffectFrame", label = "出手特效影格", kind = "effectFrame" },
+            { key = "hitFrame", label = "命中影格", kind = "hitFrame" },
+            { key = "attackDuration", label = "攻擊動畫長度", kind = "duration" },
+            { key = "projectileSpeed", label = "投射物速度", kind = "projectileSpeed" },
+            { group = "hurt", header = "受傷" },
+            { key = "hurtAnimation", label = "受傷動畫", kind = "ruid", field = "hurtRuid" },
+            { key = "hurtSound", label = "受傷音效", kind = "ruid", field = "hurtSoundRuid" },
+            { group = "die", header = "死亡" },
+            { key = "dieAnimation", label = "死亡動畫", kind = "ruid", field = "dieRuid" },
+            { key = "dieSound", label = "死亡音效", kind = "ruid", field = "dieSoundRuid" },
+        }
+    end
+
+    @ExecSpace("ClientOnly")
+    method table BuildDetails(any row)
+        -- Pure text for every value row of one published dex row. Blank optional resources, an effect frame without an effect and a speed without a projectile read as the unset text; no row yet leaves the texts empty.
+        local details = {}
+        for _, spec in ipairs(self:DetailSpecs()) do
+            if spec.key ~= nil then
+                local value = ""
+                local isSet = false
+                if row ~= nil then
+                    if spec.kind == "ruid" then
+                        value = row[spec.field] or ""
+                        isSet = value ~= ""
+                    elseif spec.kind == "effectFrame" then
+                        isSet = (row.attackEffectRuid or "") ~= ""
+                        if isSet then value = string.format("第 %d 格 (%.2f 秒)", row.attackEffectFrame, row.attackEffectDelay) end
+                    elseif spec.kind == "hitFrame" then
+                        isSet = true
+                        value = string.format("第 %d 格 (%.2f 秒)", row.attackDamageFrame, row.impactDelay)
+                    elseif spec.kind == "duration" then
+                        isSet = true
+                        value = string.format("%.2f 秒", row.attackDuration)
+                    elseif spec.kind == "projectileSpeed" then
+                        isSet = (row.projectileRuid or "") ~= "" and (row.projectileSpeed or 0) > 0
+                        if isSet then value = string.format("%.2f 世界單位/秒", row.projectileSpeed) end
+                    end
+                    if not isSet then value = self.UnsetText end
+                end
+                table.insert(details, { key = spec.key, value = value, isSet = isSet })
+            end
+        end
+        return details
+    end
+
+    @ExecSpace("ClientOnly")
+    method void DestroyDetailRows()
+        -- Remove the cloned header and value rows; the hidden templates stay.
+        for _, entity in ipairs(self._T.detailViews or {}) do
+            if isvalid(entity) then entity:Destroy() end
+        end
+        self._T.detailViews = {}
+    end
+
+    @ExecSpace("ClientOnly")
+    method void BuildDetailRows()
+        -- Clone the fixed 20-row list from the two templates, in DetailSpecs order. Rows are cloned at runtime (like the monster list) because a list of purely authored rows never measured its content, so it never scrolled.
+        if not isvalid(self.headerTemplate) or not isvalid(self.detailTemplate) then return end
+        self:DestroyDetailRows()
+        for _, spec in ipairs(self:DetailSpecs()) do
+            local entity = nil
+            if spec.key == nil then
+                entity = self.headerTemplate:Clone("Header_" .. spec.group)
+                entity.TextGUIRendererComponent.Text = spec.header
+            else
+                entity = self.detailTemplate:Clone("Detail_" .. spec.key)
+                entity:GetChildByName("Label", false).TextGUIRendererComponent.Text = spec.label
+            end
+            table.insert(self._T.detailViews, entity)
+            entity:SetEnable(true)
+        end
+        self._T.detailsFor = nil
+    end
+
+    @ExecSpace("ClientOnly")
+    method void RenderDetails()
+        -- Write the selected monster's texts into the cloned rows; no row is ever added or removed here, only its text and colour change.
+        if not isvalid(self.detailLayout) then return end
+        local selectedId = self._T.selectedId
+        if self._T.detailsFor ~= selectedId then
+            self._T.detailsFor = selectedId
+            self.detailLayout:ResetScrollPosition(UITransformAxis.Vertical)
+        end
+        for _, detail in ipairs(self:BuildDetails(self:GetSelectedRow())) do
+            local row = self.detailLayout.Entity:GetChildByName("Detail_" .. detail.key, false)
+            local value = isvalid(row) and row:GetChildByName("Value", false) or nil
+            if isvalid(value) then
+                value.TextGUIRendererComponent.Text = detail.value
+                value.TextGUIRendererComponent.FontColor = detail.isSet and self.DetailValueColor or self.DetailUnsetColor
+            end
+        end
     end
 
     @ExecSpace("ClientOnly")
@@ -179,6 +297,7 @@ script MonsterDex extends Logic
             self:ResetPlayback()
         end
         self:BuildRows()
+        self:BuildDetailRows()
         self:Render()
         log("[VRF][MonsterDex] observed rows=" .. tostring(#valid) .. " selected=" .. self._T.selectedId)
     end
@@ -227,6 +346,7 @@ script MonsterDex extends Logic
                 view.entity.TextGUIRendererComponent.FontColor = selected and self.SelectedTextColor or self.RowTextColor
             end
         end
+        self:RenderDetails()
         if not isvalid(self.statusText) then return end
         local messages = { LOADING = "讀取中…", EMPTY = "資料表沒有怪物", FAILED = "讀取逾時，請關閉後重新開啟" }
         local message = messages[self._T.loadState] or ""
@@ -241,5 +361,6 @@ script MonsterDex extends Logic
             if isvalid(binding.entity) then binding.entity:DisconnectEvent(ButtonClickEvent, binding.callback) end
         end
         self:DestroyRows()
+        self:DestroyDetailRows()
     end
 end
