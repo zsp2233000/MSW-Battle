@@ -1,0 +1,15 @@
+@Logic
+script MatchTransfer extends Logic
+
+    @ExecSpace("ServerOnly")
+    method boolean MoveToMatch(any room, string userId)
+        -- Move an admitted player into the match room; false leaves the handoff retryable.
+        return room:MoveUser(userId, "matchprobe")
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean MoveToLobby(string userId)
+        -- Preserve the return capsule until native movement and restoration both succeed.
+        return _RoomService:MoveUserToStaticRoom(userId, "formationlobby")
+    end
+end

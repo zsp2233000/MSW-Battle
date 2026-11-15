@@ -1,13 +1,8 @@
 @Component
 script SingleTargetAttack extends AttackComponent
-    property integer AttackDamageMin = 1
-    property integer AttackDamageMax = 1
-
     @ExecSpace("ServerOnly")
-    method void Configure(table profile, Component execution)
+    method void Configure(Component execution)
         -- Receive the native strike policy without keeping attack timers.
-        self.AttackDamageMin = profile.AttackDamageMin
-        self.AttackDamageMax = profile.AttackDamageMax
         self._T.execution = execution
         self:ResetTarget()
     end
@@ -24,7 +19,7 @@ script SingleTargetAttack extends AttackComponent
         if not isvalid(target) then return end
         local targetUnit = target:GetComponent("script.BattleUnit")
         if not isvalid(targetUnit) or not targetUnit:IsAlive() then return end
-        local direction = self.Entity:GetComponent("script.BattleUnit"):GetFacing()
+        local direction = self._T.execution:GetStrikeDirection()
         if not self._T.execution:IsTargetInRange(target, direction) then return end
         self._T.impactTarget = target
         self:Attack(self._T.execution:GetAttackShape(direction), "single", nil)
@@ -32,7 +27,7 @@ script SingleTargetAttack extends AttackComponent
 
     method integer CalcDamage(Entity attacker, Entity defender, string attackInfo)
         -- Supply configured damage to the native Attack to Hit pipeline.
-        return math.random(self.AttackDamageMin, self.AttackDamageMax)
+        return self._T.execution:RollDamage()
     end
 
     method boolean IsAttackTarget(Entity defender, string attackInfo)

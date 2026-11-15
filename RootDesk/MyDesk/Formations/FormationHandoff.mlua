@@ -323,7 +323,7 @@ script FormationHandoff extends Logic
         transfer.levels = {}
         for _, unit in ipairs(formation.units) do
             local progress = levels[unit.monsterId]
-            transfer.levels[unit.monsterId] = progress ~= nil and progress.level or 1
+            transfer.levels[unit.monsterId] = progress ~= nil and progress.level or _MonsterProgression.DefaultLevel
         end
         local previous = { attempt = record.attempt, metadata = record.metadata, transfer = record.transfer }
         transfer.fixed = _HttpService:JSONEncode(formation.units)
@@ -592,8 +592,8 @@ script FormationHandoff extends Logic
         if not ok or doc == nil or fixed == nil then return nil end
         if transfer.levels ~= nil and type(transfer.levels) ~= "table" then return nil end
         for _, unit in ipairs(fixed) do
-            local level = transfer.levels == nil and 1 or transfer.levels[unit.monsterId]
-            if not _FormationSchema:IsFinite(level) or level % 1 ~= 0 or level < 1 or level > 30 then return nil end
+            local level = transfer.levels == nil and _MonsterProgression.DefaultLevel or transfer.levels[unit.monsterId]
+            if not _MonsterProgression:IsValidLevel(level) then return nil end
             unit.level = level
         end
         return { document = doc, units = fixed }

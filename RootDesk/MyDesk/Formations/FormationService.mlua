@@ -52,7 +52,7 @@ script FormationService extends Logic
         if catalog ~= nil then options = catalog:GetDeploymentOptions() end
         for _, option in ipairs(options) do
             if record.levelLoadState == "READY" then
-                local progress = record.levels[option.monsterId] or { level = 1, experience = 0 }
+                local progress = record.levels[option.monsterId] or _MonsterProgression:DefaultProgress()
                 local stats = _MonsterProgression:CalculateStats(catalog:GetProfile(option.monsterId), progress.level)
                 option.level, option.experience = progress.level, progress.experience
                 option.maxHp, option.attackDamageMin, option.attackDamageMax = stats.MaxHp, stats.AttackDamageMin, stats.AttackDamageMax

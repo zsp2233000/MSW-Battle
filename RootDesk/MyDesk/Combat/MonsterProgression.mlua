@@ -1,34 +1,55 @@
 @Logic
 script MonsterProgression extends Logic
 
+    property integer DefaultLevel = 1
+    property integer MaxLevel = 30
+
+    method table DefaultProgress()
+        -- Return a fresh value so one caller cannot change another monster's starting progress.
+        return { level = self.DefaultLevel, experience = 0 }
+    end
+
+    method boolean IsValidLevel(any level)
+        -- Validate raw storage and handoff values before passing them to typed calculations.
+        return type(level) == "number" and level >= self.DefaultLevel and level <= self.MaxLevel and level % 1 == 0
+    end
+
+    method boolean IsValidProgress(any level, any experience)
+        -- Stored progress must already be normalized; never repair damaged saves during validation.
+        if not self:IsValidLevel(level) or type(experience) ~= "number"
+            or experience < 0 or experience >= math.huge or experience % 1 ~= 0 then return false end
+        local required = self:RequiredExperience(level)
+        return (required == 0 and experience == 0) or (required > 0 and experience < required)
+    end
+
     method integer RequiredExperience(integer level)
         -- The single rule for the points needed to leave this level: one per current level, none at MAX.
-        if level < 1 or level > 30 or level % 1 ~= 0 then return nil end
-        if level == 30 then return 0 end
+        if not self:IsValidLevel(level) then return nil end
+        if level == self.MaxLevel then return 0 end
         return level
     end
 
     method table ApplyExperience(integer level, integer experience, integer gained)
         -- Normalize progress with the shared per-level requirement; MAX stores no experience.
-        if level < 1 or level > 30 or level % 1 ~= 0
+        if not self:IsValidLevel(level)
             or experience < 0 or experience >= math.huge or experience % 1 ~= 0
             or gained < 0 or gained >= math.huge or gained % 1 ~= 0 then return nil end
         local remaining = experience + gained
-        while level < 30 do
+        while level < self.MaxLevel do
             local required = self:RequiredExperience(level)
             if remaining < required then break end
             remaining = remaining - required
             level = level + 1
         end
-        if level == 30 then remaining = 0 end
+        if level == self.MaxLevel then remaining = 0 end
         return { level = level, experience = remaining }
     end
 
     method table CalculateStats(table base, integer level)
         -- Scale only health and damage from the Lv1 profile, without mutating the caller's data.
-        if level < 1 or level > 30 or level % 1 ~= 0 then return nil end
-        local healthMultiplier = 1 + base.MaxHpGrowthRate * (level - 1)
-        local damageMultiplier = 1 + base.AttackDamageGrowthRate * (level - 1)
+        if not self:IsValidLevel(level) then return nil end
+        local healthMultiplier = 1 + base.MaxHpGrowthRate * (level - self.DefaultLevel)
+        local damageMultiplier = 1 + base.AttackDamageGrowthRate * (level - self.DefaultLevel)
         return {
             MaxHp = math.floor(base.MaxHp * healthMultiplier),
             AttackDamageMin = math.floor(base.AttackDamageMin * damageMultiplier),

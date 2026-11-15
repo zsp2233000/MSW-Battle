@@ -1,6 +1,6 @@
 -- client, one lobby player with an isolated saved active formation (same fixture as match_recovery_runtime_probe).
--- First arm server_main: _MatchFlow:ConfigureMakerCancelFaults(1, 1).
--- After this probe, reset ConfigureMakerCancelFaults(0, 0), restore storage keys and reload the original session.
+-- First arm server_main: _MatchFaults:ConfigureCancel(1, 1).
+-- After this probe, reset _MatchFaults:ConfigureCancel(0, 0), restore storage keys and reload the original session.
 -- ENTRY runs after the server race's ENTRY mode; PROGRESS watches its SEAL_FAILURE mode.
 local MODE = 'FAILURE'
 local m, l = _MatchFlowInput, _FormationLobby

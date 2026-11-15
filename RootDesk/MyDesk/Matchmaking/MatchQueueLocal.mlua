@@ -1,0 +1,122 @@
+@Logic
+script MatchQueueLocal extends Logic
+
+    @ExecSpace("ServerOnly")
+    method void OnBeginPlay()
+        -- A Maker session owns its in-memory FIFO and matches; Stop discards both, so nothing here is durable.
+        self._T.entries = {}
+        self._T.matches = {}
+    end
+
+    @ExecSpace("ServerOnly")
+    method string Kind()
+        -- Stamped on every ticket, so a restored ticket says which adapter wrote it.
+        return "local"
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean Configured(string leaderboardId)
+        -- The in-process FIFO needs no service configuration.
+        return true
+    end
+
+    @ExecSpace("ServerOnly")
+    method table Enqueue(table request, any deliver)
+        -- Register at the tail only; pairing waits for Poll so the caller's submission window stays short.
+        table.insert(self._T.entries, { request = request, deliver = deliver })
+        return { accepted = true, report = "QUEUED_LOCAL" }
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean Poll()
+        -- Pair the two oldest live entries in order; true means a pairing was delivered and pending work should advance.
+        local available = {}
+        local seen = {}
+        for _, entry in ipairs(self._T.entries) do
+            local userId = entry.request.userId
+            if not seen[userId] and entry.request.live() then
+                table.insert(available, entry)
+                seen[userId] = true
+            end
+        end
+        self._T.entries = available
+        if #available < 2 then return false end
+        local first = table.remove(self._T.entries, 1)
+        local second = table.remove(self._T.entries, 1)
+        if first.request.profile == second.request.profile then
+            table.insert(self._T.entries, first)
+            second.deliver("REJECTED", "DUPLICATE_PROFILE")
+            return false
+        end
+        local home, away = first.request, second.request
+        local matched = { key = "local-" .. _UtilLogic:NewGuid(), home = home.profile, away = away.profile,
+            homeAttempt = home.requestId or home.attempt, awayAttempt = away.requestId or away.attempt,
+            homeSource = home.source, awaySource = away.source, differentSources = false }
+        self._T.matches[home.profile] = matched
+        self._T.matches[away.profile] = matched
+        first.deliver("MATCHED", "")
+        second.deliver("MATCHED", "")
+        return true
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean Cancel(string profile)
+        -- A local entry holds no remote resource, so cancellation always confirms; a stale entry leaves at the next Poll.
+        return true
+    end
+
+    @ExecSpace("ServerOnly")
+    method any Lookup(string profile)
+        -- The pairing recorded for this profile, or nil once the Maker session lost it.
+        return self._T.matches[profile]
+    end
+
+    @ExecSpace("ServerOnly")
+    method table Destinations(table matched)
+        -- Both players share this instance, so no other coordinator needs a readiness hint.
+        return {}
+    end
+
+    @ExecSpace("ServerOnly")
+    method any Warp(string profile)
+        -- Nobody leaves this instance in a Maker session, so there is nothing to warp.
+        return "UNSUPPORTED"
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Withdraw(string userId)
+        -- The player left: drop their FIFO entry, but keep any pairing already made.
+        for index = #self._T.entries, 1, -1 do
+            if self._T.entries[index].request.userId == userId then table.remove(self._T.entries, index) end
+        end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Release(string profile)
+        -- The match is finished for this profile.
+        self._T.matches[profile] = nil
+    end
+
+    @ExecSpace("ServerOnly")
+    method any Reclaim(string userId, table data, boolean live)
+        -- Judge a reservation held in memory (live) or restored from storage; returns HELD, CANCEL, RETURN, or nil to read on.
+        local own = data.adapter == "local" or data.adapter == nil
+        local queueing = data.state == "QUEUED" or data.state == "SAVING" or data.state == "RENEWING" or data.state == "QUEUE_ERROR"
+        if live then
+            if not own then return "HELD" end
+            if data.state == "QUEUED" then
+                for _, entry in ipairs(self._T.entries) do
+                    if entry.request.userId == userId then return "HELD" end
+                end
+                return nil
+            end
+            if self._T.matches[data.profile] ~= nil then return "HELD" end
+            return nil
+        end
+        -- A Maker Play restart discards the FIFO, so a stored local reservation can never resume.
+        if own and queueing then return "CANCEL" end
+        local localMatch = data.adapter == "local" or string.sub(data.matchKey, 1, 6) == "local-"
+        if self._T.matches[data.profile] == nil and localMatch and (data.state == "COMMITTING" or data.state == "TRANSFER") then return "RETURN" end
+        return nil
+    end
+end

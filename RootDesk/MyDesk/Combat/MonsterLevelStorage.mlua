@@ -25,11 +25,7 @@ script MonsterLevelStorage extends Logic
             for key, _ in pairs(progress) do
                 if key ~= "level" and key ~= "experience" then return nil end
             end
-            local level, experience = progress.level, progress.experience
-            if type(level) ~= "number" or type(experience) ~= "number"
-                or level < 1 or level > 30 or level % 1 ~= 0
-                or experience < 0 or experience % 1 ~= 0
-                or (level < 30 and experience >= level) or (level == 30 and experience ~= 0) then return nil end
+            if not _MonsterProgression:IsValidProgress(progress.level, progress.experience) then return nil end
         end
         local count = _FormationSchema:ArrayCount(document.settled, 20)
         if count < 0 then return nil end
@@ -133,7 +129,7 @@ script MonsterLevelStorage extends Logic
             end
             local changes = {}
             for id, gained in pairs(operation.deaths) do
-                local before = document.monsters[id] or { level = 1, experience = 0 }
+                local before = document.monsters[id] or _MonsterProgression:DefaultProgress()
                 local after = _MonsterProgression:ApplyExperience(before.level, before.experience, gained)
                 changes[id] = { gained = gained, before = before, after = after }
                 document.monsters[id] = after

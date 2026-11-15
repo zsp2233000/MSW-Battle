@@ -17,8 +17,8 @@ local ok, detail = pcall(function()
     assert(first.CurrentMapName == 'formationlobby' and peer.CurrentMapName == 'formationlobby', 'both in lobby')
     _MatchFlow:QueueForUser(firstId)
     if MODE == 'ENTRY' then
-        _MatchFlow:ConfigureMakerCancelFaults(1, 2)
-        _MatchFlow:ConfigureMakerTransferFaults(10, 0)
+        _MatchFaults:ConfigureCancel(1, 2)
+        _MatchFaults:ConfigureTransfer(10, 0)
         _TimerService:SetTimerOnce(function() _MatchFlow:QueueForUser(peerId) end, 0.2)
         _MatchFlow:CancelForUser(firstId)
         wait(2)
@@ -27,15 +27,15 @@ local ok, detail = pcall(function()
         assert(_MatchFlow:IsFormationLocked(firstId) and first.CurrentMapName == 'formationlobby', 'failed movement retains the handoff and formation lock')
         log('[VRF][Cancel52Race] PASS cancellation failed; racing match retained; entry movement failure retryable')
     elseif MODE == 'RECONNECT_MATCH' then
-        _MatchFlow:ConfigureMakerCancelFaults(1, 2)
-        _MatchFlow:ConfigureMakerTransferFaults(10, 0)
+        _MatchFaults:ConfigureCancel(1, 2)
+        _MatchFaults:ConfigureTransfer(10, 0)
+        -- A native registration survives Depart; keep the Maker FIFO entry so the same reply can still arrive.
+        _MatchFaults:ConfigureWithdraw(true)
         _TimerService:SetTimerOnce(function() _MatchFlow:Depart(firstId) end, 0.1)
         wait(0.5)
         local event = UserReconnectEvent()
         event.UserId = firstId
         _UserService:SendEvent(event)
-        -- A native callback survives Depart; the Maker FIFO needs this entry restored to deliver the same reply.
-        table.insert(_MatchFlow._T.localQueue, firstId)
         _MatchFlow:QueueForUser(peerId)
         wait(3)
         local ticket = _FormationHandoff:Read(profile)
@@ -46,8 +46,8 @@ local ok, detail = pcall(function()
         log('[VRF][Cancel52Race] PASS reconnected player keeps the match reply when cleanup cancellation fails')
     else
         _MatchFlow.SaveDelaySeconds = 1
-        _MatchFlow:ConfigureMakerCancelFaults(MODE == 'SEAL_FAILURE' and 1 or 0, 2)
-        if MODE == 'SEAL_FAILURE' then _MatchFlow:ConfigureMakerTransferFaults(10, 0) end
+        _MatchFaults:ConfigureCancel(MODE == 'SEAL_FAILURE' and 1 or 0, 2)
+        if MODE == 'SEAL_FAILURE' then _MatchFaults:ConfigureTransfer(10, 0) end
         local done = false
         _TimerService:SetTimerOnce(function()
             for _ = 1, 150 do
@@ -77,8 +77,9 @@ local ok, detail = pcall(function()
     end
 end)
 _MatchFlow.SaveDelaySeconds = previousDelay
-_MatchFlow:ConfigureMakerCancelFaults(0, 0)
+_MatchFaults:ConfigureCancel(0, 0)
+_MatchFaults:ConfigureWithdraw(false)
 _FormationStorage:ConfigureMakerFaults(0, 0, 0)
 -- ENTRY keeps movement faults armed until the client exercises the visible abort-entry control.
-if MODE ~= 'ENTRY' then _MatchFlow:ConfigureMakerTransferFaults(0, 0) end
+if MODE ~= 'ENTRY' then _MatchFaults:ConfigureTransfer(0, 0) end
 if not ok then log('[VRF][Cancel52Race] FAIL ' .. MODE .. ' ' .. tostring(detail)) end

@@ -1,5 +1,48 @@
 -- Maker server_main: public pure calculations, with literal expectations from #64.
 local ok, detail = pcall(function()
+    local fresh = _MonsterProgression:DefaultProgress()
+    assert(fresh.level == 1 and fresh.experience == 0, "unrecorded monster starts at Lv1 / 0")
+    fresh.level = 12; fresh.experience = 3
+    local another = _MonsterProgression:DefaultProgress()
+    assert(another.level == 1 and another.experience == 0, "defaults are detached values")
+    for level = 1, 30 do
+        assert(_MonsterProgression:IsValidLevel(level), "valid level " .. tostring(level))
+    end
+    for _, invalid in ipairs({ 0, 31, 1.5, "5", false, {}, math.huge, -math.huge, 0/0 }) do
+        assert(not _MonsterProgression:IsValidLevel(invalid), "raw invalid level rejected")
+    end
+    assert(not _MonsterProgression:IsValidLevel(nil), "missing level rejected")
+    for _, case in ipairs({
+        { 1, 0, true }, { 5, 3, true }, { 29, 28, true }, { 30, 0, true },
+        { 1, 1, false }, { 5, 5, false }, { 30, 1, false }, { 0, 0, false },
+        { 31, 0, false }, { 1.5, 0, false }, { "5", 0, false }, { false, 0, false },
+        { 5, -1, false }, { 5, 1.5, false }, { 5, "3", false }, { 5, false, false },
+        { 5, math.huge, false }, { 5, 0/0, false },
+    }) do
+        assert(_MonsterProgression:IsValidProgress(case[1], case[2]) == case[3], "stored progress validation")
+    end
+    assert(not _MonsterProgression:IsValidProgress(nil, 0)
+        and not _MonsterProgression:IsValidProgress(1, nil), "incomplete progress rejected")
+    for _, case in ipairs({
+        { '{"level":1,"experience":0}', true }, { '{"level":5,"experience":3}', true },
+        { '{"level":29,"experience":28}', true }, { '{"level":30,"experience":0}', true },
+        { '{"level":0,"experience":0}', false }, { '{"level":31,"experience":0}', false },
+        { '{"level":1.5,"experience":0}', false }, { '{"level":"5","experience":0}', false },
+        { '{"level":5,"experience":5}', false }, { '{"level":30,"experience":1}', false },
+        { '{"level":5,"experience":-1}', false }, { '{"level":5,"experience":1.5}', false },
+        { '{"level":5,"experience":"3"}', false }, { '{"level":5}', false },
+        { '{"experience":0}', false }, { '{"level":1,"experience":0,"extra":1}', false },
+    }) do
+        local raw = '{"schema":1,"monsters":{"monster_tank":' .. case[1] .. '},"settled":[]}'
+        local document = _MonsterLevelStorage:Decode(raw)
+        assert((document ~= nil) == case[2], "storage preserves strict validation: " .. case[1])
+        if document ~= nil then
+            local roundTrip = _MonsterLevelStorage:Decode(_MonsterLevelStorage:Encode(document))
+            assert(roundTrip.monsters.monster_tank.level == document.monsters.monster_tank.level
+                and roundTrip.monsters.monster_tank.experience == document.monsters.monster_tank.experience,
+                "existing save values survive encoding")
+        end
+    end
     for _, case in ipairs({
         { 1, 0, 1, 2, 0 },
         { 1, 0, 6, 4, 0 },
@@ -46,6 +89,6 @@ local ok, detail = pcall(function()
                 and stats.AttackDamageMax == case[offset + 3], "formal Lv" .. tostring(level) .. " " .. case[1])
         end
     end
-    log("[VRF][MonsterProgression] PASS")
+    log("[VRF][MonsterProgression] PASS defaults; raw validation; strict save round-trip; experience; stats")
 end)
 if not ok then log_error("[VRF][MonsterProgression] FAIL " .. tostring(detail)) end

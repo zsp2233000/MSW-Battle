@@ -40,8 +40,8 @@ local function scene(players, enemies, callback)
     if clockOwned then session:EndManualSimulation(); clockOwned = false end
 end
 local function nativeShot(attacker, target)
-    attacker:DriveAttack(target, true)
-    attacker:AdvanceAttack(0.02)
+    attacker.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(target, true)
+    attacker.Entity:GetComponent("script.BattleAttackComposition"):Advance(0.02)
     advance(1 / 60)
 end
 
@@ -84,7 +84,7 @@ local ok, detail = pcall(function()
             local attackerEntity, attacker = actor("PauseAttacker")
             local nearer = actor("PauseNearer")
 
-            attacker:DriveAttack(source, true) -- Consume the enemy opening delay.
+            attacker.Entity:GetComponent("script.BattleAttackComposition"):TryEngage(source, true) -- Consume the enemy opening delay.
             advance(session.EnemyOpeningDelay + 0.02)
             nativeShot(attacker, source)
             check(unit.Hp == 219 and unit.CombatState == "ON_HIT", "native damage starts profile hit stop")

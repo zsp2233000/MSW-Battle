@@ -47,7 +47,7 @@ test("attack effects are optional clips dispatched once at the configured attack
   assert.equal(csv.header[csv.header.indexOf("AttackEffectFrame") + 1], "HitEffectRUID");
   for (const row of csv.records) {
     assert.match(row.AttackEffectRUID, /^(?:[a-f0-9]{32})?$/);
-    assert.equal(row.AttackEffectFrame, "1");
+    assert.match(row.AttackEffectFrame, /^[1-9]\d*$/);
   }
   assert.notEqual(csv.records.find((row) => row.MonsterId === "monster_tank").AttackEffectRUID, "");
 

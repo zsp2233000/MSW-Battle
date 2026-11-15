@@ -2,6 +2,8 @@
 
 依 [#52](https://github.com/zsp2233000/MSW-Battle/issues/52) 串接 #50 的單組儲存／client 未儲存變更，以及 #51 的戰鬥 HUD／自身結果。程式與本機往返已有正向證據；下方實體滑鼠與發布環境項目仍未驗收，不據此關閉 issue。
 
+> 2026-11-14：本文是 2026-11-01／02 的歷史證據。配對流程之後改為單一 `MatchFlow` 加配對 adapter（見 [ADR 0006](adr/0006-match-flow-behind-queue-adapters.md)），下文的 `ConfigureMakerCancelFaults`／`ConfigureMakerTransferFaults` 對應 `_MatchFaults:ConfigureCancel`／`ConfigureTransfer`，`TryLocalMatch` 與本機 FIFO 移入 `MatchQueueLocal`，原生佇列呼叫移入 `MatchQueueNative`。證據段落維持原文，不代表改版後重跑。
+
 ## 行為
 
 - 配對只從 `formationlobby` 開始。client 入口與伺服器 `QueueForUser` 都檢查地圖；整備內的舊事件或直接 RPC 不會排隊。

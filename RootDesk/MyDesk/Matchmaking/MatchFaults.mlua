@@ -1,0 +1,137 @@
+@Logic
+script MatchFaults extends Logic
+
+    -- Test adapter for both match ports. It wraps whichever adapters the flow runs on, forwards every call,
+    -- and misbehaves only where a probe armed it. Production code never arms it, and arming is refused outside Maker.
+
+    @ExecSpace("ServerOnly")
+    method void Install()
+        -- Wrap the flow's live adapters once; Remove puts the originals back.
+        if self._T.queue ~= nil then return end
+        self._T.queue = _MatchFlow:QueueAdapter()
+        self._T.transfer = _MatchFlow:TransferAdapter()
+        _MatchFlow:UseAdapters(self, self)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Remove()
+        -- Disarm everything and hand the flow its own adapters back.
+        if self._T.queue == nil then return end
+        _MatchFlow:UseAdapters(self._T.queue, self._T.transfer)
+        self._T.queue = nil
+        self._T.transfer = nil
+        self._T.cancelFailures = 0
+        self._T.cancelDelay = 0
+        self._T.entryFailures = 0
+        self._T.returnFailures = 0
+        self._T.keepQueue = false
+    end
+
+    @ExecSpace("ServerOnly")
+    method void ConfigureCancel(integer failures, number delaySeconds)
+        -- Make the next cancellations answer InternalError, after an optional delay.
+        if not Environment:IsMakerPlay() then return end
+        self:Install()
+        self._T.cancelFailures = math.max(0, failures)
+        self._T.cancelDelay = math.max(0, math.min(10, delaySeconds))
+    end
+
+    @ExecSpace("ServerOnly")
+    method void ConfigureTransfer(integer entryFailures, integer returnFailures)
+        -- Fail only the native movement boundary, keeping admission, tickets and restore real.
+        if not Environment:IsMakerPlay() then return end
+        self:Install()
+        self._T.entryFailures = math.max(0, entryFailures)
+        self._T.returnFailures = math.max(0, returnFailures)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void ConfigureWithdraw(boolean keepQueue)
+        -- Keep a departed player's queue entry, as the native service keeps its registration after a disconnect.
+        if not Environment:IsMakerPlay() then return end
+        self:Install()
+        self._T.keepQueue = keepQueue
+    end
+
+    @ExecSpace("ServerOnly")
+    method string Kind()
+        return self._T.queue:Kind()
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean Configured(string leaderboardId)
+        return self._T.queue:Configured(leaderboardId)
+    end
+
+    @ExecSpace("ServerOnly")
+    method table Enqueue(table request, any deliver)
+        return self._T.queue:Enqueue(request, deliver)
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean Poll()
+        return self._T.queue:Poll()
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean Cancel(string profile)
+        -- Answer like a failing queue service while armed; the delay applies to every armed cancellation.
+        local fail = (self._T.cancelFailures or 0) > 0
+        if fail then self._T.cancelFailures = self._T.cancelFailures - 1 end
+        if (self._T.cancelDelay or 0) > 0 then wait(self._T.cancelDelay) end
+        if fail then
+            log("[VRF][MatchCancel] injected failure")
+            return false
+        end
+        return self._T.queue:Cancel(profile)
+    end
+
+    @ExecSpace("ServerOnly")
+    method any Lookup(string profile)
+        return self._T.queue:Lookup(profile)
+    end
+
+    @ExecSpace("ServerOnly")
+    method table Destinations(table matched)
+        return self._T.queue:Destinations(matched)
+    end
+
+    @ExecSpace("ServerOnly")
+    method any Warp(string profile)
+        return self._T.queue:Warp(profile)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Withdraw(string userId)
+        if self._T.keepQueue then return end
+        self._T.queue:Withdraw(userId)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Release(string profile)
+        self._T.queue:Release(profile)
+    end
+
+    @ExecSpace("ServerOnly")
+    method any Reclaim(string userId, table data, boolean live)
+        return self._T.queue:Reclaim(userId, data, live)
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean MoveToMatch(any room, string userId)
+        if (self._T.entryFailures or 0) > 0 then
+            self._T.entryFailures = self._T.entryFailures - 1
+            return false
+        end
+        return self._T.transfer:MoveToMatch(room, userId)
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean MoveToLobby(string userId)
+        if (self._T.returnFailures or 0) > 0 then
+            self._T.returnFailures = self._T.returnFailures - 1
+            return false
+        end
+        return self._T.transfer:MoveToLobby(userId)
+    end
+end
