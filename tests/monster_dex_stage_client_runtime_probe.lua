@@ -39,7 +39,7 @@ end
 local BUTTONS = { IDLE = "idleButton", MOVE = "moveButton", ATTACK = "attackButton", HURT = "hurtButton", DIE = "dieButton" }
 local function trial(action) click(dex[BUTTONS[action]].Entity) end
 local FIELDS = { IDLE = "standRuid", MOVE = "moveRuid", ATTACK = "attackRuid", HURT = "hurtRuid", DIE = "dieRuid" }
-local SOUNDS = { HURT = "hurtSoundRuid", DIE = "dieSoundRuid" }
+local SOUNDS = { ATTACK = "attackSoundRuid", HURT = "hurtSoundRuid", DIE = "dieSoundRuid" }
 local LOOPS = { IDLE = true, MOVE = true, ATTACK = false, HURT = false, DIE = false }
 
 local function sprite() return dex.stageSprite end

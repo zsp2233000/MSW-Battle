@@ -137,15 +137,16 @@ test('idle and move loop, the other actions play once and return to idle on the 
   assert.deepEqual(loops, { IDLE: true, MOVE: true, ATTACK: false, HURT: false, DIE: false });
 });
 
-test('hurt and die play their own sound, blank sounds are skipped, attack plays no sound yet', () => {
+test('attack, hurt and die play their own sound, blank sounds are skipped', () => {
   const source = read(MODULE);
   const sound = methodBody(source, 'PlaySoundOnce');
   assert.match(sound, /_SoundService:PlaySound\(/);
   assert.match(sound, /== ""/, 'a blank sound field is skipped');
   const specs = methodBody(source, 'ActionSpecs');
+  assert.match(specs, /ATTACK = \{[^}]*sound = "attackSoundRuid"/);
   assert.match(specs, /HURT = \{[^}]*sound = "hurtSoundRuid"/);
   assert.match(specs, /DIE = \{[^}]*sound = "dieSoundRuid"/);
-  assert.doesNotMatch(specs, /attackSoundRuid|attackEffectRuid|hitEffectRuid|projectileRuid/, 'no attack sound, effect or projectile in this ticket');
+  assert.doesNotMatch(specs, /attackEffectRuid|hitEffectRuid|projectileRuid/, 'no attack effect, hit effect or projectile yet');
   assert.doesNotMatch(methodBody(source, 'StartClip'), /attackSoundRuid|attackEffectRuid|hitEffectRuid|projectileRuid/);
 });
 

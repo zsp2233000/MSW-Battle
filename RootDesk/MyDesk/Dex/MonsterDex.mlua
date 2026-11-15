@@ -178,7 +178,7 @@ script MonsterDex extends Logic
             self._T.actionSpecs = {
                 IDLE = { field = "standRuid", loop = true },
                 MOVE = { field = "moveRuid", loop = true },
-                ATTACK = { field = "attackRuid", loop = false },
+                ATTACK = { field = "attackRuid", loop = false, sound = "attackSoundRuid" },
                 HURT = { field = "hurtRuid", loop = false, sound = "hurtSoundRuid" },
                 DIE = { field = "dieRuid", loop = false, sound = "dieSoundRuid" },
             }
@@ -217,7 +217,7 @@ script MonsterDex extends Logic
 
     @ExecSpace("ClientOnly")
     method void StartClip(string action, boolean record)
-        -- Put the action's animation on the stage: idle and move loop, the rest play once; hurt and die also play their own sound. Only trial clips (record = true) are logged; the idle a freshly shown monster starts with is not a trial.
+        -- Put the action's animation on the stage: idle and move loop, the rest play once; attack, hurt and die also play their own sound (the attack sound at the start, as in battle). Only trial clips (record = true) are logged; the idle a freshly shown monster starts with is not a trial.
         local row = self:GetSelectedRow()
         local spec = self:ActionSpecs()[action]
         if row == nil or spec == nil or not isvalid(self.stageSprite) then return end
