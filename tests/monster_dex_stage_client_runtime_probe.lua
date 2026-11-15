@@ -8,7 +8,10 @@
 -- The attack trial is checked per monster against the dex row's own delays (attackEffectDelay, impactDelay): the attack, effect and hit
 -- effect events are recorded with their times and the effect sprites are inspected the moment each event appears. The hit point is written
 -- down independently: one attack range in front of the attacker's body centre (like the combat rectangle), and the whole stage shrinks when
--- that point would pass the stage's right edge minus a margin. Nothing is queued, stored or edited; the book is closed again at the end. Sounds cannot be heard here: the SOUND events record that
+-- that point would pass the stage's right edge minus a margin.
+-- A monster with a projectile clip and a speed launches its ball at the hit-frame delay from the attacker's body centre; the ball flies straight to the hit point in
+-- distance / speed seconds and the hit effect appears at that arrival (distance is written down independently: the attack range ahead and the body-centre height above the
+-- ground line, in world units). Replaying, another button, another monster and closing remove the ball. Nothing is queued, stored or edited; the book is closed again at the end. Sounds cannot be heard here: the SOUND events record that
 -- the sound call was made with the row's RUID, and a blank sound field is simulated on a cached row and restored.
 local failures = 0
 local function check(condition, message)
@@ -58,11 +61,24 @@ local function expectedGeometry(row)
     local factor = needed > available and available / needed or 1
     return { factor = factor, footX = foot.x, footY = foot.y, hitX = foot.x + (row.attackRange - bodyX) * PIXELS_PER_UNIT * factor }
 end
+local function hasBall(row) return (row.projectileRuid or "") ~= "" and (row.projectileSpeed or 0) > 0 end
+-- Independent ball path of one monster: it leaves the body centre (the attacker's foot, bodyX behind and the body-centre height above it) and lands on the hit point;
+-- the distance is the attack range ahead plus the height, in world units, so the flight time does not depend on the stage shrink.
+local function expectedFlight(row)
+    local geometry = expectedGeometry(row)
+    local unit = PIXELS_PER_UNIT * geometry.factor
+    local bodyX = (row.bodyOffsetX or 0) * math.abs(row.scaleX)
+    local bodyY = (row.bodyOffsetY or 0) * math.abs(row.scaleY)
+    local flight = { startX = geometry.footX - bodyX * unit, startY = geometry.footY + bodyY * unit, endX = geometry.hitX, endY = geometry.footY, unit = unit, seconds = 0 }
+    if hasBall(row) then flight.seconds = math.sqrt(row.attackRange * row.attackRange + bodyY * bodyY) / row.projectileSpeed end
+    return flight
+end
 local function clipRuid() return sprite().ImageRUID.DataId end
 local function isLoop() return sprite().AnimClipPlayType == SpriteAnimClipPlayType.Loop end
+-- The public snapshot costs about 50 ms a call (it rebuilds every detail text), too slow for polling at frame rate; the polls read the event log and action directly.
 local function eventsOf(name)
     local found = {}
-    for _, event in ipairs(dex:GetSnapshot().events) do if event.name == name then table.insert(found, event) end end
+    for _, event in ipairs(dex._T.events) do if event.name == name then table.insert(found, event) end end
     return found
 end
 local function sameColor(a, b) return math.abs(a.r - b.r) < 0.01 and math.abs(a.g - b.g) < 0.01 and math.abs(a.b - b.b) < 0.01 and math.abs(a.a - b.a) < 0.01 end
@@ -269,37 +285,60 @@ local ok, detail = pcall(function()
     check(not sprite().Entity.Enable and dex:GetSnapshot().action == "IDLE", "a finished attack cannot revive the hidden stage")
     click(dex.lobbyButton.Entity)
     check(await(function() return dex:GetSnapshot().open and sprite().Entity.Enable end, 8), "reopening shows the stage again")
+    -- Reopening rebuilds the list and replaces the cached rows: take the new list entries and the live cache (the old ones are destroyed or stale).
+    wait(0.5)
+    rows = uiRows()
+    latest = _MonsterDexService:GetLatest()
     stageShows(dex:GetSelectedRow(), "IDLE", "after reopening")
 
 
     -- Attack trial timing: for every monster, the sound, the attack effect and the hit effect come at the dex row's own delays.
-    local function checkEffectSprite(effect, ruid, expectFlip, label)
-        check(effect.Entity.Enable and effect.ImageRUID.DataId == ruid, label .. ": the effect sprite shows the row's effect clip")
+    local function checkEffectSprite(effect, ruid, expectFlip, label, eventAge)
+        -- A one-shot effect hides itself when its clip ends, so only a fresh event must still be on screen; the clip is always the row's.
+        check((effect.Entity.Enable or eventAge > 0.12) and effect.ImageRUID.DataId == ruid, label .. ": the effect sprite shows the row's effect clip")
         check(effect.FlipX == expectFlip, label .. ": the effect " .. (expectFlip and "faces the attacker's way" or "is not flipped"))
         return effect.Entity.UITransformComponent
     end
     local function runAttack(row, label)
         local geometry = expectedGeometry(row)
         local wantEffect, wantHit = (row.attackEffectRuid or "") ~= "", (row.hitEffectRuid or "") ~= ""
+        local flight = expectedFlight(row)
+        local hitDelay = row.impactDelay + flight.seconds
         trial("ATTACK")
         local started = eventsOf("ANIMATION_START")[1]
-        local deadline = _UtilLogic.ElapsedSeconds + math.max(row.attackDuration, row.attackEffectDelay, row.impactDelay) + 1.5
+        local deadline = _UtilLogic.ElapsedSeconds + math.max(row.attackDuration, row.attackEffectDelay, hitDelay) + 1.5
         local checkedEffect, checkedHit = false, false
+        local samples, ballFlips, ballScaleOk, ballGoneAtHit = {}, {}, true, nil
         while _UtilLogic.ElapsedSeconds < deadline do
-            if wantEffect and not checkedEffect and #eventsOf("ATTACK_EFFECT") > 0 then
+            local ball = dex.projectileSprite
+            -- Read the event log first and the ball afterwards: the ball always leaves before the arrival is recorded, so a ball read after the log can never look newer than it.
+            local snap = { events = dex._T.events, action = dex._T.action }
+            local function seen(name)
+                for _, event in ipairs(snap.events) do if event.name == name then return event end end
+                return nil
+            end
+            if ball.Entity.Enable then
+                local box = ball.Entity.UITransformComponent
+                table.insert(samples, { at = _UtilLogic.ElapsedSeconds, x = box.anchoredPosition.x, y = box.anchoredPosition.y })
+                table.insert(ballFlips, ball.FlipX)
+                if math.abs(box.UIScale.x - flight.unit / ART_PIXELS_PER_WORLD_UNIT) > 0.001 or math.abs(box.UIScale.y - flight.unit / ART_PIXELS_PER_WORLD_UNIT) > 0.001 then ballScaleOk = false end
+            end
+            if wantEffect and not checkedEffect and seen("ATTACK_EFFECT") ~= nil then
                 checkedEffect = true
-                local box = checkEffectSprite(dex.attackEffectSprite, row.attackEffectRuid, true, label .. " attack effect")
+                local box = checkEffectSprite(dex.attackEffectSprite, row.attackEffectRuid, true, label .. " attack effect", _UtilLogic.ElapsedSeconds - seen("ATTACK_EFFECT").at)
                 local mine = sprite().Entity.UITransformComponent
                 check(math.abs(box.anchoredPosition.x - geometry.footX) < 1 and math.abs(box.anchoredPosition.y - geometry.footY) < 1, label .. ": the attack effect is on the attacker")
                 check(math.abs(box.UIScale.x - mine.UIScale.x) < 0.001 and math.abs(box.UIScale.y - mine.UIScale.y) < 0.001, label .. ": the attack effect is drawn at the attacker's scale")
             end
-            if wantHit and not checkedHit and #eventsOf("HIT_EFFECT") > 0 then
+            if wantHit and not checkedHit and seen("HIT_EFFECT") ~= nil then
                 checkedHit = true
-                local box = checkEffectSprite(dex.hitEffectSprite, row.hitEffectRuid, false, label .. " hit effect")
+                -- The event log is a live table that timers append to while this poll reads other properties, so the ball is read right after the event is seen: the ball leaves before the arrival is recorded.
+                ballGoneAtHit = not ball.Entity.Enable
+                local box = checkEffectSprite(dex.hitEffectSprite, row.hitEffectRuid, false, label .. " hit effect", _UtilLogic.ElapsedSeconds - seen("HIT_EFFECT").at)
                 check(math.abs(box.anchoredPosition.x - geometry.hitX) < 1 and math.abs(box.anchoredPosition.y - geometry.footY) < 1,
                     label .. ": the hit effect is at the hit point (" .. string.format("%.1f vs %.1f", box.anchoredPosition.x, geometry.hitX) .. ")")
             end
-            if dex:GetSnapshot().action == "IDLE" and (checkedEffect or not wantEffect) and (checkedHit or not wantHit) then break end
+            if snap.action == "IDLE" and (checkedEffect or not wantEffect) and (checkedHit or not wantHit) and (not hasBall(row) or seen("PROJECTILE_ARRIVE") ~= nil) then break end
             wait(0.016)
         end
         local effects, hits = eventsOf("ATTACK_EFFECT"), eventsOf("HIT_EFFECT")
@@ -310,10 +349,57 @@ local ok, detail = pcall(function()
             check(#effects == 0 and not dex.attackEffectSprite.Entity.Enable, label .. ": a blank attack effect is skipped")
         end
         if wantHit then
-            check(#hits == 1 and math.abs(hits[1].at - started.at - row.impactDelay) < TIME_TOLERANCE and hits[1].ruid == row.hitEffectRuid,
-                label .. ": one hit effect at the hit-frame delay " .. string.format("%.2f", row.impactDelay) .. " (" .. (#hits > 0 and string.format("%.2f", hits[1].at - started.at) or "none") .. ")")
+            check(#hits == 1 and math.abs(hits[1].at - started.at - hitDelay) < TIME_TOLERANCE and hits[1].ruid == row.hitEffectRuid,
+                label .. ": one hit effect at the hit-frame delay plus the flight " .. string.format("%.2f", hitDelay) .. " (" .. (#hits > 0 and string.format("%.2f", hits[1].at - started.at) or "none") .. ")")
         else
             check(#hits == 0 and not dex.hitEffectSprite.Entity.Enable, label .. ": a blank hit effect is skipped")
+        end
+        local launches, arrivals = eventsOf("PROJECTILE_START"), eventsOf("PROJECTILE_ARRIVE")
+        if hasBall(row) then
+            check(#launches == 1 and launches[1].ruid == row.projectileRuid and math.abs(launches[1].at - started.at - row.impactDelay) < TIME_TOLERANCE,
+                label .. ": the ball leaves at the hit-frame delay " .. string.format("%.2f", row.impactDelay) .. " (" .. (#launches > 0 and string.format("%.2f", launches[1].at - started.at) or "none") .. ")")
+            check(#arrivals == 1 and #launches == 1 and math.abs(arrivals[1].at - launches[1].at - flight.seconds) < TIME_TOLERANCE,
+                label .. ": the flight takes distance / speed " .. string.format("%.2f", flight.seconds) .. "s (" .. ((#arrivals > 0 and #launches > 0) and string.format("%.2f", arrivals[1].at - launches[1].at) or "none") .. ")")
+            if wantHit then
+                check(#hits == 1 and #arrivals == 1 and math.abs(hits[1].at - arrivals[1].at) < 0.05, label .. ": the hit effect appears at the ball's arrival")
+                check(ballGoneAtHit == true, label .. ": the ball is gone the moment the hit effect appears")
+            else
+                check(#hits == 0, label .. ": a blank hit effect leaves the arrival silent")
+            end
+            check(not dex.projectileSprite.Entity.Enable and not dex:GetSnapshot().projectileActive, label .. ": no ball is left after the arrival")
+            check(#samples >= 3 and launches[1] ~= nil, label .. ": the ball was seen flying (" .. tostring(#samples) .. " frames)")
+            local deviation, backwards, previous = 0, false, nil
+            local tolerance = 3 + row.projectileSpeed * flight.unit * 0.08
+            for _, sample in ipairs(samples) do
+                local progress = math.max(0, math.min(1, (sample.at - launches[1].at) / flight.seconds))
+                local ex = flight.startX + (flight.endX - flight.startX) * progress
+                local ey = flight.startY + (flight.endY - flight.startY) * progress
+                deviation = math.max(deviation, math.abs(sample.x - ex), math.abs(sample.y - ey))
+                if previous ~= nil and sample.x < previous - 0.5 then backwards = true end
+                previous = sample.x
+            end
+            check(deviation <= tolerance, label .. ": the ball follows the straight line from the body centre to the hit point at distance / speed (worst " .. string.format("%.1f", deviation) .. "px, allowed " .. string.format("%.1f", tolerance) .. ")")
+            check(not backwards, label .. ": the ball only moves forward")
+            local flickered = false
+            for _, flip in ipairs(ballFlips) do if flip ~= true then flickered = true end end
+            check(not flickered, label .. ": the ball faces right in every frame (no flicker)")
+            check(ballScaleOk, label .. ": the ball is drawn at the stage art scale (" .. string.format("%.3f", flight.unit / ART_PIXELS_PER_WORLD_UNIT) .. ")")
+            if #samples > 0 then
+                local first, last = samples[1], samples[#samples]
+                -- The poll may notice the ball a few frames late or early; judge the first and last frames against the line at their own time (above) and against the ends only when they were seen close to them.
+                if first.at - launches[1].at < 0.1 then
+                    check(math.abs(first.x - flight.startX) < tolerance + 6 and math.abs(first.y - flight.startY) < tolerance + 6, label .. ": the ball starts at the attacker's body centre")
+                else
+                    check(first.at - launches[1].at < flight.seconds * 0.5, label .. ": the ball was first seen in the first half of its flight (" .. string.format("%.2f", first.at - launches[1].at) .. "s late)")
+                end
+                if arrivals[1].at - last.at < 0.1 then
+                    check(math.abs(last.x - flight.endX) < tolerance + 6 and math.abs(last.y - flight.endY) < tolerance + 6, label .. ": the ball ends at the hit point")
+                else
+                    check(arrivals[1].at - last.at < flight.seconds * 0.5, label .. ": the ball was last seen in the second half of its flight (" .. string.format("%.2f", arrivals[1].at - last.at) .. "s early)")
+                end
+            end
+        else
+            check(#launches == 0 and #arrivals == 0 and not dex.projectileSprite.Entity.Enable and not dex:GetSnapshot().projectileActive, label .. ": no ball without a projectile clip and speed (instant hit)")
         end
         local sounds = eventsOf("SOUND")
         if (row.attackSoundRuid or "") ~= "" then
@@ -419,6 +505,72 @@ local ok, detail = pcall(function()
     click(rows[timed])
     check(not dex.scaleLabel.Entity.Enable, "back at a fitting range the multiplier label is hidden")
     checkScaleAndFacing(longRow, "restored range")
+
+    -- Projectile monsters: the stage shrink scales the ball's path while its flight time stays distance / speed (simulated long range on the cached row, restored afterwards).
+    local ballIndex = nil
+    for index, row in ipairs(latest) do if ballIndex == nil and hasBall(row) then ballIndex = index end end
+    check(ballIndex ~= nil, "some monster has a projectile clip and speed (" .. tostring(ballIndex) .. ")")
+    if ballIndex ~= nil then
+        local elsewhere = (otherIndex == ballIndex) and timed or otherIndex
+        click(rows[ballIndex])
+        local ballRow = dex:GetSelectedRow()
+        local savedRange = ballRow.attackRange
+        local foot = sprite().Entity.UITransformComponent.anchoredPosition
+        local bodyX = (ballRow.bodyOffsetX or 0) * math.abs(ballRow.scaleX)
+        ballRow.attackRange = 1.6 * (stageWidth() - foot.x - dex.HitPointMargin) / PIXELS_PER_UNIT + bodyX
+        click(rows[elsewhere])
+        click(rows[ballIndex])
+        check(expectedGeometry(ballRow).factor < 0.8, "the simulated ball range shrinks the stage (factor " .. string.format("%.3f", expectedGeometry(ballRow).factor) .. ")")
+        runAttack(ballRow, ballRow.monsterName .. " shrunk-stage ball")
+        ballRow.attackRange = savedRange
+        click(rows[elsewhere])
+        click(rows[ballIndex])
+
+        -- A ball without a speed or without a clip is an instant hit at the hit-frame delay.
+        local savedSpeed, savedRuid = ballRow.projectileSpeed, ballRow.projectileRuid
+        ballRow.projectileSpeed = 0
+        runAttack(ballRow, ballRow.monsterName .. " with no ball speed")
+        ballRow.projectileSpeed = savedSpeed
+        ballRow.projectileRuid = ""
+        runAttack(ballRow, ballRow.monsterName .. " with no ball clip")
+        ballRow.projectileRuid = savedRuid
+
+        -- Every way out removes a ball in flight, and nothing it queued fires later.
+        local flight = expectedFlight(ballRow)
+        local function launchAndFly(label)
+            trial("ATTACK")
+            check(await(function() return dex.projectileSprite.Entity.Enable end, ballRow.impactDelay + 1), label .. ": the ball is flying")
+            wait(flight.seconds * 0.4)
+            check(dex.projectileSprite.Entity.Enable and dex:GetSnapshot().projectileActive, label .. ": still in flight")
+        end
+        local function checkGone(label)
+            check(not dex.projectileSprite.Entity.Enable and not dex:GetSnapshot().projectileActive, label .. ": the ball is removed at once")
+            wait(flight.seconds + 0.5)
+            check(#eventsOf("PROJECTILE_ARRIVE") == 0 and #eventsOf("HIT_EFFECT") == 0 and not dex.projectileSprite.Entity.Enable and not dex.hitEffectSprite.Entity.Enable, label .. ": the removed ball never arrives or hits later")
+        end
+        launchAndFly("replay")
+        trial("ATTACK")
+        check(not dex.projectileSprite.Entity.Enable and #eventsOf("PROJECTILE_START") == 0, "replay: the old ball is gone and the event log is clean")
+        check(await(function() return #eventsOf("PROJECTILE_ARRIVE") > 0 end, ballRow.impactDelay + flight.seconds + 1), "replay: the fresh ball arrives")
+        check(#eventsOf("PROJECTILE_START") == 1 and #eventsOf("PROJECTILE_ARRIVE") == 1, "replay: exactly one ball flew")
+        await(function() return dex:GetSnapshot().action == "IDLE" end, 5)
+        launchAndFly("another button")
+        trial("MOVE")
+        checkGone("another button")
+        trial("IDLE")
+        launchAndFly("switching monster")
+        click(rows[elsewhere])
+        check(#dex:GetSnapshot().events == 0, "switching monster: the log is cleared")
+        checkGone("switching monster")
+        click(rows[ballIndex])
+        launchAndFly("closing")
+        click(dex.closeButton.Entity)
+        checkGone("closing")
+        click(dex.lobbyButton.Entity)
+        check(await(function() return dex:GetSnapshot().open and sprite().Entity.Enable end, 8), "the book reopens after the ball checks")
+        wait(0.5)
+        rows = uiRows()
+    end
 
     -- No battle camera zoom: only the stage is off. The list, the selection and the details keep working.
     local zoom = dex._T.battleZoom

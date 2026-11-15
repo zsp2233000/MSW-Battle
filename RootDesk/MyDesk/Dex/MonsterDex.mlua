@@ -21,6 +21,7 @@ script MonsterDex extends Logic
     property SpriteGUIRendererComponent attackEffectSprite = "f7b6fd4b-00ba-40a2-a81a-2103a3ea9f55"
     property SpriteGUIRendererComponent hitEffectSprite = "5e8fd714-47e4-4c60-8385-46a63b1267bd"
     property TextGUIRendererComponent scaleLabel = "52934094-7804-4cb6-bbcd-8fa05fc9a5d3"
+    property SpriteGUIRendererComponent projectileSprite = "c3097106-255b-4ae7-9386-34c6dea7b5c0"
 
     property string LobbyMapName = "formationlobby"
     property number LoadTimeoutSeconds = 8
@@ -66,8 +67,9 @@ script MonsterDex extends Logic
         self._T.timers = {}
         self._T.trialSerial = 0
         self._T.stageFactor = 1
-        -- Authored starting state: the book, the stage image, its notice, the two effect sprites, the scale label and the three row templates are all hidden.
-        for _, component in ipairs({ self.stageSprite, self.stageNotice, self.attackEffectSprite, self.hitEffectSprite, self.scaleLabel }) do
+        self._T.shot = nil
+        -- Authored starting state: the book, the stage image, its notice, the two effect sprites, the ball, the scale label and the three row templates are all hidden.
+        for _, component in ipairs({ self.stageSprite, self.stageNotice, self.attackEffectSprite, self.hitEffectSprite, self.projectileSprite, self.scaleLabel }) do
             if isvalid(component) then component.Entity:SetEnable(false) end
         end
         for _, entity in ipairs({ self.book, self.rowTemplate, self.headerTemplate, self.detailTemplate }) do
@@ -80,6 +82,7 @@ script MonsterDex extends Logic
     method void OnUpdate(number delta)
         -- Keep the lobby entry in step with the shared matchmaking lock; a match starting under an open book closes it.
         self:EnsureBound()
+        self:AdvanceProjectile()
         if not isvalid(self.lobbyButton) then return end
         local canOpen = self:CanOpen()
         local shown = Environment:IsMakerPlay()
@@ -255,21 +258,92 @@ script MonsterDex extends Logic
 
     @ExecSpace("ClientOnly")
     method void ArmAttackTrial(any row)
-        -- The attack's effects follow the dex row's own delays, never recalculated: the attack effect after attackEffectDelay on the attacker (frame 1 is immediate), the hit effect after impactDelay at the hit point (a ball is a later ticket, so every attack is instant for now). Blank effect fields are skipped; a cleared trial drops its pending timers.
+        -- The attack's effects follow the dex row's own delays, never recalculated: the attack effect after attackEffectDelay on the attacker (frame 1 is immediate), the hit effect after impactDelay at the hit point. A monster with a ball launches it at impactDelay instead and the hit effect waits for its arrival; every other attack is an instant hit. Blank effect fields are skipped; a cleared trial drops its pending timers.
         local serial = self._T.trialSerial
-        local function arm(delay, name, effect, ruid)
-            if ruid == "" or not isvalid(effect) then return end
+        local function arm(delay, action)
             if delay <= 0 then
-                self:ShowEffect(name, effect, ruid, row)
+                action()
                 return
             end
             local id = _TimerService:SetTimerOnce(function()
-                if serial == self._T.trialSerial then self:ShowEffect(name, effect, ruid, row) end
+                if serial == self._T.trialSerial then action() end
             end, delay)
             table.insert(self._T.timers, id)
         end
-        arm(row.attackEffectDelay or 0, "ATTACK_EFFECT", self.attackEffectSprite, row.attackEffectRuid or "")
-        arm(row.impactDelay or 0, "HIT_EFFECT", self.hitEffectSprite, row.hitEffectRuid or "")
+        local effectRuid = row.attackEffectRuid or ""
+        if effectRuid ~= "" and isvalid(self.attackEffectSprite) then
+            arm(row.attackEffectDelay or 0, function() self:ShowEffect("ATTACK_EFFECT", self.attackEffectSprite, effectRuid, row) end)
+        end
+        if self:UsesProjectile(row) then
+            arm(row.impactDelay or 0, function() self:LaunchProjectile(row) end)
+            return
+        end
+        local hitRuid = row.hitEffectRuid or ""
+        if hitRuid ~= "" and isvalid(self.hitEffectSprite) then
+            arm(row.impactDelay or 0, function() self:ShowEffect("HIT_EFFECT", self.hitEffectSprite, hitRuid, row) end)
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method boolean UsesProjectile(any row)
+        -- A ball needs both its clip and a positive speed; anything else is an instant hit, like the blank state of the details list.
+        return (row.projectileRuid or "") ~= "" and (row.projectileSpeed or 0) > 0 and isvalid(self.projectileSprite)
+    end
+
+    @ExecSpace("ClientOnly")
+    method table ProjectileFlight(any row)
+        -- One ball's path in canvas pixels and its time in seconds. It leaves the attacker's body centre (bodyOffset behind and above the foot, scaled by the model) and lands on the hit point on the ground line, the place the hit effect plays at. The distance is measured in world units (the attack range ahead plus the body-centre height), so dividing it by the published world-unit speed gives a flight time that the stage shrink never changes.
+        local geometry = self:StageGeometry(row)
+        local bodyX = (row.bodyOffsetX or 0) * math.abs(row.scaleX)
+        local bodyY = (row.bodyOffsetY or 0) * math.abs(row.scaleY)
+        local startX = geometry.footX - bodyX * geometry.pixelsPerUnit
+        local startY = geometry.footY + bodyY * geometry.pixelsPerUnit
+        local distance = math.sqrt((geometry.hitX - startX) ^ 2 + (geometry.footY - startY) ^ 2) / geometry.pixelsPerUnit
+        return {
+            from = Vector2(startX, startY), to = Vector2(geometry.hitX, geometry.footY),
+            seconds = distance / row.projectileSpeed, pixelsPerUnit = geometry.pixelsPerUnit,
+        }
+    end
+
+    @ExecSpace("ClientOnly")
+    method void LaunchProjectile(any row)
+        -- Release the ball at the attacker's body centre and arm its arrival; the ball and the hit effect both belong to that one arrival moment. The art faces left like every monster art and the authored image is flipped once to fly right, so the facing never changes in flight.
+        local ball = self.projectileSprite
+        if not self:UsesProjectile(row) then return end
+        local flight = self:ProjectileFlight(row)
+        local scale = flight.pixelsPerUnit / self.PixelsPerWorldUnit
+        ball.Entity:SetEnable(false)
+        ball.AnimClipPlayType = SpriteAnimClipPlayType.Loop
+        ball.ImageRUID = DataRef(row.projectileRuid)
+        ball.PreserveSprite = PreserveSpriteType.NativeSize
+        ball.Entity.UITransformComponent.anchoredPosition = flight.from
+        ball.Entity.UITransformComponent.UIScale = Vector3(scale, scale, 1)
+        ball.Entity:SetEnable(true)
+        self._T.shot = { startedAt = _UtilLogic.ElapsedSeconds, seconds = flight.seconds, from = flight.from, to = flight.to }
+        self:RecordEvent("PROJECTILE_START", "ATTACK", row.projectileRuid)
+        local serial = self._T.trialSerial
+        local id = _TimerService:SetTimerOnce(function()
+            if serial == self._T.trialSerial then self:ArriveProjectile(row) end
+        end, flight.seconds)
+        table.insert(self._T.timers, id)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void AdvanceProjectile()
+        -- Move the ball along its straight line by elapsed time; it holds the landing point until its arrival timer removes it.
+        local shot = self._T.shot
+        if shot == nil or not isvalid(self.projectileSprite) then return end
+        local progress = math.min(1, math.max(0, (_UtilLogic.ElapsedSeconds - shot.startedAt) / shot.seconds))
+        self.projectileSprite.Entity.UITransformComponent.anchoredPosition = Vector2(shot.from.x + (shot.to.x - shot.from.x) * progress, shot.from.y + (shot.to.y - shot.from.y) * progress)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ArriveProjectile(any row)
+        -- The ball reaches the hit point: it leaves the stage and the hit effect (if the row has one) plays right there.
+        self._T.shot = nil
+        if isvalid(self.projectileSprite) then self.projectileSprite.Entity:SetEnable(false) end
+        self:RecordEvent("PROJECTILE_ARRIVE", "ATTACK", row.projectileRuid)
+        self:ShowEffect("HIT_EFFECT", self.hitEffectSprite, row.hitEffectRuid or "", row)
     end
 
     @ExecSpace("ClientOnly")
@@ -292,8 +366,10 @@ script MonsterDex extends Logic
 
     @ExecSpace("ClientOnly")
     method void ClearEffects()
-        -- Drop every pending effect timer (the serial also voids a callback already queued) and hide both effect sprites.
+        -- Drop every pending effect timer (the serial also voids a callback already queued), the ball in flight, and hide both effect sprites and the ball.
         self._T.trialSerial = (self._T.trialSerial or 0) + 1
+        self._T.shot = nil
+        if isvalid(self.projectileSprite) then self.projectileSprite.Entity:SetEnable(false) end
         for _, id in ipairs(self._T.timers or {}) do
             _TimerService:ClearTimer(id)
         end
@@ -459,7 +535,7 @@ script MonsterDex extends Logic
             open = self._T.open, loadState = self._T.loadState,
             selectedMonsterId = self._T.selectedId, selectedMonsterName = selected ~= nil and selected.monsterName or "",
             action = self._T.action, events = events, rows = rows, details = self:BuildDetails(selected),
-            stageAvailable = self._T.battleZoom ~= nil, stageFactor = self._T.stageFactor or 1,
+            stageAvailable = self._T.battleZoom ~= nil, stageFactor = self._T.stageFactor or 1, projectileActive = self._T.shot ~= nil,
         }
     end
 

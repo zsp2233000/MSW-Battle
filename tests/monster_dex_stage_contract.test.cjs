@@ -19,6 +19,7 @@ const NOTICE = `${STAGE}/Notice`;
 const ATTACK_EFFECT = `${STAGE}/AttackEffect`;
 const HIT_EFFECT = `${STAGE}/HitEffect`;
 const SCALE_LABEL = `${STAGE}/ScaleLabel`;
+const PROJECTILE = `${STAGE}/Projectile`;
 const CAMERA_MODULE = 'RootDesk/MyDesk/Combat/BattleFixedCamera.mlua';
 // Left to right, as the ticket lists them.
 const TRIAL_BUTTONS = [['Idle', '待機', 'idleButton'], ['Move', '移動', 'moveButton'], ['Attack', '攻擊', 'attackButton'],
@@ -56,7 +57,7 @@ test('the stage fills the upper right page, above the resource details', () => {
 
 test('the stage shows one monster: an animation image that always faces right', () => {
   const ui = dex();
-  assert.deepEqual(childNames(ui, STAGE), ['Ground', 'Actor', 'Notice', 'AttackEffect', 'HitEffect', 'ScaleLabel']);
+  assert.deepEqual(childNames(ui, STAGE), ['Ground', 'Actor', 'Notice', 'AttackEffect', 'HitEffect', 'ScaleLabel', 'Projectile']);
   const sprite = ui.getComponent(ACTOR, SPRITE);
   assert.equal(sprite.FlipX, true, 'monster art faces left, the stage flips it to face right');
   assert.equal(sprite.Type, 0, 'a plain image, never sliced or tiled');
@@ -95,7 +96,7 @@ test('five trial buttons sit under the left page list, in the ticket order', () 
 test('MonsterDex binds the stage image and every trial button to the authored entities', () => {
   const source = read(MODULE);
   const ui = dex();
-  const binds = [['stageSprite', ACTOR], ['attackEffectSprite', ATTACK_EFFECT], ['hitEffectSprite', HIT_EFFECT], ['scaleLabel', SCALE_LABEL], ...TRIAL_BUTTONS.map(([name, , property]) => [property, `${TRIAL}/${name}`])];
+  const binds = [['stageSprite', ACTOR], ['attackEffectSprite', ATTACK_EFFECT], ['hitEffectSprite', HIT_EFFECT], ['scaleLabel', SCALE_LABEL], ['projectileSprite', PROJECTILE], ...TRIAL_BUTTONS.map(([name, , property]) => [property, `${TRIAL}/${name}`])];
   for (const [property, entity] of binds) {
     const declared = source.match(new RegExp(`property \\w+ ${property} = "([^"]*)"`));
     assert.ok(declared, `${property} is declared`);
@@ -165,7 +166,6 @@ test('the attack trial takes every timing from the dex row and plays the effects
   assert.match(arm, /hitEffectRuid/);
   assert.match(arm, /SetTimerOnce/, 'later effect frames and the hit frame are timer driven');
   assert.doesNotMatch(arm, /attackDuration|attackEffectFrame|attackDamageFrame|\* ?0\.\d|\/ ?\d/, 'no delay is recalculated from frames or lengths');
-  assert.doesNotMatch(arm, /projectile/i, 'projectile monsters stay instant in this ticket');
   assert.match(methodBody(source, 'ShowEffect'), /""/, 'a blank effect field is skipped');
   assert.match(methodBody(source, 'ClearEffects'), /ClearTimer/, 'clearing drops pending timers');
   assert.match(methodBody(source, 'ClearEffects'), /SetEnable\(false\)/, 'clearing hides the effect sprites');
@@ -286,4 +286,56 @@ test('the attack effect, the hit effect and the scale label are authored on the 
   const left = label.AnchorsMin.x * stage.RectSize.x + label.anchoredPosition.x - label.Pivot.x * label.RectSize.x;
   assert.ok(left >= 0 && left + label.RectSize.x <= stage.RectSize.x, 'the label fits the stage width');
   assert.ok(ui.getComponent(SCALE_LABEL, TEXT), 'the label is a text');
+});
+
+test('the projectile ball is an authored stage sprite: hidden, plain, centred, flipped to face right, never takes clicks', () => {
+  const ui = dex();
+  const sprite = ui.getComponent(PROJECTILE, SPRITE);
+  assert.equal(ui.find(PROJECTILE).jsonString.enable, false, 'hidden until a ball flies');
+  assert.equal(sprite.RaycastTarget, false, 'never takes clicks');
+  assert.equal(sprite.Type, 0, 'a plain image');
+  assert.equal(sprite.FlipX, true, 'the ball art faces left like every monster art; the stage flips it to fly right');
+  const box = rect(ui, PROJECTILE);
+  assert.deepEqual([box.Pivot.x, box.Pivot.y], [0.5, 0.5], 'positioned by its centre');
+});
+
+test('a monster with a projectile clip and a speed launches the ball at the hit-frame delay and lands the hit effect on arrival', () => {
+  const source = read(MODULE);
+  const arm = methodBody(source, 'ArmAttackTrial');
+  assert.match(arm, /UsesProjectile\(/, 'the attack trial branches on the row having a ball');
+  assert.match(arm, /LaunchProjectile\(/, 'the ball leaves at the hit-frame delay');
+  assert.match(arm, /impactDelay/, 'the launch uses the row hit delay');
+  const uses = methodBody(source, 'UsesProjectile');
+  assert.match(uses, /projectileRuid/);
+  assert.match(uses, /projectileSpeed/, 'a ball without a positive speed is an instant hit, as in the details list');
+  const flight = methodBody(source, 'ProjectileFlight');
+  assert.match(flight, /projectileSpeed/, 'the flight time comes from the published world-unit speed');
+  assert.match(flight, /distance \/ /, 'flight time is distance divided by speed');
+  assert.match(flight, /bodyOffsetX/, 'the ball starts at the attacker body centre');
+  assert.match(flight, /bodyOffsetY/);
+  const launch = methodBody(source, 'LaunchProjectile');
+  assert.match(launch, /projectileRuid/);
+  assert.match(launch, /SetTimerOnce/, 'arrival is timer driven so the ball and the hit effect share one moment');
+  assert.match(launch, /PROJECTILE_START/);
+  const arrive = methodBody(source, 'ArriveProjectile');
+  assert.match(arrive, /PROJECTILE_ARRIVE/);
+  assert.match(arrive, /ShowEffect\("HIT_EFFECT"/, 'the hit effect plays on arrival');
+  assert.match(arrive, /SetEnable\(false\)/, 'the ball leaves on arrival');
+});
+
+test('the ball follows the stage geometry and never writes its facing while flying', () => {
+  const source = read(MODULE);
+  assert.match(methodBody(source, 'ProjectileFlight'), /StageGeometry\(/, 'start and landing come from the stage geometry, so they shrink with the stage');
+  assert.match(methodBody(source, 'OnUpdate'), /AdvanceProjectile\(\)/, 'the ball moves every frame');
+  assert.doesNotMatch(methodBody(source, 'AdvanceProjectile'), /FlipX/, 'the facing is authored once; nothing flips per frame');
+  assert.doesNotMatch(methodBody(source, 'LaunchProjectile'), /FlipX/);
+  assert.match(methodBody(source, 'LaunchProjectile'), /pixelsPerUnit \/ self\.PixelsPerWorldUnit/, 'the ball is drawn at the stage art scale like the hit effect');
+});
+
+test('a flying ball is cleared with every other in-flight effect', () => {
+  const source = read(MODULE);
+  const clear = methodBody(source, 'ClearEffects');
+  assert.match(clear, /projectileSprite/, 'clearing hides the ball');
+  assert.match(clear, /shot = nil/, 'clearing drops the flight record');
+  assert.match(methodBody(source, 'GetSnapshot'), /projectileActive/, 'the snapshot reports a ball in flight');
 });
