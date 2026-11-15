@@ -62,8 +62,8 @@ test('the lower right page holds a vertically scrollable detail list, the top is
   assert.ok(-rect(ui, `${RIGHT}/DetailTitle`).anchoredPosition.y < -list.anchoredPosition.y, 'the title sits above the list');
 });
 
-test('nothing else lives on the right page yet: the stage area stays empty for the next ticket', () => {
-  assert.deepEqual(childNames(dex(), RIGHT).sort(), ['DetailTitle', 'Details']);
+test('the right page holds only the stage, the details title and the details', () => {
+  assert.deepEqual(childNames(dex(), RIGHT).sort(), ['DetailTitle', 'Details', 'Stage']);
 });
 
 test('the list is authored as two hidden templates; the rows are cloned at runtime so the list measures and scrolls', () => {

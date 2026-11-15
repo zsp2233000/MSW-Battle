@@ -11,6 +11,12 @@ script MonsterDex extends Logic
     property ScrollLayoutGroupComponent detailLayout = "34659be3-bdc5-4a22-8e8d-42723cdbc393"
     property Entity headerTemplate = "9608ae32-42e0-438d-b8a2-b8a56629e208"
     property Entity detailTemplate = "8304bc60-6f15-440d-9082-9e8939b2bbcb"
+    property SpriteGUIRendererComponent stageSprite = "7ea08451-3f20-4d55-8c56-77a6d149b029"
+    property ButtonComponent idleButton = "acf2c38e-3444-4d3e-8c7b-caabefc3ff78"
+    property ButtonComponent moveButton = "4d0064ba-16d1-478f-8f06-96ffeef32ba2"
+    property ButtonComponent attackButton = "b3d24340-87cd-4927-a97f-3bc930503b38"
+    property ButtonComponent hurtButton = "56c8e073-419d-41d5-b9be-d3cd2b66104e"
+    property ButtonComponent dieButton = "faee53ab-737c-4f86-a335-be3961cf6849"
 
     property string LobbyMapName = "formationlobby"
     property number LoadTimeoutSeconds = 8
@@ -21,6 +27,9 @@ script MonsterDex extends Logic
     property string UnsetText = "未設定"
     property Color DetailValueColor = Color(0.17, 0.13, 0.28, 1)
     property Color DetailUnsetColor = Color(0.55, 0.5, 0.62, 1)
+    property Color TrialButtonColor = Color(0.36, 0.29, 0.52, 0.85)
+    property Color TrialActiveColor = Color(1, 0.78, 0.3, 1)
+    property number SoundVolume = 1
 
     @ExecSpace("ClientOnly")
     method void OnBeginPlay()
@@ -40,6 +49,11 @@ script MonsterDex extends Logic
         self._T.detailsFor = nil
         self._T.entryShown = nil
         self._T.entryEnabled = nil
+        self._T.battleZoom = nil
+        self._T.stageFor = nil
+        self._T.oneShot = false
+        self._T.endHandler = nil
+        if isvalid(self.stageSprite) then self.stageSprite.Entity:SetEnable(false) end
         if isvalid(self.book) then self.book:SetEnable(false) end
         if isvalid(self.rowTemplate) then self.rowTemplate:SetEnable(false) end
         if isvalid(self.headerTemplate) then self.headerTemplate:SetEnable(false) end
@@ -75,11 +89,17 @@ script MonsterDex extends Logic
     @ExecSpace("ClientOnly")
     method void EnsureBound()
         -- The authored buttons only call the public interface below.
-        if self._T.bound or not isvalid(self.lobbyButton) or not isvalid(self.closeButton) then return end
+        if self._T.bound or not isvalid(self.lobbyButton) or not isvalid(self.closeButton) or not isvalid(self.stageSprite) then return end
         self._T.bound = true
         self:Bind(self.lobbyButton.Entity, function() self:Open() end)
         self:Bind(self.closeButton.Entity, function() self:Close() end)
-        log("[VRF][MonsterDex] connected lobby entry and close button")
+        self:Bind(self.idleButton.Entity, function() self:Play("IDLE") end)
+        self:Bind(self.moveButton.Entity, function() self:Play("MOVE") end)
+        self:Bind(self.attackButton.Entity, function() self:Play("ATTACK") end)
+        self:Bind(self.hurtButton.Entity, function() self:Play("HURT") end)
+        self:Bind(self.dieButton.Entity, function() self:Play("DIE") end)
+        self._T.endHandler = self.stageSprite.Entity:ConnectEvent(SpriteGUIAnimPlayerEndEvent, function(event) self:OnAnimationEnd(event) end)
+        log("[VRF][MonsterDex] connected lobby entry, close button, trial buttons and the stage end event")
     end
 
     @ExecSpace("ClientOnly")
@@ -138,9 +158,133 @@ script MonsterDex extends Logic
 
     @ExecSpace("ClientOnly")
     method void ResetPlayback()
-        -- Later tickets clear the stage here as well: idle action, empty event log.
+        -- Back to a quiet idle stage: idle action, empty event log, nothing in flight. A closed book or a missing row hides the stage.
         self._T.action = "IDLE"
         self._T.events = {}
+        self._T.oneShot = false
+        self._T.stageFor = nil
+        self:RenderStage()
+    end
+
+    @ExecSpace("ClientOnly")
+    method table ActionSpecs()
+        -- What each trial action plays: the dex row field of its animation, whether it loops, and the sound it plays at its start (no sound field = silent).
+        return {
+            IDLE = { field = "standRuid", loop = true },
+            MOVE = { field = "moveRuid", loop = true },
+            ATTACK = { field = "attackRuid", loop = false },
+            HURT = { field = "hurtRuid", loop = false, sound = "hurtSoundRuid" },
+            DIE = { field = "dieRuid", loop = false, sound = "dieSoundRuid" },
+        }
+    end
+
+    @ExecSpace("ClientOnly")
+    method void RecordEvent(string name, string action, string ruid)
+        -- Append one trial event to the readable log.
+        table.insert(self._T.events, { name = name, action = action, ruid = ruid, at = _UtilLogic.ElapsedSeconds })
+    end
+
+    @ExecSpace("ClientOnly")
+    method boolean Play(string action)
+        -- Trial one action of the selected monster from its start. Replaying the same action restarts it; another action aborts the one in progress.
+        if not self._T.open or self._T.battleZoom == nil then return false end
+        if self:GetSelectedRow() == nil or self:ActionSpecs()[action] == nil then return false end
+        self._T.events = {}
+        self:StartClip(action, true)
+        log("[VRF][MonsterDex] trial " .. action)
+        return true
+    end
+
+    @ExecSpace("ClientOnly")
+    method void StartClip(string action, boolean record)
+        -- Put the action's animation on the stage: idle and move loop, the rest play once; hurt and die also play their own sound. Only trial clips (record = true) are logged; the idle a freshly shown monster starts with is not a trial.
+        local row = self:GetSelectedRow()
+        local spec = self:ActionSpecs()[action]
+        if row == nil or spec == nil or not isvalid(self.stageSprite) then return end
+        local ruid = row[spec.field] or ""
+        self._T.action = action
+        self._T.oneShot = not spec.loop
+        self.stageSprite.Entity:SetEnable(false)
+        self.stageSprite.AnimClipPlayType = spec.loop and SpriteAnimClipPlayType.Loop or SpriteAnimClipPlayType.Onetime
+        self.stageSprite.ImageRUID = DataRef(ruid)
+        self.stageSprite.Entity:SetEnable(true)
+        if record then self:RecordEvent("ANIMATION_START", action, ruid) end
+        if record and spec.sound ~= nil then self:PlaySoundOnce(action, row[spec.sound] or "") end
+        self:RenderTrialButtons()
+    end
+
+    @ExecSpace("ClientOnly")
+    method void PlaySoundOnce(string action, string ruid)
+        -- A blank sound field is skipped silently; nothing else depends on it.
+        if ruid == "" then return end
+        _SoundService:PlaySound(ruid, self.SoundVolume)
+        self:RecordEvent("SOUND", action, ruid)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnAnimationEnd(any event)
+        -- The end of a one-shot clip sends the stage back to idle; loops and stale ends are ignored.
+        if not self._T.oneShot then return end
+        self._T.oneShot = false
+        self:RecordEvent("ANIMATION_END", self._T.action, "")
+        self:StartClip("IDLE", true)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ObserveBattleCamera(number zoomRatio)
+        -- The battle camera's zoom, published by the server next to the rows; the stage scale follows it.
+        if zoomRatio > 0 then self._T.battleZoom = zoomRatio end
+    end
+
+    @ExecSpace("ClientOnly")
+    method number StagePixelsPerUnit()
+        -- Canvas pixels that one world unit covers on the battle camera: measured from the native screen-to-world conversion of the camera in use, rescaled to the battle camera's zoom.
+        local screenWidth = _UILogic.ScreenWidth
+        local left = _UILogic:ScreenToWorldPosition(Vector2(0, 0))
+        local right = _UILogic:ScreenToWorldPosition(Vector2(screenWidth, 0))
+        local currentZoom = _CameraService:GetCurrentCameraComponent().ZoomRatio
+        local unitsAcrossBattleScreen = math.abs(right.x - left.x) * currentZoom / self._T.battleZoom
+        return self.book.UITransformComponent.RectSize.x / unitsAcrossBattleScreen
+    end
+
+    @ExecSpace("ClientOnly")
+    method any StageLayout(any row)
+        -- UI scale of the stage image for one monster: the battle view's pixels per world unit times the model's own scale. The art is drawn at its native pixels, 100 per world unit.
+        if row == nil or self._T.battleZoom == nil then return nil end
+        local pixelsPerUnit = self:StagePixelsPerUnit()
+        return { x = pixelsPerUnit / 100 * row.scaleX, y = pixelsPerUnit / 100 * row.scaleY }
+    end
+
+    @ExecSpace("ClientOnly")
+    method void RenderStage()
+        -- Show the selected monster at battle scale and start it idling; an already shown monster keeps playing.
+        if not isvalid(self.stageSprite) then return end
+        local row = nil
+        if self._T.open then row = self:GetSelectedRow() end
+        local layout = self:StageLayout(row)
+        if layout == nil then
+            self._T.stageFor = nil
+            self.stageSprite.Entity:SetEnable(false)
+            self:RenderTrialButtons()
+            return
+        end
+        if self._T.stageFor == self._T.selectedId then return end
+        self._T.stageFor = self._T.selectedId
+        self.stageSprite.PreserveSprite = PreserveSpriteType.NativeSize
+        self.stageSprite.Entity.UITransformComponent.UIScale = Vector3(layout.x, layout.y, 1)
+        self:StartClip("IDLE", false)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void RenderTrialButtons()
+        -- The running action's button is highlighted; with no stage shown none is.
+        local shown = self._T.stageFor ~= nil
+        local buttons = { IDLE = self.idleButton, MOVE = self.moveButton, ATTACK = self.attackButton, HURT = self.hurtButton, DIE = self.dieButton }
+        for action, button in pairs(buttons) do
+            if isvalid(button) then
+                button.Entity.SpriteGUIRendererComponent.Color = (shown and self._T.action == action) and self.TrialActiveColor or self.TrialButtonColor
+            end
+        end
     end
 
     @ExecSpace("ClientOnly")
@@ -347,6 +491,7 @@ script MonsterDex extends Logic
             end
         end
         self:RenderDetails()
+        self:RenderStage()
         if not isvalid(self.statusText) then return end
         local messages = { LOADING = "讀取中…", EMPTY = "資料表沒有怪物", FAILED = "讀取逾時，請關閉後重新開啟" }
         local message = messages[self._T.loadState] or ""
@@ -359,6 +504,10 @@ script MonsterDex extends Logic
         -- Release the authored button subscriptions at world session shutdown.
         for _, binding in ipairs(self._T.bindings or {}) do
             if isvalid(binding.entity) then binding.entity:DisconnectEvent(ButtonClickEvent, binding.callback) end
+        end
+        if isvalid(self.stageSprite) and self._T.endHandler ~= nil then
+            self.stageSprite.Entity:DisconnectEvent(SpriteGUIAnimPlayerEndEvent, self._T.endHandler)
+            self._T.endHandler = nil
         end
         self:DestroyRows()
         self:DestroyDetailRows()

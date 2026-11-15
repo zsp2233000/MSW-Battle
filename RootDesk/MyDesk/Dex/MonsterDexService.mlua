@@ -1,6 +1,8 @@
 @Logic
 script MonsterDexService extends Logic
 
+    property string BattleCameraAnchorPath = "/maps/template/BattleCameraAnchor"
+
     @ExecSpace("Server")
     method void RequestRows()
         -- Maker Play only: answer the asking client with every dex row; the published-world refusal below must stay first.
@@ -10,9 +12,31 @@ script MonsterDexService extends Logic
             log_warning("[VRF][MonsterDex] catalog unavailable for user=" .. tostring(senderUserId))
             return
         end
+        local zoom = self:ReadBattleZoom()
+        if zoom == nil then
+            log_warning("[VRF][MonsterDex] battle camera unavailable for user=" .. tostring(senderUserId))
+            return
+        end
         local rows = catalog:GetDexRows()
-        log("[VRF][MonsterDex] served rows=" .. tostring(#rows) .. " user=" .. tostring(senderUserId))
+        log("[VRF][MonsterDex] served rows=" .. tostring(#rows) .. " battleZoom=" .. tostring(zoom) .. " user=" .. tostring(senderUserId))
+        self:ReceiveBattleCamera(zoom, senderUserId)
         self:Receive(rows, senderUserId)
+    end
+
+    @ExecSpace("ServerOnly")
+    method any ReadBattleZoom()
+        -- The battle camera's zoom ratio, read from the template battle map's camera anchor (all battle maps share it); nil when it cannot be read.
+        local anchor = _EntityService:GetEntityByPath(self.BattleCameraAnchorPath)
+        if not isvalid(anchor) or not isvalid(anchor.CameraComponent) then return nil end
+        local zoom = anchor.CameraComponent.ZoomRatio
+        if zoom == nil or zoom <= 0 then return nil end
+        return zoom
+    end
+
+    @ExecSpace("Client")
+    method void ReceiveBattleCamera(number zoomRatio)
+        -- The stage scale needs the battle camera's zoom; it arrives just before the rows.
+        _MonsterDex:ObserveBattleCamera(zoomRatio)
     end
 
     @ExecSpace("Client")
