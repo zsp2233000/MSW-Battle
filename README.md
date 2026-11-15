@@ -8,6 +8,14 @@
 
 CSV 是方便編輯與檢視的檔案；執行時讀取的是 Maker 中的 UserDataSet，不是磁碟上的 CSV 路徑。修改 CSV 後，請同步匯入或更新 Maker 的 `MonsterData` UserDataSet，並確認欄位名稱和資料列一致。[`MonsterData.userdataset`](RootDesk/MyDesk/Data/MonsterData.userdataset) 是 UserDataSet 資源描述，不是資料列內容；請勿用它代替 CSV 編輯表格資料。
 
+## 怪物圖鑑
+
+大廳的「怪物圖鑑」按鈕（只在 Maker Play 顯示）開啟一本書：左頁依資料表順序列出全部怪物，右頁上方是舞台、下方是所選怪物的資源明細，並可試播待機、移動、出手、受傷、死亡。設計取捨見 [ADR 0008](docs/adr/0008-monster-dex-local-playback.md)。
+
+- `MonsterData` 維持 `serveronly`。圖鑑列由 `MonsterCatalog:GetDexRows()` 從已驗證的資料列組出，欄位對應如下：`MonsterId`→`monsterId`、`MonsterName`→`monsterName`、`Stand/Move/Attack/Hurt/DieAnimationRUID`→`standRuid`/`moveRuid`/`attackRuid`/`hurtRuid`/`dieRuid`、`AttackEffectRUID`/`AttackEffectFrame`→`attackEffectRuid`/`attackEffectFrame`、`HitEffectRUID`→`hitEffectRuid`、`AttackDamageFrame`→`attackDamageFrame`、`Attack/Hurt/DieSoundRUID`→`attackSoundRuid`/`hurtSoundRuid`/`dieSoundRuid`、`ProjectileRUID`/`ProjectileSpeed`→`projectileRuid`/`projectileSpeed`、`AttackRange`→`attackRange`；可空白的 RUID 以空字串送出。另有載入時算好的 `attackEffectDelay`、`impactDelay`、`attackDuration`（與戰鬥使用同一組值），以及模型的 `scaleX`/`scaleY`/`bodyOffsetX`/`bodyOffsetY`。圖鑑列不含生命、傷害、成長率等戰鬥數值。
+- 新增或修改表現相關欄位（RUID、影格、`AttackRange`）後，圖鑑會自動讀到新值；若新增新的表現欄位，要同步更新 `GetDexRows`、明細清單 `DetailSpecs`、`monster_dex_runtime_probe.lua` 與契約測試。
+- 入口與伺服器回覆都以 `Environment:IsMakerPlay()` 把關：發布版沒有按鈕，`MonsterDexService:RequestRows` 也不回覆。這只用 Node 契約測試檢查結構，Maker 內無法執行，發布後需人工確認（見 [tests/README.md](tests/README.md) 的目視清單）。
+
 ## 維護規則
 
 - 保留標題列中的所有欄位名稱。即使某欄的值可空白，`BattleSession` 仍會要求該欄存在。
