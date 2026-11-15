@@ -83,6 +83,11 @@ local function compareAll(row, label)
     end
     check(shown == EXPECTED_CHILDREN and hidden == 2 and #children == EXPECTED_CHILDREN + 2,
         label .. ": the list keeps " .. tostring(EXPECTED_CHILDREN) .. " shown rows plus its 2 hidden templates (" .. tostring(shown) .. "/" .. tostring(hidden) .. ")")
+    local touchRows = 0
+    for _, child in ipairs(children) do
+        if child.Enable and child.UITouchReceiveComponent ~= nil then touchRows = touchRows + 1 end
+    end
+    check(touchRows == EXPECTED_CHILDREN, label .. ": every shown detail row swallows the touch so the list cannot be drag-scrolled (" .. tostring(touchRows) .. ")")
     local snapshotDetails = dex:GetSnapshot().details
     local at = 0
     for _, group in ipairs(GROUPS) do

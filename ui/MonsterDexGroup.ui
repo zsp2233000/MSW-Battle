@@ -2007,7 +2007,7 @@
       {
         "id": "9608ae32-42e0-438d-b8a2-b8a56629e208",
         "path": "/ui/MonsterDexGroup/Book/Page/RightPage/Details/DetailHeaderTemplate",
-        "componentNames": "MOD.Core.UITransformComponent,MOD.Core.SpriteGUIRendererComponent,MOD.Core.TextGUIRendererComponent",
+        "componentNames": "MOD.Core.UITransformComponent,MOD.Core.SpriteGUIRendererComponent,MOD.Core.TextGUIRendererComponent,MOD.Core.UITouchReceiveComponent",
         "jsonString": {
           "name": "DetailHeaderTemplate",
           "path": "/ui/MonsterDexGroup/Book/Page/RightPage/Details/DetailHeaderTemplate",
@@ -2188,6 +2188,10 @@
               "UseConstraintY": false,
               "VerticalAlignment": 512,
               "Enable": true
+            },
+            {
+              "@type": "MOD.Core.UITouchReceiveComponent",
+              "Enable": true
             }
           ],
           "@version": 1
@@ -2196,7 +2200,7 @@
       {
         "id": "8304bc60-6f15-440d-9082-9e8939b2bbcb",
         "path": "/ui/MonsterDexGroup/Book/Page/RightPage/Details/DetailRowTemplate",
-        "componentNames": "MOD.Core.UITransformComponent,MOD.Core.SpriteGUIRendererComponent",
+        "componentNames": "MOD.Core.UITransformComponent,MOD.Core.SpriteGUIRendererComponent,MOD.Core.UITouchReceiveComponent",
         "jsonString": {
           "name": "DetailRowTemplate",
           "path": "/ui/MonsterDexGroup/Book/Page/RightPage/Details/DetailRowTemplate",
@@ -2332,6 +2336,10 @@
               "OutlineWidth": 3,
               "RaycastTarget": true,
               "Type": 1,
+              "Enable": true
+            },
+            {
+              "@type": "MOD.Core.UITouchReceiveComponent",
               "Enable": true
             }
           ],

@@ -12,6 +12,7 @@ const RIGHT = 'Book/Page/RightPage';
 const DETAILS = `${RIGHT}/Details`;
 const HEADER = `${DETAILS}/DetailHeaderTemplate`;
 const ROW = `${DETAILS}/DetailRowTemplate`;
+const LIST = 'Book/Page/LeftPage/List';
 
 const SPRITE = 'MOD.Core.SpriteGUIRendererComponent';
 const TEXT = 'MOD.Core.TextGUIRendererComponent';
@@ -96,6 +97,15 @@ test('the fixed rows overflow the list, so it scrolls, and each row is a wheel-s
     assert.equal(ui.getComponent(template, SPRITE).RaycastTarget, true, `${template} takes pointer hits`);
     assert.ok(rect(ui, template).RectSize.x <= list.RectSize.x - 12, `${template} leaves room for the scroll bar`);
   }
+});
+
+test('detail rows swallow the touch like the left list rows, so holding the mouse on the list does not drag-scroll it', () => {
+  // A raycast sprite alone lets the drag through; a UITouchReceive on the row stops it (measured in Play). Wheel and scrollbar still work.
+  const ui = dex();
+  for (const template of [HEADER, ROW]) {
+    assert.ok(ui.getComponent(template, 'MOD.Core.UITouchReceiveComponent'), `${template} carries a UITouchReceiveComponent`);
+  }
+  assert.ok(ui.getComponent(`${LIST}/RowTemplate`, 'MOD.Core.UITouchReceiveComponent'), 'the left list rows already do');
 });
 
 test('the module declares exactly the five action groups and rows, in order, with their labels', () => {
