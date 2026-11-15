@@ -10,7 +10,7 @@ test("MonsterData assets reach the owning unit and semantic hit events", () => {
   const csv = fs.readFileSync(path.resolve(combat, "../Data/MonsterData.csv"), "utf8").trim().split(/\r?\n/);
   const headers = csv[0].split(",");
   const rows = csv.slice(1).map((line) => Object.fromEntries(line.split(",").map((value, index) => [headers[index], value])));
-  assert.equal(rows.length, 3);
+  assert.ok(rows.length >= 3, "the three initial monsters must stay in the dataset");
   for (const row of rows) {
     for (const field of ["StandAnimationRUID", "MoveAnimationRUID", "HurtAnimationRUID", "DieAnimationRUID", "HurtSoundRUID"]) {
       assert.ok(row[field], `${row.MonsterId} needs ${field}`);

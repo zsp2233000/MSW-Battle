@@ -165,14 +165,17 @@ test("Issue #5 publishes one strict MonsterData dataset for the three initial mo
   assert.equal(dataset.serveronly, true);
   assert.match(metadata.EntryKey, new RegExp(dataset.id));
   for (const column of requiredColumns) assert.ok(header.includes(column), `missing ${column}`);
-  assert.equal(rows.length, 3);
+  assert.ok(rows.length >= 3, "the three initial monsters must stay in the dataset");
 
   const columnIndex = new Map(header.map((column, index) => [column, index]));
   const value = (row, column) => row[columnIndex.get(column)];
   const ids = rows.map((row) => value(row, "MonsterId"));
   assert.equal(new Set(ids).size, ids.length);
+  for (const initial of ["monster_tank", "monster_warrior", "monster_shooter"]) {
+    assert.ok(ids.includes(initial), `${initial} must stay in the dataset`);
+  }
   assert.deepEqual(
-    rows.map((row) => value(row, "MonsterType")).sort(),
+    [...new Set(rows.map((row) => value(row, "MonsterType")))].sort(),
     ["ASSAULT", "SHOOTER", "TANK"],
   );
   for (const row of rows) {

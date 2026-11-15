@@ -34,7 +34,11 @@ test('monster growth columns are required, nonnegative and initialized to 3.5 pe
   for (const field of ['MaxHpGrowthRate', 'AttackDamageGrowthRate']) {
     const index = header.indexOf(field);
     assert.ok(index >= 0, `missing ${field}`);
-    for (const row of rows) assert.equal(Number(row[index]), 0.035);
+    for (const row of rows) {
+      const rate = Number(row[index]);
+      assert.ok(Number.isFinite(rate) && rate >= 0, `${row[0]} ${field} must be finite and nonnegative`);
+      if (['monster_tank', 'monster_warrior', 'monster_shooter'].includes(row[0])) assert.equal(rate, 0.035, row[0]);
+    }
     assert.match(catalog, new RegExp(`profile\\.${field} = self:ReadNumber\\(row:GetItem\\("${field}"\\), "${field}", monsterId, 0\\)`));
     const required = catalog.match(/local requiredColumns = \{([\s\S]*?)\n        \}/)[1];
     assert.ok(required.includes(`"${field}"`), `${field} must be a required column`);

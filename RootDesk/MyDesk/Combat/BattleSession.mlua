@@ -945,6 +945,7 @@ script BattleSession extends Component
         entity:AddComponent("script.BattleUnit")
         entity:AddComponent("script.BattleHPBar")
         entity:AddComponent("script.BattleHitEffectPresentation")
+        entity:AddComponent("script.BattleProjectilePresentation")
         entity:AddComponent("script.BattleAttackComposition")
         entity:AddComponent("script.BattleUnitMotion")
         local unit = entity:GetComponent("script.BattleUnit")
