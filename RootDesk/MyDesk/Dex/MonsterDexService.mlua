@@ -1,0 +1,31 @@
+@Logic
+script MonsterDexService extends Logic
+
+    @ExecSpace("Server")
+    method void RequestRows()
+        -- Maker Play only: answer the asking client with every dex row; the published-world refusal below must stay first.
+        if not Environment:IsMakerPlay() then return end
+        local catalog = _FormationService:GetCatalog()
+        if catalog == nil then
+            log_warning("[VRF][MonsterDex] catalog unavailable for user=" .. tostring(senderUserId))
+            return
+        end
+        local rows = catalog:GetDexRows()
+        log("[VRF][MonsterDex] served rows=" .. tostring(#rows) .. " user=" .. tostring(senderUserId))
+        self:Receive(rows, senderUserId)
+    end
+
+    @ExecSpace("Client")
+    method void Receive(table rows)
+        -- Keep only the most recent reply in memory; nothing is written to any storage.
+        self._T.latest = rows
+        log("[VRF][MonsterDex] received rows=" .. tostring(#rows))
+    end
+
+    @ExecSpace("ClientOnly")
+    method any GetLatest()
+        -- Return the last reply, or nil before the first one arrives.
+        return self._T.latest
+    end
+
+end

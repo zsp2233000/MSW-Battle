@@ -256,7 +256,7 @@ script MonsterCatalog extends Component
         end
         local offset = hit.ColliderOffset
         local scale = probe.TransformComponent.Scale
-        cached = { x = offset.x * math.abs(scale.x), y = offset.y * scale.y }
+        cached = { x = offset.x * math.abs(scale.x), y = offset.y * scale.y, scaleX = math.abs(scale.x), scaleY = scale.y }
         probe:Destroy()
         self._T.bodyOffsets[modelId] = cached
         return cached
@@ -283,6 +283,7 @@ script MonsterCatalog extends Component
         self.IsLoaded = false
         self._T.profilesById = {}
         self._T.bodyOffsets = self._T.bodyOffsets or {}
+        self._T.rowOrder = {}
         self._T.allowedModelIds = allowedModelIds or {}
         local dataset = _DataService:GetTable(datasetName)
         if dataset == nil then return self:SetError("MonsterData table unavailable") end
@@ -306,6 +307,7 @@ script MonsterCatalog extends Component
             local profile = self:ParseRow(dataset:GetRow(rowIndex), rowIndex)
             if profile == nil then return false end
             self._T.profilesById[profile.MonsterId] = profile
+            table.insert(self._T.rowOrder, profile.MonsterId)
         end
         if self:ValidateRoster(fixedRoster) == false then return false end
         for _, profile in pairs(self._T.profilesById) do
@@ -343,6 +345,29 @@ script MonsterCatalog extends Component
         end
         table.sort(options, function(left, right) return left.monsterId < right.monsterId end)
         return options
+    end
+
+    method table GetDexRows()
+        -- Publish every monster's presentation resources in data table order; delays are the values combat already uses.
+        local rows = {}
+        for order, monsterId in ipairs(self._T.rowOrder or {}) do
+            local profile = self._T.profilesById[monsterId]
+            local body = (self._T.bodyOffsets or {})[profile.ModelId] or {}
+            table.insert(rows, {
+                order = order, monsterId = profile.MonsterId, monsterName = profile.MonsterName,
+                standRuid = profile.StandAnimationRUID, moveRuid = profile.MoveAnimationRUID,
+                attackRuid = profile.AttackAnimationRUID, hurtRuid = profile.HurtAnimationRUID, dieRuid = profile.DieAnimationRUID,
+                attackEffectRuid = profile.AttackEffectRUID or "", attackEffectFrame = profile.AttackEffectFrame,
+                hitEffectRuid = profile.HitEffectRUID or "", attackDamageFrame = profile.AttackDamageFrame,
+                attackSoundRuid = profile.AttackSoundRUID or "", hurtSoundRuid = profile.HurtSoundRUID or "",
+                dieSoundRuid = profile.DieSoundRUID or "",
+                projectileRuid = profile.ProjectileRUID or "", projectileSpeed = profile.ProjectileSpeed,
+                attackEffectDelay = profile.AttackEffectDelaySeconds, impactDelay = profile.ImpactDelaySeconds,
+                attackDuration = profile.AttackAnimationDurationSeconds, attackRange = profile.AttackRange,
+                scaleX = body.scaleX, scaleY = body.scaleY, bodyOffsetX = body.x, bodyOffsetY = body.y,
+            })
+        end
+        return rows
     end
 
 end
