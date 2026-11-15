@@ -1,6 +1,6 @@
 # 配對流程只有一份，本機與原生配對是同一條 seam 後的兩個 adapter
 
-`MatchFlow` 擁有「排隊、取消、等對手、交接、入場、返回」整條流程；怎麼找到對手、怎麼取消、配對結果長什麼樣，由 `MatchQueueLocal`（Maker 的行程內 FIFO）與 `MatchQueueNative`（原生 `MatchmakingService`）各自負責，流程本身不再判斷 `Environment:IsMakerPlay()`。房間移動是另一條獨立的 seam（`MatchTransfer`），因為它在 Maker 與發布環境用的是同一個原生服務，只有測試需要讓它失敗。
+`MatchFlow` 擁有「排隊、取消、等對手、交接、入場、返回」整條流程；怎麼找到對手、怎麼取消、配對結果長什麼樣，由 `MatchQueueLocal`（Maker 的行程內 FIFO）與 `MatchQueueNative`（原生 `MatchmakingService`）各自負責，流程不再為排隊、取消、等對手、續約分岔。`MatchFlow` 內只剩 `OnBeginPlay`（選 adapter）與 `Player`（取得玩家與發布環境的測試帳號限制）還讀 `Environment:IsMakerPlay()`，`tests/match_queue_contract.test.cjs` 只允許這兩處。房間移動是另一條獨立的 seam（`MatchTransfer`），因為它在 Maker 與發布環境用的是同一個原生服務，只有測試需要讓它失敗。
 
 故障注入不放在流程裡。`MatchFaults` 是包住當下 adapter 的測試用 adapter：預設完全轉送，只在探針用 `ConfigureCancel`／`ConfigureTransfer`／`ConfigureWithdraw` 啟動後才失敗，且只在 Maker 可啟動。不要為了測試某條失敗路徑，在 `MatchFlow` 或正式 adapter 裡加旗標。
 

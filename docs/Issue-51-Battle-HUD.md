@@ -2,6 +2,8 @@
 
 沿用 [#44](https://github.com/zsp2233000/MSW-Battle/issues/44) 的 Cardgame 棕色視覺，改版正式戰鬥的 HUD 與結果。戰鬥、相機與頭頂血條規則不變。
 
+> 2026-11-14：驗證表保留 2026-11-01 的原文。配對流程之後改為單一 `MatchFlow` 加配對 adapter（見 [ADR 0006](adr/0006-match-flow-behind-queue-adapters.md)），表中的 `ConfigureMakerTransferFaults(0, 1)` 現在是 `_MatchFaults:ConfigureTransfer(0, 1)`。下方「可重跑程序」已改用新名稱。
+
 ## 行為
 
 - `BattleUIController` 是唯一的結果擁有者：Away 玩家的存活數與出戰數一起交換，配對戰以 `ResultForProfile` 取得自己的結果，POC 用 `session.Result`。`BattleDeploymentInput` 不再繪製結果。
@@ -36,7 +38,7 @@
 
 1. 全新 Play，在 `server_main` 設定隔離的 `_FormationService.StorageKey`，用 `add_virtual_player` 加第二名玩家。
 2. 兩名玩家都以 `_FormationService:Load` 重新讀取，再存好並啟用不對稱編隊（六隻與一隻），然後 `QueueForUser`。必須重新讀取：本機玩家已在進場時讀過正式鍵，直接寫入隔離鍵會得到 `CONFLICT`。
-3. 進房後在 `client` 派送 `matched_battle_result_ui_runtime_probe.lua`；在 `server_instance_*` 執行 `_MatchFlow:ConfigureMakerTransferFaults(0, 1)` 與 `matched_view_swap_runtime_probe.lua`。
+3. 進房後在 `client` 派送 `matched_battle_result_ui_runtime_probe.lua`；在 `server_instance_*` 執行 `_MatchFaults:ConfigureTransfer(0, 1)` 與 `matched_view_swap_runtime_probe.lua`。
 4. 回大廳後在 `client` 派送 `matched_battle_lobby_ui_runtime_probe.lua`。虛擬玩家不會自己返回；要再配對時，先在 `server_instance_*` 對他呼叫 `ReturnForUser`。
 
 ## 2026-11-01 使用者畫面回饋
