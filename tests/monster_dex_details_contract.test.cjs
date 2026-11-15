@@ -52,7 +52,7 @@ test('the lower right page holds a vertically scrollable detail list, the top is
   const layout = ui.getComponent(DETAILS, SCROLL);
   assert.equal(layout.Type, 1, 'vertical list');
   assert.equal(layout.UseScroll, true);
-  assert.equal(layout.VerticalScrollBarDirection, 3, 'a vertical scroll-bar direction value');
+  assert.equal(layout.VerticalScrollBarDirection, 2, 'BottomToTop keeps the handle in step with the content');
   const page = rect(ui, RIGHT);
   const list = rect(ui, DETAILS);
   assert.ok(list.RectSize.x <= page.RectSize.x, 'the list fits the page width');

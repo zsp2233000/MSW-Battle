@@ -76,7 +76,7 @@ test('the left page holds a scrollable vertical list with a hidden row template,
   assert.ok(ui.find(LEFT) && ui.find(`${PAGE}/RightPage`), 'both pages exist');
   const layout = ui.getComponent(LIST, SCROLL);
   assert.equal(layout.Type, 1, 'vertical list');
-  assert.ok([3].includes(layout.VerticalScrollBarDirection), 'a vertical scroll-bar direction value');
+  assert.ok([2].includes(layout.VerticalScrollBarDirection), 'a vertical scroll-bar direction value');
   assert.equal(ui.find(ROW).jsonString.enable, false, 'template is hidden');
   assert.ok(ui.getComponent(ROW, BUTTON), 'a row is a button');
   assert.equal(ui.listEntities().filter(e => e.path.startsWith(`/ui/MonsterDexGroup/${PAGE}/RightPage/`)
@@ -162,4 +162,12 @@ test('the service forwards each reply to the dex and still keeps only the latest
   const receive = methodBody(read(SERVICE), 'Receive');
   assert.match(receive, /self\._T\.latest = rows/);
   assert.match(receive, /_MonsterDex:Observe\(rows\)/);
+});
+
+test('both scroll lists put the scrollbar handle at the top when the content is at the top', () => {
+  // BottomToTop (2) draws the handle in step with the content (measured in Play); TopToBottom (3) showed it inverted.
+  const ui = dex();
+  for (const list of [LIST, `${PAGE}/RightPage/Details`]) {
+    assert.equal(ui.getComponent(list, SCROLL).VerticalScrollBarDirection, 2, `${list} scrollbar direction`);
+  }
 });
