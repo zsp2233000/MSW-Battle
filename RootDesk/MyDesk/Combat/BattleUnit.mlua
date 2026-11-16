@@ -62,6 +62,8 @@ script BattleUnit extends Component
         self.KnockbackActive = false
         self.AttackPoiseActive = false
         self._T.hitEffectRUID = ""
+        self._T.hitEffectOffsetX = 0
+        self._T.hitEffectOffsetY = 0
         if self.Hp <= 0 then self.Hp = self.MaxHp end
         self.CombatState = "IDLE"
     end
@@ -72,6 +74,18 @@ script BattleUnit extends Component
         self.MonsterId = monsterId
         self.MonsterName = monsterName
         self._T.hitEffectRUID = hitEffectRUID
+    end
+
+    @ExecSpace("ServerOnly")
+    method void SetHitEffectOffset(number offsetX, number offsetY)
+        -- Bind the attacker-owned hit effect's registered offset (world units) next to its RUID.
+        self._T.hitEffectOffsetX = offsetX
+        self._T.hitEffectOffsetY = offsetY
+    end
+
+    method table GetHitEffectOffset()
+        -- Return the hit effect offset; zero when none was bound.
+        return { x = self._T.hitEffectOffsetX or 0, y = self._T.hitEffectOffsetY or 0 }
     end
 
     @ExecSpace("ServerOnly")
@@ -185,7 +199,7 @@ script BattleUnit extends Component
     end
 
     @ExecSpace("ServerOnly")
-    method void ApplyResolvedDamage(integer amount, Entity attacker, boolean allowHitStop, string hitEffectRUID)
+    method void ApplyResolvedDamage(integer amount, Entity attacker, boolean allowHitStop, string hitEffectRUID, number hitEffectOffsetX, number hitEffectOffsetY)
         -- Apply each successful HitEvent and transition to DEAD once at zero HP.
         if amount == nil or amount <= 0 or not self:IsAlive() then return end
         self.Hp = math.max(0, self.Hp - amount)
@@ -201,7 +215,7 @@ script BattleUnit extends Component
             self.LastHitEffectRUID = hitEffectRUID
             self.HitEffectSerial = self.HitEffectSerial + 1
             local presentation = self.Entity:GetComponent("script.BattleHitEffectPresentation")
-            if isvalid(presentation) then presentation:PlayHitEffect(hitEffectRUID) end
+            if isvalid(presentation) then presentation:PlayHitEffect(hitEffectRUID, hitEffectOffsetX or 0, hitEffectOffsetY or 0) end
         end
         local session = self:GetSession()
         if isvalid(session) then session:EmitPresentation("DAMAGE", attacker, self.Entity, amount) end

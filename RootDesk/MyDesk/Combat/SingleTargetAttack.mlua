@@ -21,8 +21,24 @@ script SingleTargetAttack extends AttackComponent
         if not isvalid(targetUnit) or not targetUnit:IsAlive() then return end
         local direction = self._T.execution:GetStrikeDirection()
         if not self._T.execution:IsTargetInRange(target, direction) then return end
+        if self._T.execution:UsesProjectile() then
+            -- The strike is committed at the impact frame; damage waits for the ball to arrive.
+            self._T.execution:LaunchProjectile(target)
+            return
+        end
         self._T.impactTarget = target
         self:Attack(self._T.execution:GetAttackShape(direction), "single", nil)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void ResolveProjectileArrival(Entity target)
+        -- The ball reached its locked defender: strike a small box on its body through the native Attack to Hit pipeline.
+        if not isvalid(target) then return end
+        local targetUnit = target:GetComponent("script.BattleUnit")
+        if not isvalid(targetUnit) or not targetUnit:IsAlive() then return end
+        self._T.impactTarget = target
+        local center = self._T.execution:GetBodyCenter(target)
+        self:Attack(BoxShape(center, Vector2(0.1, 0.1), 0), "projectile", nil)
     end
 
     method integer CalcDamage(Entity attacker, Entity defender, string attackInfo)

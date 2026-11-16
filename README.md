@@ -8,6 +8,23 @@
 
 CSV 是方便編輯與檢視的檔案；執行時讀取的是 Maker 中的 UserDataSet，不是磁碟上的 CSV 路徑。修改 CSV 後，請同步匯入或更新 Maker 的 `MonsterData` UserDataSet，並確認欄位名稱和資料列一致。[`MonsterData.userdataset`](RootDesk/MyDesk/Data/MonsterData.userdataset) 是 UserDataSet 資源描述，不是資料列內容；請勿用它代替 CSV 編輯表格資料。
 
+## 特效偏移（EffectOffsetData）
+
+特效素材的錨點不一致（例如三隻精靈的命中特效錨點在圖片中心，其他怪物在底部），所以特效的位置修正以**特效素材**為單位登記在另一張伺服器專用資料表 [`EffectOffsetData.csv`](RootDesk/MyDesk/Data/EffectOffsetData.csv)（資源描述 [`EffectOffsetData.userdataset`](RootDesk/MyDesk/Data/EffectOffsetData.userdataset)）。不要為了修位置去改美術。
+
+- 欄位：`EffectRUID`（32 位十六進位）、`OffsetX`、`OffsetY`，單位與攻擊範圍相同（世界單位）。X 正為畫面右方、不隨出手朝向翻轉，Y 正為往上。同一個 RUID 不論當作出手特效、命中特效或投射物都套同一組偏移；投射物只影響球的起點，飛行路線不變。
+- `MonsterCatalog:Load` 在讀完 `MonsterData` 後一併讀取。RUID 空白、不是 32 位十六進位、重複，或偏移不是有限數字，整張表載入失敗（和 `MonsterData` 同一條 `CONFIG_ERROR` 路徑）。資料表不存在或沒有列不是錯誤（全部偏移為零）；登記了但沒有任何怪物使用的 RUID 直接忽略；沒登記的特效偏移為 (0, 0)。
+- 戰鬥端由伺服器解出偏移，連同特效 RUID 一起廣播（`BattleHitEffectPresentation:PlayHitEffect/PlayAttackEffect`），用戶端以 `PlayEffectAttached` 的 localPosition 套用；圖鑑列帶有 `attackEffectOffsetX/Y`、`hitEffectOffsetX/Y`、`projectileOffsetX/Y`，明細清單多一列「特效偏移」（三者全為零時顯示未設定）。
+- 目前只登記了三隻精靈的命中特效（`OffsetY = 0.4`），那是初估值，請在戰鬥中目視調整。修改 CSV 後同樣要同步到 Maker 的 `EffectOffsetData` UserDataSet。
+
+## 怪物圖鑑
+
+大廳的「怪物圖鑑」按鈕（只在 Maker Play 顯示）開啟一本書：左頁依資料表順序列出全部怪物，右頁上方是舞台、下方是所選怪物的資源明細，並可試播待機、移動、出手、受傷、死亡。設計取捨見 [ADR 0008](docs/adr/0008-monster-dex-local-playback.md)。
+
+- `MonsterData` 維持 `serveronly`。圖鑑列由 `MonsterCatalog:GetDexRows()` 從已驗證的資料列組出，欄位對應如下：`MonsterId`→`monsterId`、`MonsterName`→`monsterName`、`Stand/Move/Attack/Hurt/DieAnimationRUID`→`standRuid`/`moveRuid`/`attackRuid`/`hurtRuid`/`dieRuid`、`AttackEffectRUID`/`AttackEffectFrame`→`attackEffectRuid`/`attackEffectFrame`、`HitEffectRUID`→`hitEffectRuid`、`AttackDamageFrame`→`attackDamageFrame`、`Attack/Hurt/DieSoundRUID`→`attackSoundRuid`/`hurtSoundRuid`/`dieSoundRuid`、`ProjectileRUID`/`ProjectileSpeed`→`projectileRuid`/`projectileSpeed`、`AttackRange`→`attackRange`；可空白的 RUID 以空字串送出。另有載入時算好的 `attackEffectDelay`、`impactDelay`、`attackDuration`（與戰鬥使用同一組值），以及模型的 `scaleX`/`scaleY`/`bodyOffsetX`/`bodyOffsetY`。圖鑑列不含生命、傷害、成長率等戰鬥數值。
+- 新增或修改表現相關欄位（RUID、影格、`AttackRange`）後，圖鑑會自動讀到新值；若新增新的表現欄位，要同步更新 `GetDexRows`、明細清單 `DetailSpecs`、`monster_dex_runtime_probe.lua` 與契約測試。
+- 入口與伺服器回覆都以 `Environment:IsMakerPlay()` 把關：發布版沒有按鈕，`MonsterDexService:RequestRows` 也不回覆。這只用 Node 契約測試檢查結構，Maker 內無法執行，發布後需人工確認（見 [tests/README.md](tests/README.md) 的目視清單）。
+
 ## 維護規則
 
 - 保留標題列中的所有欄位名稱。即使某欄的值可空白，`BattleSession` 仍會要求該欄存在。
@@ -51,6 +68,8 @@ CSV 是方便編輯與檢視的檔案；執行時讀取的是 Maker 中的 UserD
 | `DieAnimationRUID`        | 死亡動畫 RUID；目前坦克展示會使用。必填。                                  |
 | `AttackEffectRUID`       | 出手時附著在攻擊者身上的特效 RUID；可空白。每次出手播放一次，揮空仍播放，依顯示實體同步朝向。觸發影格見 `AttackEffectFrame`。 |
 | `AttackEffectFrame`      | 出手特效播放的攻擊動畫影格；必填正整數，從 1 開始，不可超過攻擊動畫影格數。第 1 格即出手當下。 |
+| `ProjectileRUID`          | 投射物 AnimationClip RUID；可空白，空白時維持瞬發命中。填值時，戰士／射手在命中影格發射一顆追蹤鎖定目標的球，抵達才結算傷害；`TANK` 不可填。見 [ADR 0007](docs/adr/0007-shooter-projectile-owned-by-attacker.md)。 |
+| `ProjectileSpeed`         | 投射物飛行速度（世界單位／秒）；`ProjectileRUID` 非空時必須大於 0，空白時可留空，不隨怪物等級改變。 |
 | `HitEffectRUID`           | 命中特效 RUID；可空白，空白時不顯示特效。                            |
 | `AttackSoundRUID`         | 攻擊音效 RUID；可空白，空白時不播放攻擊音效。                              |
 | `HurtSoundRUID`          | 受擊音效 RUID；可空白，空白時不播放受擊音效。                              |
@@ -62,6 +81,7 @@ CSV 是方便編輯與檢視的檔案；執行時讀取的是 Maker 中的 UserD
 - 所有種類：`AttackDamageFrame` 必須介於 1 與攻擊 clip 影格數之間。
 - 所有種類：`AttackEffectFrame` 必須介於 1 與攻擊 clip 影格數之間。第 1 格在出手當下播放；較晚的影格等到該影格，揮空仍播放，攻擊在該影格前被取消則不播放。
 - 怪物等級為 Lv1–30，只有最大生命與傷害區間隨等級成長，各自套用 `floor(基礎值 × (1 + 成長率 × (等級 − 1)))`。成長率可為 0；不改變移動速度、攻擊間隔或攻擊範圍。
+- 投射物：`ProjectileRUID` 與 `ProjectileSpeed` 兩欄必須存在；留空的怪物維持瞬發。球在攻擊命中影格出發，追蹤出手時鎖定的目標，目標死亡或離場則消失；出手者死亡、戰鬥結果或重新配置時，在途的球一併丟棄且不造成傷害。
 - `TANK`：`KnockbackDistance` 必須大於 0，其他種類可填 0。坦克的每次範圍攻擊共用一個攻擊間隔，每個目標各自抽取傷害。
 
 三種怪物的走位、出手與命中共用前方矩形判定。水平範圍外直線接近，水平已重疊時只上下對齊；進入範圍後站定，出手朝向維持到攻擊動畫結束。命中影格不重新轉向。戰士與射手只打出手時鎖定的目標；坦克打命中影格時範圍內的所有敵方存活單位，每個目標一次，走路不造成傷害。坦克命中會擊退目標，不造成受擊停頓；目標正在攻擊時仍受傷害，但免疫擊退，攻擊不會因此中斷。

@@ -95,3 +95,12 @@ test("matched battlefield owns the formal viewer presentation", () => {
     assert.doesNotMatch(fs.readFileSync(file, "utf8"), /BattleViewPrototype/, file);
   }
 });
+
+test("battle view visual default sprite is blank so no unit art flashes before the real clip is set", () => {
+  const model = ModelBuilder.read("RootDesk/MyDesk/Models/MapObjects/BattleViewVisual.model");
+  assert.equal(model.getValue("MOD.Core.SpriteRendererComponent", "SpriteRUID", null), "");
+  const view = fs.readFileSync("RootDesk/MyDesk/Combat/BattleView.mlua", "utf8");
+  const projectile = fs.readFileSync("RootDesk/MyDesk/Combat/BattleProjectilePresentation.mlua", "utf8");
+  assert.match(view, /visual\.SpriteRendererComponent\.SpriteRUID = clip/);
+  assert.match(projectile, /renderer\.SpriteRUID = ruid/);
+});

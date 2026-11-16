@@ -122,6 +122,7 @@ script BattleAttackComposition extends Component
                 log("[VRF][BattleAttack] IMPACT owner=" .. self.Entity.Name)
             end
         end
+        self:AdvanceProjectiles(delta)
         -- A long frame must resolve its impact before releasing the facing held for that strike.
         if unit.AttackPoiseActive and self._T.poiseRemaining <= 0 then
             unit.AttackPoiseActive = false
@@ -139,8 +140,98 @@ script BattleAttackComposition extends Component
         self._T.pendingTarget = nil
         self._T.impactRemaining = -1
         self._T.effectRemaining = -1
+        self:ClearProjectiles()
         if isvalid(self._T.adapter) then self._T.adapter:ResetTarget() end
         self._T.cooldownRemaining = 0
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean UsesProjectile()
+        -- A projectile clip delays the strike's damage until the ball reaches its locked target.
+        local profile = self._T.profile
+        return profile ~= nil and profile.ProjectileRUID ~= nil and profile.ProjectileRUID ~= ""
+    end
+
+    @ExecSpace("ServerOnly")
+    method Vector2 GetBodyCenter(Entity entity)
+        -- Centre of the entity's hit box, matching the point GetAttackShape builds its rectangle from.
+        local transform = entity.TransformComponent
+        local position = transform.WorldPosition
+        local scale = transform.Scale
+        local offset = entity.HitComponent.ColliderOffset
+        return Vector2(position.x + offset.x * scale.x, position.y + offset.y * scale.y)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void LaunchProjectile(Entity target)
+        -- Start one ball at the shooter's body centre; it is owned by this actor and flies at the locked target.
+        local profile = self._T.profile
+        if profile == nil or not isvalid(target) then return end
+        local body = self:GetBodyCenter(self.Entity)
+        -- The registered ball offset moves only the launch point; the flight toward the target is unchanged.
+        local start = Vector2(body.x + (profile.ProjectileOffsetX or 0), body.y + (profile.ProjectileOffsetY or 0))
+        self._T.projectileSerial = (self._T.projectileSerial or 0) + 1
+        local id = self.Entity.Name .. "#" .. tostring(self._T.projectileSerial)
+        if self._T.projectiles == nil then self._T.projectiles = {} end
+        table.insert(self._T.projectiles, { id = id, target = target, x = start.x, y = start.y, speed = profile.ProjectileSpeed })
+        local presentation = self.Entity:GetComponent("script.BattleProjectilePresentation")
+        if isvalid(presentation) then
+            presentation:LaunchProjectile(id, profile.ProjectileRUID, target, start.x, start.y, profile.ProjectileSpeed)
+        end
+        log("[VRF][BattleProjectile] LAUNCH id=" .. id .. " target=" .. target.Name .. " speed=" .. tostring(profile.ProjectileSpeed))
+    end
+
+    @ExecSpace("ServerOnly")
+    method void AdvanceProjectiles(number delta)
+        -- Fly every ball toward its locked target; a ball strikes on arrival and vanishes if its target is gone.
+        local flying = self._T.projectiles
+        if flying == nil or #flying == 0 then return end
+        local remaining = {}
+        for _, shot in ipairs(flying) do
+            local target = shot.target
+            local targetUnit = isvalid(target) and target:GetComponent("script.BattleUnit") or nil
+            if not isvalid(targetUnit) or not targetUnit:IsAlive() then
+                self:EndProjectile(shot, "LOST")
+            else
+                local center = self:GetBodyCenter(target)
+                local dx = center.x - shot.x
+                local dy = center.y - shot.y
+                local distance = math.sqrt(dx * dx + dy * dy)
+                local step = shot.speed * delta
+                if distance <= step or distance <= 0.0001 then
+                    self:EndProjectile(shot, "ARRIVE")
+                    if isvalid(self._T.adapter) then self._T.adapter:ResolveProjectileArrival(target) end
+                else
+                    shot.x = shot.x + dx / distance * step
+                    shot.y = shot.y + dy / distance * step
+                    table.insert(remaining, shot)
+                end
+            end
+        end
+        self._T.projectiles = remaining
+    end
+
+    @ExecSpace("ServerOnly")
+    method void EndProjectile(table shot, string reason)
+        -- Tell every client to remove the ball's visual and record why it ended.
+        local presentation = self.Entity:GetComponent("script.BattleProjectilePresentation")
+        if isvalid(presentation) then presentation:EndProjectile(shot.id) end
+        log("[VRF][BattleProjectile] END id=" .. shot.id .. " reason=" .. reason)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void ClearProjectiles()
+        -- Unresolved work dies with the actor: balls still in flight are discarded without damage.
+        local flying = self._T.projectiles
+        self._T.projectiles = {}
+        if flying == nil then return end
+        for _, shot in ipairs(flying) do self:EndProjectile(shot, "CANCEL") end
+    end
+
+    @ExecSpace("ServerOnly")
+    method integer GetProjectileCount()
+        -- Observation seam for probes: how many balls this actor currently has in flight.
+        return #(self._T.projectiles or {})
     end
 
     @ExecSpace("ServerOnly")
@@ -159,8 +250,10 @@ script BattleAttackComposition extends Component
         -- Snapshot the attacker's rules now so accepted hits survive later reconfiguration.
         local unit = self.Entity:GetComponent("script.BattleUnit")
         local tank = self._T.profile ~= nil and self._T.profile.MonsterType == "TANK"
+        local hitOffset = isvalid(unit) and unit:GetHitEffectOffset() or { x = 0, y = 0 }
         return { allowHitStop = not tank, knockbackDistance = tank and self._T.profile.KnockbackDistance or 0,
-            hitEffectRUID = isvalid(unit) and unit:GetHitEffectRUID() or "" }
+            hitEffectRUID = isvalid(unit) and unit:GetHitEffectRUID() or "",
+            hitEffectOffsetX = hitOffset.x, hitEffectOffsetY = hitOffset.y }
     end
 
     @ExecSpace("ServerOnly")
@@ -214,7 +307,7 @@ script BattleAttackComposition extends Component
         self._T.effectRequests = (self._T.effectRequests or 0) + 1
         log("[VRF][BattleAttack] EFFECT_REQUEST owner=" .. self.Entity.Name)
         local presentation = self.Entity:GetComponent("script.BattleHitEffectPresentation")
-        if isvalid(presentation) then presentation:PlayAttackEffect(self._T.profile.AttackEffectRUID) end
+        if isvalid(presentation) then presentation:PlayAttackEffect(self._T.profile.AttackEffectRUID, self._T.profile.AttackEffectOffsetX, self._T.profile.AttackEffectOffsetY) end
     end
 
     @ExecSpace("ServerOnly")

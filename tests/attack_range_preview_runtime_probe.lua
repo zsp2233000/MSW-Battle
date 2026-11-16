@@ -23,24 +23,31 @@ local runOk, runDetail = pcall(function()
     for index, option in ipairs(options) do
         check(option.attackRangeY ~= nil and option.attackRangeY > 0 and option.bodyOffsetX ~= nil and option.bodyOffsetY ~= nil,
             option.monsterId .. " publishes AttackRangeY and the body centre")
-        table.insert(players, row(option.monsterId, "Shape" .. index, -3 + (index - 1) * 1.5, 0))
+        table.insert(players, row(option.monsterId, "Shape" .. index, -3 + ((index - 1) % session.DeploymentMaxUnits) * 1.5, 0))
     end
     clockOwned = session:BeginManualSimulation()
     if not clockOwned then error("manual clock unavailable") end
-    if not session:PrepareBattleForTest(players, { row("monster_warrior", "FarEnemy", 5, 0) }) or not session:TryStartBattle() then
-        error("scene rejected")
-    end
-    for index, option in ipairs(options) do
-        local entity = _EntityService:GetEntityByPath("/maps/template/Shape" .. index)
-        local attack = isvalid(entity) and entity:GetComponent("script.BattleAttackComposition") or nil
-        check(isvalid(attack), option.monsterId .. " has its combat attack")
-        if isvalid(attack) then
-            local foot = entity.TransformComponent.WorldPosition
-            local shape = attack:GetAttackShape(1)
-            check(near(shape.Size.x, option.attackRange) and near(shape.Size.y, option.attackRangeY * 2),
-                option.monsterId .. " published size is the combat rectangle size")
-            check(near(shape.Position.x - shape.Size.x / 2, foot.x - option.bodyOffsetX) and near(shape.Position.y, foot.y + option.bodyOffsetY),
-                option.monsterId .. " published body centre starts the combat rectangle facing right")
+    -- The catalog can hold more monsters than one scene deploys (DeploymentMaxUnits), so check them in batches.
+    local batchSize = session.DeploymentMaxUnits
+    for first = 1, #options, batchSize do
+        local batch = {}
+        for index = first, math.min(first + batchSize - 1, #options) do table.insert(batch, players[index]) end
+        if not session:PrepareBattleForTest(batch, { row("monster_warrior", "FarEnemy", 5, 0) }) or not session:TryStartBattle() then
+            error("scene rejected for batch starting at " .. tostring(first))
+        end
+        for index = first, math.min(first + batchSize - 1, #options) do
+            local option = options[index]
+            local entity = _EntityService:GetEntityByPath("/maps/template/Shape" .. index)
+            local attack = isvalid(entity) and entity:GetComponent("script.BattleAttackComposition") or nil
+            check(isvalid(attack), option.monsterId .. " has its combat attack")
+            if isvalid(attack) then
+                local foot = entity.TransformComponent.WorldPosition
+                local shape = attack:GetAttackShape(1)
+                check(near(shape.Size.x, option.attackRange) and near(shape.Size.y, option.attackRangeY * 2),
+                    option.monsterId .. " published size is the combat rectangle size")
+                check(near(shape.Position.x - shape.Size.x / 2, foot.x - option.bodyOffsetX) and near(shape.Position.y, foot.y + option.bodyOffsetY),
+                    option.monsterId .. " published body centre starts the combat rectangle facing right")
+            end
         end
     end
 end)

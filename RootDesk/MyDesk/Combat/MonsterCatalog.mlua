@@ -3,10 +3,12 @@ script MonsterCatalog extends Component
 
     property string ErrorMessage = ""
     property boolean IsLoaded = false
+    property string EffectOffsetDataSetName = "EffectOffsetData"
 
     @ExecSpace("ServerOnly")
     method void OnInitialize()
         -- Initialize the map-scoped catalog without exposing server diagnostics to clients.
+        self._T.effectOffsets = {}
         self._T.profilesById = {}
         self._T.bodyOffsets = {}
         self.ErrorMessage = ""
@@ -155,12 +157,26 @@ script MonsterCatalog extends Component
         profile.KnockbackDistance = self:ReadNumber(row:GetItem("KnockbackDistance"), "KnockbackDistance", monsterId, knockbackMinimum)
         if self.ErrorMessage ~= "" then return nil end
 
+        -- A projectile is optional: blank keeps the instant strike; a filled clip needs a positive speed.
+        local projectileRUID = row:GetItem("ProjectileRUID")
+        profile.ProjectileSpeed = 0
+        if not self:IsBlank(projectileRUID) then
+            if monsterType == "TANK" then
+                self:SetError("ProjectileRUID is not supported for TANK " .. monsterId)
+                return nil
+            end
+            profile.ProjectileSpeed = self:ReadNumber(row:GetItem("ProjectileSpeed"), "ProjectileSpeed", monsterId, 0.0001)
+            if self.ErrorMessage ~= "" then return nil end
+        end
+
         local assetFields = {
             "StandAnimationRUID", "MoveAnimationRUID", "AttackAnimationRUID", "HurtAnimationRUID",
             "DieAnimationRUID", "AttackEffectRUID", "HitEffectRUID", "AttackSoundRUID", "HurtSoundRUID", "DieSoundRUID",
+            "ProjectileRUID",
         }
         local optionalAssetFields = {
             AttackEffectRUID = true,
+            ProjectileRUID = true,
             HitEffectRUID = true,
             AttackSoundRUID = true,
             HurtSoundRUID = true,
@@ -183,6 +199,7 @@ script MonsterCatalog extends Component
             HurtAnimationRUID = ResourceType.AnimationClip,
             DieAnimationRUID = ResourceType.AnimationClip,
             AttackEffectRUID = ResourceType.AnimationClip,
+            ProjectileRUID = ResourceType.AnimationClip,
             HitEffectRUID = ResourceType.AnimationClip,
             AttackSoundRUID = ResourceType.AudioClip,
             HurtSoundRUID = ResourceType.AudioClip,
@@ -241,7 +258,7 @@ script MonsterCatalog extends Component
         end
         local offset = hit.ColliderOffset
         local scale = probe.TransformComponent.Scale
-        cached = { x = offset.x * math.abs(scale.x), y = offset.y * scale.y }
+        cached = { x = offset.x * math.abs(scale.x), y = offset.y * scale.y, scaleX = math.abs(scale.x), scaleY = scale.y }
         probe:Destroy()
         self._T.bodyOffsets[modelId] = cached
         return cached
@@ -268,6 +285,7 @@ script MonsterCatalog extends Component
         self.IsLoaded = false
         self._T.profilesById = {}
         self._T.bodyOffsets = self._T.bodyOffsets or {}
+        self._T.rowOrder = {}
         self._T.allowedModelIds = allowedModelIds or {}
         local dataset = _DataService:GetTable(datasetName)
         if dataset == nil then return self:SetError("MonsterData table unavailable") end
@@ -278,7 +296,7 @@ script MonsterCatalog extends Component
             "HitStopDurationSeconds",
             "KnockbackDistance", "StandAnimationRUID", "MoveAnimationRUID", "AttackAnimationRUID",
             "HurtAnimationRUID", "DieAnimationRUID", "AttackEffectRUID", "AttackEffectFrame", "HitEffectRUID", "AttackSoundRUID",
-            "HurtSoundRUID", "DieSoundRUID",
+            "HurtSoundRUID", "DieSoundRUID", "ProjectileRUID", "ProjectileSpeed",
         }
         for _, columnName in ipairs(requiredColumns) do
             if dataset:GetColumn(columnName) == nil then
@@ -291,14 +309,82 @@ script MonsterCatalog extends Component
             local profile = self:ParseRow(dataset:GetRow(rowIndex), rowIndex)
             if profile == nil then return false end
             self._T.profilesById[profile.MonsterId] = profile
+            table.insert(self._T.rowOrder, profile.MonsterId)
         end
         if self:ValidateRoster(fixedRoster) == false then return false end
+        if self:LoadEffectOffsets() == false then return false end
         for _, profile in pairs(self._T.profilesById) do
+            self:ResolveProfileOffsets(profile)
             if self:MeasureBodyCenterOffset(profile.ModelId) == nil then return false end
         end
         self.IsLoaded = true
         log("[M1][MonsterCatalog] loaded and validated rows=" .. tostring(rowCount))
         return true
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean LoadEffectOffsets()
+        -- Read the optional effect offset table; a missing or empty table only means every offset is zero.
+        return self:LoadEffectOffsetsFrom(_DataService:GetTable(self.EffectOffsetDataSetName))
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean LoadEffectOffsetsFrom(any dataset)
+        -- Validate every row of an offset table before replacing the registered offsets; any bad row fails the whole table.
+        self._T.effectOffsets = {}
+        if dataset == nil then return true end
+        local rowCount = dataset:GetRowCount()
+        if rowCount == nil or rowCount <= 0 then return true end
+        for _, columnName in ipairs({ "EffectRUID", "OffsetX", "OffsetY" }) do
+            if dataset:GetColumn(columnName) == nil then
+                return self:SetError("EffectOffsetData missing column " .. columnName)
+            end
+        end
+        local offsets = {}
+        for rowIndex = 1, rowCount do
+            local row = dataset:GetRow(rowIndex)
+            local ruid = row ~= nil and row:GetItem("EffectRUID") or nil
+            if type(ruid) ~= "string" or #ruid ~= 32 or string.find(ruid, "^%x+$") == nil then
+                return self:SetError("invalid EffectRUID " .. tostring(ruid) .. " in EffectOffsetData row " .. tostring(rowIndex))
+            end
+            if offsets[ruid] ~= nil then return self:SetError("duplicate EffectRUID " .. ruid) end
+            local x = self:ReadOffset(row:GetItem("OffsetX"))
+            local y = self:ReadOffset(row:GetItem("OffsetY"))
+            if x == nil or y == nil then
+                return self:SetError("invalid numeric value OffsetX/OffsetY for EffectRUID " .. ruid)
+            end
+            offsets[ruid] = { x = x, y = y }
+        end
+        self._T.effectOffsets = offsets
+        return true
+    end
+
+    method any ReadOffset(any raw)
+        -- A finite number of either sign, or nil when the cell is blank or not a number.
+        if self:IsBlank(raw) then return nil end
+        local parsed = tonumber(raw)
+        if parsed == nil or parsed ~= parsed or parsed == math.huge or parsed == -math.huge then return nil end
+        return parsed
+    end
+
+    method table GetEffectOffset(string effectRUID)
+        -- World-unit offset registered for one effect clip; an unregistered or blank effect keeps its authored position.
+        local entry = (self._T.effectOffsets or {})[effectRUID]
+        if entry == nil then return { x = 0, y = 0 } end
+        return { x = entry.x, y = entry.y }
+    end
+
+    method void ResolveProfileOffsets(table profile)
+        -- Fold the three offsets of one monster into its profile so combat and the dex read plain numbers.
+        local attack = self:GetEffectOffset(profile.AttackEffectRUID or "")
+        local hit = self:GetEffectOffset(profile.HitEffectRUID or "")
+        local projectile = self:GetEffectOffset(profile.ProjectileRUID or "")
+        profile.AttackEffectOffsetX = attack.x
+        profile.AttackEffectOffsetY = attack.y
+        profile.HitEffectOffsetX = hit.x
+        profile.HitEffectOffsetY = hit.y
+        profile.ProjectileOffsetX = projectile.x
+        profile.ProjectileOffsetY = projectile.y
     end
 
     method any GetProfile(string monsterId)
@@ -328,6 +414,32 @@ script MonsterCatalog extends Component
         end
         table.sort(options, function(left, right) return left.monsterId < right.monsterId end)
         return options
+    end
+
+    method table GetDexRows()
+        -- Publish every monster's presentation resources in data table order; delays are the values combat already uses.
+        local rows = {}
+        for order, monsterId in ipairs(self._T.rowOrder or {}) do
+            local profile = self._T.profilesById[monsterId]
+            local body = (self._T.bodyOffsets or {})[profile.ModelId] or {}
+            table.insert(rows, {
+                order = order, monsterId = profile.MonsterId, monsterName = profile.MonsterName,
+                standRuid = profile.StandAnimationRUID, moveRuid = profile.MoveAnimationRUID,
+                attackRuid = profile.AttackAnimationRUID, hurtRuid = profile.HurtAnimationRUID, dieRuid = profile.DieAnimationRUID,
+                attackEffectRuid = profile.AttackEffectRUID or "", attackEffectFrame = profile.AttackEffectFrame,
+                hitEffectRuid = profile.HitEffectRUID or "", attackDamageFrame = profile.AttackDamageFrame,
+                attackSoundRuid = profile.AttackSoundRUID or "", hurtSoundRuid = profile.HurtSoundRUID or "",
+                dieSoundRuid = profile.DieSoundRUID or "",
+                projectileRuid = profile.ProjectileRUID or "", projectileSpeed = profile.ProjectileSpeed,
+                attackEffectDelay = profile.AttackEffectDelaySeconds, impactDelay = profile.ImpactDelaySeconds,
+                attackDuration = profile.AttackAnimationDurationSeconds, attackRange = profile.AttackRange,
+                scaleX = body.scaleX, scaleY = body.scaleY, bodyOffsetX = body.x, bodyOffsetY = body.y,
+                attackEffectOffsetX = profile.AttackEffectOffsetX, attackEffectOffsetY = profile.AttackEffectOffsetY,
+                hitEffectOffsetX = profile.HitEffectOffsetX, hitEffectOffsetY = profile.HitEffectOffsetY,
+                projectileOffsetX = profile.ProjectileOffsetX, projectileOffsetY = profile.ProjectileOffsetY,
+            })
+        end
+        return rows
     end
 
 end

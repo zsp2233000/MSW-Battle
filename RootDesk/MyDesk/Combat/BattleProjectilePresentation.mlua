@@ -1,0 +1,99 @@
+@Component
+script BattleProjectilePresentation extends Component
+
+    @ExecSpace("Multicast")
+    method void LaunchProjectile(string id, string ruid, Entity target, number startX, number startY, number speed)
+        -- Deliver one launch to every client; the server keeps the authoritative flight and damage.
+        self:ShowProjectile(id, ruid, target, startX, startY, speed)
+    end
+
+    @ExecSpace("Multicast")
+    method void EndProjectile(string id)
+        -- Remove the ball once the server reports arrival, loss of the target, or cancellation.
+        self:HideProjectile(id)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ShowProjectile(string id, string ruid, Entity target, number startX, number startY, number speed)
+        -- Spawn a client-local, native-only visual that follows the same flight as the server's record.
+        if ruid == nil or ruid == "" or not isvalid(self.Entity) then return end
+        local map = self.Entity.CurrentMap
+        if not isvalid(map) then return end
+        local visual = _SpawnService:SpawnByModelId("battleviewvisual", "Projectile_" .. id, Vector3(startX, startY, 0), map)
+        if not isvalid(visual) then
+            log_error("[VRF][BattleProjectile] CREATE_FAILED id=" .. id)
+            return
+        end
+        local label = visual:GetChildByName("NameTag")
+        local tag = isvalid(label) and label.NameTagComponent or nil
+        if isvalid(tag) then tag.Enable = false end
+        local renderer = visual.SpriteRendererComponent
+        renderer.SpriteRUID = ruid
+        renderer.OrderInLayer = renderer.OrderInLayer + 1
+        if self._T.shots == nil then self._T.shots = {} end
+        self._T.shots[id] = { visual = visual, target = target, x = startX, y = startY, speed = speed, age = 0 }
+        log("[VRF][BattleProjectile] SHOW id=" .. id .. " ruid=" .. ruid)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void HideProjectile(string id)
+        -- Destroy the local visual of one ball; unknown ids are ignored.
+        local shots = self._T.shots
+        if shots == nil or shots[id] == nil then return end
+        local shot = shots[id]
+        shots[id] = nil
+        if isvalid(shot.visual) then shot.visual:Destroy() end
+        log("[VRF][BattleProjectile] HIDE id=" .. id)
+    end
+
+    @ExecSpace("ClientOnly")
+    method number GetViewerSign()
+        -- Matched viewers on the away side see the battlefield mirrored, exactly as unit visuals do.
+        local map = self.Entity.CurrentMap
+        local view = isvalid(map) and map:GetComponent("script.BattleView") or nil
+        if isvalid(view) and view:GetLocalFaction() == "ENEMY" then return -1 end
+        return 1
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnUpdate(number delta)
+        -- Advance each local ball toward its target's body centre and mirror it for this viewer.
+        local shots = self._T.shots
+        if shots == nil or next(shots) == nil then return end
+        local sign = self:GetViewerSign()
+        local expired = {}
+        for id, shot in pairs(shots) do
+            shot.age = shot.age + delta
+            if not isvalid(shot.visual) or shot.age > 6 then
+                table.insert(expired, id)
+            elseif isvalid(shot.target) and isvalid(shot.target.HitComponent) then
+                local transform = shot.target.TransformComponent
+                local position = transform.WorldPosition
+                local scale = transform.Scale
+                local offset = shot.target.HitComponent.ColliderOffset
+                local dx = position.x + offset.x * scale.x - shot.x
+                local dy = position.y + offset.y * scale.y - shot.y
+                local distance = math.sqrt(dx * dx + dy * dy)
+                local step = shot.speed * delta
+                if distance > 0.0001 then
+                    local travel = math.min(step, distance)
+                    shot.x = shot.x + dx / distance * travel
+                    shot.y = shot.y + dy / distance * travel
+                end
+                local displayedX = sign == 1 and shot.x or _FormationMapLayout:MirrorX(shot.x)
+                shot.visual.TransformComponent.WorldPosition = Vector3(displayedX, shot.y, 0)
+                shot.visual.SpriteRendererComponent.FlipX = dx * sign > 0
+            end
+        end
+        for _, id in ipairs(expired) do self:HideProjectile(id) end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnEndPlay()
+        -- Map unload must not leave local visuals behind.
+        local ids = {}
+        for id, _ in pairs(self._T.shots or {}) do table.insert(ids, id) end
+        for _, id in ipairs(ids) do self:HideProjectile(id) end
+    end
+
+end
