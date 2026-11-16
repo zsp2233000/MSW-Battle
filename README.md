@@ -8,6 +8,15 @@
 
 CSV 是方便編輯與檢視的檔案；執行時讀取的是 Maker 中的 UserDataSet，不是磁碟上的 CSV 路徑。修改 CSV 後，請同步匯入或更新 Maker 的 `MonsterData` UserDataSet，並確認欄位名稱和資料列一致。[`MonsterData.userdataset`](RootDesk/MyDesk/Data/MonsterData.userdataset) 是 UserDataSet 資源描述，不是資料列內容；請勿用它代替 CSV 編輯表格資料。
 
+## 特效偏移（EffectOffsetData）
+
+特效素材的錨點不一致（例如三隻精靈的命中特效錨點在圖片中心，其他怪物在底部），所以特效的位置修正以**特效素材**為單位登記在另一張伺服器專用資料表 [`EffectOffsetData.csv`](RootDesk/MyDesk/Data/EffectOffsetData.csv)（資源描述 [`EffectOffsetData.userdataset`](RootDesk/MyDesk/Data/EffectOffsetData.userdataset)）。不要為了修位置去改美術。
+
+- 欄位：`EffectRUID`（32 位十六進位）、`OffsetX`、`OffsetY`，單位與攻擊範圍相同（世界單位）。X 正為畫面右方、不隨出手朝向翻轉，Y 正為往上。同一個 RUID 不論當作出手特效、命中特效或投射物都套同一組偏移；投射物只影響球的起點，飛行路線不變。
+- `MonsterCatalog:Load` 在讀完 `MonsterData` 後一併讀取。RUID 空白、不是 32 位十六進位、重複，或偏移不是有限數字，整張表載入失敗（和 `MonsterData` 同一條 `CONFIG_ERROR` 路徑）。資料表不存在或沒有列不是錯誤（全部偏移為零）；登記了但沒有任何怪物使用的 RUID 直接忽略；沒登記的特效偏移為 (0, 0)。
+- 戰鬥端由伺服器解出偏移，連同特效 RUID 一起廣播（`BattleHitEffectPresentation:PlayHitEffect/PlayAttackEffect`），用戶端以 `PlayEffectAttached` 的 localPosition 套用；圖鑑列帶有 `attackEffectOffsetX/Y`、`hitEffectOffsetX/Y`、`projectileOffsetX/Y`，明細清單多一列「特效偏移」（三者全為零時顯示未設定）。
+- 目前只登記了三隻精靈的命中特效（`OffsetY = 0.4`），那是初估值，請在戰鬥中目視調整。修改 CSV 後同樣要同步到 Maker 的 `EffectOffsetData` UserDataSet。
+
 ## 怪物圖鑑
 
 大廳的「怪物圖鑑」按鈕（只在 Maker Play 顯示）開啟一本書：左頁依資料表順序列出全部怪物，右頁上方是舞台、下方是所選怪物的資源明細，並可試播待機、移動、出手、受傷、死亡。設計取捨見 [ADR 0008](docs/adr/0008-monster-dex-local-playback.md)。
