@@ -30,10 +30,11 @@ end
 local CANVAS_WIDTH = 1920
 local PC_WORLD_WIDTH_AT_ZOOM_100 = 12.8
 local BATTLE_ZOOM = 60
-local PIXELS_PER_UNIT = CANVAS_WIDTH / (PC_WORLD_WIDTH_AT_ZOOM_100 * 100 / BATTLE_ZOOM)
+local dex = _MonsterDex
+-- The dex stage is deliberately a multiple (dex.StageScaleMultiplier) of battle size; 1 would be exactly battle size.
+local PIXELS_PER_UNIT = CANVAS_WIDTH / (PC_WORLD_WIDTH_AT_ZOOM_100 * 100 / BATTLE_ZOOM) * dex.StageScaleMultiplier
 local SCALE_TOLERANCE = 0.01
 local ART_PIXELS_PER_WORLD_UNIT = 100
-local dex = _MonsterDex
 local function click(entity) entity:SendEvent(ButtonClickEvent()) end
 local function uiRows()
     local rows = {}
@@ -50,7 +51,8 @@ local LOOPS = { IDLE = true, MOVE = true, ATTACK = false, HURT = false, DIE = fa
 
 local TIME_TOLERANCE = 0.12
 local function sprite() return dex.stageSprite end
-local function stageWidth() return sprite().Entity.Parent.UITransformComponent.RectSize.x end
+local function markerShown() return dex.hitMarkerSprite.Entity.Enable end
+local function stageWidth()return sprite().Entity.Parent.UITransformComponent.RectSize.x end
 -- Independent geometry of one monster on the stage: the hit point is one attack range in front of the body centre, and the whole
 -- stage shrinks (factor < 1) when that point would pass the right edge minus the margin.
 local function expectedGeometry(row)
@@ -301,7 +303,6 @@ local ok, detail = pcall(function()
         return effect.Entity.UITransformComponent
     end
     -- The hit marker is a dummy figure standing on the hit point (feet on the ground line) for the whole attack trial, drawn at the stage art scale and facing the attacker.
-    local function markerShown() return dex.hitMarkerSprite.Entity.Enable end
     local function checkMarker(geometry, label)
         local marker = dex.hitMarkerSprite
         local box = marker.Entity.UITransformComponent

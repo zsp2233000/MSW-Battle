@@ -236,6 +236,14 @@ test('the stage scale uses the full screen width, never the book picture, and no
   assert.doesNotMatch(methodBody(module, 'StageLayout'), /\/ 100/, 'no magic 100');
 });
 
+test('the stage is a named multiple of battle size, applied once in the pixel scale', () => {
+  const module = read(MODULE);
+  assert.match(module, /property number StageScaleMultiplier = 1\.2\b/, 'the multiplier is a named property');
+  assert.match(methodBody(module, 'StagePixelsPerUnit'), /\* self\.StageScaleMultiplier/, 'the pixel scale multiplies it in');
+  const others = module.replace(/property number StageScaleMultiplier = 1\.2\b/, '');
+  assert.doesNotMatch(others, /\b1\.2\b/, 'no bare 1.2 anywhere else');
+});
+
 test('the stage notice is an authored text bound to the module and hidden until the stage is unavailable', () => {
   const source = read(MODULE);
   const ui = dex();

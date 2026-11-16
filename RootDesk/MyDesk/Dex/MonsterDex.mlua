@@ -38,6 +38,8 @@ script MonsterDex extends Logic
     property Color TrialDisabledColor = Color(0.36, 0.29, 0.52, 0.3)
     property number SoundVolume = 1
     property number PixelsPerWorldUnit = 100
+    -- How much bigger the dex stage is than battle size: 1 = the same size as in battle. Everything on the stage (art, hit point, effects, ball, marker, shrink) follows it through StagePixelsPerUnit.
+    property number StageScaleMultiplier = 1.2
     property string StageUnavailableText = "舞台無法使用：讀不到戰鬥鏡頭設定"
     property number HitPointMargin = 24
     -- The dummy figure (a normal training dummy mob's stand clip) shown at the hit point as a position marker only.
@@ -445,7 +447,7 @@ script MonsterDex extends Logic
         local worldRight = _UILogic:ScreenToWorldPosition(Vector2(screenWidth, 0))
         local currentZoom = _CameraService:GetCurrentCameraComponent().ZoomRatio
         local unitsAcrossBattleScreen = math.abs(worldRight.x - worldLeft.x) * currentZoom / self._T.battleZoom
-        return math.abs(canvasRight.x - canvasLeft.x) / unitsAcrossBattleScreen
+        return math.abs(canvasRight.x - canvasLeft.x) / unitsAcrossBattleScreen * self.StageScaleMultiplier
     end
 
     @ExecSpace("ClientOnly")
