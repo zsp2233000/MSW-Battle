@@ -171,3 +171,10 @@ test('both scroll lists put the scrollbar handle at the top when the content is 
     assert.equal(ui.getComponent(list, SCROLL).VerticalScrollBarDirection, 2, `${list} scrollbar direction`);
   }
 });
+test("a row is drawn with the final frame of the scroll animation as a plain sprite image, still a raycast button", () => {
+  const ui = dex();
+  const sprite = ui.getComponent(ROW, SPRITE);
+  assert.equal(sprite.ImageRUID.DataId, "8f181a46332f43028b5c75a465698aaf", "the last frame sprite, not the animationclip");
+  assert.equal(sprite.Type, 0, "plain stretched image");
+  assert.equal(sprite.RaycastTarget, true, "the row stays clickable");
+});
