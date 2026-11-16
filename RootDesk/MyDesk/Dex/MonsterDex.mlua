@@ -22,6 +22,7 @@ script MonsterDex extends Logic
     property SpriteGUIRendererComponent hitEffectSprite = "5e8fd714-47e4-4c60-8385-46a63b1267bd"
     property TextGUIRendererComponent scaleLabel = "52934094-7804-4cb6-bbcd-8fa05fc9a5d3"
     property SpriteGUIRendererComponent projectileSprite = "c3097106-255b-4ae7-9386-34c6dea7b5c0"
+    property SpriteGUIRendererComponent hitMarkerSprite = "cc1e563f-caef-4930-9146-0275a20a81dc"
 
     property string LobbyMapName = "formationlobby"
     property number LoadTimeoutSeconds = 8
@@ -39,6 +40,8 @@ script MonsterDex extends Logic
     property number PixelsPerWorldUnit = 100
     property string StageUnavailableText = "舞台無法使用：讀不到戰鬥鏡頭設定"
     property number HitPointMargin = 24
+    -- The dummy figure (a normal training dummy mob's stand clip) shown at the hit point as a position marker only.
+    property string HitMarkerRuid = "c9c6022d09854016b0c7f8422441ba2a"
     property string ScaleLabelFormat = "舞台縮小 ×%.2f"
 
     @ExecSpace("ClientOnly")
@@ -68,8 +71,8 @@ script MonsterDex extends Logic
         self._T.trialSerial = 0
         self._T.stageFactor = 1
         self._T.shot = nil
-        -- Authored starting state: the book, the stage image, its notice, the two effect sprites, the ball, the scale label and the three row templates are all hidden.
-        for _, component in ipairs({ self.stageSprite, self.stageNotice, self.attackEffectSprite, self.hitEffectSprite, self.projectileSprite, self.scaleLabel }) do
+        -- Authored starting state: the book, the stage image, its notice, the two effect sprites, the ball, the hit marker, the scale label and the three row templates are all hidden.
+        for _, component in ipairs({ self.stageSprite, self.stageNotice, self.attackEffectSprite, self.hitEffectSprite, self.projectileSprite, self.hitMarkerSprite, self.scaleLabel }) do
             if isvalid(component) then component.Entity:SetEnable(false) end
         end
         for _, entity in ipairs({ self.book, self.rowTemplate, self.headerTemplate, self.detailTemplate }) do
@@ -252,8 +255,27 @@ script MonsterDex extends Logic
         self.stageSprite.Entity:SetEnable(true)
         if record then self:RecordEvent("ANIMATION_START", action, ruid) end
         if record and spec.sound ~= nil then self:PlaySoundOnce(action, row[spec.sound] or "") end
-        if record and action == "ATTACK" then self:ArmAttackTrial(row) end
+        if record and action == "ATTACK" then
+            self:ShowHitMarker(row)
+            self:ArmAttackTrial(row)
+        end
         self:RenderTrialButtons()
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ShowHitMarker(any row)
+        -- Stand a dummy figure on the hit point (feet on the ground line, facing the attacker, at the stage art scale) from the start of an attack trial until the next clear. It only marks the position: no damage, no sound, no event, no timer.
+        local marker = self.hitMarkerSprite
+        if not isvalid(marker) then return end
+        local geometry = self:StageGeometry(row)
+        local scale = geometry.pixelsPerUnit / self.PixelsPerWorldUnit
+        marker.Entity:SetEnable(false)
+        marker.AnimClipPlayType = SpriteAnimClipPlayType.Loop
+        marker.ImageRUID = DataRef(self.HitMarkerRuid)
+        marker.PreserveSprite = PreserveSpriteType.NativeSize
+        marker.Entity.UITransformComponent.anchoredPosition = Vector2(geometry.hitX, geometry.footY)
+        marker.Entity.UITransformComponent.UIScale = Vector3(scale, scale, 1)
+        marker.Entity:SetEnable(true)
     end
 
     @ExecSpace("ClientOnly")
@@ -366,10 +388,11 @@ script MonsterDex extends Logic
 
     @ExecSpace("ClientOnly")
     method void ClearEffects()
-        -- Drop every pending effect timer (the serial also voids a callback already queued), the ball in flight, and hide both effect sprites and the ball.
+        -- Drop every pending effect timer (the serial also voids a callback already queued), the ball in flight, the hit marker, and hide both effect sprites and the ball.
         self._T.trialSerial = (self._T.trialSerial or 0) + 1
         self._T.shot = nil
         if isvalid(self.projectileSprite) then self.projectileSprite.Entity:SetEnable(false) end
+        if isvalid(self.hitMarkerSprite) then self.hitMarkerSprite.Entity:SetEnable(false) end
         for _, id in ipairs(self._T.timers or {}) do
             _TimerService:ClearTimer(id)
         end
@@ -536,6 +559,7 @@ script MonsterDex extends Logic
             selectedMonsterId = self._T.selectedId, selectedMonsterName = selected ~= nil and selected.monsterName or "",
             action = self._T.action, events = events, rows = rows, details = self:BuildDetails(selected),
             stageAvailable = self._T.battleZoom ~= nil, stageFactor = self._T.stageFactor or 1, projectileActive = self._T.shot ~= nil,
+            hitMarkerShown = isvalid(self.hitMarkerSprite) and self.hitMarkerSprite.Entity.Enable or false,
         }
     end
 

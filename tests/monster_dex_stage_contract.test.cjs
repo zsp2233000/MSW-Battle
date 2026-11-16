@@ -20,6 +20,7 @@ const ATTACK_EFFECT = `${STAGE}/AttackEffect`;
 const HIT_EFFECT = `${STAGE}/HitEffect`;
 const SCALE_LABEL = `${STAGE}/ScaleLabel`;
 const PROJECTILE = `${STAGE}/Projectile`;
+const HIT_MARKER = `${STAGE}/HitMarker`;
 const CAMERA_MODULE = 'RootDesk/MyDesk/Combat/BattleFixedCamera.mlua';
 // Left to right, as the ticket lists them.
 const TRIAL_BUTTONS = [['Idle', '待機', 'idleButton'], ['Move', '移動', 'moveButton'], ['Attack', '攻擊', 'attackButton'],
@@ -57,7 +58,7 @@ test('the stage fills the upper right page, above the resource details', () => {
 
 test('the stage shows one monster: an animation image that always faces right', () => {
   const ui = dex();
-  assert.deepEqual(childNames(ui, STAGE), ['Ground', 'Actor', 'Notice', 'AttackEffect', 'HitEffect', 'ScaleLabel', 'Projectile']);
+  assert.deepEqual(childNames(ui, STAGE), ['Ground', 'Actor', 'HitMarker', 'Notice', 'AttackEffect', 'HitEffect', 'ScaleLabel', 'Projectile']);
   const sprite = ui.getComponent(ACTOR, SPRITE);
   assert.equal(sprite.FlipX, true, 'monster art faces left, the stage flips it to face right');
   assert.equal(sprite.Type, 0, 'a plain image, never sliced or tiled');
@@ -96,7 +97,7 @@ test('five trial buttons sit under the left page list, in the ticket order', () 
 test('MonsterDex binds the stage image and every trial button to the authored entities', () => {
   const source = read(MODULE);
   const ui = dex();
-  const binds = [['stageSprite', ACTOR], ['attackEffectSprite', ATTACK_EFFECT], ['hitEffectSprite', HIT_EFFECT], ['scaleLabel', SCALE_LABEL], ['projectileSprite', PROJECTILE], ...TRIAL_BUTTONS.map(([name, , property]) => [property, `${TRIAL}/${name}`])];
+  const binds = [['stageSprite', ACTOR], ['attackEffectSprite', ATTACK_EFFECT], ['hitEffectSprite', HIT_EFFECT], ['scaleLabel', SCALE_LABEL], ['projectileSprite', PROJECTILE], ['hitMarkerSprite', HIT_MARKER], ...TRIAL_BUTTONS.map(([name, , property]) => [property, `${TRIAL}/${name}`])];
   for (const [property, entity] of binds) {
     const declared = source.match(new RegExp(`property \\w+ ${property} = "([^"]*)"`));
     assert.ok(declared, `${property} is declared`);
@@ -340,4 +341,36 @@ test('a flying ball is cleared with every other in-flight effect', () => {
   assert.match(clear, /projectileSprite/, 'clearing hides the ball');
   assert.match(clear, /shot = nil/, 'clearing drops the flight record');
   assert.match(methodBody(source, 'GetSnapshot'), /projectileActive/, 'the snapshot reports a ball in flight');
+});
+
+test('the hit marker is an authored dummy figure on the stage: hidden, plain, centred, facing the attacker, drawn under the effects, never takes clicks', () => {
+  const source = read(MODULE);
+  const ui = dex();
+  const sprite = ui.getComponent(HIT_MARKER, SPRITE);
+  assert.equal(ui.find(HIT_MARKER).jsonString.enable, false, 'hidden until an attack trial starts');
+  assert.equal(sprite.RaycastTarget, false, 'never takes clicks');
+  assert.equal(sprite.Type, 0, 'a plain image');
+  assert.equal(sprite.FlipX, false, 'dummy art faces left like every mob art, so unflipped it faces the attacker on its left');
+  const box = rect(ui, HIT_MARKER);
+  assert.deepEqual([box.Pivot.x, box.Pivot.y], [0.5, 0.5], 'positioned by its centre like the actor, whose art pivot is the feet');
+  const names = childNames(ui, STAGE);
+  assert.ok(names.indexOf('HitMarker') > names.indexOf('Actor') && names.indexOf('HitMarker') < names.indexOf('AttackEffect'), 'drawn above the ground and under every effect');
+  const ruid = source.match(/property string HitMarkerRuid = "([0-9a-f]{32})"/);
+  assert.ok(ruid, 'the module names the dummy clip in one property');
+  assert.equal(sprite.ImageRUID.DataId, ruid[1], 'the authored image is that clip');
+});
+
+test('an attack trial stands the dummy on the hit point and every way out removes it, with no damage and no sound', () => {
+  const source = read(MODULE);
+  assert.match(methodBody(source, 'StartClip'), /ShowHitMarker\(/, 'a recorded attack shows the marker');
+  const show = methodBody(source, 'ShowHitMarker');
+  assert.match(show, /StageGeometry\(/, 'position and scale come from the stage geometry, so they shrink with the stage');
+  assert.match(show, /hitX/, 'at the hit point');
+  assert.match(show, /footY/, 'feet on the ground line');
+  assert.match(show, /pixelsPerUnit \/ self\.PixelsPerWorldUnit/, 'drawn at the stage art scale like the hit effect');
+  assert.match(show, /HitMarkerRuid/);
+  assert.doesNotMatch(show, /PlaySound|SetTimer|RecordEvent|FlipX/, 'a position marker: no sound, no timer, no event, no facing write');
+  assert.match(methodBody(source, 'ClearEffects'), /hitMarkerSprite/, 'clearing hides the marker with the effects');
+  assert.match(methodBody(source, 'OnBeginPlay'), /self\.hitMarkerSprite/, 'hidden at the authored start');
+  assert.match(methodBody(source, 'GetSnapshot'), /hitMarkerShown/, 'the snapshot reports whether the marker is shown');
 });

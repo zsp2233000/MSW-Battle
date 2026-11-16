@@ -172,6 +172,7 @@ local ok, detail = pcall(function()
     stageShows(opened, "IDLE", "selected monster on open")
     checkScaleAndFacing(opened, "selected monster on open")
     check(#dex:GetSnapshot().events == 0, "the idle a monster starts with is not a logged trial")
+    check(not markerShown(), "no hit marker before an attack trial")
     buttonHighlight("IDLE", "on open")
 
     -- The stage sits inside its panel on the ground line, left of centre.
@@ -299,6 +300,20 @@ local ok, detail = pcall(function()
         check(effect.FlipX == expectFlip, label .. ": the effect " .. (expectFlip and "faces the attacker's way" or "is not flipped"))
         return effect.Entity.UITransformComponent
     end
+    -- The hit marker is a dummy figure standing on the hit point (feet on the ground line) for the whole attack trial, drawn at the stage art scale and facing the attacker.
+    local function markerShown() return dex.hitMarkerSprite.Entity.Enable end
+    local function checkMarker(geometry, label)
+        local marker = dex.hitMarkerSprite
+        local box = marker.Entity.UITransformComponent
+        local wantScale = geometry.factor * PIXELS_PER_UNIT / ART_PIXELS_PER_WORLD_UNIT
+        check(marker.Entity.Enable, label .. ": the hit marker is shown from the trial start")
+        check(math.abs(box.anchoredPosition.x - geometry.hitX) < 1 and math.abs(box.anchoredPosition.y - geometry.footY) < 1,
+            label .. ": the hit marker stands at the hit point on the ground line (" .. string.format("%.1f,%.1f vs %.1f,%.1f", box.anchoredPosition.x, box.anchoredPosition.y, geometry.hitX, geometry.footY) .. ")")
+        check(math.abs(box.UIScale.x - wantScale) < 0.001 and math.abs(box.UIScale.y - wantScale) < 0.001,
+            label .. ": the hit marker follows the stage scale (" .. string.format("%.3f vs %.3f", box.UIScale.x, wantScale) .. ")")
+        check(marker.FlipX == false and marker.ImageRUID.DataId == dex.HitMarkerRuid and #dex.HitMarkerRuid == 32, label .. ": the hit marker is the dummy art facing the attacker")
+        check(marker.RaycastTarget == false, label .. ": the hit marker never takes clicks")
+    end
     local function runAttack(row, label)
         local geometry = expectedGeometry(row)
         local wantEffect, wantHit = (row.attackEffectRuid or "") ~= "", (row.hitEffectRuid or "") ~= ""
@@ -306,6 +321,8 @@ local ok, detail = pcall(function()
         local hitDelay = row.impactDelay + flight.seconds
         trial("ATTACK")
         local started = eventsOf("ANIMATION_START")[1]
+        checkMarker(geometry, label)
+        check(dex:GetSnapshot().hitMarkerShown == true and #eventsOf("SOUND") <= 1, label .. ": the snapshot reports the marker, and it plays no sound of its own")
         local deadline = _UtilLogic.ElapsedSeconds + math.max(row.attackDuration, row.attackEffectDelay, hitDelay) + 1.5
         local checkedEffect, checkedHit = false, false
         local samples, ballFlips, ballScaleOk, ballGoneAtHit = {}, {}, true, nil
@@ -409,6 +426,7 @@ local ok, detail = pcall(function()
             check(#sounds == 0, label .. ": a blank attack sound plays nothing")
         end
         await(function() return dex:GetSnapshot().action == "IDLE" end, 5)
+        check(markerShown(), label .. ": the hit marker stays after the attack returns to idle, until cleared")
         return started
     end
     local laterFrame, firstFrame = nil, nil
@@ -448,14 +466,21 @@ local ok, detail = pcall(function()
     trial("ATTACK")
     local replayStart = eventsOf("ANIMATION_START")[1].at
     check(#eventsOf("HIT_EFFECT") == 0 and #eventsOf("ATTACK_EFFECT") == 0, "a replay starts with a clean event log")
+    check(markerShown(), "a replay shows the hit marker again")
     await(function() return #eventsOf("HIT_EFFECT") > 0 end, timedRow.impactDelay + 1)
     local replayHits = eventsOf("HIT_EFFECT")
     check(#replayHits == 1 and math.abs(replayHits[1].at - replayStart - timedRow.impactDelay) < TIME_TOLERANCE, "a replay's hit effect comes once, one hit delay after the replay started")
     await(function() return dex:GetSnapshot().action == "IDLE" end, 5)
     trial("ATTACK")
     wait(timedRow.impactDelay * 0.4)
+    check(markerShown(), "the hit marker is shown during the attack trial")
     trial("MOVE")
     check(not dex.attackEffectSprite.Entity.Enable and not dex.hitEffectSprite.Entity.Enable, "another button hides the effect sprites")
+    check(not markerShown() and dex:GetSnapshot().hitMarkerShown == false, "another button hides the hit marker")
+    for _, action in ipairs({ "HURT", "DIE", "IDLE", "MOVE" }) do
+        trial(action)
+        check(not markerShown(), "a " .. action .. " trial shows no hit marker")
+    end
     wait(pending)
     check(#eventsOf("HIT_EFFECT") == 0 and #eventsOf("ATTACK_EFFECT") == 0 and not dex.hitEffectSprite.Entity.Enable, "an aborted attack's pending effects never show")
     trial("IDLE")
@@ -463,6 +488,7 @@ local ok, detail = pcall(function()
     wait(timedRow.impactDelay * 0.4)
     click(rows[otherIndex])
     check(not dex.attackEffectSprite.Entity.Enable and not dex.hitEffectSprite.Entity.Enable and #dex:GetSnapshot().events == 0, "switching monsters clears the effects and the log")
+    check(not markerShown(), "switching monsters hides the hit marker")
     wait(pending)
     check(#dex:GetSnapshot().events == 0 and not dex.hitEffectSprite.Entity.Enable, "an abandoned attack's pending effects never show on the new monster")
     click(rows[timed])
@@ -470,6 +496,7 @@ local ok, detail = pcall(function()
     wait(timedRow.impactDelay * 0.4)
     click(dex.closeButton.Entity)
     check(not dex.attackEffectSprite.Entity.Enable and not dex.hitEffectSprite.Entity.Enable, "closing the book clears the effects")
+    check(not markerShown(), "closing the book hides the hit marker")
     wait(pending)
     check(not dex.hitEffectSprite.Entity.Enable and not dex.attackEffectSprite.Entity.Enable, "pending effects cannot revive after closing")
     click(dex.lobbyButton.Entity)
