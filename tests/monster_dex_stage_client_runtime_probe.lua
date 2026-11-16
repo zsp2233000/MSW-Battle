@@ -9,9 +9,9 @@
 -- effect events are recorded with their times and the effect sprites are inspected the moment each event appears. The hit point is written
 -- down independently: one attack range in front of the attacker's body centre (like the combat rectangle), and the whole stage shrinks when
 -- that point would pass the stage's right edge minus a margin.
--- A monster with a projectile clip and a speed launches its ball at the hit-frame delay from the attacker's body centre; the ball flies straight to the hit point in
--- distance / speed seconds and the hit effect appears at that arrival (distance is written down independently: the attack range ahead and the body-centre height above the
--- ground line, in world units). Replaying, another button, another monster and closing remove the ball. Nothing is queued, stored or edited; the book is closed again at the end. Sounds cannot be heard here: the SOUND events record that
+-- A monster with a projectile clip and a speed launches its ball at the hit-frame delay from the attacker's body centre; the ball flies level (at the body-centre height) to the point one attack range ahead of the body centre in
+-- attack range / speed seconds, like a combat ball at a target of the same height, and the hit effect appears at that arrival on the ground line (the distance is written down
+-- independently: the attack range, in world units). Replaying, another button, another monster and closing remove the ball. Nothing is queued, stored or edited; the book is closed again at the end. Sounds cannot be heard here: the SOUND events record that
 -- the sound call was made with the row's RUID, and a blank sound field is simulated on a cached row and restored.
 local failures = 0
 local function check(condition, message)
@@ -62,15 +62,15 @@ local function expectedGeometry(row)
     return { factor = factor, footX = foot.x, footY = foot.y, hitX = foot.x + (row.attackRange - bodyX) * PIXELS_PER_UNIT * factor }
 end
 local function hasBall(row) return (row.projectileRuid or "") ~= "" and (row.projectileSpeed or 0) > 0 end
--- Independent ball path of one monster: it leaves the body centre (the attacker's foot, bodyX behind and the body-centre height above it) and lands on the hit point;
--- the distance is the attack range ahead plus the height, in world units, so the flight time does not depend on the stage shrink.
+-- Independent ball path of one monster: it leaves the body centre (the attacker's foot, bodyX behind and the body-centre height above it) and flies level to the point one
+-- attack range ahead of the body centre (that is the hit point's x); the distance is the attack range itself, in world units, so the flight time does not depend on the stage shrink.
 local function expectedFlight(row)
     local geometry = expectedGeometry(row)
     local unit = PIXELS_PER_UNIT * geometry.factor
     local bodyX = (row.bodyOffsetX or 0) * math.abs(row.scaleX)
     local bodyY = (row.bodyOffsetY or 0) * math.abs(row.scaleY)
-    local flight = { startX = geometry.footX - bodyX * unit, startY = geometry.footY + bodyY * unit, endX = geometry.hitX, endY = geometry.footY, unit = unit, seconds = 0 }
-    if hasBall(row) then flight.seconds = math.sqrt(row.attackRange * row.attackRange + bodyY * bodyY) / row.projectileSpeed end
+    local flight = { startX = geometry.footX - bodyX * unit, startY = geometry.footY + bodyY * unit, endX = geometry.hitX, endY = geometry.footY + bodyY * unit, unit = unit, seconds = 0 }
+    if hasBall(row) then flight.seconds = row.attackRange / row.projectileSpeed end
     return flight
 end
 local function clipRuid() return sprite().ImageRUID.DataId end

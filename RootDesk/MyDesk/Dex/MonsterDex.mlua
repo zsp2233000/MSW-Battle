@@ -292,15 +292,15 @@ script MonsterDex extends Logic
 
     @ExecSpace("ClientOnly")
     method table ProjectileFlight(any row)
-        -- One ball's path in canvas pixels and its time in seconds. It leaves the attacker's body centre (bodyOffset behind and above the foot, scaled by the model) and lands on the hit point on the ground line, the place the hit effect plays at. The distance is measured in world units (the attack range ahead plus the body-centre height), so dividing it by the published world-unit speed gives a flight time that the stage shrink never changes.
+        -- One ball's path in canvas pixels and its time in seconds. It leaves the attacker's body centre (bodyOffset behind and above the foot, scaled by the model) and flies level, as a combat ball does at a target of the same height, to the point one attack range ahead of the body centre (the hit point's x; the hit effect then plays on the ground line there, like a combat hit effect on its target's foot). The distance is the attack range in world units, so dividing it by the published world-unit speed gives a flight time that the stage shrink never changes.
         local geometry = self:StageGeometry(row)
         local bodyX = (row.bodyOffsetX or 0) * math.abs(row.scaleX)
         local bodyY = (row.bodyOffsetY or 0) * math.abs(row.scaleY)
         local startX = geometry.footX - bodyX * geometry.pixelsPerUnit
         local startY = geometry.footY + bodyY * geometry.pixelsPerUnit
-        local distance = math.sqrt((geometry.hitX - startX) ^ 2 + (geometry.footY - startY) ^ 2) / geometry.pixelsPerUnit
+        local distance = row.attackRange
         return {
-            from = Vector2(startX, startY), to = Vector2(geometry.hitX, geometry.footY),
+            from = Vector2(startX, startY), to = Vector2(geometry.hitX, startY),
             seconds = distance / row.projectileSpeed, pixelsPerUnit = geometry.pixelsPerUnit,
         }
     end

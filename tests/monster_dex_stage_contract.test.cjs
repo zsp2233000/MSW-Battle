@@ -311,6 +311,8 @@ test('a monster with a projectile clip and a speed launches the ball at the hit-
   const flight = methodBody(source, 'ProjectileFlight');
   assert.match(flight, /projectileSpeed/, 'the flight time comes from the published world-unit speed');
   assert.match(flight, /distance \/ /, 'flight time is distance divided by speed');
+  assert.match(flight, /distance = row\.attackRange/, 'the distance is the attack range, as a combat ball flies at a target of the same height');
+  assert.doesNotMatch(flight, /math\.sqrt/, 'no diagonal to the ground line');
   assert.match(flight, /bodyOffsetX/, 'the ball starts at the attacker body centre');
   assert.match(flight, /bodyOffsetY/);
   const launch = methodBody(source, 'LaunchProjectile');
