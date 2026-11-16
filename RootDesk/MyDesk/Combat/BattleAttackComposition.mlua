@@ -116,9 +116,9 @@ script BattleAttackComposition extends Component
             if self._T.impactRemaining <= 0 then
                 local target = self._T.pendingTarget
                 self._T.pendingTarget = nil
-                self._T.impactRemaining = -1
                 -- A departed or dead target whiffs after committing the animation and interval.
                 self._T.adapter:ResolveImpact(target)
+                self._T.impactRemaining = -1
                 log("[VRF][BattleAttack] IMPACT owner=" .. self.Entity.Name)
             end
         end
@@ -173,7 +173,9 @@ script BattleAttackComposition extends Component
         self._T.projectileSerial = (self._T.projectileSerial or 0) + 1
         local id = self.Entity.Name .. "#" .. tostring(self._T.projectileSerial)
         if self._T.projectiles == nil then self._T.projectiles = {} end
-        table.insert(self._T.projectiles, { id = id, target = target, x = start.x, y = start.y, speed = profile.ProjectileSpeed })
+        -- The pending deadline's overrun is the part of this frame after launch.
+        table.insert(self._T.projectiles, { id = id, target = target, x = start.x, y = start.y, speed = profile.ProjectileSpeed,
+            firstDelta = math.max(0, -self._T.impactRemaining) })
         local presentation = self.Entity:GetComponent("script.BattleProjectilePresentation")
         if isvalid(presentation) then
             presentation:LaunchProjectile(id, profile.ProjectileRUID, target, start.x, start.y, profile.ProjectileSpeed)
@@ -197,7 +199,8 @@ script BattleAttackComposition extends Component
                 local dx = center.x - shot.x
                 local dy = center.y - shot.y
                 local distance = math.sqrt(dx * dx + dy * dy)
-                local step = shot.speed * delta
+                local step = shot.speed * (shot.firstDelta or delta)
+                shot.firstDelta = nil
                 if distance <= step or distance <= 0.0001 then
                     self:EndProjectile(shot, "ARRIVE")
                     if isvalid(self._T.adapter) then self._T.adapter:ResolveProjectileArrival(target) end

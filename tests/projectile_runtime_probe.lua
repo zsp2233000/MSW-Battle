@@ -1,6 +1,7 @@
 -- Run in a fresh Maker Play test with context=server_main, after `template` reaches DEPLOYMENT.
 -- Verifies the data-driven projectile: damage waits for arrival, flight time follows ProjectileSpeed,
 -- cancelling the shooter discards a ball in flight, and the instant shooter still spawns no ball.
+-- Long-frame cases call StepSimulation directly: AdvanceForTest subdivides elapsed time into 1/60 s steps.
 local map = nil
 local session = nil
 local failures = 0
@@ -126,6 +127,33 @@ local runOk, runDetail = pcall(function()
     end
     check(not sawBall and scene.defender.DamageTakenSerial >= 1,
         "the instant shooter damages without a projectile")
+
+    -- Case 4: a ball only flies for the part of its launch frame after the impact deadline.
+    for _, carriedFraction in ipairs({ 0, 0.5 }) do
+        scene = prepare("monster_moon_pixie")
+        check(scene ~= nil, "long-frame scene is prepared")
+        if scene == nil then return end
+        for _ = 1, 100 do
+            if scene.unit.AttackSerial > 0 then break end
+            session:StepSimulation(0.01)
+        end
+        check(scene.unit.AttackSerial == 1 and scene.attack:GetProjectileCount() == 0 and scene.defender.Hp == 100,
+            "long frame starts with one pending attack and no damage")
+        local from = scene.attack:GetBodyCenter(scene.shooter)
+        local to = scene.attack:GetBodyCenter(scene.target)
+        local flightSeconds = math.sqrt((to.x - from.x) ^ 2 + (to.y - from.y) ^ 2) / profile.ProjectileSpeed
+        local carriedSeconds = flightSeconds * carriedFraction
+        local label = "launch frame with " .. tostring(carriedFraction) .. " of the flight elapsed"
+        session:StepSimulation(profile.ImpactDelaySeconds + carriedSeconds + 0.000001)
+        check(scene.attack:GetProjectileCount() == 1 and scene.defender.Hp == 100 and scene.defender.DamageTakenSerial == 0,
+            label .. ": the new ball is still flying, without damage")
+        session:StepSimulation(flightSeconds - carriedSeconds - 0.02)
+        check(scene.attack:GetProjectileCount() == 1 and scene.defender.Hp == 100,
+            label .. ": no hit before the remaining flight time")
+        session:StepSimulation(0.04)
+        check(scene.attack:GetProjectileCount() == 0 and scene.defender.Hp == 70 and scene.defender.DamageTakenSerial == 1,
+            label .. ": arrival uses the carried time and deals exactly one native hit")
+    end
 end)
 
 if manualClockOwned and session ~= nil then
