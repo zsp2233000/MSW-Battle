@@ -382,3 +382,13 @@ test('an attack trial stands the dummy on the hit point and every way out remove
   assert.match(methodBody(source, 'OnBeginPlay'), /self\.hitMarkerSprite/, 'hidden at the authored start');
   assert.match(methodBody(source, 'GetSnapshot'), /hitMarkerShown/, 'the snapshot reports whether the marker is shown');
 });
+
+test('clearing parks every stage sprite off the stage so a re-shown sprite never flashes at its previous spot', () => {
+  const source = read(MODULE);
+  assert.match(source, /property Vector2 OffstagePosition = Vector2\(-10000, -10000\)/, 'the parking spot is a named property');
+  const clear = methodBody(source, 'ClearEffects');
+  for (const name of ['projectileSprite', 'hitMarkerSprite', 'attackEffectSprite', 'hitEffectSprite']) {
+    assert.match(clear, new RegExp(`self\.${name}`), `${name} is handled by ClearEffects`);
+  }
+  assert.match(clear, /anchoredPosition = self\.OffstagePosition/, 'the sprites are moved to the parking spot');
+});
