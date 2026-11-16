@@ -42,7 +42,6 @@ script MonsterDex extends Logic
     property number StageScaleMultiplier = 1.2
     property string StageUnavailableText = "舞台無法使用：讀不到戰鬥鏡頭設定"
     property number HitPointMargin = 24
-    property Vector2 OffstagePosition = Vector2(-10000, -10000)
     -- The dummy figure (a normal training dummy mob's stand clip) shown at the hit point as a position marker only.
     property string HitMarkerRuid = "c9c6022d09854016b0c7f8422441ba2a"
     property string ScaleLabelFormat = "舞台縮小 ×%.2f"
@@ -408,10 +407,6 @@ script MonsterDex extends Logic
         self._T.timers = {}
         for _, effect in ipairs({ self.attackEffectSprite, self.hitEffectSprite }) do
             if isvalid(effect) then effect.Entity:SetEnable(false) end
-        end
-        -- A hidden sprite keeps its last position, and showing it again can draw one stale frame there before the new position takes hold: park every stage sprite off the stage so that frame is never seen.
-        for _, sprite in ipairs({ self.projectileSprite, self.hitMarkerSprite, self.attackEffectSprite, self.hitEffectSprite }) do
-            if isvalid(sprite) then sprite.Entity.UITransformComponent.anchoredPosition = self.OffstagePosition end
         end
     end
 
