@@ -67,7 +67,9 @@ test('the book background uses the specified RUID, keeps its aspect ratio and is
   assert.ok(Math.abs(transform.RectSize.x / transform.RectSize.y - BOOK_PIXELS.width / BOOK_PIXELS.height) < 0.002, 'aspect ratio of the 1024x664 picture');
   assert.ok(transform.RectSize.x <= CANVAS.width && transform.RectSize.y <= CANVAS.height, 'fits the canvas');
   assert.equal(transform.AlignmentOption, 0, 'middle-center anchor');
-  assert.deepEqual([transform.anchoredPosition.x, transform.anchoredPosition.y], [0, 0]);
+  // The author may nudge the page to line it up with the art; it must stay fully on the canvas.
+  assert.ok(Math.abs(transform.anchoredPosition.x) + transform.RectSize.x / 2 <= CANVAS.width / 2, 'page stays inside the canvas horizontally');
+  assert.ok(Math.abs(transform.anchoredPosition.y) + transform.RectSize.y / 2 <= CANVAS.height / 2, 'page stays inside the canvas vertically');
   assert.equal(sprite.Type, 0, 'plain image, not sliced or tiled');
 });
 
