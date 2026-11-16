@@ -377,7 +377,10 @@ test('an attack trial stands the dummy on the hit point and every way out remove
   assert.match(show, /footY/, 'feet on the ground line');
   assert.match(show, /pixelsPerUnit \/ self\.PixelsPerWorldUnit/, 'drawn at the stage art scale like the hit effect');
   assert.match(show, /HitMarkerRuid/);
-  assert.doesNotMatch(show, /PlaySound|SetTimer|RecordEvent|FlipX/, 'a position marker: no sound, no timer, no event, no facing write');
+  assert.doesNotMatch(show, /PlaySound|RecordEvent|FlipX/, 'a position marker: no sound, no event, no facing write');
+  assert.match(show, /SetEnable\(true\)[\s\S]*anchoredPosition[\s\S]*SetTimerOnce/, 'switched on first, moved, then revealed by one timer (no stale frame at the previous spot)');
+  assert.match(show, /Color\(color\.r, color\.g, color\.b, 0\)/, 'transparent until it is in place');
+  assert.match(source, /property number MarkerRevealSeconds = 0\.1/, 'the reveal delay is a named property');
   assert.match(methodBody(source, 'ClearEffects'), /hitMarkerSprite/, 'clearing hides the marker with the effects');
   assert.match(methodBody(source, 'OnBeginPlay'), /self\.hitMarkerSprite/, 'hidden at the authored start');
   assert.match(methodBody(source, 'GetSnapshot'), /hitMarkerShown/, 'the snapshot reports whether the marker is shown');

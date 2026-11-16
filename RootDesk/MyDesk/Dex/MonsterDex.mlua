@@ -42,6 +42,7 @@ script MonsterDex extends Logic
     property number StageScaleMultiplier = 1.2
     property string StageUnavailableText = "舞台無法使用：讀不到戰鬥鏡頭設定"
     property number HitPointMargin = 24
+    property number MarkerRevealSeconds = 0.1
     -- The dummy figure (a normal training dummy mob's stand clip) shown at the hit point as a position marker only.
     property string HitMarkerRuid = "c9c6022d09854016b0c7f8422441ba2a"
     property string ScaleLabelFormat = "舞台縮小 ×%.2f"
@@ -266,18 +267,24 @@ script MonsterDex extends Logic
 
     @ExecSpace("ClientOnly")
     method void ShowHitMarker(any row)
-        -- Stand a dummy figure on the hit point (feet on the ground line, facing the attacker, at the stage art scale) from the start of an attack trial until the next clear. It only marks the position: no damage, no sound, no event, no timer.
+        -- Stand a dummy figure on the hit point (feet on the ground line, facing the attacker, at the stage art scale) from the start of an attack trial until the next clear. It only marks the position: no damage, no sound, no event. A UI entity that is switched on again draws one frame at its previous spot before a new position takes hold, so the marker is switched on first, moved while transparent, and only made opaque a moment later.
         local marker = self.hitMarkerSprite
         if not isvalid(marker) then return end
         local geometry = self:StageGeometry(row)
         local scale = geometry.pixelsPerUnit / self.PixelsPerWorldUnit
-        marker.Entity:SetEnable(false)
+        local color = marker.Color
+        marker.Entity:SetEnable(true)
+        marker.Color = Color(color.r, color.g, color.b, 0)
         marker.AnimClipPlayType = SpriteAnimClipPlayType.Loop
         marker.ImageRUID = DataRef(self.HitMarkerRuid)
         marker.PreserveSprite = PreserveSpriteType.NativeSize
         marker.Entity.UITransformComponent.anchoredPosition = Vector2(geometry.hitX, geometry.footY)
         marker.Entity.UITransformComponent.UIScale = Vector3(scale, scale, 1)
-        marker.Entity:SetEnable(true)
+        local serial = self._T.trialSerial
+        local id = _TimerService:SetTimerOnce(function()
+            if serial == self._T.trialSerial and isvalid(marker) then marker.Color = Color(color.r, color.g, color.b, 1) end
+        end, self.MarkerRevealSeconds)
+        table.insert(self._T.timers, id)
     end
 
     @ExecSpace("ClientOnly")
