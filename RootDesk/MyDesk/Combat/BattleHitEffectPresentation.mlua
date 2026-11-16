@@ -2,20 +2,21 @@
 script BattleHitEffectPresentation extends Component
 
     @ExecSpace("Multicast")
-    method void PlayHitEffect(string effectRUID)
-        -- Deliver each hit effect on the defender that owns this component.
-        self:PlayAttachedEffect(effectRUID, "HIT")
+    method void PlayHitEffect(string effectRUID, number offsetX, number offsetY)
+        -- Deliver each hit effect on the defender that owns this component, with the effect's registered offset.
+        self:PlayAttachedEffect(effectRUID, "HIT", offsetX, offsetY)
     end
 
     @ExecSpace("Multicast")
-    method void PlayAttackEffect(string effectRUID)
-        -- Deliver one effect on the attacker for each accepted attack start.
-        self:PlayAttachedEffect(effectRUID, "ATTACK")
+    method void PlayAttackEffect(string effectRUID, number offsetX, number offsetY)
+        -- Deliver one effect on the attacker for each accepted attack start, with the effect's registered offset.
+        self:PlayAttachedEffect(effectRUID, "ATTACK", offsetX, offsetY)
     end
 
     @ExecSpace("ClientOnly")
-    method void PlayAttachedEffect(string effectRUID, string effectKind)
+    method void PlayAttachedEffect(string effectRUID, string effectKind, number offsetX, number offsetY)
         -- Attach to the owner's visible representation, including mirrored match views.
+        -- The offset is in world units: X follows the world axis (a mirrored viewer sees it mirrored with the field), Y is up.
         if effectRUID == nil or effectRUID == "" or effectRUID == "TBD" or effectRUID == "N/A" then return end
         if not isvalid(self.Entity) then return end
         local target = self.Entity
@@ -27,13 +28,16 @@ script BattleHitEffectPresentation extends Component
         end
         local options = nil
         if effectKind == "ATTACK" then options = { SyncFlip = true } end
-        local serial = _EffectService:PlayEffectAttached(effectRUID, target, Vector3(0, 0, 0), 0, Vector3(1, 1, 1), false, options)
+        local localX = offsetX or 0
+        if isvalid(view) and view:GetLocalFaction() == "ENEMY" then localX = -localX end
+        local serial = _EffectService:PlayEffectAttached(effectRUID, target, Vector3(localX, offsetY or 0, 0), 0, Vector3(1, 1, 1), false, options)
         if serial == 0 then
             log_error("[VRF][BattleEffect] CREATE_FAILED kind=" .. effectKind .. " owner=" .. self.Entity.Name .. ", ruid=" .. effectRUID)
             return
         end
         log("[VRF][BattleEffect] kind=" .. effectKind .. " owner=" .. self.Entity.Name
-            .. " target=" .. target.Name .. " ruid=" .. effectRUID .. " serial=" .. tostring(serial))
+            .. " target=" .. target.Name .. " ruid=" .. effectRUID .. " serial=" .. tostring(serial)
+            .. " offset=" .. tostring(localX) .. "," .. tostring(offsetY or 0))
         if isvalid(view) and view:GetLocalFaction() ~= "" then
             log("[VRF][BattleView] EFFECT target=" .. target.Name .. " serial=" .. tostring(serial)
                 .. " position=" .. tostring(target.TransformComponent.WorldPosition))

@@ -167,7 +167,9 @@ script BattleAttackComposition extends Component
         -- Start one ball at the shooter's body centre; it is owned by this actor and flies at the locked target.
         local profile = self._T.profile
         if profile == nil or not isvalid(target) then return end
-        local start = self:GetBodyCenter(self.Entity)
+        local body = self:GetBodyCenter(self.Entity)
+        -- The registered ball offset moves only the launch point; the flight toward the target is unchanged.
+        local start = Vector2(body.x + (profile.ProjectileOffsetX or 0), body.y + (profile.ProjectileOffsetY or 0))
         self._T.projectileSerial = (self._T.projectileSerial or 0) + 1
         local id = self.Entity.Name .. "#" .. tostring(self._T.projectileSerial)
         if self._T.projectiles == nil then self._T.projectiles = {} end
@@ -248,8 +250,10 @@ script BattleAttackComposition extends Component
         -- Snapshot the attacker's rules now so accepted hits survive later reconfiguration.
         local unit = self.Entity:GetComponent("script.BattleUnit")
         local tank = self._T.profile ~= nil and self._T.profile.MonsterType == "TANK"
+        local hitOffset = isvalid(unit) and unit:GetHitEffectOffset() or { x = 0, y = 0 }
         return { allowHitStop = not tank, knockbackDistance = tank and self._T.profile.KnockbackDistance or 0,
-            hitEffectRUID = isvalid(unit) and unit:GetHitEffectRUID() or "" }
+            hitEffectRUID = isvalid(unit) and unit:GetHitEffectRUID() or "",
+            hitEffectOffsetX = hitOffset.x, hitEffectOffsetY = hitOffset.y }
     end
 
     @ExecSpace("ServerOnly")
@@ -303,7 +307,7 @@ script BattleAttackComposition extends Component
         self._T.effectRequests = (self._T.effectRequests or 0) + 1
         log("[VRF][BattleAttack] EFFECT_REQUEST owner=" .. self.Entity.Name)
         local presentation = self.Entity:GetComponent("script.BattleHitEffectPresentation")
-        if isvalid(presentation) then presentation:PlayAttackEffect(self._T.profile.AttackEffectRUID) end
+        if isvalid(presentation) then presentation:PlayAttackEffect(self._T.profile.AttackEffectRUID, self._T.profile.AttackEffectOffsetX, self._T.profile.AttackEffectOffsetY) end
     end
 
     @ExecSpace("ServerOnly")

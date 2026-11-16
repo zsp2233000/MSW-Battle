@@ -26,7 +26,7 @@ const GROUPS = [
   { group: 'move', header: '移動', rows: [['move', '移動動畫']] },
   { group: 'attack', header: '攻擊', rows: [['attackAnimation', '攻擊動畫'], ['attackEffect', '出手特效'], ['hitEffect', '命中特效'],
     ['projectile', '投射物'], ['attackSound', '出手音效'], ['attackEffectFrame', '出手特效影格'], ['hitFrame', '命中影格'],
-    ['attackDuration', '攻擊動畫長度'], ['projectileSpeed', '投射物速度']] },
+    ['attackDuration', '攻擊動畫長度'], ['projectileSpeed', '投射物速度'], ['effectOffset', '特效偏移']] },
   { group: 'hurt', header: '受傷', rows: [['hurtAnimation', '受傷動畫'], ['hurtSound', '受傷音效']] },
   { group: 'die', header: '死亡', rows: [['dieAnimation', '死亡動畫'], ['dieSound', '死亡音效']] },
 ];

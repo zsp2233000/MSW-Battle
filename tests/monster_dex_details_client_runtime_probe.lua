@@ -23,7 +23,7 @@ local GROUPS = {
     { group = "move", header = "移動", rows = { { "move", "移動動畫" } } },
     { group = "attack", header = "攻擊", rows = { { "attackAnimation", "攻擊動畫" }, { "attackEffect", "出手特效" }, { "hitEffect", "命中特效" },
         { "projectile", "投射物" }, { "attackSound", "出手音效" }, { "attackEffectFrame", "出手特效影格" }, { "hitFrame", "命中影格" },
-        { "attackDuration", "攻擊動畫長度" }, { "projectileSpeed", "投射物速度" } } },
+        { "attackDuration", "攻擊動畫長度" }, { "projectileSpeed", "投射物速度" }, { "effectOffset", "特效偏移" } } },
     { group = "hurt", header = "受傷", rows = { { "hurtAnimation", "受傷動畫" }, { "hurtSound", "受傷音效" } } },
     { group = "die", header = "死亡", rows = { { "dieAnimation", "死亡動畫" }, { "dieSound", "死亡音效" } } },
 }
@@ -32,7 +32,7 @@ local RUID_FIELDS = {
     projectile = "projectileRuid", attackSound = "attackSoundRuid", hurtAnimation = "hurtRuid", hurtSound = "hurtSoundRuid",
     dieAnimation = "dieRuid", dieSound = "dieSoundRuid",
 }
-local EXPECTED_CHILDREN = 20
+local EXPECTED_CHILDREN = 21
 
 -- What a row must read for one published dex row: the text and whether it is a real value (not the unset text).
 local function expectedValue(key, row)
@@ -52,6 +52,12 @@ local function expectedValue(key, row)
     elseif key == "projectileSpeed" then
         if (row.projectileRuid or "") == "" then return UNSET, false end
         return string.format("%.2f", row.projectileSpeed) .. " 世界單位/秒", true
+    elseif key == "effectOffset" then
+        local v = { row.attackEffectOffsetX or 0, row.attackEffectOffsetY or 0, row.hitEffectOffsetX or 0, row.hitEffectOffsetY or 0, row.projectileOffsetX or 0, row.projectileOffsetY or 0 }
+        local any = false
+        for _, n in ipairs(v) do if n ~= 0 then any = true end end
+        if not any then return UNSET, false end
+        return string.format("出手 %g,%g  命中 %g,%g  投射 %g,%g", v[1], v[2], v[3], v[4], v[5], v[6]), true
     end
     return nil, false
 end

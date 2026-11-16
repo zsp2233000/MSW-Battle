@@ -69,7 +69,7 @@ local function expectedFlight(row)
     local unit = PIXELS_PER_UNIT * geometry.factor
     local bodyX = (row.bodyOffsetX or 0) * math.abs(row.scaleX)
     local bodyY = (row.bodyOffsetY or 0) * math.abs(row.scaleY)
-    local flight = { startX = geometry.footX - bodyX * unit, startY = geometry.footY + bodyY * unit, endX = geometry.hitX, endY = geometry.footY + bodyY * unit, unit = unit, seconds = 0 }
+    local flight = { startX = geometry.footX - bodyX * unit + (row.projectileOffsetX or 0) * unit, startY = geometry.footY + bodyY * unit + (row.projectileOffsetY or 0) * unit, endX = geometry.hitX, endY = geometry.footY + bodyY * unit, unit = unit, seconds = 0 }
     if hasBall(row) then flight.seconds = row.attackRange / row.projectileSpeed end
     return flight
 end
@@ -344,7 +344,7 @@ local ok, detail = pcall(function()
                 checkedEffect = true
                 local box = checkEffectSprite(dex.attackEffectSprite, row.attackEffectRuid, true, label .. " attack effect", _UtilLogic.ElapsedSeconds - seen("ATTACK_EFFECT").at)
                 local mine = sprite().Entity.UITransformComponent
-                check(math.abs(box.anchoredPosition.x - geometry.footX) < 1 and math.abs(box.anchoredPosition.y - geometry.footY) < 1, label .. ": the attack effect is on the attacker")
+                check(math.abs(box.anchoredPosition.x - (geometry.footX + (row.attackEffectOffsetX or 0) * PIXELS_PER_UNIT * geometry.factor)) < 1 and math.abs(box.anchoredPosition.y - (geometry.footY + (row.attackEffectOffsetY or 0) * PIXELS_PER_UNIT * geometry.factor)) < 1, label .. ": the attack effect is on the attacker, shifted by its registered offset")
                 check(math.abs(box.UIScale.x - mine.UIScale.x) < 0.001 and math.abs(box.UIScale.y - mine.UIScale.y) < 0.001, label .. ": the attack effect is drawn at the attacker's scale")
             end
             if wantHit and not checkedHit and seen("HIT_EFFECT") ~= nil then
@@ -352,8 +352,8 @@ local ok, detail = pcall(function()
                 -- The event log is a live table that timers append to while this poll reads other properties, so the ball is read right after the event is seen: the ball leaves before the arrival is recorded.
                 ballGoneAtHit = not ball.Entity.Enable
                 local box = checkEffectSprite(dex.hitEffectSprite, row.hitEffectRuid, false, label .. " hit effect", _UtilLogic.ElapsedSeconds - seen("HIT_EFFECT").at)
-                check(math.abs(box.anchoredPosition.x - geometry.hitX) < 1 and math.abs(box.anchoredPosition.y - geometry.footY) < 1,
-                    label .. ": the hit effect is at the hit point (" .. string.format("%.1f vs %.1f", box.anchoredPosition.x, geometry.hitX) .. ")")
+                check(math.abs(box.anchoredPosition.x - (geometry.hitX + (row.hitEffectOffsetX or 0) * PIXELS_PER_UNIT * geometry.factor)) < 1 and math.abs(box.anchoredPosition.y - (geometry.footY + (row.hitEffectOffsetY or 0) * PIXELS_PER_UNIT * geometry.factor)) < 1,
+                    label .. ": the hit effect is at the hit point, shifted by its registered offset (" .. string.format("%.1f,%.1f vs %.1f", box.anchoredPosition.x, box.anchoredPosition.y, geometry.hitX) .. ")")
             end
             if snap.action == "IDLE" and (checkedEffect or not wantEffect) and (checkedHit or not wantHit) and (not hasBall(row) or seen("PROJECTILE_ARRIVE") ~= nil) then break end
             wait(0.016)

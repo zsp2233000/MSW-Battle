@@ -13,6 +13,8 @@ const CSV = 'RootDesk/MyDesk/Data/MonsterData.csv';
 const UI_FILES = ['ui/MonsterDexGroup.ui', 'ui/FormationGroup.ui'];
 // Delays the catalog derives at load time; they are not data table columns.
 const DERIVED_PROFILE_FIELDS = ['AttackEffectDelaySeconds', 'ImpactDelaySeconds', 'AttackAnimationDurationSeconds'];
+// Offsets come from the EffectOffsetData table (keyed by effect RUID), resolved onto the profile at load time.
+const OFFSET_PROFILE_FIELDS = ['AttackEffectOffsetX', 'AttackEffectOffsetY', 'HitEffectOffsetX', 'HitEffectOffsetY', 'ProjectileOffsetX', 'ProjectileOffsetY'];
 
 function methodBody(source, name) {
   const match = source.match(new RegExp(`method [\\w<>, ]+ ${name}\\([^)]*\\)([\\s\\S]*?)\\n    end\\b`));
@@ -29,11 +31,14 @@ test('every data field a dex row copies is a data table column (or a documented 
   const fields = [...new Set([...dexRowBody().matchAll(/profile\.(\w+)/g)].map(m => m[1]))];
   assert.ok(fields.length >= 15, 'the dex row reads the presentation fields');
   for (const field of fields) {
-    if (DERIVED_PROFILE_FIELDS.includes(field)) continue;
+    if (DERIVED_PROFILE_FIELDS.includes(field) || OFFSET_PROFILE_FIELDS.includes(field)) continue;
     assert.ok(columns.includes(field), `${field} is a MonsterData column`);
   }
   const catalog = read(CATALOG);
   for (const field of DERIVED_PROFILE_FIELDS) assert.match(catalog, new RegExp(`${field}\\s*=`), `${field} is derived by the catalog`);
+  for (const field of OFFSET_PROFILE_FIELDS) assert.match(catalog, new RegExp(`profile\\.${field}\\s*=`), `${field} is resolved from EffectOffsetData`);
+  const offsets = read('RootDesk/MyDesk/Data/EffectOffsetData.csv').replace(/^﻿/, '').split(/\r?\n/)[0].split(',');
+  assert.deepEqual(offsets, ['EffectRUID', 'OffsetX', 'OffsetY']);
 });
 
 test('every row field the book reads is published by GetDexRows', () => {

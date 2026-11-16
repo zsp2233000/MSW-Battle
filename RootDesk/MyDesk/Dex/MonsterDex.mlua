@@ -318,11 +318,13 @@ script MonsterDex extends Logic
         local geometry = self:StageGeometry(row)
         local bodyX = (row.bodyOffsetX or 0) * math.abs(row.scaleX)
         local bodyY = (row.bodyOffsetY or 0) * math.abs(row.scaleY)
-        local startX = geometry.footX - bodyX * geometry.pixelsPerUnit
-        local startY = geometry.footY + bodyY * geometry.pixelsPerUnit
+        -- The ball's registered offset moves only where it starts (X as the world axis, not mirrored; Y up); its level flight then carries on from there.
+        local levelY = geometry.footY + bodyY * geometry.pixelsPerUnit
+        local startX = geometry.footX - bodyX * geometry.pixelsPerUnit + (row.projectileOffsetX or 0) * geometry.pixelsPerUnit
+        local startY = levelY + (row.projectileOffsetY or 0) * geometry.pixelsPerUnit
         local distance = row.attackRange
         return {
-            from = Vector2(startX, startY), to = Vector2(geometry.hitX, startY),
+            from = Vector2(startX, startY), to = Vector2(geometry.hitX, levelY),
             seconds = distance / row.projectileSpeed, pixelsPerUnit = geometry.pixelsPerUnit,
         }
     end
@@ -374,7 +376,11 @@ script MonsterDex extends Logic
         if ruid == "" or not isvalid(effect) then return end
         local geometry = self:StageGeometry(row)
         local isAttack = name == "ATTACK_EFFECT"
-        local position = isAttack and Vector2(geometry.footX, geometry.footY) or Vector2(geometry.hitX, geometry.footY)
+        local base = isAttack and Vector2(geometry.footX, geometry.footY) or Vector2(geometry.hitX, geometry.footY)
+        -- The effect's registered offset in world units: X to the screen right whatever the facing, Y up.
+        local offsetX = (isAttack and row.attackEffectOffsetX or row.hitEffectOffsetX) or 0
+        local offsetY = (isAttack and row.attackEffectOffsetY or row.hitEffectOffsetY) or 0
+        local position = Vector2(base.x + offsetX * geometry.pixelsPerUnit, base.y + offsetY * geometry.pixelsPerUnit)
         local scale = isAttack and self.stageSprite.Entity.UITransformComponent.UIScale or Vector3(geometry.pixelsPerUnit / self.PixelsPerWorldUnit, geometry.pixelsPerUnit / self.PixelsPerWorldUnit, 1)
         effect.Entity:SetEnable(false)
         effect.AnimClipPlayType = SpriteAnimClipPlayType.Onetime
@@ -582,6 +588,7 @@ script MonsterDex extends Logic
                 { key = "hitFrame", label = "命中影格", kind = "hitFrame" },
                 { key = "attackDuration", label = "攻擊動畫長度", kind = "duration" },
                 { key = "projectileSpeed", label = "投射物速度", kind = "projectileSpeed" },
+                { key = "effectOffset", label = "特效偏移", kind = "effectOffset" },
                 { group = "hurt", header = "受傷" },
                 { key = "hurtAnimation", label = "受傷動畫", kind = "ruid", field = "hurtRuid" },
                 { key = "hurtSound", label = "受傷音效", kind = "ruid", field = "hurtSoundRuid" },
@@ -607,6 +614,15 @@ script MonsterDex extends Logic
         end
         if spec.kind == "hitFrame" then
             return { value = string.format("第 %d 格 (%.2f 秒)", row.attackDamageFrame, row.impactDelay), isSet = true }
+        end
+        if spec.kind == "effectOffset" then
+            local values = { row.attackEffectOffsetX or 0, row.attackEffectOffsetY or 0, row.hitEffectOffsetX or 0, row.hitEffectOffsetY or 0, row.projectileOffsetX or 0, row.projectileOffsetY or 0 }
+            local registered = false
+            for _, value in ipairs(values) do
+                if value ~= 0 then registered = true end
+            end
+            if not registered then return unset end
+            return { value = string.format("出手 %g,%g  命中 %g,%g  投射 %g,%g", values[1], values[2], values[3], values[4], values[5], values[6]), isSet = true }
         end
         if spec.kind == "duration" then
             return { value = string.format("%.2f 秒", row.attackDuration), isSet = true }
@@ -639,7 +655,7 @@ script MonsterDex extends Logic
 
     @ExecSpace("ClientOnly")
     method void BuildDetailRows()
-        -- Clone the fixed 20-row list from the two templates, in DetailSpecs order. Rows are cloned at runtime (like the monster list) because a list of purely authored rows never measured its content, so it never scrolled.
+        -- Clone the fixed detail list from the two templates, in DetailSpecs order. Rows are cloned at runtime (like the monster list) because a list of purely authored rows never measured its content, so it never scrolled.
         if not isvalid(self.headerTemplate) or not isvalid(self.detailTemplate) then return end
         self:DestroyDetailRows()
         for _, spec in ipairs(self:DetailSpecs()) do
