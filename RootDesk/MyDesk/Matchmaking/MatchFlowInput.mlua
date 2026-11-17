@@ -58,7 +58,8 @@ script MatchFlowInput extends Logic
         if map == "formationlobby" then return "Match" end
         if map ~= "matchprobe" then return "" end
         if _BattleUIController.OwnResult ~= "" then return "BattleResult" end
-        if self.Snapshot.state == "BATTLE" then return "" end
+        -- The result window waits two seconds; keep the old corner panel hidden during that delay.
+        if self.Snapshot.state == "BATTLE" or string.sub(self.Snapshot.state, 1, 7) == "RESULT_" then return "" end
         return "BattleMatch"
     end
 
