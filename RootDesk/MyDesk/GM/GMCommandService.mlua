@@ -10,45 +10,235 @@ script GMCommandService extends Logic
     @ExecSpace("ServerOnly")
     method void Execute(string requesterProfile, table command, any complete)
         -- All commands, including identity and unknown commands, fail closed before dispatch.
-        if not self:IsGM(requesterProfile) then
-            complete({ status = "FORBIDDEN" })
-            return
-        end
-        if command.kind == "IDENTITY" then
-            complete({ status = "OK", profile = requesterProfile })
-            return
-        end
-        if command.kind ~= "LOAD_LEVELS" then
-            complete({ status = "INVALID_COMMAND" })
-            return
-        end
+        if not self:IsGM(requesterProfile) then complete({ status = "FORBIDDEN" }) return end
+        if command.kind == "IDENTITY" then complete({ status = "OK", profile = requesterProfile }) return end
         local profile = command.profile == "" and requesterProfile or command.profile
         if type(profile) ~= "string" or #profile == 0 or #profile > 64 or not string.match(profile, "^[%w]+$") then
             complete({ status = "INVALID_PROFILE" })
             return
         end
+        if command.kind == "LOAD_LEVELS" then self:Load(profile, complete) return end
+        if command.kind == "SAVE_LEVELS" or command.kind == "FORCE_SAVE_LEVELS"
+            or command.kind == "RESET_LEVELS" or command.kind == "DELETE_LEVELS" then
+            self:Mutate(requesterProfile, profile, command, complete)
+            return
+        end
+        complete({ status = "INVALID_COMMAND" })
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Load(string profile, any complete)
+        -- Return exact bytes as the CAS expectation; reads never create or repair a save.
         local catalog = _FormationService:GetCatalog()
         if catalog == nil then complete({ status = "UNAVAILABLE" }) return end
         _FormationStorage:Read(profile, _MonsterLevelStorage.StorageKey, function(code, key, raw)
             local missing = code == 1000002 or (code == 0 and raw == nil)
-            if not missing and code ~= 0 then
-                complete({ status = "STORAGE_ERROR", code = code, profile = profile })
-                return
-            end
-            local document = missing and { monsters = {} } or _MonsterLevelStorage:Decode(raw)
+            if not missing and code ~= 0 then complete({ status = "STORAGE_ERROR", code = code, profile = profile }) return end
+            local stored = missing and "" or raw
+            local document = missing and { monsters = {}, settled = {} } or _MonsterLevelStorage:Decode(raw)
             if document == nil then
-                complete({ status = "CORRUPT", profile = profile, raw = raw })
+                complete({ status = "CORRUPT", profile = profile, expected = stored, raw = stored })
                 log("[VRF][GM] load corrupt profile=" .. profile)
                 return
             end
-            local rows = {}
-            for _, monster in ipairs(catalog:GetDeploymentOptions()) do
-                local progress = document.monsters[monster.monsterId] or _MonsterProgression:DefaultProgress()
-                table.insert(rows, { monsterId = monster.monsterId, monsterName = monster.monsterName,
-                    level = progress.level, experience = progress.experience })
-            end
-            complete({ status = "READY", profile = profile, exists = not missing, rows = rows })
-            log("[VRF][GM] load profile=" .. profile .. " rows=" .. tostring(#rows) .. " exists=" .. tostring(not missing))
+            complete(self:Ready(profile, not missing, stored, document, catalog))
+            log("[VRF][GM] load profile=" .. profile .. " exists=" .. tostring(not missing))
         end)
+    end
+
+    @ExecSpace("ServerOnly")
+    method table Ready(string profile, boolean exists, string expected, table document, any catalog)
+        -- Keep absent progress at the shared default without inventing stored rows.
+        local rows = {}
+        for _, monster in ipairs(catalog:GetDeploymentOptions()) do
+            local progress = document.monsters[monster.monsterId] or _MonsterProgression:DefaultProgress()
+            table.insert(rows, { monsterId = monster.monsterId, monsterName = monster.monsterName,
+                level = progress.level, experience = progress.experience })
+        end
+        return { status = "READY", profile = profile, exists = exists, expected = expected, rows = rows }
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Mutate(string requesterProfile, string profile, table command, any complete)
+        -- One exclusive owner covers audit, CAS, force re-read and marker deletion.
+        local key = _MonsterLevelStorage.StorageKey
+        _FormationStorage:BeginExclusive(profile, key, function(code, memory, lockName, etag)
+            if code ~= 0 then complete({ status = "BUSY", code = code, profile = profile }) return end
+            local function finish(response, retainGuard)
+                if not retainGuard then _FormationStorage:EndExclusive(memory, lockName, etag) end
+                complete(response)
+            end
+            self:ReadCurrent(profile, key, function(readCode, stored, document)
+                if readCode ~= 0 then finish({ status = "STORAGE_ERROR", code = readCode, profile = profile }) return end
+                if command.kind == "FORCE_SAVE_LEVELS" then
+                    self:Commit(requesterProfile, profile, key, command, stored, document, finish)
+                    return
+                end
+                if stored ~= (command.expected or "") then
+                    finish(self:Conflict(profile, stored, document))
+                    return
+                end
+                self:Commit(requesterProfile, profile, key, command, stored, document, finish)
+            end)
+        end)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void ReadCurrent(string profile, string key, any complete)
+        -- Distinguish absence, corruption and storage errors without repairing any of them.
+        _FormationStorage:Read(profile, key, function(code, loadedKey, raw)
+            local missing = code == 1000002 or (code == 0 and raw == nil)
+            if not missing and code ~= 0 then complete(code, nil, nil) return end
+            local stored = missing and "" or raw
+            complete(0, stored, missing and { monsters = {}, settled = {} } or _MonsterLevelStorage:Decode(raw))
+        end)
+    end
+
+    @ExecSpace("ServerOnly")
+    method table Conflict(string profile, string stored, table document)
+        -- Return the version the GM must reload or explicitly overwrite.
+        local catalog = _FormationService:GetCatalog()
+        if document == nil or catalog == nil then return { status = "CONFLICT", profile = profile, expected = stored, raw = stored } end
+        local reply = self:Ready(profile, stored ~= "", stored, document, catalog)
+        reply.status = "CONFLICT"
+        return reply
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Commit(string requesterProfile, string profile, string key, table command, string stored, table document, any finish)
+        -- Audit the version about to be overwritten before any save mutation.
+        local after, delete = self:Plan(command, stored, document)
+        if after == nil and not delete then finish(delete == false and { status = "INVALID_PROGRESS", profile = profile } or { status = "NOT_CORRUPT", profile = profile }) return end
+        local marker = delete and "GM85DELETE:" .. _UtilLogic:NewGuid() or nil
+        self:Audit(profile, requesterProfile, key, stored, marker or after, "PENDING", "", function(auditCode, auditRaw)
+            if auditCode ~= 0 then finish({ status = "AUDIT_FAILED", code = auditCode, profile = profile }) return end
+            local function recorded(outcome, response, retainGuard, auditedAfter)
+                self:Audit(profile, requesterProfile, key, stored, auditedAfter or marker or after, outcome, auditRaw, function(resultCode)
+                    response.status = resultCode == 0 and response.status or "AUDIT_INCOMPLETE"
+                    response.code = resultCode == 0 and response.code or resultCode
+                    finish(response, retainGuard)
+                end)
+            end
+            if delete then
+                _FormationStorage:WriteGuarded(memory, lockName, etag, profile, key, stored, marker, function(markerCode)
+                    if markerCode ~= 0 then
+                        recorded("FAILED", { status = "STORAGE_ERROR", code = markerCode, profile = profile }, markerCode ~= 0 and stored == "")
+                        return
+                    end
+                    _FormationStorage:DeleteGuarded(profile, key, marker, function(deleteCode)
+                        local response = deleteCode == 0 and { status = "SAVED", profile = profile, expected = "", exists = false }
+                            or { status = "STORAGE_ERROR", code = deleteCode, profile = profile }
+                        recorded(deleteCode == 0 and "SAVED" or "FAILED", response, false, "")
+                    end)
+                end)
+                return
+            end
+            local function write(expected)
+                _FormationStorage:WriteGuarded(memory, lockName, etag, profile, key, expected, after, function(writeCode)
+                    if writeCode == 2000000 then
+                        self:ReadCurrent(profile, key, function(readCode, current, currentDocument)
+                            if readCode ~= 0 then recorded("FAILED", { status = "STORAGE_ERROR", code = readCode, profile = profile }) return end
+                            recorded("CONFLICT", self:Conflict(profile, current, currentDocument))
+                        end)
+                        return
+                    end
+                    local response = writeCode == 0 and self:Saved(profile, after) or { status = "STORAGE_ERROR", code = writeCode, profile = profile }
+                    recorded(writeCode == 0 and "SAVED" or "FAILED", response, writeCode ~= 0 and expected == "")
+                end)
+            end
+            if command.kind ~= "FORCE_SAVE_LEVELS" then write(stored) return end
+            self:ReadCurrent(profile, key, function(readCode, current, currentDocument)
+                if readCode ~= 0 then recorded("FAILED", { status = "STORAGE_ERROR", code = readCode, profile = profile }) return end
+                if current ~= stored then recorded("CONFLICT", self:Conflict(profile, current, currentDocument)) return end
+                write(current)
+            end)
+        end)
+    end
+
+    @ExecSpace("ServerOnly")
+    method any Plan(table command, string stored, table document)
+        -- Rows edit one document; raw repairs corruption; reset keeps settled matches.
+        local action = command.kind == "FORCE_SAVE_LEVELS" and command.action or command.kind
+        if action ~= "SAVE_LEVELS" and action ~= "RESET_LEVELS" and action ~= "DELETE_LEVELS" then return nil, false end
+        if action == "DELETE_LEVELS" then return nil, document == nil and stored ~= "" end
+        if command.raw ~= nil and command.rows ~= nil then return nil, false end
+        if document == nil and command.raw == nil then return nil, false end
+        local catalog = _FormationService:GetCatalog()
+        if catalog == nil then return nil, false end
+        local source = document or { monsters = {}, settled = {} }
+        local monsters = {}
+        for id, progress in pairs(source.monsters) do monsters[id] = { level = progress.level, experience = progress.experience } end
+        if action == "RESET_LEVELS" then
+            monsters = {}
+            for _, monster in ipairs(catalog:GetDeploymentOptions()) do monsters[monster.monsterId] = _MonsterProgression:DefaultProgress() end
+        elseif command.raw ~= nil then
+            if document ~= nil then return nil, false end
+            local decoded = _MonsterLevelStorage:Decode(command.raw)
+            if decoded == nil then return nil, false end
+            monsters = decoded.monsters
+            source.settled = decoded.settled
+        elseif command.rows ~= nil then
+            local count = _FormationSchema:ArrayCount(command.rows, 100)
+            if count < 0 then return nil, false end
+            local seen = {}
+            for _, row in ipairs(command.rows) do
+                if type(row) ~= "table" or catalog:GetProfile(row.monsterId) == nil or seen[row.monsterId]
+                    or not _MonsterProgression:IsValidProgress(row.level, row.experience) then return nil, false end
+                seen[row.monsterId] = true
+                monsters[row.monsterId] = { level = row.level, experience = row.experience }
+            end
+        end
+        local encoded = _MonsterLevelStorage:Encode({ schema = 1, monsters = monsters, settled = source.settled })
+        if #encoded > 4000 then return nil, false end
+        return encoded, false
+    end
+
+    @ExecSpace("ServerOnly")
+    method table Saved(string profile, string raw)
+        -- Read the committed bytes back through the existing decoder before reporting success.
+        local document = _MonsterLevelStorage:Decode(raw)
+        local catalog = _FormationService:GetCatalog()
+        local reply = self:Ready(profile, true, raw, document, catalog)
+        reply.status = "SAVED"
+        return reply
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Audit(string profile, string requesterProfile, string key, string before, string after, string outcome, string expected, any complete)
+        -- CAS against the exact audit bytes just read; missing and timeout stay distinct.
+        _FormationStorage:ReadAudit(profile, function(code, raw)
+            local missing = code == 1000002 or (code == 0 and raw == nil)
+            if not missing and code ~= 0 then complete(code, nil) return end
+            local current = missing and "" or raw
+            if outcome == "PENDING" then expected = current elseif expected == "" then expected = current end
+            local records = missing and {} or self:DecodeAudit(raw)
+            if records == nil then complete(2000001, nil) return end
+            if outcome == "PENDING" then
+                table.insert(records, { gm = requesterProfile, time = DateTime.UtcNow:ToFormattedString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+                    target = profile, key = key, before = before, after = after, outcome = outcome })
+                while #records > 20 do table.remove(records, 1) end
+            else
+                records[#records].outcome = outcome
+            end
+            local encoded = self:EncodeAudit(records)
+            _FormationStorage:WriteAudit(profile, expected, encoded, function(writeCode)
+                complete(writeCode, writeCode == 0 and encoded or nil)
+            end)
+        end)
+    end
+
+    @ExecSpace("ServerOnly")
+    method table DecodeAudit(any raw)
+        -- Reject a damaged audit trail instead of dropping its history.
+        if raw == nil or raw == "" then return {} end
+        local ok, decoded = pcall(function() return _HttpService:JSONDecode(raw) end)
+        if not ok or type(decoded) ~= "table" then return nil end
+        return decoded
+    end
+
+    @ExecSpace("ServerOnly")
+    method string EncodeAudit(table records)
+        -- Preserve the empty-array shape rejected by native JSONEncode.
+        return #records == 0 and "[]" or _HttpService:JSONEncode(records)
     end
 end

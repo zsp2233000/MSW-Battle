@@ -51,6 +51,12 @@ script FormationStorage extends Logic
     end
 
     @ExecSpace("ServerOnly")
+    method void ConfigureMakerAuditFailures(integer count)
+        -- Fail only the GM audit write; ordinary save writes stay on the real path.
+        if Environment:IsMakerPlay() then self._T.auditFailures = math.max(0, count) end
+    end
+
+    @ExecSpace("ServerOnly")
     method void ConfigureMakerSaveResponse(string mode, number delaySeconds)
         -- Fault only formation acknowledgements; transfer persistence continues through the real boundary.
         if not Environment:IsMakerPlay() then return end
@@ -154,6 +160,104 @@ script FormationStorage extends Logic
             end)
         end
         if delaySeconds > 0 then self:Schedule(perform, delaySeconds) else perform() end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void BeginExclusive(string profile, string key, any complete)
+        -- Hold the existing cross-instance ETag for the whole GM mutation, including delete.
+        self:RetryRelease(profile, key)
+        local memoryCode, memory = _WorldInstanceService:GetSharedMemory("BattleFormationWrites")
+        local lockName = self:LockName(profile, key)
+        if memoryCode ~= SharedMemoryResultCode.OK or #lockName > 100 then complete(1000001, nil, nil, nil) return end
+        local acquired = memory:CreateVariableAndWait(lockName, "writing")
+        if acquired.Code == SharedMemoryResultCode.AlreadyExists then
+            local currentGuard = memory:GetVariableAndWait(lockName)
+            if currentGuard.Code == SharedMemoryResultCode.OK and currentGuard.Info.Value == "free" then
+                acquired = memory:UpdateVariableAndWait(SharedVariableKeyInfo(lockName, currentGuard.Info.ETag), "writing")
+            end
+        end
+        if acquired.Code ~= SharedMemoryResultCode.OK then complete(1000007, nil, nil, nil) return end
+        complete(0, memory, lockName, acquired.Info.ETag)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void EndExclusive(any memory, string lockName, string etag)
+        -- Release only this owner; a late callback cannot steal a newer mutation.
+        self:ReleaseGuard(memory, lockName, etag)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void WriteGuarded(any memory, string lockName, string etag, string profile, string key, string expected, string raw, any complete)
+        -- Reuse native CAS or the creation recheck while the caller already owns the guard.
+        if Environment:IsMakerPlay() and (self._T.writeFailures or 0) > 0 then
+            self._T.writeFailures = self._T.writeFailures - 1
+            complete(1000004)
+            return
+        end
+        local storage = _DataStorageService:GetUserDataStorage(profile)
+        if expected ~= "" then
+            storage:UpdateAsync(key, expected, raw, function(code, savedKey, value) complete(code) end)
+            return
+        end
+        storage:GetAsync(key, function(readCode, loadedKey, current)
+            if not (readCode == 1000002 or (readCode == 0 and current == nil)) then
+                complete(readCode == 0 and 2000000 or readCode)
+                return
+            end
+            storage:SetAsync(key, raw, function(code, savedKey)
+                if code ~= 0 then
+                    -- A timed-out creation may still land; keep its owner until those exact bytes are observed.
+                    self._T.uncertain = self._T.uncertain or {}
+                    self._T.uncertain[lockName] = { memory = memory, lockName = lockName, etag = etag, key = key, raw = raw }
+                end
+                complete(code)
+            end)
+        end)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void DeleteGuarded(string profile, string key, string marker, any complete)
+        -- Delete only while the unique marker is still the current value.
+        if Environment:IsMakerPlay() and (self._T.writeFailures or 0) > 0 then
+            self._T.writeFailures = self._T.writeFailures - 1
+            complete(1000004)
+            return
+        end
+        local storage = _DataStorageService:GetUserDataStorage(profile)
+        storage:GetAsync(key, function(code, loadedKey, current)
+            if code ~= 0 or current ~= marker then complete(code == 0 and 2000000 or code) return end
+            storage:DeleteAsync(key, function(deleteCode, deletedKey) complete(deleteCode) end)
+        end)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void ReadAudit(string profile, any complete)
+        -- Read the target player's audit trail without creating it.
+        _DataStorageService:GetGlobalDataStorage("GMAuditV1"):GetAsync(profile, function(code, key, raw)
+            complete(code, raw)
+        end)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void WriteAudit(string profile, string expected, string raw, any complete)
+        -- Keep one global audit container keyed by the target player, with Maker-only failure injection.
+        if Environment:IsMakerPlay() and (self._T.auditFailures or 0) > 0 then
+            self._T.auditFailures = self._T.auditFailures - 1
+            complete(1000004)
+            return
+        end
+        local storage = _DataStorageService:GetGlobalDataStorage("GMAuditV1")
+        if expected == "" then
+            storage:GetAsync(profile, function(code, loadedKey, current)
+                if not (code == 1000002 or (code == 0 and current == nil)) then
+                    complete(code == 0 and 2000000 or code)
+                    return
+                end
+                storage:SetAsync(profile, raw, function(writeCode, savedKey) complete(writeCode) end)
+            end)
+            return
+        end
+        storage:UpdateAsync(profile, expected, raw, function(code, savedKey, value) complete(code) end)
     end
 
     @ExecSpace("ServerOnly")
