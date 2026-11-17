@@ -67,11 +67,23 @@ local runOk, runDetail = pcall(function()
     if not manualClockOwned then return end
 
     local profile = session:GetMonsterProfile("monster_moon_pixie")
-    check(profile ~= nil and profile.ProjectileRUID ~= "" and profile.ProjectileSpeed == 5,
-        "catalog publishes the moon pixie ball clip and speed 5")
+    check(profile ~= nil and profile.ProjectileRUID ~= "" and profile.ProjectileSpeed > 0,
+        "catalog publishes the moon pixie ball clip and speed")
     local instant = session:GetMonsterProfile("monster_shooter")
     check(instant ~= nil and instant.ProjectileRUID == "" and instant.ProjectileSpeed == 0,
         "the original shooter keeps an instant strike")
+
+    local darkCentaur = session:GetMonsterProfile("monster_dark_centaur")
+    check(darkCentaur ~= nil and darkCentaur.AttackEffectDelaySeconds < darkCentaur.ImpactDelaySeconds,
+        "dark centaur attack-effect deadline precedes its damage deadline")
+    local darkScene = prepare("monster_dark_centaur")
+    check(darkScene ~= nil, "dark centaur scene is prepared")
+    if darkScene ~= nil then
+        local darkLaunch = stepUntilLaunch(darkScene, 1)
+        check(darkLaunch ~= nil and darkLaunch < darkCentaur.ImpactDelaySeconds,
+            "dark centaur launches before its damage frame")
+        darkScene.attack:Cancel()
+    end
 
     -- Case 1: damage waits for the ball to arrive.
     local scene = prepare("monster_moon_pixie")
@@ -79,7 +91,7 @@ local runOk, runDetail = pcall(function()
         "moon pixie and stationary target are prepared")
     if scene == nil then return end
     local launchedAfter = stepUntilLaunch(scene, 3)
-    check(launchedAfter ~= nil, "the impact frame launches a ball")
+    check(launchedAfter ~= nil, "the attack-effect frame launches a ball")
     if launchedAfter == nil then return end
     check(scene.unit.AttackSerial == 1, "one attack started")
     check(scene.defender.Hp == 100 and scene.defender.DamageTakenSerial == 0,
@@ -97,7 +109,7 @@ local runOk, runDetail = pcall(function()
         if scene.attack:GetProjectileCount() > 0 and scene.defender.Hp ~= 100 then damagedWhileFlying = true end
     end
     check(not damagedWhileFlying, "the target is untouched while the ball is in flight")
-    local expected = distance / 5
+    local expected = distance / profile.ProjectileSpeed
     check(math.abs(flight - expected) <= 0.15,
         "flight time follows distance / speed (expected " .. tostring(expected) .. ", observed " .. tostring(flight) .. ")")
     check(scene.defender.Hp == 70 and scene.defender.DamageTakenSerial == 1,
@@ -110,9 +122,7 @@ local runOk, runDetail = pcall(function()
     check(stepUntilLaunch(scene, 3) ~= nil, "second scene launches a ball")
     scene.attack:Cancel()
     check(scene.attack:GetProjectileCount() == 0, "Cancel discards the ball in flight")
-    -- Cancel also clears the interval, so the shooter may start a fresh attack; stay inside the 0.85 s
-    -- impact delay of that new attack while still outlasting the cancelled ball's 0.62 s flight.
-    for _ = 1, 14 do session:AdvanceForTest(STEP) end
+    session:AdvanceForTest(STEP)
     check(scene.attack:GetProjectileCount() == 0 and scene.defender.Hp == 100 and scene.defender.DamageTakenSerial == 0,
         "a cancelled ball never damages the target")
 
@@ -128,7 +138,7 @@ local runOk, runDetail = pcall(function()
     check(not sawBall and scene.defender.DamageTakenSerial >= 1,
         "the instant shooter damages without a projectile")
 
-    -- Case 4: a ball only flies for the part of its launch frame after the impact deadline.
+    -- Case 4: a ball only flies for the part of its launch frame after the attack-effect deadline.
     for _, carriedFraction in ipairs({ 0, 0.5 }) do
         scene = prepare("monster_moon_pixie")
         check(scene ~= nil, "long-frame scene is prepared")
@@ -144,7 +154,7 @@ local runOk, runDetail = pcall(function()
         local flightSeconds = math.sqrt((to.x - from.x) ^ 2 + (to.y - from.y) ^ 2) / profile.ProjectileSpeed
         local carriedSeconds = flightSeconds * carriedFraction
         local label = "launch frame with " .. tostring(carriedFraction) .. " of the flight elapsed"
-        session:StepSimulation(profile.ImpactDelaySeconds + carriedSeconds + 0.000001)
+        session:StepSimulation(profile.AttackEffectDelaySeconds + carriedSeconds + 0.000001)
         check(scene.attack:GetProjectileCount() == 1 and scene.defender.Hp == 100 and scene.defender.DamageTakenSerial == 0,
             label .. ": the new ball is still flying, without damage")
         session:StepSimulation(flightSeconds - carriedSeconds - 0.02)

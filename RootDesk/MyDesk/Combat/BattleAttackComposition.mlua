@@ -83,7 +83,9 @@ script BattleAttackComposition extends Component
         end
         self._T.adapter:ResetTarget()
         self._T.pendingTarget = target
-        self._T.impactRemaining = profile.ImpactDelaySeconds
+        local resolveDelay = profile.ImpactDelaySeconds
+        if self:UsesProjectile() then resolveDelay = profile.AttackEffectDelaySeconds or 0 end
+        self._T.impactRemaining = resolveDelay
         self._T.cooldownRemaining = profile.AttackIntervalSeconds
         self:PublishAttackStart(target)
     end

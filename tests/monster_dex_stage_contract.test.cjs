@@ -308,12 +308,12 @@ test('the projectile ball is an authored stage sprite: hidden, plain, centred, f
   assert.deepEqual([box.Pivot.x, box.Pivot.y], [0.5, 0.5], 'positioned by its centre');
 });
 
-test('a monster with a projectile clip and a speed launches the ball at the hit-frame delay and lands the hit effect on arrival', () => {
+test('a monster with a projectile clip and a speed launches the ball at the attack-effect delay and lands the hit effect on arrival', () => {
   const source = read(MODULE);
   const arm = methodBody(source, 'ArmAttackTrial');
   assert.match(arm, /UsesProjectile\(/, 'the attack trial branches on the row having a ball');
-  assert.match(arm, /LaunchProjectile\(/, 'the ball leaves at the hit-frame delay');
-  assert.match(arm, /impactDelay/, 'the launch uses the row hit delay');
+  assert.match(arm, /LaunchProjectile\(/, 'the ball leaves at the attack-effect delay');
+  assert.match(arm, /attackEffectDelay/, 'the launch uses the row attack-effect delay');
   const uses = methodBody(source, 'UsesProjectile');
   assert.match(uses, /projectileRuid/);
   assert.match(uses, /projectileSpeed/, 'a ball without a positive speed is an instant hit, as in the details list');

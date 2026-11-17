@@ -55,6 +55,9 @@ test('projectiles are owned by the attacker and resolve through the native hit p
   assert.match(cancel, /ClearProjectiles\(\)/, 'cancelling the actor discards its projectiles');
   const advance = composition.match(/method void Advance\(number delta\)([\s\S]*?)\n    end/)[1];
   assert.match(advance, /AdvanceProjectiles\(delta\)/);
+  const engage = composition.match(/method void TryEngage\(Entity target, boolean targetInRange\)([\s\S]*?)\n    end/)[1];
+  assert.match(engage, /if self:UsesProjectile\(\) then resolveDelay = profile\.AttackEffectDelaySeconds or 0 end/,
+    'projectiles launch on AttackEffectFrame instead of AttackDamageFrame');
 
   assert.match(single, /method void ResolveProjectileArrival\(Entity target\)/);
   assert.match(single, /self:Attack\(/, 'arrival damage uses the native Attack to Hit pipeline');
