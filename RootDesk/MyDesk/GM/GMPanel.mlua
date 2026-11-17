@@ -1,0 +1,221 @@
+@Logic
+script GMPanel extends Logic
+
+    property Entity panel = "ce0fd29b-64ea-4364-b244-c10896174934"
+    property ButtonComponent lobbyButton = "620d7621-27dd-4210-941d-ca3e29130ee8"
+    property ButtonComponent closeButton = "ae519708-9aa6-4ed7-983c-a574cd69c0a9"
+    property ButtonComponent loadButton = "38497918-2aef-4246-b302-557cd1f394b9"
+    property ButtonComponent selfButton = "a8302ff8-c3d3-4392-a84a-e2965a9aa306"
+    property TextGUIRendererInputComponent targetInput = "7d4ad329-6b5a-4485-85e7-2d9977fe72cb"
+    property TextGUIRendererComponent statusText = "6d59564f-f39a-4686-83f7-a01e468ddefa"
+    property Entity tableHeader = "54f1f67c-576b-49bb-ba6f-f8178e344b0b"
+    property ScrollLayoutGroupComponent listLayout = "e7e709c1-4f5a-458d-8f30-67c4111c3bec"
+    property Entity rowTemplate = "5009a317-30a9-4097-bc31-397cef2fffb3"
+    property ScrollLayoutGroupComponent rawLayout = "6ead7083-1618-489e-82ab-b92dc5422142"
+    property TextGUIRendererComponent rawText = "768a922b-912a-421a-ae1b-318270777da2"
+    property number LoadTimeoutSeconds = 8
+
+    @ExecSpace("ClientOnly")
+    method void OnBeginPlay()
+        -- Start closed and unauthorized; only a positive server identity reply reveals the entry.
+        self._T.authorized = false
+        self._T.open = false
+        self._T.pending = false
+        self._T.serial = 0
+        self._T.identityRequest = 0
+        self._T.loadRequest = 0
+        self._T.identityFor = ""
+        self._T.profile = ""
+        self._T.status = "IDLE"
+        self._T.rows = {}
+        self._T.raw = ""
+        self._T.rowViews = {}
+        self._T.bindings = {}
+        self._T.bound = false
+        log("[VRF][GMPanel] ready")
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnUpdate(number delta)
+        -- Query identity once per lobby entry; map travel, identity changes and matchmaking close the panel.
+        self:EnsureBound()
+        local player = _UserService.LocalPlayer
+        local inLobby = isvalid(player) and player.CurrentMapName == "formationlobby"
+        local userId = inLobby and player.PlayerComponent.UserId or ""
+        if self._T.identityFor ~= userId then
+            self._T.identityFor = userId
+            self._T.authorized = false
+            self._T.identityRequest = 0
+            self:Close()
+            if userId ~= "" then self:RequestIdentity() end
+        end
+        if isvalid(self.lobbyButton) then
+            self.lobbyButton.Entity:SetEnable(inLobby and self._T.authorized)
+            self.lobbyButton.Enable = self:CanOpen()
+        end
+        if self._T.open and not self:CanOpen() then self:Close() end
+        if self._T.pending and _UtilLogic.ElapsedSeconds - self._T.startedAt > self.LoadTimeoutSeconds then
+            self._T.pending = false
+            self._T.loadRequest = 0
+            self._T.status = "TIMEOUT"
+            self:Render()
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void EnsureBound()
+        -- Own the connected native button events, including teardown at the end of Play.
+        if self._T.bound or not isvalid(self.lobbyButton) or not isvalid(self.closeButton) then return end
+        self._T.bound = true
+        self.panel:SetEnable(false)
+        self.rowTemplate:SetEnable(false)
+        self:Bind(self.lobbyButton.Entity, function() self:Open() end)
+        self:Bind(self.closeButton.Entity, function() self:Close() end)
+        self:Bind(self.loadButton.Entity, function() self:Load(self.targetInput.Text) end)
+        self:Bind(self.selfButton.Entity, function() self:Load("") end)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Bind(Entity entity, any action)
+        -- Keep each event connection until session teardown.
+        local callback = entity:ConnectEvent(ButtonClickEvent, action)
+        table.insert(self._T.bindings, { entity = entity, callback = callback })
+    end
+
+    @ExecSpace("ClientOnly")
+    method integer RequestIdentity()
+        -- Correlate identity replies independently from target-load replies.
+        self._T.serial = self._T.serial + 1
+        self._T.identityRequest = self._T.serial
+        _GMPanelService:Request(self._T.identityRequest, "IDENTITY", "")
+        return self._T.identityRequest
+    end
+
+    @ExecSpace("ClientOnly")
+    method boolean CanOpen()
+        -- Reuse the lobby's matchmaking lock; the server rechecks permission for every command.
+        local player = _UserService.LocalPlayer
+        return self._T.authorized and isvalid(player) and player.CurrentMapName == "formationlobby"
+            and _MatchFlowInput:AllowsFormationActions()
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Open()
+        -- Show the read-only panel and load the displayed target through the normal RPC path.
+        if not self:CanOpen() or self._T.open then return end
+        self._T.open = true
+        self.panel:SetEnable(true)
+        self:Load(self.targetInput.Text)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Close()
+        -- Invalidate outstanding loads so a late reply cannot repopulate a closed panel.
+        self._T.open = false
+        self._T.pending = false
+        self._T.loadRequest = 0
+        self._T.rows = {}
+        self._T.raw = ""
+        self:ClearRows()
+        if isvalid(self.rawText) then self.rawText.Text = "" end
+        if isvalid(self.panel) then self.panel:SetEnable(false) end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Load(string profile)
+        -- One click issues one read; retry is available after errors or an unconfirmed timeout.
+        if not self._T.open or not self:CanOpen() or self._T.pending then return end
+        local target = string.upper(string.match(profile, "^%s*(.-)%s*$"))
+        self.targetInput.Text = target == "" and self._T.profile or target
+        self._T.serial = self._T.serial + 1
+        self._T.loadRequest = self._T.serial
+        self._T.startedAt = _UtilLogic.ElapsedSeconds
+        self._T.pending = true
+        self._T.status = "LOADING"
+        self._T.rows = {}
+        self._T.raw = ""
+        self:Render()
+        _GMPanelService:Request(self._T.loadRequest, "LOAD_LEVELS", target)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Observe(integer requestId, string kind, table response)
+        -- Consume each reply once; outdated targets, closed panels and timed-out requests stay untouched.
+        if kind == "IDENTITY" then
+            if requestId ~= self._T.identityRequest or self._T.identityRequest == 0 then return end
+            self._T.identityRequest = 0
+            self._T.authorized = response.status == "OK"
+            self._T.profile = response.profile or ""
+            if not self._T.authorized then self:Close() end
+            log("[VRF][GMPanel] authorized=" .. tostring(self._T.authorized))
+            return
+        end
+        if kind ~= "LOAD_LEVELS" or requestId ~= self._T.loadRequest or not self._T.pending or not self._T.open then return end
+        self._T.loadRequest = 0
+        self._T.pending = false
+        self._T.status = response.status
+        self._T.rows = response.rows or {}
+        self._T.raw = response.raw or ""
+        self._T.target = response.profile or ""
+        self._T.exists = response.exists
+        self._T.errorCode = response.code
+        if response.status == "FORBIDDEN" then self._T.authorized = false self:Close() return end
+        self:Render()
+        log("[VRF][GMPanel] shown status=" .. response.status .. " rows=" .. tostring(#self._T.rows))
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ClearRows()
+        -- Destroy only the previous load's clones; keep the hidden authored template.
+        for _, row in ipairs(self._T.rowViews or {}) do if isvalid(row) then row:Destroy() end end
+        self._T.rowViews = {}
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Render()
+        -- Show a complete table or literal damaged-save text, with explicit load and error states.
+        self:ClearRows()
+        local status = self._T.status
+        local messages = { IDLE = "請輸入玩家代碼或選擇我自己", LOADING = "讀取中…", CORRUPT = "存檔損壞：以下為原文",
+            STORAGE_ERROR = "讀取失敗，請重試", INVALID_PROFILE = "玩家代碼格式無效", UNAVAILABLE = "怪物資料尚未就緒，請重試",
+            TIMEOUT = "讀取逾時，請重試", INVALID_COMMAND = "不支援的指令" }
+        local message = messages[status] or status
+        if status == "READY" then
+            message = "玩家代碼：" .. self._T.target .. (self._T.exists and " · 怪物等級" or " · 尚無存檔，顯示 Lv1／經驗 0")
+        elseif status == "STORAGE_ERROR" then
+            message = message .. "（" .. tostring(self._T.errorCode) .. "）"
+        end
+        self.statusText.Text = message
+        self.tableHeader:SetEnable(status == "READY")
+        self.listLayout.Entity:SetEnable(status == "READY")
+        self.rawLayout.Entity:SetEnable(status == "CORRUPT")
+        self.rawText.Text = self._T.raw
+        if status == "CORRUPT" then
+            local width = self.rawText.Entity.UITransformComponent.RectSize.x
+            local height = self.rawText:GetPreferredHeight(self._T.raw, width)
+            self.rawText.Entity.UITransformComponent.RectSize = Vector2(width, math.max(560, height + 24))
+            self.rawLayout:ResetScrollPosition(UITransformAxis.Vertical)
+        end
+        for index, data in ipairs(self._T.rows) do
+            local row = self.rowTemplate:Clone("GMRow_" .. tostring(index))
+            row:GetChildByName("Name").TextGUIRendererComponent.Text = data.monsterName .. "（" .. data.monsterId .. "）"
+            row:GetChildByName("Level").TextGUIRendererComponent.Text = "Lv" .. tostring(data.level)
+            row:GetChildByName("Experience").TextGUIRendererComponent.Text = tostring(data.experience)
+            row:SetEnable(true)
+            table.insert(self._T.rowViews, row)
+        end
+        if status == "READY" then self.listLayout:ResetScrollPosition(UITransformAxis.Vertical) end
+        self.loadButton.Enable = not self._T.pending
+        self.selfButton.Enable = not self._T.pending
+        self.targetInput.Enable = not self._T.pending
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnEndPlay()
+        -- Release every native button connection and every cloned row.
+        self:Close()
+        for _, binding in ipairs(self._T.bindings or {}) do
+            if isvalid(binding.entity) then binding.entity:DisconnectEvent(ButtonClickEvent, binding.callback) end
+        end
+    end
+end

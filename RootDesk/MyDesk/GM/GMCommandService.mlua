@@ -1,0 +1,54 @@
+@Logic
+script GMCommandService extends Logic
+
+    @ExecSpace("ServerOnly")
+    method boolean IsGM(string requesterProfile)
+        -- The owner and the Maker test account both resolve to this ProfileCode (issue #84).
+        return requesterProfile == "6Y9NGB"
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Execute(string requesterProfile, table command, any complete)
+        -- All commands, including identity and unknown commands, fail closed before dispatch.
+        if not self:IsGM(requesterProfile) then
+            complete({ status = "FORBIDDEN" })
+            return
+        end
+        if command.kind == "IDENTITY" then
+            complete({ status = "OK", profile = requesterProfile })
+            return
+        end
+        if command.kind ~= "LOAD_LEVELS" then
+            complete({ status = "INVALID_COMMAND" })
+            return
+        end
+        local profile = command.profile == "" and requesterProfile or command.profile
+        if type(profile) ~= "string" or #profile == 0 or #profile > 64 or not string.match(profile, "^[%w]+$") then
+            complete({ status = "INVALID_PROFILE" })
+            return
+        end
+        local catalog = _FormationService:GetCatalog()
+        if catalog == nil then complete({ status = "UNAVAILABLE" }) return end
+        _FormationStorage:Read(profile, _MonsterLevelStorage.StorageKey, function(code, key, raw)
+            local missing = code == 1000002 or (code == 0 and raw == nil)
+            if not missing and code ~= 0 then
+                complete({ status = "STORAGE_ERROR", code = code, profile = profile })
+                return
+            end
+            local document = missing and { monsters = {} } or _MonsterLevelStorage:Decode(raw)
+            if document == nil then
+                complete({ status = "CORRUPT", profile = profile, raw = raw })
+                log("[VRF][GM] load corrupt profile=" .. profile)
+                return
+            end
+            local rows = {}
+            for _, monster in ipairs(catalog:GetDeploymentOptions()) do
+                local progress = document.monsters[monster.monsterId] or _MonsterProgression:DefaultProgress()
+                table.insert(rows, { monsterId = monster.monsterId, monsterName = monster.monsterName,
+                    level = progress.level, experience = progress.experience })
+            end
+            complete({ status = "READY", profile = profile, exists = not missing, rows = rows })
+            log("[VRF][GM] load profile=" .. profile .. " rows=" .. tostring(#rows) .. " exists=" .. tostring(not missing))
+        end)
+    end
+end
