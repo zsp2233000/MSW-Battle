@@ -67,15 +67,17 @@
 - 配對期間的編輯與保存不會讓玩家誤以為本局編隊已更新。
 - 選取怪物後能查看戰術資料，同時保持戰場與常用布陣操作清楚可見。
 
-## 原型產出
+## 原型產出（歷史記錄）
 
-| 方案 | 版面重心 | MSW 原生檔 |
+2026-11-17 清理未使用 UI 時已移除 A／B／C 原生設計原型；歷史版本可從 Git 取回。以下保留原型設計與當時的驗證紀錄。
+
+| 方案 | 版面重心 | MSW 原生檔狀態 |
 |---|---|---|
-| A：指揮中樞 | 大廳左側管理五組編隊；整備左側選怪、中央戰場、右側情報 | [UIPrototypeA.ui](../ui/UIPrototypeA.ui) |
-| B：戰術沙盤 | 大廳突出站位預覽；整備擴大戰場、下方選怪、右側情報與保存操作 | [UIPrototypeB.ui](../ui/UIPrototypeB.ui) |
-| C：編隊檔案 | 大廳橫向比較五組卡片；整備以頂部分頁切換編隊 | [UIPrototypeC.ui](../ui/UIPrototypeC.ui) |
+| A：指揮中樞 | 大廳左側管理五組編隊；整備左側選怪、中央戰場、右側情報 | `UIPrototypeA.ui` 已移除 |
+| B：戰術沙盤 | 大廳突出站位預覽；整備擴大戰場、下方選怪、右側情報與保存操作 | `UIPrototypeB.ui` 已移除 |
+| C：編隊檔案 | 大廳橫向比較五組卡片；整備以頂部分頁切換編隊 | `UIPrototypeC.ui` 已移除 |
 
-- 三份 `.ui` 均由 UIBuilder 建立，各含大廳與整備畫面。根群組 `DefaultShow=false`、`Interactable=false`、`BlocksRaycasts=false`，不會自動顯示或攔截既有遊戲輸入；原生檔未接遊戲操作事件。
+- 三份 `.ui` 當時均由 UIBuilder 建立，各含大廳與整備畫面。根群組設定為 `DefaultShow=false`、`Interactable=false`、`BlocksRaycasts=false`，不會自動顯示或攔截既有遊戲輸入；原生檔未接遊戲操作事件。
 - 可互動比較頁由原生版面資料產生，位於本機暫存輸出 `C:/Users/zsp22/AppData/Local/Temp/msw-ui-redesign/index.html`；以瀏覽器開啟即可，無須啟動伺服器或安裝套件。此路徑屬本機暫存，其他電腦與清除暫存後不適用。
 - 以 `?variant=A|B|C&screen=Lobby|Editor` 選擇畫面；底部按鈕或左右方向鍵切換方案。可試用選怪、布陣、保存、設為出戰、開始與取消配對，資料僅存在頁面記憶體。
 - 怪物名稱與五項情報（種類、生命值、傷害、攻擊間隔、攻擊距離）取自現有 `MonsterData.csv` 的三隻怪物；圖像取自其待機動畫的靜態影格。瀏覽器的按鈕材質與字體為近似預覽，實際 MSW 9-slice 與字體須由 Maker 確認。
