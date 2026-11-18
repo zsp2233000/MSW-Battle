@@ -112,3 +112,11 @@ test('GM level writes validate through the command boundary and use the shared e
   assert.match(source, /command\.expected/);
   assert.match(source, /_FormationStorage:Write/);
 });
+
+test('operation history has a private request and a per-record restore button', () => {
+  const ui = UIBuilder.read('ui/GMPanelGroup.ui');
+  assert.ok(ui.getComponent('Panel/Window/History', 'MOD.Core.ButtonComponent'));
+  assert.ok(ui.getComponent('Panel/Window/HistoryList/RecordTemplate/Restore', 'MOD.Core.ButtonComponent'));
+  assert.match(body(read(RPC), 'Request'), /recordId = payload\.recordId/);
+  assert.match(body(read(PANEL), 'Restore'), /"RESTORE_LEVELS"/);
+});

@@ -21,6 +21,9 @@ script GMPanel extends Logic
     property ButtonComponent forceButton = "8cc8b4aa-1849-40da-9f7f-9e7596f1c3e0"
     property ButtonComponent reloadButton = "36de60f4-86dd-4166-8c0a-e2352e46d26c"
     property TextGUIRendererInputComponent rawInput = "1ddd7130-638f-4912-bfbc-dd5df73f5f22"
+    property ButtonComponent historyButton = "ff89dc99-b214-4e1c-874d-2a54a731fe41"
+    property ScrollLayoutGroupComponent historyLayout = "7c5eb197-0c2a-496d-b5da-291b58665ccb"
+    property Entity recordTemplate = "bcee0a48-e625-4ed2-8730-b2bb5e36763c"
 
     @ExecSpace("ClientOnly")
     method void OnBeginPlay()
@@ -40,6 +43,9 @@ script GMPanel extends Logic
         self._T.rows = {}
         self._T.raw = ""
         self._T.rowViews = {}
+        self._T.recordViews = {}
+        self._T.records = {}
+        self._T.history = false
         self._T.bindings = {}
         self._T.bound = false
         log("[VRF][GMPanel] ready")
@@ -90,6 +96,7 @@ script GMPanel extends Logic
         self:Bind(self.deleteButton.Entity, function() self:Delete() end)
         self:Bind(self.forceButton.Entity, function() self:Force() end)
         self:Bind(self.reloadButton.Entity, function() self:Reload() end)
+        self:Bind(self.historyButton.Entity, function() self:ToggleHistory() end)
     end
 
     @ExecSpace("ClientOnly")
@@ -137,7 +144,10 @@ script GMPanel extends Logic
         self._T.draft = nil
         self._T.rows = {}
         self._T.raw = ""
+        self._T.history = false
+        self._T.records = {}
         self:ClearRows()
+        self:ClearRecords()
         if isvalid(self.rawText) then self.rawText.Text = "" end
         if isvalid(self.panel) then self.panel:SetEnable(false) end
     end
@@ -159,6 +169,8 @@ script GMPanel extends Logic
         self.rawInput.Text = ""
         self._T.rows = {}
         self._T.raw = ""
+        self._T.history = false
+        self._T.records = {}
         self:Render()
         _GMPanelService:Request(self._T.loadRequest, "LOAD_LEVELS", target, "", {})
     end
@@ -222,6 +234,25 @@ script GMPanel extends Logic
     end
 
     @ExecSpace("ClientOnly")
+    method void ToggleHistory()
+        -- Use the loaded target even when the editable profile field has changed.
+        if not self.historyButton.Enable then return end
+        if self._T.history then self:Load(self._T.loaded) return end
+        self._T.history = true
+        self._T.records = {}
+        self._T.draft = nil
+        self:Submit("LIST_AUDIT", {})
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Restore(string recordId)
+        -- The server resolves this ID against the selected player's retained history.
+        if not self._T.history or self._T.status ~= "HISTORY_READY" or self._T.pending then return end
+        self._T.draft = { action = "RESTORE_LEVELS", recordId = recordId }
+        self:Submit("RESTORE_LEVELS", self._T.draft)
+    end
+
+    @ExecSpace("ClientOnly")
     method void Submit(string kind, table payload)
         -- One pending command owns the loaded expectation; late replies cannot apply another target.
         if not self._T.open or not self:CanOpen() or self._T.pending or self._T.status == "LOADING" or self._T.loaded == "" then return end
@@ -229,7 +260,7 @@ script GMPanel extends Logic
         self._T.activeRequest = self._T.serial
         self._T.startedAt = _UtilLogic.ElapsedSeconds
         self._T.pending = true
-        self._T.status = "SAVING"
+        self._T.status = kind == "LIST_AUDIT" and "HISTORY_LOADING" or "SAVING"
         self:Render()
         payload.exists = self._T.exists
         _GMPanelService:Request(self._T.activeRequest, kind, self._T.loaded, self._T.expected or "", payload)
@@ -275,14 +306,20 @@ script GMPanel extends Logic
         self._T.target = response.profile or self._T.target
         if kind == "LOAD_LEVELS" and (response.status == "READY" or response.status == "CORRUPT") then self._T.loaded = self._T.target end
         self._T.errorCode = response.code
+        if response.status == "HISTORY_READY" then self._T.records = response.records or {} end
         if response.status == "READY" or response.status == "CORRUPT" or response.status == "SAVED" then
             self._T.exists = response.exists
             self._T.expected = response.expected
             self._T.rows = response.rows or {}
             self._T.raw = response.raw or ""
-            self._T.corrupt = response.status == "CORRUPT"
+            self._T.corrupt = response.status == "CORRUPT" or response.corrupt == true
         end
-        if response.status == "SAVED" then self._T.draft = nil end
+        if response.status == "SAVED" then
+            self._T.restored = self._T.draft ~= nil and self._T.draft.action == "RESTORE_LEVELS"
+            self._T.draft = nil
+            self._T.history = false
+            self._T.records = {}
+        end
         if response.status == "FORBIDDEN" then self._T.authorized = false self:Close() return end
         self:Render()
         log("[VRF][GMPanel] shown status=" .. response.status .. " rows=" .. tostring(#self._T.rows))
@@ -300,6 +337,41 @@ script GMPanel extends Logic
     end
 
     @ExecSpace("ClientOnly")
+    method void ClearRecords()
+        -- Each cloned restore button owns a connection for as long as its row is shown.
+        for _, view in ipairs(self._T.recordViews or {}) do
+            if isvalid(view.button) then view.button:DisconnectEvent(ButtonClickEvent, view.callback) end
+            if isvalid(view.row) then view.row:Destroy() end
+        end
+        self._T.recordViews = {}
+    end
+
+    @ExecSpace("ClientOnly")
+    method void RenderHistory()
+        -- The server returns metadata in ring order. Each button retains its record ID.
+        self:ClearRecords()
+        self.historyLayout.Entity:SetEnable(self._T.history)
+        if not self._T.history then return end
+        local outcomes = { PENDING = "處理中", SAVED = "成功", CONFLICT = "衝突", FAILED = "失敗", UNKNOWN = "結果未確認" }
+        for index, record in ipairs(self._T.records) do
+            local row = self.recordTemplate:Clone("GMRecord_" .. tostring(index))
+            local time = DateTime(record.timeMs):ToFormattedString("yyyy-MM-dd HH:mm:ss")
+            local item = record.key == "MonsterLevelsV1" and "怪物等級" or record.key
+            local result = outcomes[record.outcome] or record.outcome
+            if record.action == "RESTORE_LEVELS" then result = "還原 · " .. result end
+            row:GetChildByName("Details").TextGUIRendererComponent.Text =
+                record.gm .. "  ·  " .. time .. " UTC\n" .. item .. "  ·  " .. result
+            local button = row:GetChildByName("Restore")
+            local id = record.id
+            local callback = button:ConnectEvent(ButtonClickEvent, function() self:Restore(id) end)
+            button.ButtonComponent.Enable = self._T.status == "HISTORY_READY"
+            row:SetEnable(true)
+            table.insert(self._T.recordViews, { row = row, button = button, callback = callback })
+        end
+        self.historyLayout:ResetScrollPosition(UITransformAxis.Vertical)
+    end
+
+    @ExecSpace("ClientOnly")
     method void Render()
         -- Show a complete table or literal damaged-save text, with explicit load and error states.
         self:ClearRows()
@@ -310,11 +382,21 @@ script GMPanel extends Logic
             AUDIT_INCOMPLETE = "操作紀錄未完成，請重新讀取", INVALID_PROGRESS = "等級或經驗無效，存檔未改",
             NOT_CORRUPT = "存檔可讀，不能刪除", BUSY = "存檔正在寫入，請重試",
             INVALID_PROFILE = "玩家代碼格式無效", UNAVAILABLE = "怪物資料尚未就緒，請重試",
-            TIMEOUT = "操作逾時，請重新讀取", INVALID_COMMAND = "不支援的指令" }
+            TIMEOUT = "操作逾時，請重新讀取", INVALID_COMMAND = "不支援的指令",
+            HISTORY_LOADING = "讀取操作紀錄中…", RECORD_UNAVAILABLE = "這筆紀錄已無法還原，請重新查看操作紀錄" }
         local message = messages[status] or status
-        if status == "STORAGE_ERROR" and self._T.lastCommand ~= "LOAD_LEVELS" then message = "寫入失敗，請重新讀取" end
+        if status == "STORAGE_ERROR" then
+            if self._T.lastCommand == "LIST_AUDIT" then message = "操作紀錄讀取失敗，請重試"
+            elseif self._T.lastCommand ~= "LOAD_LEVELS" then message = "寫入失敗，請重新讀取" end
+        end
+        if status == "HISTORY_READY" then
+            local label = #self._T.records == 0 and " · 尚無操作紀錄" or " · 操作紀錄（最新在前）"
+            message = "玩家代碼：" .. self._T.loaded .. label
+        end
         if status == "READY" or status == "SAVED" then
-            local label = status == "SAVED" and " · 已儲存" or (self._T.exists and " · 怪物等級" or " · 尚無存檔，顯示 Lv1／經驗 0")
+            local savedLabel = self._T.restored and " · 已還原" or " · 已儲存"
+            local label = status == "SAVED" and savedLabel or (self._T.exists and " · 怪物等級" or " · 尚無存檔，顯示 Lv1／經驗 0")
+            if self._T.corrupt then label = label .. " · 存檔損壞：可修復合法內容或刪除" end
             message = "玩家代碼：" .. tostring(self._T.target) .. label
             status = "READY"
         elseif status == "STORAGE_ERROR" or status == "AUDIT_FAILED" or status == "AUDIT_INCOMPLETE" or status == "BUSY" then
@@ -323,8 +405,8 @@ script GMPanel extends Logic
         end
         self.statusText.Text = message
         local editable = status == "READY" or status == "CORRUPT" or status == "INVALID_PROGRESS" or status == "AUDIT_FAILED" or status == "BUSY"
-        local ready = editable and self._T.loaded ~= "" and not self._T.corrupt
-        local corrupt = editable and self._T.corrupt
+        local ready = editable and not self._T.history and self._T.loaded ~= "" and not self._T.corrupt
+        local corrupt = editable and not self._T.history and self._T.corrupt
         self.tableHeader:SetEnable(ready)
         self.listLayout.Entity:SetEnable(ready)
         self.rawLayout.Entity:SetEnable(corrupt)
@@ -370,6 +452,9 @@ script GMPanel extends Logic
         self.deleteButton.Enable = corrupt and not busy
         self.forceButton.Enable = self._T.status == "CONFLICT" and self._T.draft ~= nil and not busy
         self.reloadButton.Enable = self._T.status == "CONFLICT" and not busy
+        self.historyButton.Enable = self._T.loaded ~= "" and not busy
+        self.historyButton.Entity.TextGUIRendererComponent.Text = self._T.history and "返回存檔" or "操作紀錄"
+        self:RenderHistory()
     end
 
     @ExecSpace("ClientOnly")

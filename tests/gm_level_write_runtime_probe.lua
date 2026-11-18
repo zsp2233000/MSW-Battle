@@ -23,6 +23,15 @@ local function save(level, experience, snapshot)
     return execute({ kind = 'SAVE_LEVELS', rows = { { monsterId = 'monster_tank', level = level, experience = experience } } }, snapshot)
 end
 local function load() return execute({ kind = 'LOAD_LEVELS' }) end
+local function history()
+    local reply = execute({ kind = 'LIST_AUDIT' })
+    assert(reply.status == 'HISTORY_READY', 'history: ' .. tostring(reply.status) .. '/' .. tostring(reply.code))
+    return reply.records
+end
+local function restore(record, snapshot, force)
+    return execute({ kind = force and 'FORCE_SAVE_LEVELS' or 'RESTORE_LEVELS',
+        action = 'RESTORE_LEVELS', recordId = record.id }, snapshot)
+end
 local function auditRecord(slot)
     local code, cursor = audit:GetAndWait(target)
     assert(code == 0, 'audit cursor: ' .. tostring(code))
@@ -51,11 +60,13 @@ local ok, detail = pcall(function()
     assertMissing(user, key)
     assertMissing(audit, target)
     _MonsterLevelStorage.StorageKey = key
-    for _, kind in ipairs({ 'LOAD_LEVELS', 'SAVE_LEVELS', 'RESET_LEVELS', 'DELETE_LEVELS', 'FORCE_SAVE_LEVELS' }) do
+    for _, kind in ipairs({ 'LOAD_LEVELS', 'SAVE_LEVELS', 'RESET_LEVELS', 'DELETE_LEVELS', 'FORCE_SAVE_LEVELS',
+        'LIST_AUDIT', 'RESTORE_LEVELS' }) do
         assert(execute({ kind = kind }, nil, target).status == 'FORBIDDEN', 'whitelist ' .. kind)
     end
     local absent = load()
     assert(absent.status == 'READY' and absent.exists == false, 'missing save')
+    assert(#history() == 0, 'no operations before first write')
     assert(save(31, 0, absent).status == 'INVALID_PROGRESS', 'invalid level rejected')
     assertMissing(user, key)
     assertMissing(audit, target)
@@ -74,6 +85,9 @@ local ok, detail = pcall(function()
     local first = auditRecord()
     assert(first.before == valid and first.after == saved.expected and first.outcome == 'SAVED'
         and first.gm == requester and first.target == target and first.key == key and first.timeMs > 0, 'all audit fields')
+    local listed = history()
+    assert(#listed == 1 and listed[1].id == first.id and listed[1].gm == requester and listed[1].key == key
+        and listed[1].timeMs == first.timeMs and listed[1].outcome == 'SAVED' and listed[1].before == nil, 'history metadata')
 
     assert(user:SetAndWait(key, changed) == 0, 'concurrent settlement')
     local conflict = save(9, 0, saved)
@@ -111,6 +125,7 @@ local ok, detail = pcall(function()
     assert(damaged.status == 'CORRUPT' and damaged.raw == corrupt, 'corruption round-trips as literal bytes')
     local repaired = execute({ kind = 'SAVE_LEVELS', raw = levels(3, 1, '["recovered"]') }, damaged)
     assert(repaired.status == 'SAVED' and auditRecord().before == corrupt, 'repair with recoverable before-content')
+    local repairRecord = auditRecord()
     local refused = execute({ kind = 'FORCE_SAVE_LEVELS', action = 'DELETE_LEVELS' }, damaged)
     assert(refused.status == 'NOT_CORRUPT', 'force delete refuses a healthy save')
     assertStored(repaired.expected)
@@ -127,17 +142,41 @@ local ok, detail = pcall(function()
     local seed = { [target] = '19:abc' }
     for slot = 8, 19 do
         local prefix = target .. '_' .. slot
-        seed[prefix] = '{"outcome":"SAVED","id":"seed"}'
+        seed[prefix] = _HttpService:JSONEncode({ outcome = 'SAVED', id = slot .. ':abc',
+            target = target, gm = requester, key = key, timeMs = DateTime.UtcNow.Elapsed, beforeExists = false })
         seed[prefix .. '_before'] = ''
         seed[prefix .. '_after'] = ''
     end
     assert(audit:BatchSetAndWait(seed) == 0, 'retention fixture')
     local slot20 = save(2, 0, load())
     assert(slot20.status == 'SAVED' and auditRecord(20).after == slot20.expected, 'first creation and slot 20')
+    local creation = auditRecord(20)
     local wrapped = save(2, 1, slot20)
     assert(wrapped.status == 'SAVED' and auditRecord(1).after == wrapped.expected, 'slot 1 replaced')
     assert(auditRecord(2).before == changed and auditRecord(20).after == slot20.expected, 'next oldest and prior write retained')
     assertMissing(audit, target .. '_21')
+    listed = history()
+    assert(#listed == 20 and listed[1].id == auditRecord(1).id and listed[2].id == creation.id
+        and listed[20].id == auditRecord(2).id, 'history keeps newest-first ring order after wrap')
+    assert(restore(first, wrapped).status == 'RECORD_UNAVAILABLE', 'recycled slot cannot restore another record')
+    assert(user:SetAndWait(key, changed) == 0, 'concurrent write after history opened')
+    assert(restore(repairRecord, wrapped).status == 'CONFLICT', 'stale restore conflicts')
+    assertStored(changed)
+    boundary:ConfigureMakerAuditFailures(1)
+    assert(restore(repairRecord, wrapped, true).status == 'AUDIT_FAILED', 'restore must audit first')
+    assertStored(changed)
+    local restored = restore(repairRecord, wrapped, true)
+    local restoration = auditRecord()
+    assert(restored.status == 'SAVED' and restored.corrupt and restored.raw == corrupt, 'restore preserves corrupt bytes')
+    assertStored(corrupt)
+    assert(restoration.action == 'RESTORE_LEVELS' and restoration.restoredFrom == repairRecord.id
+        and restoration.outcome == 'SAVED' and restoration.before == changed and restoration.after == corrupt, 'restore has its own audit')
+    local removedAgain = restore(creation, restored)
+    assert(removedAgain.status == 'SAVED' and not removedAgain.exists and not auditRecord().afterExists, 'restore absent save deletes key')
+    assertMissing(user, key)
+    local restoredAgain = restore(restoration, removedAgain)
+    assert(restoredAgain.status == 'SAVED' and restoredAgain.expected == changed, 'restore a restoration')
+    assertStored(changed)
 end)
 boundary:ConfigureMakerAuditFailures(0)
 boundary:ConfigureMakerFaults(0, 0, 0)
@@ -158,7 +197,7 @@ local cleaned, cleanupError = pcall(function()
     for _, storageKey in ipairs(keys) do assertMissing(audit, storageKey) end
 end)
 if ok and cleaned then
-    log('[VRF][GMLevelWriteProbe] PASS save; validation; conflict; force; reset; audit; repair; delete; retention; errors; CLEANUP_PASS')
+    log('[VRF][GMLevelWriteProbe] PASS save; conflict; audit; retention; history; restore; errors; CLEANUP_PASS')
 else
     log_error('[VRF][GMLevelWriteProbe] FAIL ' .. tostring(detail) .. ' cleanup=' .. tostring(cleaned) .. ' ' .. tostring(cleanupError))
 end

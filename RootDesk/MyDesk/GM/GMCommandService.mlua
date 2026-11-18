@@ -18,8 +18,16 @@ script GMCommandService extends Logic
             return
         end
         if command.kind == "LOAD_LEVELS" then self:Load(profile, complete) return end
+        if command.kind == "LIST_AUDIT" then
+            _FormationStorage:ListAudit(profile, function(code, records)
+                if code ~= 0 then complete({ status = "STORAGE_ERROR", profile = profile, code = code }) return end
+                complete({ status = "HISTORY_READY", profile = profile, records = records })
+                log("[VRF][GM] history profile=" .. profile .. " records=" .. tostring(#records))
+            end)
+            return
+        end
         if command.kind == "SAVE_LEVELS" or command.kind == "FORCE_SAVE_LEVELS"
-            or command.kind == "RESET_LEVELS" or command.kind == "DELETE_LEVELS" then
+            or command.kind == "RESET_LEVELS" or command.kind == "DELETE_LEVELS" or command.kind == "RESTORE_LEVELS" then
             self:Mutate(requesterProfile, profile, command, complete)
             return
         end
@@ -110,28 +118,47 @@ script GMCommandService extends Logic
         local profile = guard.profile
         local action = command.kind == "FORCE_SAVE_LEVELS" and command.action or command.kind
         local deleting = action == "DELETE_LEVELS"
+        local after = nil
         local catalog = _FormationService:GetCatalog()
         if catalog == nil then finish({ status = "UNAVAILABLE", profile = profile }, false) return end
         if deleting and (not exists or document ~= nil) then
             finish({ status = "NOT_CORRUPT", profile = profile }, false)
             return
         end
-        local after = deleting and "" or self:Plan(command, action, document, catalog)
+        if action == "RESTORE_LEVELS" then
+            if type(command.recordId) ~= "string" or #command.recordId > 64 then
+                finish({ status = "RECORD_UNAVAILABLE", profile = profile }, false)
+                return
+            end
+            local snapshot = {}
+            local code = _FormationStorage:ReadAuditBefore(guard, command.recordId, snapshot)
+            if code ~= 0 then
+                local status = code == 1000002 and "RECORD_UNAVAILABLE" or "STORAGE_ERROR"
+                finish({ status = status, code = code, profile = profile }, false)
+                return
+            end
+            deleting = not snapshot.exists
+            after = snapshot.raw
+        else
+            after = deleting and "" or self:Plan(command, action, document, catalog)
+        end
         if after == nil then finish({ status = "INVALID_PROGRESS", profile = profile }, false) return end
         local record = { gm = requesterProfile, timeMs = DateTime.UtcNow.Elapsed,
-            target = profile, key = guard.key, beforeExists = exists, afterExists = not deleting, outcome = "PENDING" }
+            target = profile, key = guard.key, beforeExists = exists, afterExists = not deleting, outcome = "PENDING",
+            action = action, restoredFrom = action == "RESTORE_LEVELS" and command.recordId or nil }
         _FormationStorage:AppendAudit(guard, record, stored, after, function(auditCode, audit, pending, retainGuard)
             if auditCode ~= 0 then finish({ status = "AUDIT_FAILED", code = auditCode, profile = profile }, retainGuard) return end
             local function written(writeCode, retainWriteGuard)
                 local status = writeCode == 0 and "SAVED" or (writeCode == 2000000 and "CONFLICT" or "STORAGE_ERROR")
                 record.outcome = writeCode == 1000004 and "UNKNOWN" or (status == "STORAGE_ERROR" and "FAILED" or status)
                 _FormationStorage:CompleteAudit(audit, pending, record, function(resultCode)
-                    log("[VRF][GM] write profile=" .. profile .. " status=" .. status .. " auditCode=" .. tostring(resultCode))
+                    log("[VRF][GM] write profile=" .. profile .. " action=" .. action .. " status=" .. status .. " auditCode=" .. tostring(resultCode))
                     if resultCode ~= 0 then
                         finish({ status = "AUDIT_INCOMPLETE", code = resultCode, profile = profile }, retainWriteGuard)
                     elseif writeCode == 0 then
                         local saved = deleting and { monsters = {}, settled = {} } or _MonsterLevelStorage:Decode(after)
-                        local response = self:Ready(profile, not deleting, after, saved, catalog)
+                        local response = saved and self:Ready(profile, not deleting, after, saved, catalog)
+                            or { profile = profile, exists = true, expected = after, raw = after, corrupt = true }
                         response.status = status
                         finish(response, retainWriteGuard)
                     elseif status == "CONFLICT" then
@@ -146,7 +173,7 @@ script GMCommandService extends Logic
                 end)
             end
             if deleting then
-                _FormationStorage:DeleteGuarded(guard, stored, written)
+                if exists then _FormationStorage:DeleteGuarded(guard, stored, written) else written(0, false) end
             else
                 _FormationStorage:WriteGuarded(guard, exists, stored, after, written)
             end

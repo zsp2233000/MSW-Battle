@@ -1,4 +1,4 @@
--- client. Use the same TOKEN as the server fixture. Run EDIT, RELOAD, then FORCE in one Play.
+-- client. Use the server fixture TOKEN. After EDIT, run either RELOAD/FORCE or the RESTORE phases.
 local TOKEN = ''
 local MODE = 'EDIT'
 assert(Environment:IsMakerPlay() and TOKEN:match('^%x+$') and #TOKEN == 8, 'Maker and a fresh synthetic token required')
@@ -39,6 +39,18 @@ local function conflict(level)
     await(function() return gm.statusText.Text == '存檔在你開啟後已變動' end, 'conflict prompt')
     assert(gm.forceButton.Enable and gm.reloadButton.Enable, 'both conflict choices enabled')
 end
+local function recordRow(index)
+    return gm.historyLayout.Entity:GetChildByName('GMRecord_' .. index)
+end
+local function openHistory()
+    click(gm.historyButton)
+    await(function() return hasStatus('最新在前') and isvalid(recordRow(2)) end, 'operation history')
+end
+local function restoreConflict()
+    click(recordRow(1):GetChildByName('Restore').ButtonComponent)
+    await(function() return gm.statusText.Text == '存檔在你開啟後已變動' end, 'restore conflict')
+    assert(gm.forceButton.Enable and gm.reloadButton.Enable, 'both restore conflict choices enabled')
+end
 local ok, detail = pcall(function()
     if MODE == 'EDIT' then
         await(function() return isvalid(gm.lobbyButton) and gm.lobbyButton.Enable end, 'GM entry')
@@ -74,6 +86,27 @@ local ok, detail = pcall(function()
         await(function() return hasStatus(profile) and hasStatus('已儲存') and tankLevel() == '13' end, 'force preserves draft')
         click(gm.closeButton)
         assert(not gm.panel.Enable, 'panel closed')
+    elseif MODE == 'RESTORE_START' then
+        gm.targetInput.Text = damaged
+        openHistory()
+        assert(hasStatus(profile), 'history stays on loaded target')
+        local label = recordRow(1):GetChildByName('Details').TextGUIRendererComponent.Text
+        assert(label:find('6Y9NGB', 1, true) and label:find(' UTC', 1, true)
+            and label:find('GM85UILevels', 1, true) and label:find('成功', 1, true), 'record shows GM, time, key and result')
+    elseif MODE == 'RESTORE_RELOAD' then
+        restoreConflict()
+        click(gm.reloadButton)
+        await(function() return hasStatus(profile) and tankLevel() == '10' end, 'restore reload reads new version')
+        openHistory()
+    elseif MODE == 'RESTORE_FORCE' then
+        restoreConflict()
+        click(gm.forceButton)
+        await(function() return hasStatus(profile) and hasStatus('已還原') and tankLevel() == '7' end, 'force restores the latest record before-content')
+        openHistory()
+        local label = recordRow(1):GetChildByName('Details').TextGUIRendererComponent.Text
+        assert(label:find('還原 · 成功', 1, true), 'restore has a new visible operation record')
+        click(gm.closeButton)
+        assert(not gm.panel.Enable, 'panel closed')
     else
         error('unknown probe phase')
     end
@@ -83,6 +116,8 @@ if not ok then
     log_error('[VRF][GMPanelEditUIProbe] FAIL ' .. MODE .. ' ' .. tostring(detail))
 elseif MODE == 'FORCE' then
     log('[VRF][GMPanelEditUIProbe] PASS edit; invalid; reset; repair; conflict; reload; force')
+elseif MODE == 'RESTORE_FORCE' then
+    log('[VRF][GMPanelEditUIProbe] RESTORE_PASS history; restore conflict; reload; force; new record')
 else
     log('[VRF][GMPanelEditUIProbe] ' .. MODE .. '_PASS')
 end

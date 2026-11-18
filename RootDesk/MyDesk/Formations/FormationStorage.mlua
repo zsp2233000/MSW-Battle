@@ -130,17 +130,25 @@ script FormationStorage extends Logic
         local perform = function()
             if fail then complete(self._T.failureCode or 1000004) return end
             local storage = _DataStorageService:GetUserDataStorage(profile)
-            if expected ~= "" then
+            if expected ~= "" and key ~= _MonsterLevelStorage.StorageKey then
                 -- Native CAS fences late writers without a guard that could outlive a missing callback.
                 storage:UpdateAsync(key, expected, raw, function(code, savedKey, value) complete(code) end)
                 return
             end
             self:BeginExclusive(profile, key, function(code, guard)
                 if code ~= 0 then complete(code) return end
-                self:CreateGuarded(guard, raw, function(writeCode, retainGuard)
+                local function written(writeCode, retainGuard)
                     if not retainGuard then self:EndExclusive(guard) end
                     complete(writeCode)
-                end)
+                end
+                if expected ~= "" then
+                    -- Restoring a missing level save can delete healthy data under this same lock.
+                    storage:UpdateAsync(key, expected, raw, function(writeCode)
+                        written(writeCode, false)
+                    end)
+                else
+                    self:CreateGuarded(guard, raw, written)
+                end
             end)
         end
         if delaySeconds > 0 then self:Schedule(perform, delaySeconds) else perform() end
@@ -220,7 +228,7 @@ script FormationStorage extends Logic
 
     @ExecSpace("ServerOnly")
     method void DeleteGuarded(table guard, string expected, any complete)
-        -- Settlement rejects corrupt bytes, and this guard blocks first creation until deletion resolves.
+        -- All level writers share this guard because storage has no conditional delete.
         if Environment:IsMakerPlay() and (self._T.writeFailures or 0) > 0 then
             self._T.writeFailures = self._T.writeFailures - 1
             complete(self._T.failureCode or 1000004, false)
@@ -242,6 +250,84 @@ script FormationStorage extends Logic
     end
 
     @ExecSpace("ServerOnly")
+    method integer AuditSlot(string id)
+        -- Only accept canonical ring IDs before constructing a storage key.
+        local slot = tonumber(string.match(id, "^([1-9]%d?):[%x%-]+$"))
+        if slot == nil or slot > 20 then return nil end
+        return slot
+    end
+
+    @ExecSpace("ServerOnly")
+    method table DecodeAudit(string raw, string profile, integer slot)
+        -- Treat damaged or mismatched metadata as unreadable.
+        if raw == nil then return nil end
+        local ok, record = pcall(function() return _HttpService:JSONDecode(raw) end)
+        if not ok or type(record) ~= "table" or type(record.id) ~= "string" or self:AuditSlot(record.id) ~= slot
+            or record.target ~= profile or type(record.key) ~= "string" or type(record.gm) ~= "string"
+            or type(record.timeMs) ~= "number" or type(record.outcome) ~= "string" or type(record.beforeExists) ~= "boolean" then return nil end
+        return record
+    end
+
+    @ExecSpace("ServerOnly")
+    method void ListAudit(string profile, any complete)
+        -- Fetch metadata in one batch, using the cursor to preserve ring order across wraparound.
+        local storage = _DataStorageService:GetGlobalDataStorage("GMAuditV1")
+        local code, cursor = storage:GetAndWait(profile)
+        if code == 1000002 or (code == 0 and cursor == nil) then complete(0, {}) return end
+        if code ~= 0 then complete(code, nil) return end
+        local newest = self:AuditSlot(cursor)
+        if newest == nil then complete(2000001, nil) return end
+        local keys, metadata, records = {}, {}, {}
+        for offset = 0, 19 do
+            table.insert(keys, profile .. "_" .. tostring((newest - 1 - offset) % 20 + 1))
+        end
+        local batchCode, pages = storage:BatchGetAndWait(keys)
+        if batchCode ~= 0 then complete(batchCode, nil) return end
+        while true do
+            for _, item in ipairs(pages:GetCurrentPageDatas() or {}) do metadata[item.KeyInfo.Key] = item.Value end
+            if pages.IsLastPage then break end
+            local pageCode = pages:LoadNextPageAndWait()
+            if pageCode ~= 0 then complete(pageCode, nil) return end
+            pages:MoveToNextPageAndWait()
+        end
+        local checkCode, current = storage:GetAndWait(profile)
+        if checkCode ~= 0 then complete(checkCode, nil) return end
+        if current ~= cursor then complete(2000000, nil) return end
+        for index, key in ipairs(keys) do
+            if metadata[key] ~= nil then
+                local record = self:DecodeAudit(metadata[key], profile, (newest - index) % 20 + 1)
+                if record == nil or (index == 1 and record.id ~= cursor) then complete(2000001, nil) return end
+                table.insert(records, record)
+            elseif index == 1 then
+                complete(2000001, nil)
+                return
+            end
+        end
+        complete(0, records)
+    end
+
+    @ExecSpace("ServerOnly")
+    method integer ReadAuditBefore(table guard, string recordId, table snapshot)
+        -- The save guard prevents this target's level records from being recycled during restore.
+        local slot = self:AuditSlot(recordId)
+        if slot == nil then return 1000002 end
+        local storage = _DataStorageService:GetGlobalDataStorage("GMAuditV1")
+        local key = guard.profile .. "_" .. tostring(slot)
+        local code, raw = storage:GetAndWait(key)
+        if code ~= 0 then return code end
+        local record = self:DecodeAudit(raw, guard.profile, slot)
+        if record == nil or record.id ~= recordId or record.key ~= guard.key then return 1000002 end
+        snapshot.exists = record.beforeExists
+        snapshot.raw = ""
+        if not snapshot.exists then return 0 end
+        local beforeCode, before = storage:GetAndWait(key .. "_before")
+        if beforeCode ~= 0 then return beforeCode end
+        if before == nil then return 1000002 end
+        snapshot.raw = before
+        return 0
+    end
+
+    @ExecSpace("ServerOnly")
     method void AppendAudit(table guard, table record, string before, string after, any complete)
         -- Atomically replace the oldest slot and its two byte-exact snapshots.
         if Environment:IsMakerPlay() and (self._T.auditFailures or 0) > 0 then
@@ -254,8 +340,8 @@ script FormationStorage extends Logic
         local code, cursor = storage:GetAndWait(profile)
         local slot = 0
         if code == 0 and cursor ~= nil then
-            slot = tonumber(string.match(cursor, "^(%d+):[%x%-]+$"))
-            if slot == nil or slot < 1 or slot > 20 then complete(2000001, nil, nil, false) return end
+            slot = self:AuditSlot(cursor)
+            if slot == nil then complete(2000001, nil, nil, false) return end
         elseif code ~= 0 and code ~= 1000002 then
             complete(code, nil, nil, false)
             return

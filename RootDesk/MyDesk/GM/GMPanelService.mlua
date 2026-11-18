@@ -11,7 +11,7 @@ script GMPanelService extends Logic
         payload = payload or {}
         _GMCommandService:Execute(requesterProfile, {
             kind = kind, profile = profile, expected = expected, expectedExists = payload.exists,
-            action = payload.action, rows = payload.rows, raw = payload.raw
+            action = payload.action, rows = payload.rows, raw = payload.raw, recordId = payload.recordId
         }, function(response)
             self:Receive(requestId, kind, response, replyUserId)
         end)
