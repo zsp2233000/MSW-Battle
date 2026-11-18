@@ -251,7 +251,10 @@ script GMPanel extends Logic
             local experience = self:Integer(self:InputText(row, "ExperienceInput"))
             if level == nil or experience == nil or not _MonsterProgression:IsValidProgress(level, experience) then
                 self._T.status = "INVALID_PROGRESS"
-                self.statusText.Text = "等級限 1–" .. tostring(_MonsterProgression.MaxLevel) .. "；經驗需小於目前等級（滿等為 0）"
+                self.statusText.Text = "【數值無效】" .. tostring(row.monsterName) .. "：等級限 1–" .. tostring(_MonsterProgression.MaxLevel)
+                    .. "；經驗需小於目前等級（滿等為 0）。存檔未改"
+                self:StyleStatus("INVALID_PROGRESS")
+                self:UpdateDirty()
                 return
             end
             if level ~= row.level or experience ~= row.experience then
@@ -510,15 +513,51 @@ script GMPanel extends Logic
     method void UpdateDirty()
         -- Show an amber bar on rows whose inputs differ from the loaded values; UI-only, no storage access.
         if not self._T.rowsInit then return end
+        self._T.rowState = self._T.rowState or {}
+        local anyInvalid = false
         for index, data in ipairs(self._T.rows or {}) do
             local view = self._T.rowViews[index]
             if isvalid(view) then
-                local dirty = self:InputText(data, "LevelInput") ~= tostring(data.level)
-                    or self:InputText(data, "ExperienceInput") ~= tostring(data.experience)
-                local bar = view:GetChildByName("Dirty")
-                if isvalid(bar) and bar.Enable ~= dirty then bar:SetEnable(dirty) end
+                local levelText = self:InputText(data, "LevelInput")
+                local experienceText = self:InputText(data, "ExperienceInput")
+                local dirty = levelText ~= tostring(data.level) or experienceText ~= tostring(data.experience)
+                local invalid = self:InvalidProgress(levelText, experienceText)
+                local state = invalid and "invalid" or (dirty and "dirty" or "clean")
+                -- Recolor only on a state change so idle rows cost nothing per tick.
+                if self._T.rowState[index] ~= state then
+                    self._T.rowState[index] = state
+                    local bar = view:GetChildByName("Dirty")
+                    if isvalid(bar) then
+                        bar:SetEnable(state ~= "clean")
+                        bar.SpriteGUIRendererComponent.Color = invalid and Color(0.937, 0.325, 0.314, 1) or Color(0.910, 0.659, 0.220, 1)
+                    end
+                    if invalid then view.SpriteGUIRendererComponent.Color = Color(0.431, 0.141, 0.133, 1)
+                    else view.SpriteGUIRendererComponent.Color = self:ZebraColor(index) end
+                end
+                if invalid then anyInvalid = true end
             end
         end
+        -- Once every bad value is fixed, drop the red banner instead of leaving a stale error.
+        if self._T.status == "INVALID_PROGRESS" and not anyInvalid then
+            self._T.status = "READY"
+            self.statusText.Text = "數值已修正，可再次儲存"
+            self:StyleStatus("READY")
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method boolean InvalidProgress(string levelText, string experienceText)
+        -- True when the typed level/experience pair could never be saved.
+        local level = self:Integer(levelText)
+        local experience = self:Integer(experienceText)
+        return level == nil or experience == nil or not _MonsterProgression:IsValidProgress(level, experience)
+    end
+
+    @ExecSpace("ClientOnly")
+    method Color ZebraColor(integer index)
+        -- Alternate two warm browns so long tables stay scannable.
+        if index % 2 == 1 then return Color(0.275, 0.200, 0.141, 1) end
+        return Color(0.227, 0.165, 0.114, 1)
     end
 
     @ExecSpace("ClientOnly")
@@ -630,6 +669,7 @@ script GMPanel extends Logic
         self.formationWarning.Entity:SetEnable(formations and showingSave)
         self.rawText.Text = self._T.raw
         self._T.rowsInit = false
+        self._T.rowState = {}
         -- Damaged saves read in warning red; a healthy read-only handoff stays cream.
         self.rawText.FontColor = (corrupt or corruptFormation) and Color(1, 0.690, 0.667, 1) or Color(0.957, 0.914, 0.847, 1)
         if corrupt or corruptFormation or readHandoff then
@@ -646,7 +686,7 @@ script GMPanel extends Logic
             data.index = index
             local row = self.rowTemplate:Clone("GMRow_" .. tostring(index))
             -- Zebra rows: alternate two warm browns so long tables stay scannable.
-            row.SpriteGUIRendererComponent.Color = index % 2 == 1 and Color(0.275, 0.200, 0.141, 1) or Color(0.227, 0.165, 0.114, 1)
+            row.SpriteGUIRendererComponent.Color = self:ZebraColor(index)
             row:GetChildByName("Name").TextGUIRendererComponent.Text = data.monsterName .. "（" .. data.monsterId .. "）"
             local level = row:GetChildByName("LevelInput")
             local experience = row:GetChildByName("ExperienceInput")
