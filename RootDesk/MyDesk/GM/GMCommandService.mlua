@@ -48,7 +48,7 @@ script GMCommandService extends Logic
         if action == "SAVE_FORMATIONS" or action == "DELETE_FORMATIONS" or action == "RESTORE_FORMATIONS" then
             return _FormationService.StorageKey
         end
-        if action == "DELETE_HANDOFF" or action == "RESTORE_HANDOFF" then return _FormationHandoff.StorageKey end
+        if action == "DELETE_HANDOFF" then return _FormationHandoff.StorageKey end
         return nil
     end
 
@@ -150,7 +150,7 @@ script GMCommandService extends Logic
         local profile = guard.profile
         local key = guard.key
         local deleting = action == "DELETE_LEVELS" or action == "DELETE_FORMATIONS" or action == "DELETE_HANDOFF"
-        local restoring = action == "RESTORE_LEVELS" or action == "RESTORE_FORMATIONS" or action == "RESTORE_HANDOFF"
+        local restoring = action == "RESTORE_LEVELS" or action == "RESTORE_FORMATIONS"
         local after = nil
         if action == "DELETE_LEVELS" and (not exists or document ~= nil) then
             finish({ status = "NOT_CORRUPT", profile = profile }, false, false)

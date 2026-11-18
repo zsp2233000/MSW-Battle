@@ -51,6 +51,7 @@ click(gm.historyButton)
 await(function() return status('最新在前') and gm.historyLayout.Entity.EnabledInHierarchy end, 'shared operation record list')
 local function record(index) return gm.historyLayout.Entity:GetChildByName('GMRecord_' .. index) end
 assert(record(1):GetChildByName('Details').TextGUIRendererComponent.Text:find('配對交接資料', 1, true), 'handoff deletion evident')
+assert(not record(1):GetChildByName('Restore').EnabledInHierarchy, 'handoff audit row has no restore action')
 assert(record(2):GetChildByName('Details').TextGUIRendererComponent.Text:find('預存編隊', 1, true), 'formation deletion evident')
 click(record(2):GetChildByName('Restore').ButtonComponent)
 await(function() return status('已還原') and clickable(gm.formationSaveButton) end, 'restore across items')

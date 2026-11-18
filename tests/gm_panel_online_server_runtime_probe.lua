@@ -2,7 +2,7 @@
 -- moving that player to an instance room within the same world instance.
 local EXPECT_OTHER = false
 local IN_OTHER_ROOM = false
-local OTHER = 'gm8802'
+local OTHER = 'GM8802'
 assert(Environment:IsMakerPlay(), 'Maker only')
 
 local service = _GMCommandService

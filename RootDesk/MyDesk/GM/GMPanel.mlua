@@ -317,7 +317,7 @@ script GMPanel extends Logic
     @ExecSpace("ClientOnly")
     method void Restore(string recordId, string item)
         -- The server resolves this ID against the selected player's retained history.
-        if not self._T.history or self._T.status ~= "HISTORY_READY" or self._T.pending then return end
+        if item == "HANDOFF" or not self._T.history or self._T.status ~= "HISTORY_READY" or self._T.pending then return end
         if item ~= self._T.item then
             self._T.item = item
             self:LoadSnapshot(self._T.loaded, recordId)
@@ -328,7 +328,7 @@ script GMPanel extends Logic
 
     @ExecSpace("ClientOnly")
     method void RestoreLoaded(string recordId)
-        local action = self._T.item == "LEVELS" and "RESTORE_LEVELS" or "RESTORE_" .. self._T.item
+        local action = self._T.item == "LEVELS" and "RESTORE_LEVELS" or "RESTORE_FORMATIONS"
         self._T.draft = { action = action, recordId = recordId }
         self:Submit(action, self._T.draft)
     end
@@ -431,7 +431,7 @@ script GMPanel extends Logic
     method void ClearRecords()
         -- Each cloned restore button owns a connection for as long as its row is shown.
         for _, view in ipairs(self._T.recordViews or {}) do
-            if isvalid(view.button) then view.button:DisconnectEvent(ButtonClickEvent, view.callback) end
+            if view.callback ~= nil and isvalid(view.button) then view.button:DisconnectEvent(ButtonClickEvent, view.callback) end
             if isvalid(view.row) then view.row:Destroy() end
         end
         self._T.recordViews = {}
@@ -484,9 +484,14 @@ script GMPanel extends Logic
             row:GetChildByName("Details").TextGUIRendererComponent.Text =
                 record.gm .. "  ·  " .. time .. " UTC\n" .. item .. "  ·  " .. result
             local button = row:GetChildByName("Restore")
-            local id = record.id
-            local callback = button:ConnectEvent(ButtonClickEvent, function() self:Restore(id, key) end)
-            button.ButtonComponent.Enable = self._T.status == "HISTORY_READY"
+            local callback = nil
+            if key == "HANDOFF" then
+                button:SetEnable(false)
+            else
+                local id = record.id
+                callback = button:ConnectEvent(ButtonClickEvent, function() self:Restore(id, key) end)
+                button.ButtonComponent.Enable = self._T.status == "HISTORY_READY"
+            end
             row:SetEnable(true)
             table.insert(self._T.recordViews, { row = row, button = button, callback = callback })
         end
@@ -600,7 +605,7 @@ script GMPanel extends Logic
         local busy = self._T.pending
         self.loadButton.Enable = not busy
         self.selfButton.Enable = not busy
-        self.targetInput.Enable = not busy
+        self.targetInput.RaycastTarget = not busy
         self.levelsTab.Enable = not busy and (not levels or not showingSave)
         self.formationsTab.Enable = not busy and (not formations or not showingSave)
         self.handoffTab.Enable = not busy and (item ~= "HANDOFF" or not showingSave)

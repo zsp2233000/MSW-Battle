@@ -105,6 +105,11 @@ local ok, detail = pcall(function()
         and history.records[1].action == 'DELETE_HANDOFF' and history.records[1].outcome == 'SAVED'
         and history.records[2].key == formationKey and history.records[2].action == 'DELETE_FORMATIONS'
         and history.records[2].outcome == 'SAVED', 'both deletions are retained in the same audit list')
+    local handoffRecord = history.records[1].id
+    assert(execute('RESTORE_HANDOFF', {recordId = handoffRecord}).status == 'INVALID_COMMAND', 'handoff restore refused')
+    assert(execute('FORCE_SAVE_LEVELS', {action = 'RESTORE_HANDOFF', recordId = handoffRecord}).status == 'INVALID_COMMAND',
+        'forced handoff restore refused')
+    assert(read(handoffKey) == nil, 'handoff stays deleted')
 end)
 
 storage:ConfigureMakerAuditFailures(0)
