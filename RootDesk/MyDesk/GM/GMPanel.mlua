@@ -84,6 +84,10 @@ script GMPanel extends Logic
             self.lobbyButton.Entity:SetEnable(inLobby and self._T.authorized and not self._T.open)
             self.lobbyButton.Enable = self:CanOpen()
         end
+        if self._T.open and not self._T.pending and _UtilLogic.ElapsedSeconds - (self._T.dirtyAt or 0) > 0.2 then
+            self._T.dirtyAt = _UtilLogic.ElapsedSeconds
+            self:UpdateDirty()
+        end
         if self._T.pending and _UtilLogic.ElapsedSeconds - self._T.startedAt > self.LoadTimeoutSeconds then
             self._T.pending = false
             self._T.loadRequest = 0
@@ -503,6 +507,67 @@ script GMPanel extends Logic
     end
 
     @ExecSpace("ClientOnly")
+    method void UpdateDirty()
+        -- Show an amber bar on rows whose inputs differ from the loaded values; UI-only, no storage access.
+        if not self._T.rowsInit then return end
+        for index, data in ipairs(self._T.rows or {}) do
+            local view = self._T.rowViews[index]
+            if isvalid(view) then
+                local dirty = self:InputText(data, "LevelInput") ~= tostring(data.level)
+                    or self:InputText(data, "ExperienceInput") ~= tostring(data.experience)
+                local bar = view:GetChildByName("Dirty")
+                if isvalid(bar) and bar.Enable ~= dirty then bar:SetEnable(dirty) end
+            end
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void StyleStatus(string status)
+        -- Tint the status banner by severity so success, warning and failure read at a glance.
+        -- In-flight states stay neutral: recoloring them made the banner flash blue on every click.
+        local severities = {
+            SAVED = "success", CONFLICT = "warning", BUSY = "warning", NO_SAVE = "warning", NOT_CORRUPT = "warning",
+            CORRUPT = "error", STORAGE_ERROR = "error", AUDIT_FAILED = "error", AUDIT_INCOMPLETE = "error",
+            INVALID_PROGRESS = "error", INVALID_FORMATIONS = "error", INVALID_PROFILE = "error",
+            UNAVAILABLE = "error", TIMEOUT = "error", INVALID_COMMAND = "error", RECORD_UNAVAILABLE = "error" }
+        local palette = {
+            neutral = { bg = Color(0.227, 0.180, 0.133, 1), fg = Color(0.957, 0.914, 0.847, 1) },
+            info = { bg = Color(0.169, 0.290, 0.400, 1), fg = Color(1, 1, 1, 1) },
+            success = { bg = Color(0.184, 0.369, 0.247, 1), fg = Color(0.847, 0.961, 0.878, 1) },
+            warning = { bg = Color(0.420, 0.247, 0.071, 1), fg = Color(1, 0.851, 0.659, 1) },
+            error = { bg = Color(0.431, 0.141, 0.133, 1), fg = Color(1, 0.839, 0.831, 1) },
+        }
+        local severity = severities[status] or "neutral"
+        local style = palette[severity]
+        if isvalid(self.statusText) then
+            self.statusText.Entity.SpriteGUIRendererComponent.Color = style.bg
+            self.statusText.FontColor = style.fg
+        end
+        log("[VRF][GMPanel] banner status=" .. tostring(status) .. " severity=" .. severity)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void StyleTabs(string item, boolean busy, boolean showingSave)
+        -- Mark the active tab amber; never dim tabs while busy, which made every click flash the whole bar.
+        local tabs = { LEVELS = self.levelsTab, FORMATIONS = self.formationsTab, HANDOFF = self.handoffTab,
+            HISTORY = self.historyButton }
+        local alpha = 1
+        for key, tab in pairs(tabs) do
+            local active = (key == "HISTORY" and self._T.history) or (key ~= "HISTORY" and showingSave and key == item)
+            local sprite = tab.Entity.SpriteGUIRendererComponent
+            local text = tab.Entity.TextGUIRendererComponent
+            if active then
+                sprite.Color = Color(0.910, 0.659, 0.220, alpha)
+                text.FontColor = Color(0.169, 0.133, 0.098, alpha)
+            else
+                sprite.Color = Color(0.227, 0.180, 0.133, alpha)
+                text.FontColor = Color(0.659, 0.592, 0.494, alpha)
+            end
+        end
+        log("[VRF][GMPanel] tabs item=" .. item .. " busy=" .. tostring(busy) .. " showingSave=" .. tostring(showingSave))
+    end
+
+    @ExecSpace("ClientOnly")
     method void Render()
         -- Show a complete table or literal damaged-save text, with explicit load and error states.
         self:ClearRows()
@@ -547,6 +612,7 @@ script GMPanel extends Logic
             message = message .. "（" .. reason .. "）"
         end
         self.statusText.Text = message
+        self:StyleStatus(self._T.status)
         local editable = status == "READY" or status == "CORRUPT" or status == "INVALID_PROGRESS"
             or status == "INVALID_FORMATIONS" or status == "AUDIT_FAILED" or status == "BUSY"
         local showingSave = not self._T.history and not self._T.online
@@ -563,6 +629,9 @@ script GMPanel extends Logic
         self.formationInput.Entity:SetEnable(editFormation)
         self.formationWarning.Entity:SetEnable(formations and showingSave)
         self.rawText.Text = self._T.raw
+        self._T.rowsInit = false
+        -- Damaged saves read in warning red; a healthy read-only handoff stays cream.
+        self.rawText.FontColor = (corrupt or corruptFormation) and Color(1, 0.690, 0.667, 1) or Color(0.957, 0.914, 0.847, 1)
         if corrupt or corruptFormation or readHandoff then
             local frame = self.rawLayout.Entity.UITransformComponent
             local frameHeight = readHandoff and 432 or (corruptFormation and 152 or 180)
@@ -576,6 +645,8 @@ script GMPanel extends Logic
         for index, data in ipairs(ready and self._T.rows or {}) do
             data.index = index
             local row = self.rowTemplate:Clone("GMRow_" .. tostring(index))
+            -- Zebra rows: alternate two warm browns so long tables stay scannable.
+            row.SpriteGUIRendererComponent.Color = index % 2 == 1 and Color(0.275, 0.200, 0.141, 1) or Color(0.227, 0.165, 0.114, 1)
             row:GetChildByName("Name").TextGUIRendererComponent.Text = data.monsterName .. "（" .. data.monsterId .. "）"
             local level = row:GetChildByName("LevelInput")
             local experience = row:GetChildByName("ExperienceInput")
@@ -594,6 +665,7 @@ script GMPanel extends Logic
                     row:GetChildByName("LevelInput").TextGUIRendererInputComponent.Text = tostring(data.level)
                     row:GetChildByName("ExperienceInput").TextGUIRendererInputComponent.Text = tostring(data.experience)
                 end
+                self._T.rowsInit = true
                 self.saveButton.Enable = not self._T.pending
             end, 0.1)
         elseif editFormation then
@@ -613,6 +685,7 @@ script GMPanel extends Logic
         self.levelsTab.Enable = not busy and (not levels or not showingSave)
         self.formationsTab.Enable = not busy and (not formations or not showingSave)
         self.handoffTab.Enable = not busy and (item ~= "HANDOFF" or not showingSave)
+        self:StyleTabs(item, busy, showingSave)
         self.saveButton.Entity:SetEnable(ready)
         self.saveButton.Enable = false
         self.formationSaveButton.Entity:SetEnable(editFormation)
@@ -632,7 +705,6 @@ script GMPanel extends Logic
         self.reloadButton.Enable = conflicted and not busy
         self.historyButton.Entity:SetEnable(self._T.loaded ~= "" and not self._T.online)
         self.historyButton.Enable = self._T.loaded ~= "" and not busy and not self._T.online
-        self.historyButton.Entity.TextGUIRendererComponent.Text = self._T.history and "返回存檔" or "操作紀錄"
         self:RenderHistory()
         self.onlineButton.Enable = not busy
         self.onlineButton.Entity.TextGUIRendererComponent.Text = self._T.online and "重新整理在線名單" or "在線玩家"

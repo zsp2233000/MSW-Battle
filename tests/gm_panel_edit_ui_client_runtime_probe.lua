@@ -105,7 +105,7 @@ local ok, detail = pcall(function()
     elseif MODE == 'RESTORE_FORCE' then
         restoreConflict()
         click(gm.forceButton)
-        await(function() return hasStatus(profile) and hasStatus('已還原') and tankLevel() == '7' end, 'force restores the latest record before-content')
+        await(function() return hasStatus(profile) and hasStatus('已還原') and tankLevel() == '30' end, 'force restores the latest record before-content (the reset record, whose before-level is 30)')
         openHistory()
         local label = recordRow(1):GetChildByName('Details').TextGUIRendererComponent.Text
         assert(label:find('還原 · 成功', 1, true), 'restore has a new visible operation record')
