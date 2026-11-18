@@ -1,0 +1,7 @@
+@Event
+script GMOnlinePlayersEvent extends EventType
+    property string RequestId = ""
+    property string OriginRoom = ""
+    property string ReplyRoom = ""
+    property string PlayersJson = ""
+end

@@ -1,0 +1,91 @@
+@Logic
+script GMOnlinePlayers extends Logic
+
+    @ExecSpace("ServerOnly")
+    method table LocalPlayers()
+        local players = {}
+        for _, user in ipairs(_UserService.Users.Values) do
+            if user.ProfileCode ~= "" then
+                table.insert(players, { profile = user.ProfileCode, nickname = user.Nickname })
+            end
+        end
+        return players
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Read(any complete)
+        -- UserService is room-local. Ask the occupied rooms in this world instance for a fresh snapshot.
+        local origin = _RoomService.RoomKey
+        local rooms = {}
+        if _RoomService:IsInstanceRoom() then rooms[_RoomService.StaticRoomKey] = true end
+        for _, room in ipairs(_RoomService.InstanceRooms.Values) do
+            if room.InstanceKey ~= origin and room:IsValid() and room:GetUserCount() > 0 then
+                rooms[room.InstanceKey] = true
+            end
+        end
+        local id = _UtilLogic:NewGuid()
+        local request = { rooms = rooms, players = {}, complete = complete, timeout = 0 }
+        for _, player in ipairs(self:LocalPlayers()) do request.players[player.profile] = player end
+        self._T.requests = self._T.requests or {}
+        self._T.requests[id] = request
+        if next(rooms) == nil then self:Finish(id, true) return end
+        request.timeout = _TimerService:SetTimerOnce(function() self:Finish(id, false) end, 4)
+        local event = GMOnlinePlayersEvent()
+        event.RequestId = id
+        event.OriginRoom = origin
+        local targets = {}
+        for roomKey, _ in pairs(rooms) do table.insert(targets, roomKey) end
+        for _, roomKey in ipairs(targets) do
+            _RoomService:RequestSendEventToRoomAsync(event, roomKey, function(code)
+                if code ~= SendEventRequestResultCode.OK then self:Finish(id, false) end
+            end)
+        end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Finish(string id, boolean success)
+        local request = self._T.requests and self._T.requests[id]
+        if request == nil then return end
+        self._T.requests[id] = nil
+        if request.timeout ~= 0 then _TimerService:ClearTimer(request.timeout) end
+        if not success then request.complete({ status = "UNAVAILABLE" }) return end
+        local players = {}
+        for _, player in pairs(request.players) do table.insert(players, player) end
+        table.sort(players, function(a, b) return a.profile < b.profile end)
+        log("[VRF][GM] online players=" .. tostring(#players))
+        request.complete({ status = "PLAYERS_READY", players = players })
+    end
+
+    @ExecSpace("ServerOnly")
+    @EventSender("Service", "RoomService")
+    handler HandleGMOnlinePlayersEvent(GMOnlinePlayersEvent event)
+        if event.ReplyRoom == "" then
+            local reply = GMOnlinePlayersEvent()
+            reply.RequestId = event.RequestId
+            reply.OriginRoom = event.OriginRoom
+            reply.ReplyRoom = _RoomService.RoomKey
+            reply.PlayersJson = _HttpService:JSONEncode(self:LocalPlayers())
+            _RoomService:RequestSendEventToRoomAsync(reply, event.OriginRoom, nil)
+            return
+        end
+        local request = self._T.requests and self._T.requests[event.RequestId]
+        if request == nil or event.OriginRoom ~= _RoomService.RoomKey or not request.rooms[event.ReplyRoom] then return end
+        local ok, players = pcall(function() return _HttpService:JSONDecode(event.PlayersJson) end)
+        if not ok or type(players) ~= "table" then self:Finish(event.RequestId, false) return end
+        for _, player in ipairs(players) do
+            if type(player) == "table" and type(player.profile) == "string" and type(player.nickname) == "string" then
+                request.players[player.profile] = player
+            end
+        end
+        request.rooms[event.ReplyRoom] = nil
+        if next(request.rooms) == nil then self:Finish(event.RequestId, true) end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void OnEndPlay()
+        for _, request in pairs(self._T.requests or {}) do
+            if request.timeout ~= 0 then _TimerService:ClearTimer(request.timeout) end
+        end
+        self._T.requests = nil
+    end
+end

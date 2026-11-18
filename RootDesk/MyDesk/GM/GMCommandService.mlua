@@ -12,6 +12,7 @@ script GMCommandService extends Logic
         -- All commands, including identity and unknown commands, fail closed before dispatch.
         if not self:IsGM(requesterProfile) then complete({ status = "FORBIDDEN" }) return end
         if command.kind == "IDENTITY" then complete({ status = "OK", profile = requesterProfile }) return end
+        if command.kind == "LIST_ONLINE_PLAYERS" then _GMOnlinePlayers:Read(complete) return end
         local profile = command.profile == "" and requesterProfile or command.profile
         if type(profile) ~= "string" or #profile == 0 or #profile > 64 or not string.match(profile, "^[%w]+$") then
             complete({ status = "INVALID_PROFILE" })
