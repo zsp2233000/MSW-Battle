@@ -20,7 +20,7 @@ script GMPanel extends Logic
     property ButtonComponent deleteButton = "9bae8b0c-bd3c-40e5-ad96-f0fd057a82c6"
     property ButtonComponent forceButton = "8cc8b4aa-1849-40da-9f7f-9e7596f1c3e0"
     property ButtonComponent reloadButton = "36de60f4-86dd-4166-8c0a-e2352e46d26c"
-    property TextGUIRendererInputComponent rawInput = "76a52890-2094-4e22-89d0-63fb7a025cce"
+    property TextGUIRendererInputComponent rawInput = "1ddd7130-638f-4912-bfbc-dd5df73f5f22"
 
     @ExecSpace("ClientOnly")
     method void OnBeginPlay()
@@ -118,7 +118,7 @@ script GMPanel extends Logic
 
     @ExecSpace("ClientOnly")
     method void Open()
-        -- Show the read-only panel and load the displayed target through the normal RPC path.
+        -- Open the panel and load the displayed target through the normal RPC path.
         if not self:CanOpen() or self._T.open then return end
         self._T.open = true
         self.panel:SetEnable(true)
@@ -133,6 +133,7 @@ script GMPanel extends Logic
         self._T.loadRequest = 0
         self._T.activeRequest = 0
         self._T.expected = ""
+        self._T.loaded = ""
         self._T.draft = nil
         self._T.rows = {}
         self._T.raw = ""
@@ -153,6 +154,9 @@ script GMPanel extends Logic
         self._T.pending = true
         self._T.status = "LOADING"
         self._T.loaded = ""
+        self._T.corrupt = false
+        self._T.draft = nil
+        self.rawInput.Text = ""
         self._T.rows = {}
         self._T.raw = ""
         self:Render()
@@ -163,6 +167,7 @@ script GMPanel extends Logic
     @ExecSpace("ClientOnly")
     method void Save()
         -- Send only changed rows; the server merges them and keeps the settled match list.
+        if not self.saveButton.Enable then return end
         local edits = {}
         for _, row in ipairs(self._T.rows or {}) do
             local level = self:Integer(self:InputText(row, "LevelInput"))
@@ -179,6 +184,7 @@ script GMPanel extends Logic
     @ExecSpace("ClientOnly")
     method void Repair()
         -- Replace a damaged document with one complete raw document, never mixed with row edits.
+        if not self.repairButton.Enable then return end
         self._T.draft = { action = "SAVE_LEVELS", raw = self.rawInput.Text }
         self:Submit("SAVE_LEVELS", self._T.draft)
     end
@@ -186,13 +192,14 @@ script GMPanel extends Logic
     @ExecSpace("ClientOnly")
     method void Force()
         -- Repeat the unchanged draft; the server re-reads and CAS-writes those fresh bytes.
-        if self._T.draft == nil then return end
+        if not self.forceButton.Enable or self._T.draft == nil then return end
         self:Submit("FORCE_SAVE_LEVELS", self._T.draft)
     end
 
     @ExecSpace("ClientOnly")
     method void Reset()
         -- Ask the server to restore every catalog monster while retaining settled matches.
+        if not self.resetButton.Enable then return end
         self._T.draft = { action = "RESET_LEVELS" }
         self:Submit("RESET_LEVELS", self._T.draft)
     end
@@ -200,6 +207,7 @@ script GMPanel extends Logic
     @ExecSpace("ClientOnly")
     method void Delete()
         -- Ask the server to delete only a document it still cannot decode.
+        if not self.deleteButton.Enable then return end
         self._T.draft = { action = "DELETE_LEVELS" }
         self:Submit("DELETE_LEVELS", self._T.draft)
     end
@@ -207,6 +215,7 @@ script GMPanel extends Logic
     @ExecSpace("ClientOnly")
     method void Reload()
         -- Re-read the loaded target; editing the input does not retarget a write.
+        if not self.reloadButton.Enable then return end
         self._T.draft = nil
         self.targetInput.Text = self._T.loaded
         self:Load(self._T.loaded)
@@ -222,6 +231,7 @@ script GMPanel extends Logic
         self._T.pending = true
         self._T.status = "SAVING"
         self:Render()
+        payload.exists = self._T.exists
         _GMPanelService:Request(self._T.activeRequest, kind, self._T.loaded, self._T.expected or "", payload)
         log("[VRF][GMPanel] submit kind=" .. kind)
     end
@@ -261,14 +271,18 @@ script GMPanel extends Logic
         self._T.activeRequest = 0
         self._T.pending = false
         self._T.status = response.status
+        self._T.lastCommand = kind
         self._T.target = response.profile or self._T.target
         if kind == "LOAD_LEVELS" and (response.status == "READY" or response.status == "CORRUPT") then self._T.loaded = self._T.target end
-        self._T.exists = response.exists
         self._T.errorCode = response.code
-        if response.expected ~= nil then self._T.expected = response.expected end
-        if response.rows ~= nil then self._T.rows = response.rows end
-        if response.raw ~= nil then self._T.raw = response.raw end
-        if response.status == "SAVED" then self._T.draft = nil self._T.raw = "" end
+        if response.status == "READY" or response.status == "CORRUPT" or response.status == "SAVED" then
+            self._T.exists = response.exists
+            self._T.expected = response.expected
+            self._T.rows = response.rows or {}
+            self._T.raw = response.raw or ""
+            self._T.corrupt = response.status == "CORRUPT"
+        end
+        if response.status == "SAVED" then self._T.draft = nil end
         if response.status == "FORBIDDEN" then self._T.authorized = false self:Close() return end
         self:Render()
         log("[VRF][GMPanel] shown status=" .. response.status .. " rows=" .. tostring(#self._T.rows))
@@ -277,6 +291,10 @@ script GMPanel extends Logic
     @ExecSpace("ClientOnly")
     method void ClearRows()
         -- Destroy only the previous load's clones; keep the hidden authored template.
+        if self._T.rowsTimer ~= nil then
+            _TimerService:ClearTimer(self._T.rowsTimer)
+            self._T.rowsTimer = nil
+        end
         for _, row in ipairs(self._T.rowViews or {}) do if isvalid(row) then row:Destroy() end end
         self._T.rowViews = {}
     end
@@ -292,21 +310,25 @@ script GMPanel extends Logic
             AUDIT_INCOMPLETE = "操作紀錄未完成，請重新讀取", INVALID_PROGRESS = "等級或經驗無效，存檔未改",
             NOT_CORRUPT = "存檔可讀，不能刪除", BUSY = "存檔正在寫入，請重試",
             INVALID_PROFILE = "玩家代碼格式無效", UNAVAILABLE = "怪物資料尚未就緒，請重試",
-            TIMEOUT = "讀取逾時，請重試", INVALID_COMMAND = "不支援的指令" }
+            TIMEOUT = "操作逾時，請重新讀取", INVALID_COMMAND = "不支援的指令" }
         local message = messages[status] or status
+        if status == "STORAGE_ERROR" and self._T.lastCommand ~= "LOAD_LEVELS" then message = "寫入失敗，請重新讀取" end
         if status == "READY" or status == "SAVED" then
             local label = status == "SAVED" and " · 已儲存" or (self._T.exists and " · 怪物等級" or " · 尚無存檔，顯示 Lv1／經驗 0")
             message = "玩家代碼：" .. tostring(self._T.target) .. label
             status = "READY"
-        elseif status == "STORAGE_ERROR" or status == "AUDIT_FAILED" or status == "BUSY" then
-            message = message .. "（" .. tostring(self._T.errorCode) .. "）"
+        elseif status == "STORAGE_ERROR" or status == "AUDIT_FAILED" or status == "AUDIT_INCOMPLETE" or status == "BUSY" then
+            local reason = self._T.errorCode == 1000004 and "逾時" or (self._T.errorCode == 1000005 and "Credit 不足" or tostring(self._T.errorCode))
+            message = message .. "（" .. reason .. "）"
         end
         self.statusText.Text = message
-        local ready = status == "READY"
-        local corrupt = self._T.status == "CORRUPT" or (self._T.status == "CONFLICT" and self._T.raw ~= "")
+        local editable = status == "READY" or status == "CORRUPT" or status == "INVALID_PROGRESS" or status == "AUDIT_FAILED" or status == "BUSY"
+        local ready = editable and self._T.loaded ~= "" and not self._T.corrupt
+        local corrupt = editable and self._T.corrupt
         self.tableHeader:SetEnable(ready)
         self.listLayout.Entity:SetEnable(ready)
         self.rawLayout.Entity:SetEnable(corrupt)
+        self.rawInput.Entity:SetEnable(corrupt)
         self.rawText.Text = self._T.raw
         if corrupt then
             local width = self.rawText.Entity.UITransformComponent.RectSize.x
@@ -320,24 +342,32 @@ script GMPanel extends Logic
             row:GetChildByName("Name").TextGUIRendererComponent.Text = data.monsterName .. "（" .. data.monsterId .. "）"
             local level = row:GetChildByName("LevelInput")
             local experience = row:GetChildByName("ExperienceInput")
-            level.TextGUIRendererInputComponent.Text = tostring(data.level)
-            experience.TextGUIRendererInputComponent.Text = tostring(data.experience)
             level:SetEnable(true)
             experience:SetEnable(true)
-            row:GetChildByName("Level"):SetEnable(false)
-            row:GetChildByName("Experience"):SetEnable(false)
             row:SetEnable(true)
             self._T.rowViews[index] = row
         end
-        if ready then self.listLayout:ResetScrollPosition(UITransformAxis.Vertical) end
+        if ready then
+            self.listLayout:ResetScrollPosition(UITransformAxis.Vertical)
+            -- A newly enabled input initializes its native text after the row is cloned.
+            self._T.rowsTimer = _TimerService:SetTimerOnce(function()
+                self._T.rowsTimer = nil
+                for index, data in ipairs(self._T.rows) do
+                    local row = self._T.rowViews[index]
+                    row:GetChildByName("LevelInput").TextGUIRendererInputComponent.Text = tostring(data.level)
+                    row:GetChildByName("ExperienceInput").TextGUIRendererInputComponent.Text = tostring(data.experience)
+                end
+                self.saveButton.Enable = not self._T.pending
+            end, 0.1)
+        end
         local busy = self._T.pending
         self.loadButton.Enable = not busy
         self.selfButton.Enable = not busy
         self.targetInput.Enable = not busy
-        self.saveButton.Enable = ready and not busy
+        self.saveButton.Enable = false
         self.resetButton.Enable = ready and not busy
         self.repairButton.Enable = corrupt and not busy
-        self.deleteButton.Enable = self._T.status == "CORRUPT" and not busy
+        self.deleteButton.Enable = corrupt and not busy
         self.forceButton.Enable = self._T.status == "CONFLICT" and self._T.draft ~= nil and not busy
         self.reloadButton.Enable = self._T.status == "CONFLICT" and not busy
     end

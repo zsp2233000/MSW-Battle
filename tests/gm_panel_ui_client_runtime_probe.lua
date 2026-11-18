@@ -15,7 +15,7 @@ local function rows()
     end
     return result
 end
-local function ready() return #rows() == EXPECTED_COUNT and gm.loadButton.Enable end
+local function ready() return #rows() == EXPECTED_COUNT and gm.saveButton.Enable end
 local function lobbyState()
     local state = _FormationEditSession.Snapshot
     return table.concat({ tostring(state.editSlot), tostring(state.saved.activeSlot), tostring(_FormationEditSession:View().dirty), _MatchFlowInput.Snapshot.state }, '|')
@@ -36,13 +36,15 @@ local ok, detail = pcall(function()
     click(gm.lobbyButton)
     assert(not gm.loadButton.Enable, 'loading disables repeated requests')
     assert(await(ready) and gm.panel.EnabledInHierarchy, 'connected lobby button loads table')
+    click(gm.selfButton)
+    assert(await(ready), 'myself loads the current GM fixture')
     local count = #rows()
     local sawTank = false
     for _, row in ipairs(rows()) do
         local tank = string.find(row:GetChildByName('Name').TextGUIRendererComponent.Text, 'monster_tank', 1, true)
         if tank then sawTank = true end
-        assert(row:GetChildByName('Level').TextGUIRendererComponent.Text == (tank and 'Lv6' or 'Lv1'), 'visible level')
-        assert(row:GetChildByName('Experience').TextGUIRendererComponent.Text == (tank and '2' or '0'), 'visible experience')
+        assert(row:GetChildByName('LevelInput').TextGUIRendererInputComponent.Text == (tank and '6' or '1'), 'visible level')
+        assert(row:GetChildByName('ExperienceInput').TextGUIRendererInputComponent.Text == (tank and '2' or '0'), 'visible experience')
     end
     assert(sawTank, 'the stored tank appears in the table')
     assert(gm.statusText.Text:find(_UserService.LocalPlayer.PlayerComponent.ProfileCode, 1, true), 'self profile shown')
@@ -58,8 +60,8 @@ local ok, detail = pcall(function()
     click(gm.loadButton)
     assert(await(ready) and gm.statusText.Text:find('尚無存檔', 1, true), 'explicit absent target gets defaults')
     for _, row in ipairs(rows()) do
-        assert(row:GetChildByName('Level').TextGUIRendererComponent.Text == 'Lv1'
-            and row:GetChildByName('Experience').TextGUIRendererComponent.Text == '0', 'all missing-save rows default')
+        assert(row:GetChildByName('LevelInput').TextGUIRendererInputComponent.Text == '1'
+            and row:GetChildByName('ExperienceInput').TextGUIRendererInputComponent.Text == '0', 'all missing-save rows default')
     end
     gm.targetInput.Text = '***'
     click(gm.loadButton)

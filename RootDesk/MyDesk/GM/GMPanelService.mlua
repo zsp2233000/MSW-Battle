@@ -10,7 +10,8 @@ script GMPanelService extends Logic
         local replyUserId = senderUserId
         payload = payload or {}
         _GMCommandService:Execute(requesterProfile, {
-            kind = kind, profile = profile, expected = expected, action = payload.action, rows = payload.rows, raw = payload.raw
+            kind = kind, profile = profile, expected = expected, expectedExists = payload.exists,
+            action = payload.action, rows = payload.rows, raw = payload.raw
         }, function(response)
             self:Receive(requestId, kind, response, replyUserId)
         end)

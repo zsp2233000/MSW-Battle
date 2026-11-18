@@ -34,6 +34,7 @@ test('the RPC derives requester identity from the sender and replies only to tha
   assert.match(request, /GetUserEntityByUserId\(senderUserId\)/);
   assert.match(request, /local requesterProfile = player\.PlayerComponent\.ProfileCode/);
   assert.match(request, /action = payload\.action/);
+  assert.match(request, /expectedExists = payload\.exists/);
   assert.match(request, /_GMCommandService:Execute\(requesterProfile,/);
   assert.match(request, /local replyUserId = senderUserId/);
   assert.match(request, /self:Receive\(requestId, kind, response, replyUserId\)/);
@@ -92,21 +93,21 @@ test('GM controls and every bound entity exist, with entry and panel hidden init
   assert.equal(ui.find('Panel').jsonString.enable, false);
   assert.equal(ui.getComponent('Panel/Dimmer', 'MOD.Core.SpriteGUIRendererComponent').RaycastTarget, true);
   assert.equal(ui.getComponent('Panel/Window/Raw/Text', 'MOD.Core.TextGUIRendererComponent').IsRichText, false);
-  assert.ok(ui.getComponent('Panel/Window/Raw/RepairInput', 'MOD.Core.TextGUIRendererInputComponent'));
+  assert.ok(ui.getComponent('Panel/Window/RepairInput', 'MOD.Core.TextGUIRendererInputComponent'));
   for (const name of ['LevelInput', 'ExperienceInput']) {
     const row = ui.listEntities().find(e => e.path.endsWith('/RowTemplate/' + name));
     assert.equal(row.enable, false, name);
   }
 });
 
-test('GM level writes validate through the command boundary and preserve settled matches', () => {
+test('GM level writes validate through the command boundary and use the shared encoder', () => {
   const source = read(COMMANDS);
   const execute = body(source, 'Execute');
   assert.match(execute, /command\.kind == "SAVE_LEVELS"/);
   assert.match(execute, /command\.kind == "RESET_LEVELS"/);
   assert.match(execute, /command\.kind == "DELETE_LEVELS"/);
   assert.match(source, /_MonsterProgression:IsValidProgress\(/);
-  assert.match(source, /source\.settled/);
+  assert.match(source, /_MonsterLevelStorage:Encode\(/);
   assert.match(source, /command\.kind == "FORCE_SAVE_LEVELS"/);
   assert.match(source, /command\.expected/);
   assert.match(source, /_FormationStorage:Write/);
