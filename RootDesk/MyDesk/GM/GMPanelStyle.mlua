@@ -1,0 +1,102 @@
+@Logic
+script GMPanelStyle extends Logic
+
+    @ExecSpace("ClientOnly")
+    method table Palette()
+        -- Single source of truth for GM panel colors; built once per client.
+        if self._T.palette ~= nil then return self._T.palette end
+        local palette = {
+            amber = Color(0.910, 0.659, 0.220, 1),
+            amberText = Color(0.169, 0.133, 0.098, 1),
+            brown = Color(0.227, 0.180, 0.133, 1),
+            cream = Color(0.957, 0.914, 0.847, 1),
+            muted = Color(0.659, 0.592, 0.494, 1),
+            errorBar = Color(0.937, 0.325, 0.314, 1),
+            errorRow = Color(0.431, 0.141, 0.133, 1),
+            damagedText = Color(1, 0.690, 0.667, 1),
+            zebraOdd = Color(0.275, 0.200, 0.141, 1),
+            zebraEven = Color(0.227, 0.165, 0.114, 1),
+            banner = {
+                neutral = { bg = Color(0.227, 0.180, 0.133, 1), fg = Color(0.957, 0.914, 0.847, 1) },
+                success = { bg = Color(0.184, 0.369, 0.247, 1), fg = Color(0.847, 0.961, 0.878, 1) },
+                warning = { bg = Color(0.420, 0.247, 0.071, 1), fg = Color(1, 0.851, 0.659, 1) },
+                error = { bg = Color(0.431, 0.141, 0.133, 1), fg = Color(1, 0.839, 0.831, 1) },
+            },
+        }
+        self._T.palette = palette
+        return palette
+    end
+
+    @ExecSpace("ClientOnly")
+    method table Banner(string status)
+        -- In-flight states stay neutral: recoloring them made the banner flash on every click.
+        local severities = {
+            SAVED = "success", CONFLICT = "warning", BUSY = "warning", NO_SAVE = "warning", NOT_CORRUPT = "warning",
+            CORRUPT = "error", STORAGE_ERROR = "error", AUDIT_FAILED = "error", AUDIT_INCOMPLETE = "error",
+            INVALID_PROGRESS = "error", INVALID_FORMATIONS = "error", INVALID_PROFILE = "error",
+            UNAVAILABLE = "error", TIMEOUT = "error", INVALID_COMMAND = "error", RECORD_UNAVAILABLE = "error" }
+        local severity = severities[status] or "neutral"
+        local style = self:Palette().banner[severity]
+        return { bg = style.bg, fg = style.fg, severity = severity }
+    end
+
+    @ExecSpace("ClientOnly")
+    method table Tab(boolean active)
+        -- Active tab is amber with dark text; inactive tabs are dark with muted text.
+        local palette = self:Palette()
+        if active then return { bg = palette.amber, fg = palette.amberText } end
+        return { bg = palette.brown, fg = palette.muted }
+    end
+
+    @ExecSpace("ClientOnly")
+    method Color Zebra(integer index)
+        -- Alternate two warm browns so long tables stay scannable.
+        local palette = self:Palette()
+        if index % 2 == 1 then return palette.zebraOdd end
+        return palette.zebraEven
+    end
+
+    @ExecSpace("ClientOnly")
+    method Color RowMark(boolean invalid)
+        -- Left bar: red for an unsavable value, amber for a pending edit.
+        local palette = self:Palette()
+        return invalid and palette.errorBar or palette.amber
+    end
+
+    @ExecSpace("ClientOnly")
+    method Color RowInvalid()
+        return self:Palette().errorRow
+    end
+
+    @ExecSpace("ClientOnly")
+    method Color RawText(boolean damaged)
+        -- Damaged saves read in warning red; a healthy read-only handoff stays cream.
+        local palette = self:Palette()
+        return damaged and palette.damagedText or palette.cream
+    end
+
+    @ExecSpace("ClientOnly")
+    method table RawFrame(boolean readHandoff, boolean corruptFormation)
+        -- Raw-text frame geometry (UI pixels) for handoff view, damaged formations or damaged levels.
+        local frameX = 40
+        local handoffHeight = 432
+        local formationHeight = 152
+        local levelsHeight = 180
+        local formationY = -458
+        local levelsY = -398
+        return { x = frameX, y = corruptFormation and formationY or levelsY,
+            height = readHandoff and handoffHeight or (corruptFormation and formationHeight or levelsHeight) }
+    end
+
+    @ExecSpace("ClientOnly")
+    method table FormationFrame(boolean corruptFormation)
+        -- Formation JSON editor geometry; a damaged save leaves room for the raw view above it.
+        local frameX = 40
+        local healthyY = -458
+        local damagedY = -620
+        local healthyHeight = 372
+        local damagedHeight = 210
+        return { x = frameX, y = corruptFormation and damagedY or healthyY,
+            height = corruptFormation and damagedHeight or healthyHeight }
+    end
+end

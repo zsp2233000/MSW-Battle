@@ -5,7 +5,7 @@ local function await(predicate) for index=1,100 do if predicate() then return tr
 local player=_UserService.UserEntities.Values[1]
 local profile=player.PlayerComponent.ProfileCode
 local storage=_DataStorageService:GetUserDataStorage(profile)
-local key='FormationBootstrap28_'..tostring(_UtilLogic.ElapsedSeconds)
+local key='FormationBootstrap28_'.._UtilLogic:NewGuid()
 local ok,detail=pcall(function()
     local catalog=_FormationService:GetCatalog()
     check(_FormationSchema:ValidateUnits({{monsterId='monster_tank',x=0/0,y=0}},catalog,false)==nil,'NaN rejected')

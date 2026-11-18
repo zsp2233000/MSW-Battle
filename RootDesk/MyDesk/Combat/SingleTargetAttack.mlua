@@ -22,7 +22,7 @@ script SingleTargetAttack extends AttackComponent
         local direction = self._T.execution:GetStrikeDirection()
         if not self._T.execution:IsTargetInRange(target, direction) then return end
         if self._T.execution:UsesProjectile() then
-            -- The strike is committed at the impact frame; damage waits for the ball to arrive.
+            -- Release the ball at the configured attack-effect frame; damage waits for arrival.
             self._T.execution:LaunchProjectile(target)
             return
         end

@@ -289,7 +289,7 @@ script MonsterDex extends Logic
 
     @ExecSpace("ClientOnly")
     method void ArmAttackTrial(any row)
-        -- The attack's effects follow the dex row's own delays, never recalculated: the attack effect after attackEffectDelay on the attacker (frame 1 is immediate), the hit effect after impactDelay at the hit point. A monster with a ball launches it at impactDelay instead and the hit effect waits for its arrival; every other attack is an instant hit. Blank effect fields are skipped; a cleared trial drops its pending timers.
+        -- The attack's effects follow the dex row's own delays, never recalculated: the attack effect and projectile launch after attackEffectDelay (frame 1 is immediate), while an instant hit uses impactDelay. A projectile's hit effect waits for arrival. Blank effect fields are skipped; a cleared trial drops its pending timers.
         local serial = self._T.trialSerial
         local function arm(delay, action)
             if delay <= 0 then
@@ -306,7 +306,7 @@ script MonsterDex extends Logic
             arm(row.attackEffectDelay or 0, function() self:ShowEffect("ATTACK_EFFECT", self.attackEffectSprite, effectRuid, row) end)
         end
         if self:UsesProjectile(row) then
-            arm(row.impactDelay or 0, function() self:LaunchProjectile(row) end)
+            arm(row.attackEffectDelay or 0, function() self:LaunchProjectile(row) end)
             return
         end
         local hitRuid = row.hitEffectRuid or ""

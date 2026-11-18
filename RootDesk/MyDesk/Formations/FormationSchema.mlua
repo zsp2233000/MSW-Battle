@@ -51,6 +51,12 @@ script FormationSchema extends Logic
         return doc
     end
 
+    method any DecodeDocument(string raw, any catalog)
+        local ok, parsed = pcall(function() return _HttpService:JSONDecode(raw) end)
+        if not ok then return nil end
+        return self:ValidateDocument(parsed, catalog)
+    end
+
     method any ValidateDocument(any value, any catalog)
         -- Fail closed on corrupt or newer schemas, leaving the original storage bytes intact.
         if type(value) ~= "table" or value.schema ~= 2 or type(value.slots) ~= "table" then return nil end

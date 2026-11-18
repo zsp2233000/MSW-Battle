@@ -1,0 +1,25 @@
+@Logic
+script GMPanelService extends Logic
+
+    @ExecSpace("Server")
+    method void Request(integer requestId, string kind, string profile, string expected, table payload)
+        -- Only the engine's RPC sender identifies the requester; payload selects the target write.
+        local player = _UserService:GetUserEntityByUserId(senderUserId)
+        if not isvalid(player) or not isvalid(player.PlayerComponent) then return end
+        local requesterProfile = player.PlayerComponent.ProfileCode
+        local replyUserId = senderUserId
+        payload = payload or {}
+        _GMCommandService:Execute(requesterProfile, {
+            kind = kind, profile = profile, expected = expected, expectedExists = payload.exists,
+            action = payload.action, rows = payload.rows, raw = payload.raw, recordId = payload.recordId
+        }, function(response)
+            self:Receive(requestId, kind, response, replyUserId)
+        end)
+    end
+
+    @ExecSpace("Client")
+    method void Receive(integer requestId, string kind, table response)
+        -- Deliver the private reply to this client's panel; the UI never calls storage.
+        _GMPanel:Observe(requestId, kind, response)
+    end
+end

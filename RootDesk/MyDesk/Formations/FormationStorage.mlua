@@ -51,6 +51,18 @@ script FormationStorage extends Logic
     end
 
     @ExecSpace("ServerOnly")
+    method void ConfigureMakerAuditFailures(integer count)
+        -- Fail only the GM audit write; ordinary save writes stay on the real path.
+        if Environment:IsMakerPlay() then self._T.auditFailures = math.max(0, count) end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void ConfigureMakerFailureCode(integer code)
+        -- Exercise the same read/write error paths for timeout and exhausted Credit.
+        if Environment:IsMakerPlay() then self._T.failureCode = code == 1000005 and code or 1000004 end
+    end
+
+    @ExecSpace("ServerOnly")
     method void ConfigureMakerSaveResponse(string mode, number delaySeconds)
         -- Fault only formation acknowledgements; transfer persistence continues through the real boundary.
         if not Environment:IsMakerPlay() then return end
@@ -76,14 +88,16 @@ script FormationStorage extends Logic
         self:RetryRelease(profile, key)
         if Environment:IsMakerPlay() and (self._T.readFailures or 0) > 0 then
             self._T.readFailures = self._T.readFailures - 1
-            complete(1000004, key, nil)
+            complete(self._T.failureCode or 1000004, key, nil)
             return
         end
         _DataStorageService:GetUserDataStorage(profile):GetAsync(key, function(code, loadedKey, raw)
             -- A timed-out first creation is safe to release only after its exact bytes are observed.
             local lockName = self:LockName(profile, key)
             local uncertain = self._T.uncertain and self._T.uncertain[lockName] or nil
-            if uncertain ~= nil and uncertain.key == key and code == 0 and raw == uncertain.raw then
+            local missing = code == 1000002 or (code == 0 and raw == nil)
+            if uncertain ~= nil and uncertain.key == key
+                and ((uncertain.deleting and missing) or (not uncertain.deleting and code == 0 and raw == uncertain.raw)) then
                 self:ReleaseGuard(uncertain.memory, uncertain.lockName, uncertain.etag)
                 self._T.uncertain[lockName] = nil
             end
@@ -114,46 +128,238 @@ script FormationStorage extends Logic
             if fail then self._T.writeFailures = self._T.writeFailures - 1 end
         end
         local perform = function()
-            if fail then complete(1000004) return end
-            local storage = _DataStorageService:GetUserDataStorage(profile)
-            if expected ~= "" then
-                -- Native CAS fences late writers without a guard that could outlive a missing callback.
-                storage:UpdateAsync(key, expected, raw, function(code, savedKey, value) complete(code) end)
-                return
-            end
-            self:RetryRelease(profile, key)
-            local memoryCode, memory = _WorldInstanceService:GetSharedMemory("BattleFormationWrites")
-            local lockName = self:LockName(profile, key)
-            if memoryCode ~= SharedMemoryResultCode.OK or #lockName > 100 then complete(1000001) return end
-            local acquired = memory:CreateVariableAndWait(lockName, "writing")
-            if acquired.Code == SharedMemoryResultCode.AlreadyExists then
-                local currentGuard = memory:GetVariableAndWait(lockName)
-                if currentGuard.Code == SharedMemoryResultCode.OK and currentGuard.Info.Value == "free" then
-                    acquired = memory:UpdateVariableAndWait(SharedVariableKeyInfo(lockName, currentGuard.Info.ETag), "writing")
-                end
-            end
-            if acquired.Code ~= SharedMemoryResultCode.OK then complete(1000007) return end
-            local etag = acquired.Info.ETag
-            -- Creation has no native CAS. Serialize across instances and recheck under ownership.
-            storage:GetAsync(key, function(readCode, loadedKey, current)
-                    if not (readCode == 1000002 or (readCode == 0 and current == nil)) then
-                        self:ReleaseGuard(memory, lockName, etag)
-                        complete(readCode == 0 and 2000000 or readCode)
-                        return
-                    end
-                    storage:SetAsync(key, raw, function(code, savedKey)
-                        if code == 0 then
-                            self:ReleaseGuard(memory, lockName, etag)
-                        else
-                            -- Never expire an ambiguous unconditional creation and permit a newer write.
-                            self._T.uncertain = self._T.uncertain or {}
-                            self._T.uncertain[lockName] = { memory = memory, lockName = lockName, etag = etag, key = key, raw = raw }
-                        end
-                        complete(code)
-                    end)
+            if fail then complete(self._T.failureCode or 1000004) return end
+            -- Native delete has no compare-and-swap. Existing and first writers share its guard.
+            self:BeginExclusive(profile, key, function(code, guard)
+                if code ~= 0 then complete(code) return end
+                self:StoreGuarded(guard, expected ~= "", expected, raw, function(writeCode, retainGuard)
+                    if not retainGuard then self:EndExclusive(guard) end
+                    complete(writeCode)
+                end)
             end)
         end
         if delaySeconds > 0 then self:Schedule(perform, delaySeconds) else perform() end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void BeginExclusive(string profile, string key, any complete)
+        -- Use a cross-instance guard for a save item or a target's operation-record ring.
+        self:RetryRelease(profile, key)
+        local lockName = self:LockName(profile, key)
+        local audit = self._T.uncertainAudit and self._T.uncertainAudit[lockName] or nil
+        if audit ~= nil then
+            local code, current = _DataStorageService:GetGlobalDataStorage("GMAuditV1"):GetAndWait(profile)
+            if code == 0 and current == audit.cursor then
+                self:EndExclusive(audit.guard)
+                self._T.uncertainAudit[lockName] = nil
+            end
+        end
+        local memoryCode, memory = _WorldInstanceService:GetSharedMemory("BattleFormationWrites")
+        if memoryCode ~= SharedMemoryResultCode.OK or #lockName > 100 then complete(1000001, nil) return end
+        local acquired = memory:CreateVariableAndWait(lockName, "writing")
+        if acquired.Code == SharedMemoryResultCode.AlreadyExists then
+            local current = memory:GetVariableAndWait(lockName)
+            if current.Code == SharedMemoryResultCode.OK and current.Info.Value == "free" then
+                acquired = memory:UpdateVariableAndWait(SharedVariableKeyInfo(lockName, current.Info.ETag), "writing")
+            end
+        end
+        if acquired.Code ~= SharedMemoryResultCode.OK then complete(1000007, nil) return end
+        complete(0, { profile = profile, key = key, memory = memory, lockName = lockName, etag = acquired.Info.ETag })
+    end
+
+    @ExecSpace("ServerOnly")
+    method void EndExclusive(table guard)
+        -- Release only this owner's ETag.
+        self:ReleaseGuard(guard.memory, guard.lockName, guard.etag)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void WriteGuarded(table guard, boolean exists, string expected, string raw, any complete)
+        if Environment:IsMakerPlay() and (self._T.writeFailures or 0) > 0 then
+            self._T.writeFailures = self._T.writeFailures - 1
+            complete(self._T.failureCode or 1000004, false)
+            return
+        end
+        self:StoreGuarded(guard, exists, expected, raw, complete)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void StoreGuarded(table guard, boolean exists, string expected, string raw, any complete)
+        if exists then
+            local storage = _DataStorageService:GetUserDataStorage(guard.profile)
+            storage:UpdateAsync(guard.key, expected, raw, function(code, savedKey, value)
+                local retainGuard = code == 1000004
+                if retainGuard then self:KeepUncertain(guard, raw, false) end
+                complete(code == 1000002 and 2000000 or code, retainGuard)
+            end)
+            return
+        end
+        self:CreateGuarded(guard, raw, complete)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void CreateGuarded(table guard, string raw, any complete)
+        -- First creation has no native CAS, so recheck absence with the guard held.
+        local storage = _DataStorageService:GetUserDataStorage(guard.profile)
+        storage:GetAsync(guard.key, function(readCode, loadedKey, current)
+            if not (readCode == 1000002 or (readCode == 0 and current == nil)) then
+                complete(readCode == 0 and 2000000 or readCode, false)
+                return
+            end
+            storage:SetAsync(guard.key, raw, function(code, savedKey)
+                local retainGuard = code ~= 0 and code ~= 1000005
+                if retainGuard then self:KeepUncertain(guard, raw, false) end
+                complete(code, retainGuard)
+            end)
+        end)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void DeleteGuarded(table guard, string expected, any complete)
+        -- All writers share this guard because storage has no conditional delete.
+        if Environment:IsMakerPlay() and (self._T.writeFailures or 0) > 0 then
+            self._T.writeFailures = self._T.writeFailures - 1
+            complete(self._T.failureCode or 1000004, false)
+            return
+        end
+        local storage = _DataStorageService:GetUserDataStorage(guard.profile)
+        storage:GetAsync(guard.key, function(code, loadedKey, current)
+            if code == 1000002 or (code == 0 and current ~= expected) then complete(2000000, false) return end
+            if code ~= 0 then complete(code, false) return end
+            storage:DeleteAsync(guard.key, function(deleteCode, deletedKey)
+                if deleteCode == 1000004 then self:KeepUncertain(guard, "", true) end
+                complete(deleteCode, deleteCode == 1000004)
+            end)
+        end)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void KeepUncertain(table guard, string raw, boolean deleting)
+        -- Delay release until a later read confirms the result of the native operation.
+        self._T.uncertain = self._T.uncertain or {}
+        guard.raw = raw
+        guard.deleting = deleting
+        self._T.uncertain[guard.lockName] = guard
+    end
+
+    @ExecSpace("ServerOnly")
+    method integer AuditSlot(string id)
+        -- Only accept canonical ring IDs before constructing a storage key.
+        local slot = tonumber(string.match(id, "^([1-9]%d?):[%x%-]+$"))
+        if slot == nil or slot > 20 then return nil end
+        return slot
+    end
+
+    @ExecSpace("ServerOnly")
+    method table DecodeAudit(string raw, string profile, integer slot)
+        -- Treat damaged or mismatched metadata as unreadable.
+        if raw == nil then return nil end
+        local ok, record = pcall(function() return _HttpService:JSONDecode(raw) end)
+        if not ok or type(record) ~= "table" or type(record.id) ~= "string" or self:AuditSlot(record.id) ~= slot
+            or record.target ~= profile or type(record.key) ~= "string" or type(record.gm) ~= "string"
+            or type(record.timeMs) ~= "number" or type(record.outcome) ~= "string" or type(record.beforeExists) ~= "boolean" then return nil end
+        return record
+    end
+
+    @ExecSpace("ServerOnly")
+    method void ListAudit(string profile, any complete)
+        -- Fetch metadata in one batch, using the cursor to preserve ring order across wraparound.
+        local storage = _DataStorageService:GetGlobalDataStorage("GMAuditV1")
+        local code, cursor = storage:GetAndWait(profile)
+        if code == 1000002 or (code == 0 and cursor == nil) then complete(0, {}) return end
+        if code ~= 0 then complete(code, nil) return end
+        local newest = self:AuditSlot(cursor)
+        if newest == nil then complete(2000001, nil) return end
+        local keys, metadata, records = {}, {}, {}
+        for offset = 0, 19 do
+            table.insert(keys, profile .. "_" .. tostring((newest - 1 - offset) % 20 + 1))
+        end
+        local batchCode, pages = storage:BatchGetAndWait(keys)
+        if batchCode ~= 0 then complete(batchCode, nil) return end
+        while true do
+            for _, item in ipairs(pages:GetCurrentPageDatas() or {}) do metadata[item.KeyInfo.Key] = item.Value end
+            if pages.IsLastPage then break end
+            local pageCode = pages:LoadNextPageAndWait()
+            if pageCode ~= 0 then complete(pageCode, nil) return end
+            pages:MoveToNextPageAndWait()
+        end
+        local checkCode, current = storage:GetAndWait(profile)
+        if checkCode ~= 0 then complete(checkCode, nil) return end
+        if current ~= cursor then complete(2000000, nil) return end
+        for index, key in ipairs(keys) do
+            if metadata[key] ~= nil then
+                local record = self:DecodeAudit(metadata[key], profile, (newest - index) % 20 + 1)
+                if record == nil or (index == 1 and record.id ~= cursor) then complete(2000001, nil) return end
+                table.insert(records, record)
+            elseif index == 1 then
+                complete(2000001, nil)
+                return
+            end
+        end
+        complete(0, records)
+    end
+
+    @ExecSpace("ServerOnly")
+    method integer ReadAuditBefore(table guard, string recordId, table snapshot)
+        -- The caller holds the target's audit and save guards during restore.
+        local slot = self:AuditSlot(recordId)
+        if slot == nil then return 1000002 end
+        local storage = _DataStorageService:GetGlobalDataStorage("GMAuditV1")
+        local key = guard.profile .. "_" .. tostring(slot)
+        local code, raw = storage:GetAndWait(key)
+        if code ~= 0 then return code end
+        local record = self:DecodeAudit(raw, guard.profile, slot)
+        if record == nil or record.id ~= recordId or record.key ~= guard.key then return 1000002 end
+        snapshot.exists = record.beforeExists
+        snapshot.raw = ""
+        if not snapshot.exists then return 0 end
+        local beforeCode, before = storage:GetAndWait(key .. "_before")
+        if beforeCode ~= 0 then return beforeCode end
+        if before == nil then return 1000002 end
+        snapshot.raw = before
+        return 0
+    end
+
+    @ExecSpace("ServerOnly")
+    method void AppendAudit(table guard, table record, string before, string after, any complete)
+        -- Atomically replace the oldest slot and its two byte-exact snapshots.
+        if Environment:IsMakerPlay() and (self._T.auditFailures or 0) > 0 then
+            self._T.auditFailures = self._T.auditFailures - 1
+            complete(1000004, nil, nil, false)
+            return
+        end
+        local profile = guard.profile
+        local storage = _DataStorageService:GetGlobalDataStorage("GMAuditV1")
+        local code, cursor = storage:GetAndWait(profile)
+        local slot = 0
+        if code == 0 and cursor ~= nil then
+            slot = self:AuditSlot(cursor)
+            if slot == nil then complete(2000001, nil, nil, false) return end
+        elseif code ~= 0 and code ~= 1000002 then
+            complete(code, nil, nil, false)
+            return
+        end
+        slot = slot % 20 + 1
+        cursor = tostring(slot) .. ":" .. _UtilLogic:NewGuid()
+        local audit = profile .. "_" .. tostring(slot)
+        record.id = cursor
+        local pending = _HttpService:JSONEncode(record)
+        local result, succeededKeys = storage:TransactSetAndWait({
+            [profile] = cursor, [audit] = pending, [audit .. "_before"] = before, [audit .. "_after"] = after
+        })
+        if result == 1000004 then
+            -- Keep ownership while a timed-out append can still replace this slot.
+            self._T.uncertainAudit = self._T.uncertainAudit or {}
+            self._T.uncertainAudit[guard.lockName] = { guard = guard, cursor = cursor }
+        end
+        complete(result, audit, pending, result == 1000004)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void CompleteAudit(string auditKey, string pending, table record, any complete)
+        -- The pending record ID fences late outcome writes after the slot is reused.
+        _DataStorageService:GetGlobalDataStorage("GMAuditV1"):UpdateAsync(auditKey, pending, _HttpService:JSONEncode(record),
+            function(code, key, value) complete(code) end)
     end
 
     @ExecSpace("ServerOnly")

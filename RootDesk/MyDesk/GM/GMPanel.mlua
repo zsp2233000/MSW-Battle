@@ -1,0 +1,743 @@
+@Logic
+script GMPanel extends Logic
+
+    property Entity panel = "ce0fd29b-64ea-4364-b244-c10896174934"
+    property ButtonComponent lobbyButton = "620d7621-27dd-4210-941d-ca3e29130ee8"
+    property ButtonComponent closeButton = "ae519708-9aa6-4ed7-983c-a574cd69c0a9"
+    property ButtonComponent loadButton = "38497918-2aef-4246-b302-557cd1f394b9"
+    property ButtonComponent selfButton = "a8302ff8-c3d3-4392-a84a-e2965a9aa306"
+    property TextGUIRendererInputComponent targetInput = "7d4ad329-6b5a-4485-85e7-2d9977fe72cb"
+    property TextGUIRendererComponent statusText = "6d59564f-f39a-4686-83f7-a01e468ddefa"
+    property Entity tableHeader = "54f1f67c-576b-49bb-ba6f-f8178e344b0b"
+    property ScrollLayoutGroupComponent listLayout = "e7e709c1-4f5a-458d-8f30-67c4111c3bec"
+    property Entity rowTemplate = "5009a317-30a9-4097-bc31-397cef2fffb3"
+    property ScrollLayoutGroupComponent rawLayout = "6ead7083-1618-489e-82ab-b92dc5422142"
+    property TextGUIRendererComponent rawText = "768a922b-912a-421a-ae1b-318270777da2"
+    property number LoadTimeoutSeconds = 8
+    property number DirtyPollSeconds = 0.2
+    property number InputInitDelaySeconds = 0.1
+    property integer MaxIntegerDigits = 2
+    property ButtonComponent saveButton = "dba499cd-f0c5-47e3-be33-79e230a9720a"
+    property ButtonComponent resetButton = "16a22527-259d-412e-a666-f908c405640f"
+    property ButtonComponent repairButton = "fcd6f9fc-f19b-4aaa-838e-226e822939d6"
+    property ButtonComponent deleteButton = "9bae8b0c-bd3c-40e5-ad96-f0fd057a82c6"
+    property ButtonComponent forceButton = "8cc8b4aa-1849-40da-9f7f-9e7596f1c3e0"
+    property ButtonComponent reloadButton = "36de60f4-86dd-4166-8c0a-e2352e46d26c"
+    property TextGUIRendererInputComponent rawInput = "1ddd7130-638f-4912-bfbc-dd5df73f5f22"
+    property ButtonComponent historyButton = "ff89dc99-b214-4e1c-874d-2a54a731fe41"
+    property ScrollLayoutGroupComponent historyLayout = "7c5eb197-0c2a-496d-b5da-291b58665ccb"
+    property Entity recordTemplate = "bcee0a48-e625-4ed2-8730-b2bb5e36763c"
+    property ButtonComponent levelsTab = "7e7d2538-a5f7-4dbf-b5d0-9b2584cdd2e6"
+    property ButtonComponent formationsTab = "4bc7aeb2-2f7b-4390-8bd7-488996884a74"
+    property ButtonComponent handoffTab = "47667834-be60-457d-8db4-5d01347518a6"
+    property TextGUIRendererInputComponent formationInput = "5483b2c8-e94c-4ae0-abb0-963127f5c047"
+    property TextGUIRendererComponent formationWarning = "c670cc6d-9b27-492c-b2fc-c4245db9d108"
+    property ButtonComponent formationSaveButton = "3c47d85c-054d-40e1-96b0-4463401dcd26"
+    property ButtonComponent onlineButton = "8c0663dc-506f-48e0-8ccc-ca59f4ebe0d3"
+    property ButtonComponent onlineBackButton = "d95419c4-94ad-4376-a6f5-2329b7bfb2ae"
+    property ScrollLayoutGroupComponent onlineLayout = "43a49cb9-8a6b-4862-8679-e0a2b3b6cf21"
+    property Entity playerTemplate = "6c42431f-3355-405e-95c2-d6fc28eab47a"
+
+    @ExecSpace("ClientOnly")
+    method void OnBeginPlay()
+        -- Start closed and unauthorized; only a positive server identity reply reveals the entry.
+        self._T.authorized = false
+        self._T.open = false
+        self._T.pending = false
+        self._T.serial = 0
+        self._T.identityRequest = 0
+        self._T.activeRequest = 0
+        self._T.expected = ""
+        self._T.draft = nil
+        self._T.loadRequest = 0
+        self._T.identityFor = ""
+        self._T.profile = ""
+        self._T.status = "IDLE"
+        self._T.rows = {}
+        self._T.raw = ""
+        self._T.rowViews = {}
+        self._T.recordViews = {}
+        self._T.records = {}
+        self._T.history = false
+        self._T.item = "LEVELS"
+        self._T.online = false
+        self._T.players = {}
+        self._T.playerViews = {}
+        self._T.bindings = {}
+        self._T.bound = false
+        log("[VRF][GMPanel] ready")
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnUpdate(number delta)
+        -- Query identity once per lobby entry; map travel, identity changes and matchmaking close the panel.
+        self:EnsureBound()
+        local player = _UserService.LocalPlayer
+        local inLobby = isvalid(player) and player.CurrentMapName == "formationlobby"
+        local userId = inLobby and player.PlayerComponent.UserId or ""
+        if self._T.identityFor ~= userId then
+            self._T.identityFor = userId
+            self._T.authorized = false
+            self._T.identityRequest = 0
+            self:Close()
+            if userId ~= "" then self:RequestIdentity() end
+        end
+        if self._T.open and not self:CanOpen() then self:Close() end
+        if isvalid(self.lobbyButton) then
+            self.lobbyButton.Entity:SetEnable(inLobby and self._T.authorized and not self._T.open)
+            self.lobbyButton.Enable = self:CanOpen()
+        end
+        if self._T.open and not self._T.pending and _UtilLogic.ElapsedSeconds - (self._T.dirtyAt or 0) > self.DirtyPollSeconds then
+            self._T.dirtyAt = _UtilLogic.ElapsedSeconds
+            self:UpdateDirty()
+        end
+        if self._T.pending and _UtilLogic.ElapsedSeconds - self._T.startedAt > self.LoadTimeoutSeconds then
+            self._T.pending = false
+            self._T.loadRequest = 0
+            self._T.activeRequest = 0
+            self._T.status = "TIMEOUT"
+            self:Render()
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void EnsureBound()
+        -- Own the connected native button events, including teardown at the end of Play.
+        if self._T.bound or not isvalid(self.lobbyButton) or not isvalid(self.closeButton) then return end
+        self._T.bound = true
+        self.panel:SetEnable(false)
+        self.rowTemplate:SetEnable(false)
+        self:Bind(self.lobbyButton.Entity, function() self:Open() end)
+        self:Bind(self.closeButton.Entity, function() self:Close() end)
+        self:Bind(self.loadButton.Entity, function() self:Load(self.targetInput.Text) end)
+        self:Bind(self.selfButton.Entity, function() self:Load("") end)
+        self:Bind(self.saveButton.Entity, function() self:Save() end)
+        self:Bind(self.resetButton.Entity, function() self:Reset() end)
+        self:Bind(self.repairButton.Entity, function() self:Repair() end)
+        self:Bind(self.deleteButton.Entity, function() self:Delete() end)
+        self:Bind(self.forceButton.Entity, function() self:Force() end)
+        self:Bind(self.reloadButton.Entity, function() self:Reload() end)
+        self:Bind(self.historyButton.Entity, function() self:ToggleHistory() end)
+        self:Bind(self.levelsTab.Entity, function() self:SelectItem("LEVELS") end)
+        self:Bind(self.formationsTab.Entity, function() self:SelectItem("FORMATIONS") end)
+        self:Bind(self.handoffTab.Entity, function() self:SelectItem("HANDOFF") end)
+        self:Bind(self.formationSaveButton.Entity, function() self:SaveFormation() end)
+        self:Bind(self.onlineButton.Entity, function() self:ShowOnlinePlayers() end)
+        self:Bind(self.onlineBackButton.Entity, function() self:Load(self:CurrentTarget()) end)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Bind(Entity entity, any action)
+        -- Keep each event connection until session teardown.
+        local callback = entity:ConnectEvent(ButtonClickEvent, action)
+        table.insert(self._T.bindings, { entity = entity, callback = callback })
+    end
+
+    @ExecSpace("ClientOnly")
+    method integer RequestIdentity()
+        -- Correlate identity replies independently from target-load replies.
+        self._T.serial = self._T.serial + 1
+        self._T.identityRequest = self._T.serial
+        _GMPanelService:Request(self._T.identityRequest, "IDENTITY", "", "", {})
+        return self._T.identityRequest
+    end
+
+    @ExecSpace("ClientOnly")
+    method boolean CanOpen()
+        -- Reuse the lobby's matchmaking lock; the server rechecks permission for every command.
+        local player = _UserService.LocalPlayer
+        return self._T.authorized and isvalid(player) and player.CurrentMapName == "formationlobby"
+            and _MatchFlowInput:AllowsFormationActions()
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Open()
+        -- Open the panel and load the displayed target through the normal RPC path.
+        if not self:CanOpen() or self._T.open then return end
+        self._T.open = true
+        self.panel:SetEnable(true)
+        self:Load(self.targetInput.Text)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Close()
+        -- Invalidate outstanding loads so a late reply cannot repopulate a closed panel.
+        self._T.open = false
+        self._T.pending = false
+        self._T.loadRequest = 0
+        self._T.activeRequest = 0
+        self._T.expected = ""
+        self._T.loaded = ""
+        self._T.draft = nil
+        self._T.rows = {}
+        self._T.raw = ""
+        self._T.history = false
+        self._T.records = {}
+        self._T.item = "LEVELS"
+        self._T.restoreAfterLoad = ""
+        self._T.formationDraft = nil
+        self._T.online = false
+        self._T.players = {}
+        self:ClearRows()
+        self:ClearRecords()
+        self:ClearPlayers()
+        if isvalid(self.rawText) then self.rawText.Text = "" end
+        if isvalid(self.panel) then self.panel:SetEnable(false) end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Load(string profile)
+        self:LoadSnapshot(profile, "")
+    end
+
+    @ExecSpace("ClientOnly")
+    method string CurrentTarget()
+        return self._T.loaded ~= "" and self._T.loaded or self.targetInput.Text
+    end
+
+    @ExecSpace("ClientOnly")
+    method void SelectItem(string item)
+        if not self._T.open or not self:CanOpen() or self._T.pending then return end
+        self._T.item = item
+        self:Load(self:CurrentTarget())
+    end
+
+    @ExecSpace("ClientOnly")
+    method void LoadSnapshot(string profile, string restoreRecordId)
+        -- One click issues one read; retry is available after errors or an unconfirmed timeout.
+        if not self._T.open or not self:CanOpen() or self._T.pending then return end
+        local target = string.upper(string.match(profile, "^%s*(.-)%s*$"))
+        self.targetInput.Text = target == "" and self._T.profile or target
+        self._T.serial = self._T.serial + 1
+        self._T.loadRequest = self._T.serial
+        self._T.startedAt = _UtilLogic.ElapsedSeconds
+        self._T.pending = true
+        self._T.status = "LOADING"
+        self._T.loaded = ""
+        self._T.corrupt = false
+        self._T.draft = nil
+        self._T.restoreAfterLoad = restoreRecordId
+        self._T.formationDraft = nil
+        self.rawInput.Text = ""
+        self._T.rows = {}
+        self._T.raw = ""
+        self._T.history = false
+        self._T.records = {}
+        self._T.online = false
+        self._T.players = {}
+        self:Render()
+        _GMPanelService:Request(self._T.loadRequest, "LOAD_" .. self._T.item, target, "", {})
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ShowOnlinePlayers()
+        if not self._T.open or not self:CanOpen() or self._T.pending then return end
+        self._T.online = true
+        self._T.history = false
+        self._T.players = {}
+        self._T.serial = self._T.serial + 1
+        self._T.activeRequest = self._T.serial
+        self._T.startedAt = _UtilLogic.ElapsedSeconds
+        self._T.pending = true
+        self._T.status = "PLAYERS_LOADING"
+        self:Render()
+        _GMPanelService:Request(self._T.activeRequest, "LIST_ONLINE_PLAYERS", "", "", {})
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Save()
+        -- Send only changed rows; the server merges them and keeps the settled match list.
+        if not self.saveButton.Enable then return end
+        local edits = {}
+        for _, row in ipairs(self._T.rows or {}) do
+            local level = self:Integer(self:InputText(row, "LevelInput"))
+            local experience = self:Integer(self:InputText(row, "ExperienceInput"))
+            if level == nil or experience == nil or not _MonsterProgression:IsValidProgress(level, experience) then
+                self._T.status = "INVALID_PROGRESS"
+                self.statusText.Text = "【數值無效】" .. tostring(row.monsterName) .. "：等級限 1–" .. tostring(_MonsterProgression.MaxLevel)
+                    .. "；經驗需小於目前等級（滿等為 0）。存檔未改"
+                self:StyleStatus("INVALID_PROGRESS")
+                self:UpdateDirty()
+                return
+            end
+            if level ~= row.level or experience ~= row.experience then
+                table.insert(edits, { monsterId = row.monsterId, level = level, experience = experience })
+            end
+        end
+        self._T.draft = { action = "SAVE_LEVELS", rows = edits }
+        self:Submit("SAVE_LEVELS", self._T.draft)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void SaveFormation()
+        if not self.formationSaveButton.Enable then return end
+        self._T.formationDraft = self.formationInput.Text
+        self._T.draft = { action = "SAVE_FORMATIONS", raw = self._T.formationDraft }
+        self:Submit("SAVE_FORMATIONS", self._T.draft)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Repair()
+        -- Replace a damaged document with one complete raw document, never mixed with row edits.
+        if not self.repairButton.Enable then return end
+        self._T.draft = { action = "SAVE_LEVELS", raw = self.rawInput.Text }
+        self:Submit("SAVE_LEVELS", self._T.draft)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Force()
+        -- Repeat the unchanged draft; the server re-reads and CAS-writes those fresh bytes.
+        if not self.forceButton.Enable or self._T.draft == nil then return end
+        self:Submit("FORCE_SAVE_LEVELS", self._T.draft)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Reset()
+        -- Ask the server to restore every catalog monster while retaining settled matches.
+        if not self.resetButton.Enable then return end
+        self._T.draft = { action = "RESET_LEVELS" }
+        self:Submit("RESET_LEVELS", self._T.draft)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Delete()
+        if not self.deleteButton.Enable then return end
+        local action = "DELETE_LEVELS"
+        if self._T.item ~= "LEVELS" then action = "DELETE_" .. self._T.item end
+        self._T.draft = { action = action }
+        self:Submit(action, self._T.draft)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Reload()
+        -- Re-read the loaded target; editing the input does not retarget a write.
+        if not self.reloadButton.Enable then return end
+        self._T.draft = nil
+        self.targetInput.Text = self._T.loaded
+        self:Load(self._T.loaded)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ToggleHistory()
+        -- Use the loaded target even when the editable profile field has changed.
+        if not self.historyButton.Enable then return end
+        if self._T.history then self:Load(self._T.loaded) return end
+        self._T.history = true
+        self._T.records = {}
+        self._T.draft = nil
+        self:Submit("LIST_AUDIT", {})
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Restore(string recordId, string item)
+        -- The server resolves this ID against the selected player's retained history.
+        if item == "HANDOFF" or not self._T.history or self._T.status ~= "HISTORY_READY" or self._T.pending then return end
+        if item ~= self._T.item then
+            self._T.item = item
+            self:LoadSnapshot(self._T.loaded, recordId)
+            return
+        end
+        self:RestoreLoaded(recordId)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void RestoreLoaded(string recordId)
+        local action = self._T.item == "LEVELS" and "RESTORE_LEVELS" or "RESTORE_FORMATIONS"
+        self._T.draft = { action = action, recordId = recordId }
+        self:Submit(action, self._T.draft)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Submit(string kind, table payload)
+        -- One pending command owns the loaded expectation; late replies cannot apply another target.
+        if not self._T.open or not self:CanOpen() or self._T.pending or self._T.status == "LOADING" or self._T.loaded == "" then return end
+        self._T.serial = self._T.serial + 1
+        self._T.activeRequest = self._T.serial
+        self._T.startedAt = _UtilLogic.ElapsedSeconds
+        self._T.pending = true
+        self._T.status = kind == "LIST_AUDIT" and "HISTORY_LOADING" or "SAVING"
+        self:Render()
+        payload.exists = self._T.exists
+        _GMPanelService:Request(self._T.activeRequest, kind, self._T.loaded, self._T.expected or "", payload)
+        log("[VRF][GMPanel] submit kind=" .. kind)
+    end
+
+    @ExecSpace("ClientOnly")
+    method string InputText(table row, string name)
+        -- Read the visible clone; the template stays hidden and is never submitted.
+        local view = self._T.rowViews[row.index]
+        if not isvalid(view) then return "" end
+        return view:GetChildByName(name).TextGUIRendererInputComponent.Text
+    end
+
+    @ExecSpace("ClientOnly")
+    method integer Integer(string text)
+        -- Accept only a complete non-negative integer; the server still validates progress.
+        if text == nil or not string.match(text, "^%d+$") or #text > self.MaxIntegerDigits then return nil end
+        local value = 0
+        local zero = string.byte("0")
+        for index = 1, #text do value = value * 10 + string.byte(text, index) - zero end
+        return value
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Observe(integer requestId, string kind, table response)
+        -- Consume each reply once; outdated targets, closed panels and timed-out requests stay untouched.
+        if kind == "IDENTITY" then
+            if requestId ~= self._T.identityRequest or self._T.identityRequest == 0 then return end
+            self._T.identityRequest = 0
+            self._T.authorized = response.status == "OK"
+            self._T.profile = response.profile or ""
+            if not self._T.authorized then self:Close() end
+            log("[VRF][GMPanel] authorized=" .. tostring(self._T.authorized))
+            return
+        end
+        local loading = string.sub(kind, 1, 5) == "LOAD_"
+        local current = loading and requestId == self._T.loadRequest or requestId == self._T.activeRequest
+        if not current or requestId == 0 or not self._T.pending or not self._T.open then return end
+        self._T.loadRequest = 0
+        self._T.activeRequest = 0
+        self._T.pending = false
+        self._T.status = response.status
+        self._T.lastCommand = kind
+        self._T.target = response.profile or self._T.target
+        if loading and (response.status == "READY" or response.status == "CORRUPT") then self._T.loaded = self._T.target end
+        self._T.errorCode = response.code
+        if response.status == "HISTORY_READY" then self._T.records = response.records or {} end
+        if response.status == "PLAYERS_READY" then self._T.players = response.players or {} end
+        if response.status == "READY" or response.status == "CORRUPT" or response.status == "SAVED" then
+            self._T.exists = response.exists
+            self._T.expected = response.expected
+            self._T.rows = response.rows or {}
+            self._T.raw = response.raw or ""
+            self._T.corrupt = response.status == "CORRUPT" or response.corrupt == true
+        end
+        if response.status == "SAVED" then
+            local action = self._T.draft and self._T.draft.action or ""
+            self._T.restored = string.sub(action, 1, 8) == "RESTORE_"
+            self._T.deleted = string.sub(action, 1, 7) == "DELETE_"
+            self._T.draft = nil
+            self._T.formationDraft = nil
+            self._T.history = false
+            self._T.records = {}
+        end
+        if response.status == "FORBIDDEN" then self._T.authorized = false self:Close() return end
+        if loading then
+            local recordId = self._T.restoreAfterLoad
+            self._T.restoreAfterLoad = ""
+            if recordId ~= "" and self._T.loaded ~= "" then self:RestoreLoaded(recordId) return end
+        end
+        self:Render()
+        log("[VRF][GMPanel] shown status=" .. response.status .. " rows=" .. tostring(#self._T.rows))
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ClearRows()
+        -- Destroy only the previous load's clones; keep the hidden authored template.
+        if self._T.rowsTimer ~= nil then
+            _TimerService:ClearTimer(self._T.rowsTimer)
+            self._T.rowsTimer = nil
+        end
+        for _, row in ipairs(self._T.rowViews or {}) do if isvalid(row) then row:Destroy() end end
+        self._T.rowViews = {}
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ClearRecords()
+        -- Each cloned restore button owns a connection for as long as its row is shown.
+        for _, view in ipairs(self._T.recordViews or {}) do
+            if view.callback ~= nil and isvalid(view.button) then view.button:DisconnectEvent(ButtonClickEvent, view.callback) end
+            if isvalid(view.row) then view.row:Destroy() end
+        end
+        self._T.recordViews = {}
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ClearPlayers()
+        for _, view in ipairs(self._T.playerViews or {}) do
+            if isvalid(view.row) then
+                view.row:DisconnectEvent(ButtonClickEvent, view.callback)
+                view.row:Destroy()
+            end
+        end
+        self._T.playerViews = {}
+    end
+
+    @ExecSpace("ClientOnly")
+    method void RenderOnlinePlayers()
+        self:ClearPlayers()
+        self.onlineLayout.Entity:SetEnable(self._T.online)
+        if not self._T.online then return end
+        for index, player in ipairs(self._T.players) do
+            local row = self.playerTemplate:Clone("GMPlayer_" .. tostring(index))
+            local profile = player.profile
+            row.TextGUIRendererComponent.Text = player.nickname .. "（" .. profile .. "）"
+            local callback = row:ConnectEvent(ButtonClickEvent, function() self:Load(profile) end)
+            row:SetEnable(true)
+            table.insert(self._T.playerViews, { row = row, callback = callback })
+        end
+        self.onlineLayout:ResetScrollPosition(UITransformAxis.Vertical)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void RenderHistory()
+        -- The server returns metadata in ring order. Each button retains its record ID.
+        self:ClearRecords()
+        self.historyLayout.Entity:SetEnable(self._T.history)
+        if not self._T.history then return end
+        local outcomes = { PENDING = "處理中", SAVED = "成功", CONFLICT = "衝突", FAILED = "失敗", UNKNOWN = "結果未確認" }
+        for index, record in ipairs(self._T.records) do
+            local row = self.recordTemplate:Clone("GMRecord_" .. tostring(index))
+            local time = DateTime(record.timeMs):ToFormattedString("yyyy-MM-dd HH:mm:ss")
+            local key = string.match(record.action or "", "_(%u+)$")
+            if key ~= "FORMATIONS" and key ~= "HANDOFF" then key = "LEVELS" end
+            local item = record.key == "MonsterLevelsV1" and "怪物等級" or record.key
+            if key == "FORMATIONS" then item = "預存編隊"
+            elseif key == "HANDOFF" then item = "配對交接資料" end
+            local result = outcomes[record.outcome] or record.outcome
+            if record.restoredFrom ~= nil then result = "還原 · " .. result end
+            row:GetChildByName("Details").TextGUIRendererComponent.Text =
+                record.gm .. "  ·  " .. time .. " UTC\n" .. item .. "  ·  " .. result
+            local button = row:GetChildByName("Restore")
+            local callback = nil
+            if key == "HANDOFF" then
+                button:SetEnable(false)
+            else
+                local id = record.id
+                callback = button:ConnectEvent(ButtonClickEvent, function() self:Restore(id, key) end)
+                button.ButtonComponent.Enable = self._T.status == "HISTORY_READY"
+            end
+            row:SetEnable(true)
+            table.insert(self._T.recordViews, { row = row, button = button, callback = callback })
+        end
+        self.historyLayout:ResetScrollPosition(UITransformAxis.Vertical)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void UpdateDirty()
+        -- Show an amber bar on rows whose inputs differ from the loaded values; UI-only, no storage access.
+        if not self._T.rowsInit then return end
+        self._T.rowState = self._T.rowState or {}
+        local anyInvalid = false
+        for index, data in ipairs(self._T.rows or {}) do
+            local view = self._T.rowViews[index]
+            if isvalid(view) then
+                local levelText = self:InputText(data, "LevelInput")
+                local experienceText = self:InputText(data, "ExperienceInput")
+                local dirty = levelText ~= tostring(data.level) or experienceText ~= tostring(data.experience)
+                local invalid = self:InvalidProgress(levelText, experienceText)
+                local state = invalid and "invalid" or (dirty and "dirty" or "clean")
+                -- Recolor only on a state change so idle rows cost nothing per tick.
+                if self._T.rowState[index] ~= state then
+                    self._T.rowState[index] = state
+                    local bar = view:GetChildByName("Dirty")
+                    if isvalid(bar) then
+                        bar:SetEnable(state ~= "clean")
+                        bar.SpriteGUIRendererComponent.Color = _GMPanelStyle:RowMark(invalid)
+                    end
+                    view.SpriteGUIRendererComponent.Color = invalid and _GMPanelStyle:RowInvalid() or _GMPanelStyle:Zebra(index)
+                end
+                if invalid then anyInvalid = true end
+            end
+        end
+        -- Once every bad value is fixed, drop the red banner instead of leaving a stale error.
+        if self._T.status == "INVALID_PROGRESS" and not anyInvalid then
+            self._T.status = "READY"
+            self.statusText.Text = "數值已修正，可再次儲存"
+            self:StyleStatus("READY")
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method boolean InvalidProgress(string levelText, string experienceText)
+        -- True when the typed level/experience pair could never be saved.
+        local level = self:Integer(levelText)
+        local experience = self:Integer(experienceText)
+        return level == nil or experience == nil or not _MonsterProgression:IsValidProgress(level, experience)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void StyleStatus(string status)
+        -- Tint the status banner by severity so success, warning and failure read at a glance.
+        local style = _GMPanelStyle:Banner(status)
+        if isvalid(self.statusText) then
+            self.statusText.Entity.SpriteGUIRendererComponent.Color = style.bg
+            self.statusText.FontColor = style.fg
+        end
+        log("[VRF][GMPanel] banner status=" .. tostring(status) .. " severity=" .. style.severity)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void StyleTabs(string item, boolean busy, boolean showingSave)
+        -- Mark the active tab amber; never dim tabs while busy, which made every click flash the whole bar.
+        local tabs = { LEVELS = self.levelsTab, FORMATIONS = self.formationsTab, HANDOFF = self.handoffTab,
+            HISTORY = self.historyButton }
+        for key, tab in pairs(tabs) do
+            local active = (key == "HISTORY" and self._T.history) or (key ~= "HISTORY" and showingSave and key == item)
+            local style = _GMPanelStyle:Tab(active)
+            tab.Entity.SpriteGUIRendererComponent.Color = style.bg
+            tab.Entity.TextGUIRendererComponent.FontColor = style.fg
+        end
+        log("[VRF][GMPanel] tabs item=" .. item .. " busy=" .. tostring(busy) .. " showingSave=" .. tostring(showingSave))
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Render()
+        -- Show a complete table or literal damaged-save text, with explicit load and error states.
+        -- The panel state is passed whole; GMPanelText only reads it.
+        self:ClearRows()
+        local described = _GMPanelText:Describe(self._T)
+        self.statusText.Text = described.message
+        self:StyleStatus(self._T.status)
+        local layout = self:Layout(described.status)
+        self:RenderDocument(layout)
+        self:RenderControls(layout)
+        self:RenderHistory()
+        self:RenderOnlineControls()
+        self:RenderOnlinePlayers()
+    end
+
+    @ExecSpace("ClientOnly")
+    method table Layout(string status)
+        -- Decide which views and controls apply to the current item, mode and save state.
+        local item = self._T.item
+        local editable = status == "READY" or status == "CORRUPT" or status == "INVALID_PROGRESS"
+            or status == "INVALID_FORMATIONS" or status == "AUDIT_FAILED" or status == "BUSY"
+        local showingSave = not self._T.history and not self._T.online
+        local showDocument = editable and showingSave and self._T.loaded ~= ""
+        local levels = item == "LEVELS"
+        local formations = item == "FORMATIONS"
+        local editFormation = showDocument and formations
+        return { item = item, levels = levels, formations = formations, showingSave = showingSave,
+            ready = showDocument and levels and not self._T.corrupt,
+            corrupt = showDocument and levels and self._T.corrupt,
+            editFormation = editFormation,
+            corruptFormation = editFormation and self._T.corrupt,
+            readHandoff = showDocument and item == "HANDOFF" and self._T.exists }
+    end
+
+    @ExecSpace("ClientOnly")
+    method void RenderDocument(table layout)
+        -- Toggle the table, raw-text and formation views and fill whichever one is showing.
+        local showRaw = layout.corrupt or layout.corruptFormation or layout.readHandoff
+        self.tableHeader:SetEnable(layout.ready)
+        self.listLayout.Entity:SetEnable(layout.ready)
+        self.rawLayout.Entity:SetEnable(showRaw)
+        self.rawInput.Entity:SetEnable(layout.corrupt)
+        self.formationInput.Entity:SetEnable(layout.editFormation)
+        self.formationWarning.Entity:SetEnable(layout.formations and layout.showingSave)
+        self.rawText.Text = self._T.raw
+        self._T.rowsInit = false
+        self._T.rowState = {}
+        self.rawText.FontColor = _GMPanelStyle:RawText(layout.corrupt or layout.corruptFormation)
+        if showRaw then self:RenderRawFrame(layout) end
+        if layout.ready then self:RenderRows()
+        elseif layout.editFormation then self:RenderFormationEditor(layout) end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void RenderRawFrame(table layout)
+        -- Size the raw-text frame for its mode and fit the text inside it.
+        local geometry = _GMPanelStyle:RawFrame(layout.readHandoff, layout.corruptFormation)
+        local textPadding = 24
+        local frame = self.rawLayout.Entity.UITransformComponent
+        frame.anchoredPosition = Vector2(geometry.x, geometry.y)
+        frame.RectSize = Vector2(frame.RectSize.x, geometry.height)
+        local width = self.rawText.Entity.UITransformComponent.RectSize.x
+        local height = self.rawText:GetPreferredHeight(self._T.raw, width)
+        self.rawText.Entity.UITransformComponent.RectSize = Vector2(width, math.max(geometry.height, height + textPadding))
+        self.rawLayout:ResetScrollPosition(UITransformAxis.Vertical)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void RenderRows()
+        -- Clone one row per monster; native inputs only accept text once their row is enabled.
+        for index, data in ipairs(self._T.rows) do
+            data.index = index
+            local row = self.rowTemplate:Clone("GMRow_" .. tostring(index))
+            row.SpriteGUIRendererComponent.Color = _GMPanelStyle:Zebra(index)
+            row:GetChildByName("Name").TextGUIRendererComponent.Text = data.monsterName .. "（" .. data.monsterId .. "）"
+            row:GetChildByName("LevelInput"):SetEnable(true)
+            row:GetChildByName("ExperienceInput"):SetEnable(true)
+            row:SetEnable(true)
+            self._T.rowViews[index] = row
+        end
+        self.listLayout:ResetScrollPosition(UITransformAxis.Vertical)
+        self._T.rowsTimer = _TimerService:SetTimerOnce(function()
+            self._T.rowsTimer = nil
+            for index, data in ipairs(self._T.rows) do
+                local row = self._T.rowViews[index]
+                row:GetChildByName("LevelInput").TextGUIRendererInputComponent.Text = tostring(data.level)
+                row:GetChildByName("ExperienceInput").TextGUIRendererInputComponent.Text = tostring(data.experience)
+            end
+            self._T.rowsInit = true
+            self.saveButton.Enable = not self._T.pending
+        end, self.InputInitDelaySeconds)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void RenderFormationEditor(table layout)
+        -- Place the JSON editor below the raw view when the stored save is damaged.
+        local geometry = _GMPanelStyle:FormationFrame(layout.corruptFormation)
+        local frame = self.formationInput.Entity.UITransformComponent
+        frame.anchoredPosition = Vector2(geometry.x, geometry.y)
+        frame.RectSize = Vector2(frame.RectSize.x, geometry.height)
+        self._T.rowsTimer = _TimerService:SetTimerOnce(function()
+            self._T.rowsTimer = nil
+            self.formationInput.Text = self._T.formationDraft or self._T.raw
+            self.formationSaveButton.Enable = not self._T.pending
+        end, self.InputInitDelaySeconds)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void RenderControls(table layout)
+        -- Show and enable each action only where its precondition holds; never enable while a request is pending.
+        local busy = self._T.pending
+        local item = layout.item
+        self.loadButton.Enable = not busy
+        self.selfButton.Enable = not busy
+        self.targetInput.RaycastTarget = not busy
+        self.levelsTab.Enable = not busy and (not layout.levels or not layout.showingSave)
+        self.formationsTab.Enable = not busy and (not layout.formations or not layout.showingSave)
+        self.handoffTab.Enable = not busy and (item ~= "HANDOFF" or not layout.showingSave)
+        self:StyleTabs(item, busy, layout.showingSave)
+        self.saveButton.Entity:SetEnable(layout.ready)
+        self.saveButton.Enable = false
+        self.formationSaveButton.Entity:SetEnable(layout.editFormation)
+        self.formationSaveButton.Enable = false
+        self.resetButton.Entity:SetEnable(layout.ready)
+        self.resetButton.Enable = layout.ready and not busy
+        self.repairButton.Entity:SetEnable(layout.corrupt)
+        self.repairButton.Enable = layout.corrupt and not busy
+        local canDelete = layout.corrupt or layout.editFormation and self._T.exists or layout.readHandoff
+        self.deleteButton.Entity:SetEnable(canDelete)
+        self.deleteButton.Enable = canDelete and not busy
+        self.deleteButton.Entity.TextGUIRendererComponent.Text = layout.formations and "清空編隊" or "刪除"
+        local conflicted = self._T.status == "CONFLICT"
+        self.forceButton.Entity:SetEnable(conflicted and self._T.draft ~= nil)
+        self.forceButton.Enable = conflicted and self._T.draft ~= nil and not busy
+        self.reloadButton.Entity:SetEnable(conflicted)
+        self.reloadButton.Enable = conflicted and not busy
+        self.historyButton.Entity:SetEnable(self._T.loaded ~= "" and not self._T.online)
+        self.historyButton.Enable = self._T.loaded ~= "" and not busy and not self._T.online
+    end
+
+    @ExecSpace("ClientOnly")
+    method void RenderOnlineControls()
+        -- The online-list button doubles as refresh while the list is showing.
+        local busy = self._T.pending
+        self.onlineButton.Enable = not busy
+        self.onlineButton.Entity.TextGUIRendererComponent.Text = self._T.online and "重新整理在線名單" or "在線玩家"
+        self.onlineBackButton.Entity:SetEnable(self._T.online)
+        self.onlineBackButton.Enable = not busy
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnEndPlay()
+        -- Release every native button connection and every cloned row.
+        self:Close()
+        for _, binding in ipairs(self._T.bindings or {}) do
+            if isvalid(binding.entity) then binding.entity:DisconnectEvent(ButtonClickEvent, binding.callback) end
+        end
+    end
+end

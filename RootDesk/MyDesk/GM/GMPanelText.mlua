@@ -1,0 +1,81 @@
+@Logic
+script GMPanelText extends Logic
+
+    @ExecSpace("ClientOnly")
+    method table Describe(any state)
+        -- Build the banner message and the effective status; saved and ready both collapse to READY.
+        local status = state.status
+        if status == "READY" or status == "SAVED" then
+            return { message = self:Ready(state), status = "READY" }
+        end
+        local message = self:Base(state)
+        if status == "STORAGE_ERROR" or status == "AUDIT_FAILED" or status == "AUDIT_INCOMPLETE" or status == "BUSY" then
+            message = message .. "（" .. self:Reason(state.errorCode) .. "）"
+        end
+        return { message = message, status = status }
+    end
+
+    @ExecSpace("ClientOnly")
+    method string Damaged(string item)
+        -- A damaged handoff can only be deleted; other items can also be repaired.
+        if item == "HANDOFF" then return "存檔損壞：可刪除交接資料" end
+        return "存檔損壞：可修復合法內容或刪除"
+    end
+
+    @ExecSpace("ClientOnly")
+    method string Base(any state)
+        local status = state.status
+        local messages = { IDLE = "請輸入玩家代碼或選擇我自己", LOADING = "讀取中…", SAVING = "寫入中…",
+            CONFLICT = "存檔在你開啟後已變動",
+            STORAGE_ERROR = "讀取失敗，請重試", AUDIT_FAILED = "操作紀錄失敗，存檔未改",
+            AUDIT_INCOMPLETE = "操作紀錄未完成，請重新讀取", INVALID_PROGRESS = "等級或經驗無效，存檔未改",
+            INVALID_FORMATIONS = "預存編隊 JSON 無效，存檔未改", NO_SAVE = "尚無存檔可刪除",
+            NOT_CORRUPT = "存檔可讀，不能刪除", BUSY = "存檔正在寫入，請重試",
+            INVALID_PROFILE = "玩家代碼格式無效", UNAVAILABLE = "怪物資料尚未就緒，請重試",
+            TIMEOUT = "操作逾時，請重新讀取", INVALID_COMMAND = "不支援的指令",
+            HISTORY_LOADING = "讀取操作紀錄中…", RECORD_UNAVAILABLE = "這筆紀錄已無法還原，請重新查看操作紀錄",
+            PLAYERS_LOADING = "讀取同一個世界實例的在線玩家…", PLAYERS_READY = "請選擇在線玩家" }
+        if status == "CORRUPT" then return self:Damaged(state.item) end
+        if status == "UNAVAILABLE" and state.online then return "在線名單讀取失敗，請重新整理" end
+        if status == "STORAGE_ERROR" then
+            local command = state.lastCommand or ""
+            if command == "LIST_AUDIT" then return "操作紀錄讀取失敗，請重試" end
+            if string.sub(command, 1, 5) ~= "LOAD_" then return "寫入失敗，請重新讀取" end
+        end
+        if status == "HISTORY_READY" then
+            local label = #state.records == 0 and " · 尚無操作紀錄" or " · 操作紀錄（最新在前）"
+            return "玩家代碼：" .. state.loaded .. label
+        end
+        return messages[status] or status
+    end
+
+    @ExecSpace("ClientOnly")
+    method string Ready(any state)
+        -- Describe the loaded target and which save item is on screen.
+        local levels = state.item == "LEVELS"
+        local formations = state.item == "FORMATIONS"
+        local label
+        if state.status == "SAVED" then
+            label = state.restored and " · 已還原" or " · 已儲存"
+            if state.deleted then label = formations and " · 已清空預存編隊" or " · 已刪除" end
+        else
+            local itemLabel = levels and "怪物等級" or (formations and "預存編隊" or "配對交接資料（唯讀）")
+            label = " · " .. itemLabel
+            if not state.exists then
+                label = levels and " · 尚無存檔，顯示 Lv1／經驗 0" or " · 尚無" .. itemLabel
+            end
+        end
+        if state.corrupt then label = label .. " · " .. self:Damaged(state.item) end
+        return "玩家代碼：" .. tostring(state.target) .. label
+    end
+
+    @ExecSpace("ClientOnly")
+    method string Reason(any code)
+        -- Name the two storage failures a GM can act on; show any other code verbatim.
+        local timeoutCode = 1000004
+        local creditCode = 1000005
+        if code == timeoutCode then return "逾時" end
+        if code == creditCode then return "Credit 不足" end
+        return tostring(code)
+    end
+end
