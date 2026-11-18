@@ -129,26 +129,13 @@ script FormationStorage extends Logic
         end
         local perform = function()
             if fail then complete(self._T.failureCode or 1000004) return end
-            local storage = _DataStorageService:GetUserDataStorage(profile)
-            if expected ~= "" and key ~= _MonsterLevelStorage.StorageKey then
-                -- Native CAS fences late writers without a guard that could outlive a missing callback.
-                storage:UpdateAsync(key, expected, raw, function(code, savedKey, value) complete(code) end)
-                return
-            end
+            -- Native delete has no compare-and-swap. Existing and first writers share its guard.
             self:BeginExclusive(profile, key, function(code, guard)
                 if code ~= 0 then complete(code) return end
-                local function written(writeCode, retainGuard)
+                self:StoreGuarded(guard, expected ~= "", expected, raw, function(writeCode, retainGuard)
                     if not retainGuard then self:EndExclusive(guard) end
                     complete(writeCode)
-                end
-                if expected ~= "" then
-                    -- Restoring a missing level save can delete healthy data under this same lock.
-                    storage:UpdateAsync(key, expected, raw, function(writeCode)
-                        written(writeCode, false)
-                    end)
-                else
-                    self:CreateGuarded(guard, raw, written)
-                end
+                end)
             end)
         end
         if delaySeconds > 0 then self:Schedule(perform, delaySeconds) else perform() end
@@ -156,7 +143,7 @@ script FormationStorage extends Logic
 
     @ExecSpace("ServerOnly")
     method void BeginExclusive(string profile, string key, any complete)
-        -- Hold the same cross-instance guard used by settlement to create absent saves.
+        -- Use a cross-instance guard for a save item or a target's operation-record ring.
         self:RetryRelease(profile, key)
         local lockName = self:LockName(profile, key)
         local audit = self._T.uncertainAudit and self._T.uncertainAudit[lockName] or nil
@@ -188,16 +175,22 @@ script FormationStorage extends Logic
 
     @ExecSpace("ServerOnly")
     method void WriteGuarded(table guard, boolean exists, string expected, string raw, any complete)
-        -- Use native CAS for existing saves; creation is serialized by the guard.
         if Environment:IsMakerPlay() and (self._T.writeFailures or 0) > 0 then
             self._T.writeFailures = self._T.writeFailures - 1
             complete(self._T.failureCode or 1000004, false)
             return
         end
+        self:StoreGuarded(guard, exists, expected, raw, complete)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void StoreGuarded(table guard, boolean exists, string expected, string raw, any complete)
         if exists then
             local storage = _DataStorageService:GetUserDataStorage(guard.profile)
             storage:UpdateAsync(guard.key, expected, raw, function(code, savedKey, value)
-                complete(code == 1000002 and 2000000 or code, false)
+                local retainGuard = code == 1000004
+                if retainGuard then self:KeepUncertain(guard, raw, false) end
+                complete(code == 1000002 and 2000000 or code, retainGuard)
             end)
             return
         end
@@ -215,12 +208,7 @@ script FormationStorage extends Logic
             end
             storage:SetAsync(guard.key, raw, function(code, savedKey)
                 local retainGuard = code ~= 0 and code ~= 1000005
-                if retainGuard then
-                    -- Release a write with an uncertain result only after observing its bytes.
-                    self._T.uncertain = self._T.uncertain or {}
-                    guard.raw = raw
-                    self._T.uncertain[guard.lockName] = guard
-                end
+                if retainGuard then self:KeepUncertain(guard, raw, false) end
                 complete(code, retainGuard)
             end)
         end)
@@ -228,7 +216,7 @@ script FormationStorage extends Logic
 
     @ExecSpace("ServerOnly")
     method void DeleteGuarded(table guard, string expected, any complete)
-        -- All level writers share this guard because storage has no conditional delete.
+        -- All writers share this guard because storage has no conditional delete.
         if Environment:IsMakerPlay() and (self._T.writeFailures or 0) > 0 then
             self._T.writeFailures = self._T.writeFailures - 1
             complete(self._T.failureCode or 1000004, false)
@@ -239,14 +227,19 @@ script FormationStorage extends Logic
             if code == 1000002 or (code == 0 and current ~= expected) then complete(2000000, false) return end
             if code ~= 0 then complete(code, false) return end
             storage:DeleteAsync(guard.key, function(deleteCode, deletedKey)
-                if deleteCode == 1000004 then
-                    guard.deleting = true
-                    self._T.uncertain = self._T.uncertain or {}
-                    self._T.uncertain[guard.lockName] = guard
-                end
+                if deleteCode == 1000004 then self:KeepUncertain(guard, "", true) end
                 complete(deleteCode, deleteCode == 1000004)
             end)
         end)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void KeepUncertain(table guard, string raw, boolean deleting)
+        -- Delay release until a later read confirms the result of the native operation.
+        self._T.uncertain = self._T.uncertain or {}
+        guard.raw = raw
+        guard.deleting = deleting
+        self._T.uncertain[guard.lockName] = guard
     end
 
     @ExecSpace("ServerOnly")
@@ -308,7 +301,7 @@ script FormationStorage extends Logic
 
     @ExecSpace("ServerOnly")
     method integer ReadAuditBefore(table guard, string recordId, table snapshot)
-        -- The save guard prevents this target's level records from being recycled during restore.
+        -- The caller holds the target's audit and save guards during restore.
         local slot = self:AuditSlot(recordId)
         if slot == nil then return 1000002 end
         local storage = _DataStorageService:GetGlobalDataStorage("GMAuditV1")

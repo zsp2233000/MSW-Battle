@@ -64,7 +64,8 @@ script GMOnlinePlayers extends Logic
             reply.RequestId = event.RequestId
             reply.OriginRoom = event.OriginRoom
             reply.ReplyRoom = _RoomService.RoomKey
-            reply.PlayersJson = _HttpService:JSONEncode(self:LocalPlayers())
+            local players = self:LocalPlayers()
+            reply.PlayersJson = #players > 0 and _HttpService:JSONEncode(players) or "[]"
             _RoomService:RequestSendEventToRoomAsync(reply, event.OriginRoom, nil)
             return
         end

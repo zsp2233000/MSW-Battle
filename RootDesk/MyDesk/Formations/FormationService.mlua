@@ -165,10 +165,7 @@ script FormationService extends Logic
             local doc = nil
             local missing = code == 1000002 or (code == 0 and raw == nil)
             if catalog ~= nil and missing then doc = _FormationSchema:EmptyDocument() end
-            if code == 0 and not missing and catalog ~= nil then
-                local ok, parsed = pcall(function() return _HttpService:JSONDecode(raw) end)
-                if ok then doc = _FormationSchema:ValidateDocument(parsed, catalog) end
-            end
+            if code == 0 and not missing and catalog ~= nil then doc = _FormationSchema:DecodeDocument(raw, catalog) end
             if doc == nil then
                 record.loadState = "ERROR"
                 record.message = "讀取失敗，原資料未變更；請重新讀取"

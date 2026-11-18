@@ -18,7 +18,9 @@ script GMCommandService extends Logic
             complete({ status = "INVALID_PROFILE" })
             return
         end
-        if command.kind == "LOAD_LEVELS" then self:Load(profile, complete) return end
+        if command.kind == "LOAD_LEVELS" then self:Load(profile, _MonsterLevelStorage.StorageKey, complete) return end
+        if command.kind == "LOAD_FORMATIONS" then self:Load(profile, _FormationService.StorageKey, complete) return end
+        if command.kind == "LOAD_HANDOFF" then self:Load(profile, _FormationHandoff.StorageKey, complete) return end
         if command.kind == "LIST_AUDIT" then
             _FormationStorage:ListAudit(profile, function(code, records)
                 if code ~= 0 then complete({ status = "STORAGE_ERROR", profile = profile, code = code }) return end
@@ -27,149 +29,189 @@ script GMCommandService extends Logic
             end)
             return
         end
-        if command.kind == "SAVE_LEVELS" or command.kind == "FORCE_SAVE_LEVELS"
-            or command.kind == "RESET_LEVELS" or command.kind == "DELETE_LEVELS" or command.kind == "RESTORE_LEVELS" then
-            self:Mutate(requesterProfile, profile, command, complete)
+        local force = command.kind == "FORCE_SAVE_LEVELS"
+        local action = command.kind
+        if force then action = command.action end
+        local key = type(action) == "string" and self:MutationKey(action) or nil
+        if key ~= nil then
+            self:Mutate(requesterProfile, profile, key, action, force, command, complete)
             return
         end
         complete({ status = "INVALID_COMMAND" })
     end
 
     @ExecSpace("ServerOnly")
-    method void Load(string profile, any complete)
-        -- Return exact bytes as the CAS expectation; reads never create or repair a save.
+    method string MutationKey(string action)
+        if action == "SAVE_LEVELS" or action == "RESET_LEVELS" or action == "DELETE_LEVELS" or action == "RESTORE_LEVELS" then
+            return _MonsterLevelStorage.StorageKey
+        end
+        if action == "SAVE_FORMATIONS" or action == "DELETE_FORMATIONS" or action == "RESTORE_FORMATIONS" then
+            return _FormationService.StorageKey
+        end
+        if action == "DELETE_HANDOFF" or action == "RESTORE_HANDOFF" then return _FormationHandoff.StorageKey end
+        return nil
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Load(string profile, string key, any complete)
         local catalog = _FormationService:GetCatalog()
-        if catalog == nil then complete({ status = "UNAVAILABLE" }) return end
-        _FormationStorage:Read(profile, _MonsterLevelStorage.StorageKey, function(code, key, raw)
-            local missing = code == 1000002 or (code == 0 and raw == nil)
-            if not missing and code ~= 0 then complete({ status = "STORAGE_ERROR", code = code, profile = profile }) return end
-            local stored = missing and "" or raw
-            local document = missing and { monsters = {}, settled = {} } or _MonsterLevelStorage:Decode(raw)
-            if document == nil then
-                complete({ status = "CORRUPT", profile = profile, exists = true, expected = stored, raw = stored })
-                log("[VRF][GM] load corrupt profile=" .. profile)
-                return
-            end
-            complete(self:Ready(profile, not missing, stored, document, catalog))
-            log("[VRF][GM] load profile=" .. profile .. " exists=" .. tostring(not missing))
+        if catalog == nil and key ~= _FormationHandoff.StorageKey then complete({ status = "UNAVAILABLE" }) return end
+        self:ReadCurrent(profile, key, catalog, function(code, stored, document, exists)
+            if code ~= 0 then complete({ status = "STORAGE_ERROR", code = code, profile = profile }) return end
+            local response = self:Describe(profile, key, stored, document, exists, catalog)
+            complete(response)
+            log("[VRF][GM] load profile=" .. profile .. " key=" .. key .. " status=" .. response.status)
         end)
     end
 
     @ExecSpace("ServerOnly")
-    method table Ready(string profile, boolean exists, string expected, table document, any catalog)
-        -- Keep absent progress at the shared default without inventing stored rows.
+    method table Describe(string profile, string key, string stored, table document, boolean exists, any catalog)
+        local response = { status = "READY", profile = profile, exists = exists, expected = stored }
+        if key ~= _MonsterLevelStorage.StorageKey or document == nil then response.raw = stored end
+        if document == nil then
+            response.status = "CORRUPT"
+            response.corrupt = true
+        elseif key == _MonsterLevelStorage.StorageKey then
+            response.rows = self:LevelRows(document, catalog)
+        end
+        return response
+    end
+
+    @ExecSpace("ServerOnly")
+    method table LevelRows(table document, any catalog)
         local rows = {}
         for _, monster in ipairs(catalog:GetDeploymentOptions()) do
             local progress = document.monsters[monster.monsterId] or _MonsterProgression:DefaultProgress()
             table.insert(rows, { monsterId = monster.monsterId, monsterName = monster.monsterName,
                 level = progress.level, experience = progress.experience })
         end
-        return { status = "READY", profile = profile, exists = exists, expected = expected, rows = rows }
+        return rows
     end
 
     @ExecSpace("ServerOnly")
-    method void Mutate(string requesterProfile, string profile, table command, any complete)
-        -- One exclusive owner covers audit, CAS, force re-read and corrupt-save deletion.
-        local key = _MonsterLevelStorage.StorageKey
-        _FormationStorage:BeginExclusive(profile, key, function(code, guard)
+    method void Mutate(string requesterProfile, string profile, string key, string action, boolean force, table command, any complete)
+        local catalog = _FormationService:GetCatalog()
+        if catalog == nil and key ~= _FormationHandoff.StorageKey then complete({ status = "UNAVAILABLE" }) return end
+        -- A shared audit guard serializes the target's ring across all save items.
+        _FormationStorage:BeginExclusive(profile, "GMAuditV1", function(code, auditGuard)
             if code ~= 0 then complete({ status = "BUSY", code = code, profile = profile }) return end
-            local function finish(response, retainGuard)
-                if not retainGuard then _FormationStorage:EndExclusive(guard) end
-                complete(response)
-            end
-            self:ReadCurrent(profile, key, function(readCode, stored, document, exists)
-                if readCode ~= 0 then finish({ status = "STORAGE_ERROR", code = readCode, profile = profile }, false) return end
-                if command.kind ~= "FORCE_SAVE_LEVELS" and (stored ~= command.expected or exists ~= command.expectedExists) then
-                    finish(self:Conflict(profile, stored, document, exists), false)
+            _FormationStorage:BeginExclusive(profile, key, function(guardCode, guard)
+                if guardCode ~= 0 then
+                    _FormationStorage:EndExclusive(auditGuard)
+                    complete({ status = "BUSY", code = guardCode, profile = profile })
                     return
                 end
-                self:Commit(requesterProfile, guard, command, stored, document, exists, finish)
+                local function finish(response, retainGuard, retainAuditGuard)
+                    if not retainGuard then _FormationStorage:EndExclusive(guard) end
+                    if not retainAuditGuard then _FormationStorage:EndExclusive(auditGuard) end
+                    complete(response)
+                end
+                self:ReadCurrent(profile, key, catalog, function(readCode, stored, document, exists)
+                    if readCode ~= 0 then finish({ status = "STORAGE_ERROR", code = readCode, profile = profile }, false, false) return end
+                    if not force and (stored ~= command.expected or exists ~= command.expectedExists) then
+                        local response = self:Describe(profile, key, stored, document, exists, catalog)
+                        response.status = "CONFLICT"
+                        finish(response, false, false)
+                        return
+                    end
+                    self:Commit(requesterProfile, guard, auditGuard, action, command, stored, document, exists, catalog, finish)
+                end)
             end)
         end)
     end
 
     @ExecSpace("ServerOnly")
-    method void ReadCurrent(string profile, string key, any complete)
+    method void ReadCurrent(string profile, string key, any catalog, any complete)
         -- Distinguish absence, corruption and storage errors without repairing any of them.
         _FormationStorage:Read(profile, key, function(code, loadedKey, raw)
             local missing = code == 1000002 or (code == 0 and raw == nil)
             if not missing and code ~= 0 then complete(code, nil, nil, false) return end
             local stored = missing and "" or raw
-            complete(0, stored, missing and { monsters = {}, settled = {} } or _MonsterLevelStorage:Decode(raw), not missing)
+            complete(0, stored, self:Decode(key, stored, not missing, catalog), not missing)
         end)
     end
 
     @ExecSpace("ServerOnly")
-    method table Conflict(string profile, string stored, table document, boolean exists)
-        -- Return the current snapshot without changing the caller's original expectation.
-        local catalog = _FormationService:GetCatalog()
-        local reply = { profile = profile, exists = exists, expected = stored }
-        if document == nil then
-            reply.raw = stored
-        elseif catalog ~= nil then
-            reply = self:Ready(profile, exists, stored, document, catalog)
+    method table Decode(string key, string raw, boolean exists, any catalog)
+        if key == _MonsterLevelStorage.StorageKey then
+            if not exists then return { monsters = {}, settled = {} } end
+            return _MonsterLevelStorage:Decode(raw)
         end
-        reply.status = "CONFLICT"
-        return reply
+        if not exists then return {} end
+        if key == _FormationService.StorageKey then return _FormationSchema:DecodeDocument(raw, catalog) end
+        local ok, document = pcall(function() return _HttpService:JSONDecode(raw) end)
+        return ok and type(document) == "table" and document or nil
     end
 
     @ExecSpace("ServerOnly")
-    method void Commit(string requesterProfile, table guard, table command, string stored, table document, boolean exists, any finish)
+    method void Commit(string requesterProfile, table guard, table auditGuard, string action, table command, string stored,
+        table document, boolean exists, any catalog, any finish)
         -- Audit the version about to be overwritten before any save mutation.
         local profile = guard.profile
-        local action = command.kind == "FORCE_SAVE_LEVELS" and command.action or command.kind
-        local deleting = action == "DELETE_LEVELS"
+        local key = guard.key
+        local deleting = action == "DELETE_LEVELS" or action == "DELETE_FORMATIONS" or action == "DELETE_HANDOFF"
+        local restoring = action == "RESTORE_LEVELS" or action == "RESTORE_FORMATIONS" or action == "RESTORE_HANDOFF"
         local after = nil
-        local catalog = _FormationService:GetCatalog()
-        if catalog == nil then finish({ status = "UNAVAILABLE", profile = profile }, false) return end
-        if deleting and (not exists or document ~= nil) then
-            finish({ status = "NOT_CORRUPT", profile = profile }, false)
+        if action == "DELETE_LEVELS" and (not exists or document ~= nil) then
+            finish({ status = "NOT_CORRUPT", profile = profile }, false, false)
             return
         end
-        if action == "RESTORE_LEVELS" then
+        if deleting and not exists then finish({ status = "NO_SAVE", profile = profile }, false, false) return end
+        if restoring then
             if type(command.recordId) ~= "string" or #command.recordId > 64 then
-                finish({ status = "RECORD_UNAVAILABLE", profile = profile }, false)
+                finish({ status = "RECORD_UNAVAILABLE", profile = profile }, false, false)
                 return
             end
             local snapshot = {}
             local code = _FormationStorage:ReadAuditBefore(guard, command.recordId, snapshot)
             if code ~= 0 then
                 local status = code == 1000002 and "RECORD_UNAVAILABLE" or "STORAGE_ERROR"
-                finish({ status = status, code = code, profile = profile }, false)
+                finish({ status = status, code = code, profile = profile }, false, false)
                 return
             end
             deleting = not snapshot.exists
             after = snapshot.raw
+        elseif deleting then
+            after = ""
+        elseif action == "SAVE_FORMATIONS" then
+            local raw = command.raw
+            if type(raw) == "string" and #raw <= 50000 and _FormationSchema:DecodeDocument(raw, catalog) ~= nil then
+                after = raw
+            end
         else
-            after = deleting and "" or self:Plan(command, action, document, catalog)
+            after = self:Plan(command, action, document, catalog)
         end
-        if after == nil then finish({ status = "INVALID_PROGRESS", profile = profile }, false) return end
+        if after == nil then
+            local status = action == "SAVE_FORMATIONS" and "INVALID_FORMATIONS" or "INVALID_PROGRESS"
+            finish({ status = status, profile = profile }, false, false)
+            return
+        end
         local record = { gm = requesterProfile, timeMs = DateTime.UtcNow.Elapsed,
-            target = profile, key = guard.key, beforeExists = exists, afterExists = not deleting, outcome = "PENDING",
-            action = action, restoredFrom = action == "RESTORE_LEVELS" and command.recordId or nil }
-        _FormationStorage:AppendAudit(guard, record, stored, after, function(auditCode, audit, pending, retainGuard)
-            if auditCode ~= 0 then finish({ status = "AUDIT_FAILED", code = auditCode, profile = profile }, retainGuard) return end
+            target = profile, key = key, beforeExists = exists, afterExists = not deleting, outcome = "PENDING",
+            action = action, restoredFrom = restoring and command.recordId or nil }
+        _FormationStorage:AppendAudit(auditGuard, record, stored, after, function(auditCode, audit, pending, retainAuditGuard)
+            if auditCode ~= 0 then finish({ status = "AUDIT_FAILED", code = auditCode, profile = profile }, false, retainAuditGuard) return end
             local function written(writeCode, retainWriteGuard)
                 local status = writeCode == 0 and "SAVED" or (writeCode == 2000000 and "CONFLICT" or "STORAGE_ERROR")
                 record.outcome = writeCode == 1000004 and "UNKNOWN" or (status == "STORAGE_ERROR" and "FAILED" or status)
                 _FormationStorage:CompleteAudit(audit, pending, record, function(resultCode)
                     log("[VRF][GM] write profile=" .. profile .. " action=" .. action .. " status=" .. status .. " auditCode=" .. tostring(resultCode))
                     if resultCode ~= 0 then
-                        finish({ status = "AUDIT_INCOMPLETE", code = resultCode, profile = profile }, retainWriteGuard)
+                        finish({ status = "AUDIT_INCOMPLETE", code = resultCode, profile = profile }, retainWriteGuard, false)
                     elseif writeCode == 0 then
-                        local saved = deleting and { monsters = {}, settled = {} } or _MonsterLevelStorage:Decode(after)
-                        local response = saved and self:Ready(profile, not deleting, after, saved, catalog)
-                            or { profile = profile, exists = true, expected = after, raw = after, corrupt = true }
+                        local saved = self:Decode(key, after, not deleting, catalog)
+                        local response = self:Describe(profile, key, after, saved, not deleting, catalog)
                         response.status = status
-                        finish(response, retainWriteGuard)
+                        finish(response, retainWriteGuard, false)
                     elseif status == "CONFLICT" then
-                        self:ReadCurrent(profile, guard.key, function(code, current, currentDocument, currentExists)
-                            local response = code == 0 and self:Conflict(profile, current, currentDocument, currentExists)
-                                or { status = "STORAGE_ERROR", code = code, profile = profile }
-                            finish(response, retainWriteGuard)
+                        self:ReadCurrent(profile, key, catalog, function(code, current, currentDocument, currentExists)
+                            if code ~= 0 then finish({ status = "STORAGE_ERROR", code = code, profile = profile }, retainWriteGuard, false) return end
+                            local response = self:Describe(profile, key, current, currentDocument, currentExists, catalog)
+                            response.status = "CONFLICT"
+                            finish(response, retainWriteGuard, false)
                         end)
                     else
-                        finish({ status = status, code = writeCode, profile = profile }, retainWriteGuard)
+                        finish({ status = status, code = writeCode, profile = profile }, retainWriteGuard, false)
                     end
                 end)
             end

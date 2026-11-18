@@ -58,7 +58,7 @@ test('the GM editor is client only and sends writes only through the RPC', () =>
   assert.doesNotMatch(body(source, 'Submit'), /targetInput/);
   assert.match(body(source, 'Force'), /FORCE_SAVE_LEVELS/);
   assert.match(body(source, 'Reset'), /action = "RESET_LEVELS"/);
-  assert.match(body(source, 'Delete'), /action = "DELETE_LEVELS"/);
+  assert.match(body(source, 'Delete'), /"DELETE_LEVELS"/);
   assert.match(body(source, 'Reload'), /self\._T\.loaded/);
   assert.match(save, /rows = edits/);
   assert.doesNotMatch(save, /raw =/);
@@ -102,10 +102,10 @@ test('GM controls and every bound entity exist, with entry and panel hidden init
 
 test('GM level writes validate through the command boundary and use the shared encoder', () => {
   const source = read(COMMANDS);
-  const execute = body(source, 'Execute');
-  assert.match(execute, /command\.kind == "SAVE_LEVELS"/);
-  assert.match(execute, /command\.kind == "RESET_LEVELS"/);
-  assert.match(execute, /command\.kind == "DELETE_LEVELS"/);
+  const mutations = body(source, 'MutationKey');
+  assert.match(mutations, /action == "SAVE_LEVELS"/);
+  assert.match(mutations, /action == "RESET_LEVELS"/);
+  assert.match(mutations, /action == "DELETE_LEVELS"/);
   assert.match(source, /_MonsterProgression:IsValidProgress\(/);
   assert.match(source, /_MonsterLevelStorage:Encode\(/);
   assert.match(source, /command\.kind == "FORCE_SAVE_LEVELS"/);
@@ -118,5 +118,5 @@ test('operation history has a private request and a per-record restore button', 
   assert.ok(ui.getComponent('Panel/Window/History', 'MOD.Core.ButtonComponent'));
   assert.ok(ui.getComponent('Panel/Window/HistoryList/RecordTemplate/Restore', 'MOD.Core.ButtonComponent'));
   assert.match(body(read(RPC), 'Request'), /recordId = payload\.recordId/);
-  assert.match(body(read(PANEL), 'Restore'), /"RESTORE_LEVELS"/);
+  assert.match(body(read(PANEL), 'RestoreLoaded'), /"RESTORE_LEVELS"/);
 });

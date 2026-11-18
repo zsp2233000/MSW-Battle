@@ -24,6 +24,16 @@ script GMPanel extends Logic
     property ButtonComponent historyButton = "ff89dc99-b214-4e1c-874d-2a54a731fe41"
     property ScrollLayoutGroupComponent historyLayout = "7c5eb197-0c2a-496d-b5da-291b58665ccb"
     property Entity recordTemplate = "bcee0a48-e625-4ed2-8730-b2bb5e36763c"
+    property ButtonComponent levelsTab = "7e7d2538-a5f7-4dbf-b5d0-9b2584cdd2e6"
+    property ButtonComponent formationsTab = "4bc7aeb2-2f7b-4390-8bd7-488996884a74"
+    property ButtonComponent handoffTab = "47667834-be60-457d-8db4-5d01347518a6"
+    property TextGUIRendererInputComponent formationInput = "5483b2c8-e94c-4ae0-abb0-963127f5c047"
+    property TextGUIRendererComponent formationWarning = "c670cc6d-9b27-492c-b2fc-c4245db9d108"
+    property ButtonComponent formationSaveButton = "3c47d85c-054d-40e1-96b0-4463401dcd26"
+    property ButtonComponent onlineButton = "8c0663dc-506f-48e0-8ccc-ca59f4ebe0d3"
+    property ButtonComponent onlineBackButton = "d95419c4-94ad-4376-a6f5-2329b7bfb2ae"
+    property ScrollLayoutGroupComponent onlineLayout = "43a49cb9-8a6b-4862-8679-e0a2b3b6cf21"
+    property Entity playerTemplate = "6c42431f-3355-405e-95c2-d6fc28eab47a"
 
     @ExecSpace("ClientOnly")
     method void OnBeginPlay()
@@ -46,6 +56,10 @@ script GMPanel extends Logic
         self._T.recordViews = {}
         self._T.records = {}
         self._T.history = false
+        self._T.item = "LEVELS"
+        self._T.online = false
+        self._T.players = {}
+        self._T.playerViews = {}
         self._T.bindings = {}
         self._T.bound = false
         log("[VRF][GMPanel] ready")
@@ -97,6 +111,12 @@ script GMPanel extends Logic
         self:Bind(self.forceButton.Entity, function() self:Force() end)
         self:Bind(self.reloadButton.Entity, function() self:Reload() end)
         self:Bind(self.historyButton.Entity, function() self:ToggleHistory() end)
+        self:Bind(self.levelsTab.Entity, function() self:SelectItem("LEVELS") end)
+        self:Bind(self.formationsTab.Entity, function() self:SelectItem("FORMATIONS") end)
+        self:Bind(self.handoffTab.Entity, function() self:SelectItem("HANDOFF") end)
+        self:Bind(self.formationSaveButton.Entity, function() self:SaveFormation() end)
+        self:Bind(self.onlineButton.Entity, function() self:ShowOnlinePlayers() end)
+        self:Bind(self.onlineBackButton.Entity, function() self:Load(self:CurrentTarget()) end)
     end
 
     @ExecSpace("ClientOnly")
@@ -146,14 +166,37 @@ script GMPanel extends Logic
         self._T.raw = ""
         self._T.history = false
         self._T.records = {}
+        self._T.item = "LEVELS"
+        self._T.restoreAfterLoad = ""
+        self._T.formationDraft = nil
+        self._T.online = false
+        self._T.players = {}
         self:ClearRows()
         self:ClearRecords()
+        self:ClearPlayers()
         if isvalid(self.rawText) then self.rawText.Text = "" end
         if isvalid(self.panel) then self.panel:SetEnable(false) end
     end
 
     @ExecSpace("ClientOnly")
     method void Load(string profile)
+        self:LoadSnapshot(profile, "")
+    end
+
+    @ExecSpace("ClientOnly")
+    method string CurrentTarget()
+        return self._T.loaded ~= "" and self._T.loaded or self.targetInput.Text
+    end
+
+    @ExecSpace("ClientOnly")
+    method void SelectItem(string item)
+        if not self._T.open or not self:CanOpen() or self._T.pending then return end
+        self._T.item = item
+        self:Load(self:CurrentTarget())
+    end
+
+    @ExecSpace("ClientOnly")
+    method void LoadSnapshot(string profile, string restoreRecordId)
         -- One click issues one read; retry is available after errors or an unconfirmed timeout.
         if not self._T.open or not self:CanOpen() or self._T.pending then return end
         local target = string.upper(string.match(profile, "^%s*(.-)%s*$"))
@@ -166,15 +209,33 @@ script GMPanel extends Logic
         self._T.loaded = ""
         self._T.corrupt = false
         self._T.draft = nil
+        self._T.restoreAfterLoad = restoreRecordId
+        self._T.formationDraft = nil
         self.rawInput.Text = ""
         self._T.rows = {}
         self._T.raw = ""
         self._T.history = false
         self._T.records = {}
+        self._T.online = false
+        self._T.players = {}
         self:Render()
-        _GMPanelService:Request(self._T.loadRequest, "LOAD_LEVELS", target, "", {})
+        _GMPanelService:Request(self._T.loadRequest, "LOAD_" .. self._T.item, target, "", {})
     end
 
+    @ExecSpace("ClientOnly")
+    method void ShowOnlinePlayers()
+        if not self._T.open or not self:CanOpen() or self._T.pending then return end
+        self._T.online = true
+        self._T.history = false
+        self._T.players = {}
+        self._T.serial = self._T.serial + 1
+        self._T.activeRequest = self._T.serial
+        self._T.startedAt = _UtilLogic.ElapsedSeconds
+        self._T.pending = true
+        self._T.status = "PLAYERS_LOADING"
+        self:Render()
+        _GMPanelService:Request(self._T.activeRequest, "LIST_ONLINE_PLAYERS", "", "", {})
+    end
 
     @ExecSpace("ClientOnly")
     method void Save()
@@ -191,6 +252,14 @@ script GMPanel extends Logic
         end
         self._T.draft = { action = "SAVE_LEVELS", rows = edits }
         self:Submit("SAVE_LEVELS", self._T.draft)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void SaveFormation()
+        if not self.formationSaveButton.Enable then return end
+        self._T.formationDraft = self.formationInput.Text
+        self._T.draft = { action = "SAVE_FORMATIONS", raw = self._T.formationDraft }
+        self:Submit("SAVE_FORMATIONS", self._T.draft)
     end
 
     @ExecSpace("ClientOnly")
@@ -218,10 +287,11 @@ script GMPanel extends Logic
 
     @ExecSpace("ClientOnly")
     method void Delete()
-        -- Ask the server to delete only a document it still cannot decode.
         if not self.deleteButton.Enable then return end
-        self._T.draft = { action = "DELETE_LEVELS" }
-        self:Submit("DELETE_LEVELS", self._T.draft)
+        local action = "DELETE_LEVELS"
+        if self._T.item ~= "LEVELS" then action = "DELETE_" .. self._T.item end
+        self._T.draft = { action = action }
+        self:Submit(action, self._T.draft)
     end
 
     @ExecSpace("ClientOnly")
@@ -245,11 +315,22 @@ script GMPanel extends Logic
     end
 
     @ExecSpace("ClientOnly")
-    method void Restore(string recordId)
+    method void Restore(string recordId, string item)
         -- The server resolves this ID against the selected player's retained history.
         if not self._T.history or self._T.status ~= "HISTORY_READY" or self._T.pending then return end
-        self._T.draft = { action = "RESTORE_LEVELS", recordId = recordId }
-        self:Submit("RESTORE_LEVELS", self._T.draft)
+        if item ~= self._T.item then
+            self._T.item = item
+            self:LoadSnapshot(self._T.loaded, recordId)
+            return
+        end
+        self:RestoreLoaded(recordId)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void RestoreLoaded(string recordId)
+        local action = self._T.item == "LEVELS" and "RESTORE_LEVELS" or "RESTORE_" .. self._T.item
+        self._T.draft = { action = action, recordId = recordId }
+        self:Submit(action, self._T.draft)
     end
 
     @ExecSpace("ClientOnly")
@@ -296,7 +377,8 @@ script GMPanel extends Logic
             log("[VRF][GMPanel] authorized=" .. tostring(self._T.authorized))
             return
         end
-        local current = kind == "LOAD_LEVELS" and requestId == self._T.loadRequest or requestId == self._T.activeRequest
+        local loading = string.sub(kind, 1, 5) == "LOAD_"
+        local current = loading and requestId == self._T.loadRequest or requestId == self._T.activeRequest
         if not current or requestId == 0 or not self._T.pending or not self._T.open then return end
         self._T.loadRequest = 0
         self._T.activeRequest = 0
@@ -304,9 +386,10 @@ script GMPanel extends Logic
         self._T.status = response.status
         self._T.lastCommand = kind
         self._T.target = response.profile or self._T.target
-        if kind == "LOAD_LEVELS" and (response.status == "READY" or response.status == "CORRUPT") then self._T.loaded = self._T.target end
+        if loading and (response.status == "READY" or response.status == "CORRUPT") then self._T.loaded = self._T.target end
         self._T.errorCode = response.code
         if response.status == "HISTORY_READY" then self._T.records = response.records or {} end
+        if response.status == "PLAYERS_READY" then self._T.players = response.players or {} end
         if response.status == "READY" or response.status == "CORRUPT" or response.status == "SAVED" then
             self._T.exists = response.exists
             self._T.expected = response.expected
@@ -315,12 +398,20 @@ script GMPanel extends Logic
             self._T.corrupt = response.status == "CORRUPT" or response.corrupt == true
         end
         if response.status == "SAVED" then
-            self._T.restored = self._T.draft ~= nil and self._T.draft.action == "RESTORE_LEVELS"
+            local action = self._T.draft and self._T.draft.action or ""
+            self._T.restored = string.sub(action, 1, 8) == "RESTORE_"
+            self._T.deleted = string.sub(action, 1, 7) == "DELETE_"
             self._T.draft = nil
+            self._T.formationDraft = nil
             self._T.history = false
             self._T.records = {}
         end
         if response.status == "FORBIDDEN" then self._T.authorized = false self:Close() return end
+        if loading then
+            local recordId = self._T.restoreAfterLoad
+            self._T.restoreAfterLoad = ""
+            if recordId ~= "" and self._T.loaded ~= "" then self:RestoreLoaded(recordId) return end
+        end
         self:Render()
         log("[VRF][GMPanel] shown status=" .. response.status .. " rows=" .. tostring(#self._T.rows))
     end
@@ -347,6 +438,33 @@ script GMPanel extends Logic
     end
 
     @ExecSpace("ClientOnly")
+    method void ClearPlayers()
+        for _, view in ipairs(self._T.playerViews or {}) do
+            if isvalid(view.row) then
+                view.row:DisconnectEvent(ButtonClickEvent, view.callback)
+                view.row:Destroy()
+            end
+        end
+        self._T.playerViews = {}
+    end
+
+    @ExecSpace("ClientOnly")
+    method void RenderOnlinePlayers()
+        self:ClearPlayers()
+        self.onlineLayout.Entity:SetEnable(self._T.online)
+        if not self._T.online then return end
+        for index, player in ipairs(self._T.players) do
+            local row = self.playerTemplate:Clone("GMPlayer_" .. tostring(index))
+            local profile = player.profile
+            row.TextGUIRendererComponent.Text = player.nickname .. "（" .. profile .. "）"
+            local callback = row:ConnectEvent(ButtonClickEvent, function() self:Load(profile) end)
+            row:SetEnable(true)
+            table.insert(self._T.playerViews, { row = row, callback = callback })
+        end
+        self.onlineLayout:ResetScrollPosition(UITransformAxis.Vertical)
+    end
+
+    @ExecSpace("ClientOnly")
     method void RenderHistory()
         -- The server returns metadata in ring order. Each button retains its record ID.
         self:ClearRecords()
@@ -356,14 +474,18 @@ script GMPanel extends Logic
         for index, record in ipairs(self._T.records) do
             local row = self.recordTemplate:Clone("GMRecord_" .. tostring(index))
             local time = DateTime(record.timeMs):ToFormattedString("yyyy-MM-dd HH:mm:ss")
+            local key = string.match(record.action or "", "_(%u+)$")
+            if key ~= "FORMATIONS" and key ~= "HANDOFF" then key = "LEVELS" end
             local item = record.key == "MonsterLevelsV1" and "怪物等級" or record.key
+            if key == "FORMATIONS" then item = "預存編隊"
+            elseif key == "HANDOFF" then item = "配對交接資料" end
             local result = outcomes[record.outcome] or record.outcome
-            if record.action == "RESTORE_LEVELS" then result = "還原 · " .. result end
+            if record.restoredFrom ~= nil then result = "還原 · " .. result end
             row:GetChildByName("Details").TextGUIRendererComponent.Text =
                 record.gm .. "  ·  " .. time .. " UTC\n" .. item .. "  ·  " .. result
             local button = row:GetChildByName("Restore")
             local id = record.id
-            local callback = button:ConnectEvent(ButtonClickEvent, function() self:Restore(id) end)
+            local callback = button:ConnectEvent(ButtonClickEvent, function() self:Restore(id, key) end)
             button.ButtonComponent.Enable = self._T.status == "HISTORY_READY"
             row:SetEnable(true)
             table.insert(self._T.recordViews, { row = row, button = button, callback = callback })
@@ -376,18 +498,26 @@ script GMPanel extends Logic
         -- Show a complete table or literal damaged-save text, with explicit load and error states.
         self:ClearRows()
         local status = self._T.status
+        local item = self._T.item
+        local levels = item == "LEVELS"
+        local formations = item == "FORMATIONS"
         local messages = { IDLE = "請輸入玩家代碼或選擇我自己", LOADING = "讀取中…", SAVING = "寫入中…",
             CORRUPT = "存檔損壞：可修復合法內容或刪除", CONFLICT = "存檔在你開啟後已變動",
             STORAGE_ERROR = "讀取失敗，請重試", AUDIT_FAILED = "操作紀錄失敗，存檔未改",
             AUDIT_INCOMPLETE = "操作紀錄未完成，請重新讀取", INVALID_PROGRESS = "等級或經驗無效，存檔未改",
+            INVALID_FORMATIONS = "預存編隊 JSON 無效，存檔未改", NO_SAVE = "尚無存檔可刪除",
             NOT_CORRUPT = "存檔可讀，不能刪除", BUSY = "存檔正在寫入，請重試",
             INVALID_PROFILE = "玩家代碼格式無效", UNAVAILABLE = "怪物資料尚未就緒，請重試",
             TIMEOUT = "操作逾時，請重新讀取", INVALID_COMMAND = "不支援的指令",
-            HISTORY_LOADING = "讀取操作紀錄中…", RECORD_UNAVAILABLE = "這筆紀錄已無法還原，請重新查看操作紀錄" }
+            HISTORY_LOADING = "讀取操作紀錄中…", RECORD_UNAVAILABLE = "這筆紀錄已無法還原，請重新查看操作紀錄",
+            PLAYERS_LOADING = "讀取同一個世界實例的在線玩家…", PLAYERS_READY = "請選擇在線玩家" }
         local message = messages[status] or status
+        local damaged = item == "HANDOFF" and "存檔損壞：可刪除交接資料" or messages.CORRUPT
+        if status == "CORRUPT" then message = damaged end
+        if status == "UNAVAILABLE" and self._T.online then message = "在線名單讀取失敗，請重新整理" end
         if status == "STORAGE_ERROR" then
             if self._T.lastCommand == "LIST_AUDIT" then message = "操作紀錄讀取失敗，請重試"
-            elseif self._T.lastCommand ~= "LOAD_LEVELS" then message = "寫入失敗，請重新讀取" end
+            elseif string.sub(self._T.lastCommand, 1, 5) ~= "LOAD_" then message = "寫入失敗，請重新讀取" end
         end
         if status == "HISTORY_READY" then
             local label = #self._T.records == 0 and " · 尚無操作紀錄" or " · 操作紀錄（最新在前）"
@@ -395,8 +525,12 @@ script GMPanel extends Logic
         end
         if status == "READY" or status == "SAVED" then
             local savedLabel = self._T.restored and " · 已還原" or " · 已儲存"
-            local label = status == "SAVED" and savedLabel or (self._T.exists and " · 怪物等級" or " · 尚無存檔，顯示 Lv1／經驗 0")
-            if self._T.corrupt then label = label .. " · 存檔損壞：可修復合法內容或刪除" end
+            if self._T.deleted then savedLabel = formations and " · 已清空預存編隊" or " · 已刪除" end
+            local itemLabel = levels and "怪物等級" or (formations and "預存編隊" or "配對交接資料（唯讀）")
+            local label = " · " .. itemLabel
+            if status == "SAVED" then label = savedLabel
+            elseif not self._T.exists then label = levels and " · 尚無存檔，顯示 Lv1／經驗 0" or " · 尚無" .. itemLabel end
+            if self._T.corrupt then label = label .. " · " .. damaged end
             message = "玩家代碼：" .. tostring(self._T.target) .. label
             status = "READY"
         elseif status == "STORAGE_ERROR" or status == "AUDIT_FAILED" or status == "AUDIT_INCOMPLETE" or status == "BUSY" then
@@ -404,18 +538,30 @@ script GMPanel extends Logic
             message = message .. "（" .. reason .. "）"
         end
         self.statusText.Text = message
-        local editable = status == "READY" or status == "CORRUPT" or status == "INVALID_PROGRESS" or status == "AUDIT_FAILED" or status == "BUSY"
-        local ready = editable and not self._T.history and self._T.loaded ~= "" and not self._T.corrupt
-        local corrupt = editable and not self._T.history and self._T.corrupt
+        local editable = status == "READY" or status == "CORRUPT" or status == "INVALID_PROGRESS"
+            or status == "INVALID_FORMATIONS" or status == "AUDIT_FAILED" or status == "BUSY"
+        local showingSave = not self._T.history and not self._T.online
+        local showDocument = editable and showingSave and self._T.loaded ~= ""
+        local ready = showDocument and levels and not self._T.corrupt
+        local corrupt = showDocument and levels and self._T.corrupt
+        local editFormation = showDocument and formations
+        local corruptFormation = editFormation and self._T.corrupt
+        local readHandoff = showDocument and item == "HANDOFF" and self._T.exists
         self.tableHeader:SetEnable(ready)
         self.listLayout.Entity:SetEnable(ready)
-        self.rawLayout.Entity:SetEnable(corrupt)
+        self.rawLayout.Entity:SetEnable(corrupt or corruptFormation or readHandoff)
         self.rawInput.Entity:SetEnable(corrupt)
+        self.formationInput.Entity:SetEnable(editFormation)
+        self.formationWarning.Entity:SetEnable(formations and showingSave)
         self.rawText.Text = self._T.raw
-        if corrupt then
+        if corrupt or corruptFormation or readHandoff then
+            local frame = self.rawLayout.Entity.UITransformComponent
+            local frameHeight = readHandoff and 432 or (corruptFormation and 152 or 180)
+            frame.anchoredPosition = Vector2(40, corruptFormation and -458 or -398)
+            frame.RectSize = Vector2(frame.RectSize.x, frameHeight)
             local width = self.rawText.Entity.UITransformComponent.RectSize.x
             local height = self.rawText:GetPreferredHeight(self._T.raw, width)
-            self.rawText.Entity.UITransformComponent.RectSize = Vector2(width, math.max(280, height + 24))
+            self.rawText.Entity.UITransformComponent.RectSize = Vector2(width, math.max(frameHeight, height + 24))
             self.rawLayout:ResetScrollPosition(UITransformAxis.Vertical)
         end
         for index, data in ipairs(ready and self._T.rows or {}) do
@@ -441,20 +587,49 @@ script GMPanel extends Logic
                 end
                 self.saveButton.Enable = not self._T.pending
             end, 0.1)
+        elseif editFormation then
+            local frame = self.formationInput.Entity.UITransformComponent
+            frame.anchoredPosition = Vector2(40, corruptFormation and -620 or -458)
+            frame.RectSize = Vector2(frame.RectSize.x, corruptFormation and 210 or 372)
+            self._T.rowsTimer = _TimerService:SetTimerOnce(function()
+                self._T.rowsTimer = nil
+                self.formationInput.Text = self._T.formationDraft or self._T.raw
+                self.formationSaveButton.Enable = not self._T.pending
+            end, 0.1)
         end
         local busy = self._T.pending
         self.loadButton.Enable = not busy
         self.selfButton.Enable = not busy
         self.targetInput.Enable = not busy
+        self.levelsTab.Enable = not busy and (not levels or not showingSave)
+        self.formationsTab.Enable = not busy and (not formations or not showingSave)
+        self.handoffTab.Enable = not busy and (item ~= "HANDOFF" or not showingSave)
+        self.saveButton.Entity:SetEnable(ready)
         self.saveButton.Enable = false
+        self.formationSaveButton.Entity:SetEnable(editFormation)
+        self.formationSaveButton.Enable = false
+        self.resetButton.Entity:SetEnable(ready)
         self.resetButton.Enable = ready and not busy
+        self.repairButton.Entity:SetEnable(corrupt)
         self.repairButton.Enable = corrupt and not busy
-        self.deleteButton.Enable = corrupt and not busy
-        self.forceButton.Enable = self._T.status == "CONFLICT" and self._T.draft ~= nil and not busy
-        self.reloadButton.Enable = self._T.status == "CONFLICT" and not busy
-        self.historyButton.Enable = self._T.loaded ~= "" and not busy
+        local canDelete = corrupt or editFormation and self._T.exists or readHandoff
+        self.deleteButton.Entity:SetEnable(canDelete)
+        self.deleteButton.Enable = canDelete and not busy
+        self.deleteButton.Entity.TextGUIRendererComponent.Text = formations and "清空編隊" or "刪除"
+        local conflicted = self._T.status == "CONFLICT"
+        self.forceButton.Entity:SetEnable(conflicted and self._T.draft ~= nil)
+        self.forceButton.Enable = conflicted and self._T.draft ~= nil and not busy
+        self.reloadButton.Entity:SetEnable(conflicted)
+        self.reloadButton.Enable = conflicted and not busy
+        self.historyButton.Entity:SetEnable(self._T.loaded ~= "" and not self._T.online)
+        self.historyButton.Enable = self._T.loaded ~= "" and not busy and not self._T.online
         self.historyButton.Entity.TextGUIRendererComponent.Text = self._T.history and "返回存檔" or "操作紀錄"
         self:RenderHistory()
+        self.onlineButton.Enable = not busy
+        self.onlineButton.Entity.TextGUIRendererComponent.Text = self._T.online and "重新整理在線名單" or "在線玩家"
+        self.onlineBackButton.Entity:SetEnable(self._T.online)
+        self.onlineBackButton.Enable = not busy
+        self:RenderOnlinePlayers()
     end
 
     @ExecSpace("ClientOnly")
