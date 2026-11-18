@@ -62,9 +62,13 @@ local ok, detail = pcall(function()
         tankInput('ExperienceInput').Text = '1'
         click(gm.saveButton)
         await(function() return hasStatus(profile) and hasStatus('已儲存') and tankLevel() == '7' end, 'save stays on loaded target')
-        tankInput('LevelInput').Text = '31'
+        tankInput('LevelInput').Text = '50'
         click(gm.saveButton)
-        await(function() return hasStatus('無效') and tankLevel() == '7' end, 'reject invalid level')
+        await(function() return hasStatus('1–30') and tankLevel() == '50' end, 'reject level 50 without discarding input')
+        tankInput('LevelInput').Text = '30'
+        tankInput('ExperienceInput').Text = '0'
+        click(gm.saveButton)
+        await(function() return hasStatus('已儲存') and tankLevel() == '30' end, 'corrected level saves')
         click(gm.resetButton)
         await(function() return hasStatus('已儲存') and tankLevel() == '1' end, 'reset')
         gm.targetInput.Text = damaged

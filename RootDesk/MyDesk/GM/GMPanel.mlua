@@ -79,11 +79,11 @@ script GMPanel extends Logic
             self:Close()
             if userId ~= "" then self:RequestIdentity() end
         end
+        if self._T.open and not self:CanOpen() then self:Close() end
         if isvalid(self.lobbyButton) then
-            self.lobbyButton.Entity:SetEnable(inLobby and self._T.authorized)
+            self.lobbyButton.Entity:SetEnable(inLobby and self._T.authorized and not self._T.open)
             self.lobbyButton.Enable = self:CanOpen()
         end
-        if self._T.open and not self:CanOpen() then self:Close() end
         if self._T.pending and _UtilLogic.ElapsedSeconds - self._T.startedAt > self.LoadTimeoutSeconds then
             self._T.pending = false
             self._T.loadRequest = 0
@@ -245,7 +245,11 @@ script GMPanel extends Logic
         for _, row in ipairs(self._T.rows or {}) do
             local level = self:Integer(self:InputText(row, "LevelInput"))
             local experience = self:Integer(self:InputText(row, "ExperienceInput"))
-            if level == nil or experience == nil then self._T.status = "INVALID_PROGRESS" self:Render() return end
+            if level == nil or experience == nil or not _MonsterProgression:IsValidProgress(level, experience) then
+                self._T.status = "INVALID_PROGRESS"
+                self.statusText.Text = "等級限 1–" .. tostring(_MonsterProgression.MaxLevel) .. "；經驗需小於目前等級（滿等為 0）"
+                return
+            end
             if level ~= row.level or experience ~= row.experience then
                 table.insert(edits, { monsterId = row.monsterId, level = level, experience = experience })
             end
