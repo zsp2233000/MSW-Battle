@@ -69,8 +69,12 @@ test('the GM editor is client only and sends writes only through the RPC', () =>
   assert.match(body(source, 'Force'), /"FORCE_SAVE_LEVELS"/);
   assert.match(body(source, 'Reset'), /"RESET_LEVELS"/);
   assert.match(body(source, 'Delete'), /"DELETE_LEVELS"/);
-  assert.match(source, /存檔在你開啟後已變動/);
-  assert.match(source, /AUDIT_FAILED|AUDIT_INCOMPLETE|INVALID_PROGRESS|NOT_CORRUPT|BUSY/);
+  // Status wording lives in GMPanelText so the panel stays under the file-size limit.
+  const wording = source + read('RootDesk/MyDesk/GM/GMPanelText.mlua');
+  assert.match(wording, /存檔在你開啟後已變動/);
+  assert.match(wording, /AUDIT_FAILED|AUDIT_INCOMPLETE|INVALID_PROGRESS|NOT_CORRUPT|BUSY/);
+  assert.doesNotMatch(read('RootDesk/MyDesk/GM/GMPanelText.mlua') + read('RootDesk/MyDesk/GM/GMPanelStyle.mlua'),
+    /DataStorage|_FormationStorage|_MonsterLevelStorage|IsMakerPlay|@Sync|ExecSpace\("Server/);
 });
 
 test('GM controls and every bound entity exist, with entry and panel hidden initially', () => {

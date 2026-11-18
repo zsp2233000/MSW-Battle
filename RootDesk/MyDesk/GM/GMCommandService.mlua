@@ -1,6 +1,15 @@
 @Logic
 script GMCommandService extends Logic
 
+    property integer ErrorNotFound = 1000002
+    property integer ErrorTimeout = 1000004
+    property integer ErrorConflict = 2000000
+    property integer MaxProfileLength = 64
+    property integer MaxRecordIdLength = 64
+    property integer MaxFormationBytes = 50000
+    property integer MaxLevelBytes = 4000
+    property integer MaxRowCount = 100
+
     @ExecSpace("ServerOnly")
     method boolean IsGM(string requesterProfile)
         -- The owner and the Maker test account both resolve to this ProfileCode (issue #84).
@@ -14,7 +23,7 @@ script GMCommandService extends Logic
         if command.kind == "IDENTITY" then complete({ status = "OK", profile = requesterProfile }) return end
         if command.kind == "LIST_ONLINE_PLAYERS" then _GMOnlinePlayers:Read(complete) return end
         local profile = command.profile == "" and requesterProfile or command.profile
-        if type(profile) ~= "string" or #profile == 0 or #profile > 64 or not string.match(profile, "^[%w]+$") then
+        if type(profile) ~= "string" or #profile == 0 or #profile > self.MaxProfileLength or not string.match(profile, "^[%w]+$") then
             complete({ status = "INVALID_PROFILE" })
             return
         end
@@ -92,7 +101,24 @@ script GMCommandService extends Logic
     method void Mutate(string requesterProfile, string profile, string key, string action, boolean force, table command, any complete)
         local catalog = _FormationService:GetCatalog()
         if catalog == nil and key ~= _FormationHandoff.StorageKey then complete({ status = "UNAVAILABLE" }) return end
-        -- A shared audit guard serializes the target's ring across all save items.
+        self:AcquireGuards(profile, key, complete, function(guard, auditGuard, finish)
+            self:ReadCurrent(profile, key, catalog, function(readCode, stored, document, exists)
+                if readCode ~= 0 then finish({ status = "STORAGE_ERROR", code = readCode, profile = profile }, false, false) return end
+                if not force and (stored ~= command.expected or exists ~= command.expectedExists) then
+                    local response = self:Describe(profile, key, stored, document, exists, catalog)
+                    response.status = "CONFLICT"
+                    finish(response, false, false)
+                    return
+                end
+                self:Commit(requesterProfile, guard, auditGuard, action, command, stored, document, exists, catalog, finish)
+            end)
+        end)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void AcquireGuards(string profile, string key, any complete, any body)
+        -- A shared audit guard serializes the target's ring across all save items; then the item's own guard.
+        -- finish(response, retainGuard, retainAuditGuard) releases whichever guards are not retained, then replies.
         _FormationStorage:BeginExclusive(profile, "GMAuditV1", function(code, auditGuard)
             if code ~= 0 then complete({ status = "BUSY", code = code, profile = profile }) return end
             _FormationStorage:BeginExclusive(profile, key, function(guardCode, guard)
@@ -106,16 +132,7 @@ script GMCommandService extends Logic
                     if not retainAuditGuard then _FormationStorage:EndExclusive(auditGuard) end
                     complete(response)
                 end
-                self:ReadCurrent(profile, key, catalog, function(readCode, stored, document, exists)
-                    if readCode ~= 0 then finish({ status = "STORAGE_ERROR", code = readCode, profile = profile }, false, false) return end
-                    if not force and (stored ~= command.expected or exists ~= command.expectedExists) then
-                        local response = self:Describe(profile, key, stored, document, exists, catalog)
-                        response.status = "CONFLICT"
-                        finish(response, false, false)
-                        return
-                    end
-                    self:Commit(requesterProfile, guard, auditGuard, action, command, stored, document, exists, catalog, finish)
-                end)
+                body(guard, auditGuard, finish)
             end)
         end)
     end
@@ -124,7 +141,7 @@ script GMCommandService extends Logic
     method void ReadCurrent(string profile, string key, any catalog, any complete)
         -- Distinguish absence, corruption and storage errors without repairing any of them.
         _FormationStorage:Read(profile, key, function(code, loadedKey, raw)
-            local missing = code == 1000002 or (code == 0 and raw == nil)
+            local missing = code == self.ErrorNotFound or (code == 0 and raw == nil)
             if not missing and code ~= 0 then complete(code, nil, nil, false) return end
             local stored = missing and "" or raw
             complete(0, stored, self:Decode(key, stored, not missing, catalog), not missing)
@@ -148,79 +165,119 @@ script GMCommandService extends Logic
         table document, boolean exists, any catalog, any finish)
         -- Audit the version about to be overwritten before any save mutation.
         local profile = guard.profile
-        local key = guard.key
+        local plan = self:ResolveAfter(guard, action, command, document, exists, catalog)
+        if plan.failure ~= nil then finish(plan.failure, false, false) return end
+        local record = { gm = requesterProfile, timeMs = DateTime.UtcNow.Elapsed,
+            target = profile, key = guard.key, beforeExists = exists, afterExists = not plan.deleting, outcome = "PENDING",
+            action = action, restoredFrom = plan.restoring and command.recordId or nil }
+        local context = { guard = guard, profile = profile, key = guard.key, action = action, stored = stored,
+            exists = exists, after = plan.after, deleting = plan.deleting, catalog = catalog, record = record, finish = finish }
+        _FormationStorage:AppendAudit(auditGuard, record, stored, plan.after, function(auditCode, audit, pending, retainAuditGuard)
+            if auditCode ~= 0 then finish({ status = "AUDIT_FAILED", code = auditCode, profile = profile }, false, retainAuditGuard) return end
+            self:Persist(context, audit, pending)
+        end)
+    end
+
+    @ExecSpace("ServerOnly")
+    method table ResolveAfter(table guard, string action, table command, table document, boolean exists, any catalog)
+        -- Work out the content to write, or the refusal to return, before touching the audit ring.
+        local profile = guard.profile
         local deleting = action == "DELETE_LEVELS" or action == "DELETE_FORMATIONS" or action == "DELETE_HANDOFF"
         local restoring = action == "RESTORE_LEVELS" or action == "RESTORE_FORMATIONS"
-        local after = nil
         if action == "DELETE_LEVELS" and (not exists or document ~= nil) then
-            finish({ status = "NOT_CORRUPT", profile = profile }, false, false)
-            return
+            return { failure = { status = "NOT_CORRUPT", profile = profile } }
         end
-        if deleting and not exists then finish({ status = "NO_SAVE", profile = profile }, false, false) return end
+        if deleting and not exists then return { failure = { status = "NO_SAVE", profile = profile } } end
+        local after = nil
         if restoring then
-            if type(command.recordId) ~= "string" or #command.recordId > 64 then
-                finish({ status = "RECORD_UNAVAILABLE", profile = profile }, false, false)
-                return
-            end
-            local snapshot = {}
-            local code = _FormationStorage:ReadAuditBefore(guard, command.recordId, snapshot)
-            if code ~= 0 then
-                local status = code == 1000002 and "RECORD_UNAVAILABLE" or "STORAGE_ERROR"
-                finish({ status = status, code = code, profile = profile }, false, false)
-                return
-            end
-            deleting = not snapshot.exists
-            after = snapshot.raw
+            local restored = self:ReadRestoreSnapshot(guard, command)
+            if restored.failure ~= nil then return { failure = restored.failure } end
+            deleting = not restored.snapshot.exists
+            after = restored.snapshot.raw
         elseif deleting then
             after = ""
         elseif action == "SAVE_FORMATIONS" then
-            local raw = command.raw
-            if type(raw) == "string" and #raw <= 50000 and _FormationSchema:DecodeDocument(raw, catalog) ~= nil then
-                after = raw
-            end
+            after = self:ValidFormationRaw(command.raw, catalog)
         else
             after = self:Plan(command, action, document, catalog)
         end
         if after == nil then
             local status = action == "SAVE_FORMATIONS" and "INVALID_FORMATIONS" or "INVALID_PROGRESS"
-            finish({ status = status, profile = profile }, false, false)
-            return
+            return { failure = { status = status, profile = profile } }
         end
-        local record = { gm = requesterProfile, timeMs = DateTime.UtcNow.Elapsed,
-            target = profile, key = key, beforeExists = exists, afterExists = not deleting, outcome = "PENDING",
-            action = action, restoredFrom = restoring and command.recordId or nil }
-        _FormationStorage:AppendAudit(auditGuard, record, stored, after, function(auditCode, audit, pending, retainAuditGuard)
-            if auditCode ~= 0 then finish({ status = "AUDIT_FAILED", code = auditCode, profile = profile }, false, retainAuditGuard) return end
-            local function written(writeCode, retainWriteGuard)
-                local status = writeCode == 0 and "SAVED" or (writeCode == 2000000 and "CONFLICT" or "STORAGE_ERROR")
-                record.outcome = writeCode == 1000004 and "UNKNOWN" or (status == "STORAGE_ERROR" and "FAILED" or status)
-                _FormationStorage:CompleteAudit(audit, pending, record, function(resultCode)
-                    log("[VRF][GM] write profile=" .. profile .. " action=" .. action .. " status=" .. status .. " auditCode=" .. tostring(resultCode))
-                    if resultCode ~= 0 then
-                        finish({ status = "AUDIT_INCOMPLETE", code = resultCode, profile = profile }, retainWriteGuard, false)
-                    elseif writeCode == 0 then
-                        local saved = self:Decode(key, after, not deleting, catalog)
-                        local response = self:Describe(profile, key, after, saved, not deleting, catalog)
-                        response.status = status
-                        finish(response, retainWriteGuard, false)
-                    elseif status == "CONFLICT" then
-                        self:ReadCurrent(profile, key, catalog, function(code, current, currentDocument, currentExists)
-                            if code ~= 0 then finish({ status = "STORAGE_ERROR", code = code, profile = profile }, retainWriteGuard, false) return end
-                            local response = self:Describe(profile, key, current, currentDocument, currentExists, catalog)
-                            response.status = "CONFLICT"
-                            finish(response, retainWriteGuard, false)
-                        end)
-                    else
-                        finish({ status = status, code = writeCode, profile = profile }, retainWriteGuard, false)
-                    end
-                end)
-            end
-            if deleting then
-                if exists then _FormationStorage:DeleteGuarded(guard, stored, written) else written(0, false) end
-            else
-                _FormationStorage:WriteGuarded(guard, exists, stored, after, written)
-            end
+        return { after = after, deleting = deleting, restoring = restoring }
+    end
+
+    @ExecSpace("ServerOnly")
+    method table ReadRestoreSnapshot(table guard, table command)
+        -- A restore writes the before-content of one retained record of this target.
+        local profile = guard.profile
+        if type(command.recordId) ~= "string" or #command.recordId > self.MaxRecordIdLength then
+            return { failure = { status = "RECORD_UNAVAILABLE", profile = profile } }
+        end
+        local snapshot = {}
+        local code = _FormationStorage:ReadAuditBefore(guard, command.recordId, snapshot)
+        if code ~= 0 then
+            local status = code == self.ErrorNotFound and "RECORD_UNAVAILABLE" or "STORAGE_ERROR"
+            return { failure = { status = status, code = code, profile = profile } }
+        end
+        return { snapshot = snapshot }
+    end
+
+    @ExecSpace("ServerOnly")
+    method string ValidFormationRaw(any raw, any catalog)
+        -- Formation JSON must pass the same decoder a player load uses.
+        if type(raw) == "string" and #raw <= self.MaxFormationBytes and _FormationSchema:DecodeDocument(raw, catalog) ~= nil then
+            return raw
+        end
+        return nil
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Persist(table context, any audit, any pending)
+        -- Write or delete under the item guard, then settle the audit record with the outcome.
+        local function written(writeCode, retainWriteGuard)
+            self:Settle(context, audit, pending, writeCode, retainWriteGuard)
+        end
+        if context.deleting then
+            if context.exists then _FormationStorage:DeleteGuarded(context.guard, context.stored, written) else written(0, false) end
+        else
+            _FormationStorage:WriteGuarded(context.guard, context.exists, context.stored, context.after, written)
+        end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Settle(table context, any audit, any pending, integer writeCode, any retainWriteGuard)
+        -- Record the real outcome (including an unconfirmed timeout) before replying to the GM.
+        local status = writeCode == 0 and "SAVED" or (writeCode == self.ErrorConflict and "CONFLICT" or "STORAGE_ERROR")
+        context.record.outcome = writeCode == self.ErrorTimeout and "UNKNOWN" or (status == "STORAGE_ERROR" and "FAILED" or status)
+        _FormationStorage:CompleteAudit(audit, pending, context.record, function(resultCode)
+            log("[VRF][GM] write profile=" .. context.profile .. " action=" .. context.action .. " status=" .. status .. " auditCode=" .. tostring(resultCode))
+            self:Respond(context, status, writeCode, resultCode, retainWriteGuard)
         end)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Respond(table context, string status, integer writeCode, integer auditResult, any retainWriteGuard)
+        local profile = context.profile
+        local finish = context.finish
+        if auditResult ~= 0 then
+            finish({ status = "AUDIT_INCOMPLETE", code = auditResult, profile = profile }, retainWriteGuard, false)
+        elseif writeCode == 0 then
+            local saved = self:Decode(context.key, context.after, not context.deleting, context.catalog)
+            local response = self:Describe(profile, context.key, context.after, saved, not context.deleting, context.catalog)
+            response.status = status
+            finish(response, retainWriteGuard, false)
+        elseif status == "CONFLICT" then
+            self:ReadCurrent(profile, context.key, context.catalog, function(code, current, currentDocument, currentExists)
+                if code ~= 0 then finish({ status = "STORAGE_ERROR", code = code, profile = profile }, retainWriteGuard, false) return end
+                local response = self:Describe(profile, context.key, current, currentDocument, currentExists, context.catalog)
+                response.status = "CONFLICT"
+                finish(response, retainWriteGuard, false)
+            end)
+        else
+            finish({ status = status, code = writeCode, profile = profile }, retainWriteGuard, false)
+        end
     end
 
     @ExecSpace("ServerOnly")
@@ -232,12 +289,12 @@ script GMCommandService extends Logic
         elseif action ~= "SAVE_LEVELS" then
             return nil
         elseif command.raw ~= nil then
-            if source ~= nil or command.rows ~= nil or type(command.raw) ~= "string" or #command.raw > 4000 then return nil end
+            if source ~= nil or command.rows ~= nil or type(command.raw) ~= "string" or #command.raw > self.MaxLevelBytes then return nil end
             source = _MonsterLevelStorage:Decode(command.raw)
             if source == nil then return nil end
         else
             if source == nil then return nil end
-            local count = _FormationSchema:ArrayCount(command.rows, 100)
+            local count = _FormationSchema:ArrayCount(command.rows, self.MaxRowCount)
             if count < 0 then return nil end
             local seen = {}
             for _, row in ipairs(command.rows) do
@@ -248,6 +305,6 @@ script GMCommandService extends Logic
             end
         end
         local encoded = _MonsterLevelStorage:Encode(source)
-        return #encoded <= 4000 and encoded or nil
+        return #encoded <= self.MaxLevelBytes and encoded or nil
     end
 end

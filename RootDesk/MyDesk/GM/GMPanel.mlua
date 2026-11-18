@@ -14,6 +14,9 @@ script GMPanel extends Logic
     property ScrollLayoutGroupComponent rawLayout = "6ead7083-1618-489e-82ab-b92dc5422142"
     property TextGUIRendererComponent rawText = "768a922b-912a-421a-ae1b-318270777da2"
     property number LoadTimeoutSeconds = 8
+    property number DirtyPollSeconds = 0.2
+    property number InputInitDelaySeconds = 0.1
+    property integer MaxIntegerDigits = 2
     property ButtonComponent saveButton = "dba499cd-f0c5-47e3-be33-79e230a9720a"
     property ButtonComponent resetButton = "16a22527-259d-412e-a666-f908c405640f"
     property ButtonComponent repairButton = "fcd6f9fc-f19b-4aaa-838e-226e822939d6"
@@ -84,7 +87,7 @@ script GMPanel extends Logic
             self.lobbyButton.Entity:SetEnable(inLobby and self._T.authorized and not self._T.open)
             self.lobbyButton.Enable = self:CanOpen()
         end
-        if self._T.open and not self._T.pending and _UtilLogic.ElapsedSeconds - (self._T.dirtyAt or 0) > 0.2 then
+        if self._T.open and not self._T.pending and _UtilLogic.ElapsedSeconds - (self._T.dirtyAt or 0) > self.DirtyPollSeconds then
             self._T.dirtyAt = _UtilLogic.ElapsedSeconds
             self:UpdateDirty()
         end
@@ -370,9 +373,10 @@ script GMPanel extends Logic
     @ExecSpace("ClientOnly")
     method integer Integer(string text)
         -- Accept only a complete non-negative integer; the server still validates progress.
-        if text == nil or not string.match(text, "^%d+$") or #text > 2 then return nil end
+        if text == nil or not string.match(text, "^%d+$") or #text > self.MaxIntegerDigits then return nil end
         local value = 0
-        for index = 1, #text do value = value * 10 + string.byte(text, index) - 48 end
+        local zero = string.byte("0")
+        for index = 1, #text do value = value * 10 + string.byte(text, index) - zero end
         return value
     end
 
@@ -529,10 +533,9 @@ script GMPanel extends Logic
                     local bar = view:GetChildByName("Dirty")
                     if isvalid(bar) then
                         bar:SetEnable(state ~= "clean")
-                        bar.SpriteGUIRendererComponent.Color = invalid and Color(0.937, 0.325, 0.314, 1) or Color(0.910, 0.659, 0.220, 1)
+                        bar.SpriteGUIRendererComponent.Color = _GMPanelStyle:RowMark(invalid)
                     end
-                    if invalid then view.SpriteGUIRendererComponent.Color = Color(0.431, 0.141, 0.133, 1)
-                    else view.SpriteGUIRendererComponent.Color = self:ZebraColor(index) end
+                    view.SpriteGUIRendererComponent.Color = invalid and _GMPanelStyle:RowInvalid() or _GMPanelStyle:Zebra(index)
                 end
                 if invalid then anyInvalid = true end
             end
@@ -554,35 +557,14 @@ script GMPanel extends Logic
     end
 
     @ExecSpace("ClientOnly")
-    method Color ZebraColor(integer index)
-        -- Alternate two warm browns so long tables stay scannable.
-        if index % 2 == 1 then return Color(0.275, 0.200, 0.141, 1) end
-        return Color(0.227, 0.165, 0.114, 1)
-    end
-
-    @ExecSpace("ClientOnly")
     method void StyleStatus(string status)
         -- Tint the status banner by severity so success, warning and failure read at a glance.
-        -- In-flight states stay neutral: recoloring them made the banner flash blue on every click.
-        local severities = {
-            SAVED = "success", CONFLICT = "warning", BUSY = "warning", NO_SAVE = "warning", NOT_CORRUPT = "warning",
-            CORRUPT = "error", STORAGE_ERROR = "error", AUDIT_FAILED = "error", AUDIT_INCOMPLETE = "error",
-            INVALID_PROGRESS = "error", INVALID_FORMATIONS = "error", INVALID_PROFILE = "error",
-            UNAVAILABLE = "error", TIMEOUT = "error", INVALID_COMMAND = "error", RECORD_UNAVAILABLE = "error" }
-        local palette = {
-            neutral = { bg = Color(0.227, 0.180, 0.133, 1), fg = Color(0.957, 0.914, 0.847, 1) },
-            info = { bg = Color(0.169, 0.290, 0.400, 1), fg = Color(1, 1, 1, 1) },
-            success = { bg = Color(0.184, 0.369, 0.247, 1), fg = Color(0.847, 0.961, 0.878, 1) },
-            warning = { bg = Color(0.420, 0.247, 0.071, 1), fg = Color(1, 0.851, 0.659, 1) },
-            error = { bg = Color(0.431, 0.141, 0.133, 1), fg = Color(1, 0.839, 0.831, 1) },
-        }
-        local severity = severities[status] or "neutral"
-        local style = palette[severity]
+        local style = _GMPanelStyle:Banner(status)
         if isvalid(self.statusText) then
             self.statusText.Entity.SpriteGUIRendererComponent.Color = style.bg
             self.statusText.FontColor = style.fg
         end
-        log("[VRF][GMPanel] banner status=" .. tostring(status) .. " severity=" .. severity)
+        log("[VRF][GMPanel] banner status=" .. tostring(status) .. " severity=" .. style.severity)
     end
 
     @ExecSpace("ClientOnly")
@@ -590,18 +572,11 @@ script GMPanel extends Logic
         -- Mark the active tab amber; never dim tabs while busy, which made every click flash the whole bar.
         local tabs = { LEVELS = self.levelsTab, FORMATIONS = self.formationsTab, HANDOFF = self.handoffTab,
             HISTORY = self.historyButton }
-        local alpha = 1
         for key, tab in pairs(tabs) do
             local active = (key == "HISTORY" and self._T.history) or (key ~= "HISTORY" and showingSave and key == item)
-            local sprite = tab.Entity.SpriteGUIRendererComponent
-            local text = tab.Entity.TextGUIRendererComponent
-            if active then
-                sprite.Color = Color(0.910, 0.659, 0.220, alpha)
-                text.FontColor = Color(0.169, 0.133, 0.098, alpha)
-            else
-                sprite.Color = Color(0.227, 0.180, 0.133, alpha)
-                text.FontColor = Color(0.659, 0.592, 0.494, alpha)
-            end
+            local style = _GMPanelStyle:Tab(active)
+            tab.Entity.SpriteGUIRendererComponent.Color = style.bg
+            tab.Entity.TextGUIRendererComponent.FontColor = style.fg
         end
         log("[VRF][GMPanel] tabs item=" .. item .. " busy=" .. tostring(busy) .. " showingSave=" .. tostring(showingSave))
     end
@@ -609,135 +584,135 @@ script GMPanel extends Logic
     @ExecSpace("ClientOnly")
     method void Render()
         -- Show a complete table or literal damaged-save text, with explicit load and error states.
+        -- The panel state is passed whole; GMPanelText only reads it.
         self:ClearRows()
-        local status = self._T.status
-        local item = self._T.item
-        local levels = item == "LEVELS"
-        local formations = item == "FORMATIONS"
-        local messages = { IDLE = "請輸入玩家代碼或選擇我自己", LOADING = "讀取中…", SAVING = "寫入中…",
-            CORRUPT = "存檔損壞：可修復合法內容或刪除", CONFLICT = "存檔在你開啟後已變動",
-            STORAGE_ERROR = "讀取失敗，請重試", AUDIT_FAILED = "操作紀錄失敗，存檔未改",
-            AUDIT_INCOMPLETE = "操作紀錄未完成，請重新讀取", INVALID_PROGRESS = "等級或經驗無效，存檔未改",
-            INVALID_FORMATIONS = "預存編隊 JSON 無效，存檔未改", NO_SAVE = "尚無存檔可刪除",
-            NOT_CORRUPT = "存檔可讀，不能刪除", BUSY = "存檔正在寫入，請重試",
-            INVALID_PROFILE = "玩家代碼格式無效", UNAVAILABLE = "怪物資料尚未就緒，請重試",
-            TIMEOUT = "操作逾時，請重新讀取", INVALID_COMMAND = "不支援的指令",
-            HISTORY_LOADING = "讀取操作紀錄中…", RECORD_UNAVAILABLE = "這筆紀錄已無法還原，請重新查看操作紀錄",
-            PLAYERS_LOADING = "讀取同一個世界實例的在線玩家…", PLAYERS_READY = "請選擇在線玩家" }
-        local message = messages[status] or status
-        local damaged = item == "HANDOFF" and "存檔損壞：可刪除交接資料" or messages.CORRUPT
-        if status == "CORRUPT" then message = damaged end
-        if status == "UNAVAILABLE" and self._T.online then message = "在線名單讀取失敗，請重新整理" end
-        if status == "STORAGE_ERROR" then
-            if self._T.lastCommand == "LIST_AUDIT" then message = "操作紀錄讀取失敗，請重試"
-            elseif string.sub(self._T.lastCommand, 1, 5) ~= "LOAD_" then message = "寫入失敗，請重新讀取" end
-        end
-        if status == "HISTORY_READY" then
-            local label = #self._T.records == 0 and " · 尚無操作紀錄" or " · 操作紀錄（最新在前）"
-            message = "玩家代碼：" .. self._T.loaded .. label
-        end
-        if status == "READY" or status == "SAVED" then
-            local savedLabel = self._T.restored and " · 已還原" or " · 已儲存"
-            if self._T.deleted then savedLabel = formations and " · 已清空預存編隊" or " · 已刪除" end
-            local itemLabel = levels and "怪物等級" or (formations and "預存編隊" or "配對交接資料（唯讀）")
-            local label = " · " .. itemLabel
-            if status == "SAVED" then label = savedLabel
-            elseif not self._T.exists then label = levels and " · 尚無存檔，顯示 Lv1／經驗 0" or " · 尚無" .. itemLabel end
-            if self._T.corrupt then label = label .. " · " .. damaged end
-            message = "玩家代碼：" .. tostring(self._T.target) .. label
-            status = "READY"
-        elseif status == "STORAGE_ERROR" or status == "AUDIT_FAILED" or status == "AUDIT_INCOMPLETE" or status == "BUSY" then
-            local reason = self._T.errorCode == 1000004 and "逾時" or (self._T.errorCode == 1000005 and "Credit 不足" or tostring(self._T.errorCode))
-            message = message .. "（" .. reason .. "）"
-        end
-        self.statusText.Text = message
+        local described = _GMPanelText:Describe(self._T)
+        self.statusText.Text = described.message
         self:StyleStatus(self._T.status)
+        local layout = self:Layout(described.status)
+        self:RenderDocument(layout)
+        self:RenderControls(layout)
+        self:RenderHistory()
+        self:RenderOnlineControls()
+        self:RenderOnlinePlayers()
+    end
+
+    @ExecSpace("ClientOnly")
+    method table Layout(string status)
+        -- Decide which views and controls apply to the current item, mode and save state.
+        local item = self._T.item
         local editable = status == "READY" or status == "CORRUPT" or status == "INVALID_PROGRESS"
             or status == "INVALID_FORMATIONS" or status == "AUDIT_FAILED" or status == "BUSY"
         local showingSave = not self._T.history and not self._T.online
         local showDocument = editable and showingSave and self._T.loaded ~= ""
-        local ready = showDocument and levels and not self._T.corrupt
-        local corrupt = showDocument and levels and self._T.corrupt
+        local levels = item == "LEVELS"
+        local formations = item == "FORMATIONS"
         local editFormation = showDocument and formations
-        local corruptFormation = editFormation and self._T.corrupt
-        local readHandoff = showDocument and item == "HANDOFF" and self._T.exists
-        self.tableHeader:SetEnable(ready)
-        self.listLayout.Entity:SetEnable(ready)
-        self.rawLayout.Entity:SetEnable(corrupt or corruptFormation or readHandoff)
-        self.rawInput.Entity:SetEnable(corrupt)
-        self.formationInput.Entity:SetEnable(editFormation)
-        self.formationWarning.Entity:SetEnable(formations and showingSave)
+        return { item = item, levels = levels, formations = formations, showingSave = showingSave,
+            ready = showDocument and levels and not self._T.corrupt,
+            corrupt = showDocument and levels and self._T.corrupt,
+            editFormation = editFormation,
+            corruptFormation = editFormation and self._T.corrupt,
+            readHandoff = showDocument and item == "HANDOFF" and self._T.exists }
+    end
+
+    @ExecSpace("ClientOnly")
+    method void RenderDocument(table layout)
+        -- Toggle the table, raw-text and formation views and fill whichever one is showing.
+        local showRaw = layout.corrupt or layout.corruptFormation or layout.readHandoff
+        self.tableHeader:SetEnable(layout.ready)
+        self.listLayout.Entity:SetEnable(layout.ready)
+        self.rawLayout.Entity:SetEnable(showRaw)
+        self.rawInput.Entity:SetEnable(layout.corrupt)
+        self.formationInput.Entity:SetEnable(layout.editFormation)
+        self.formationWarning.Entity:SetEnable(layout.formations and layout.showingSave)
         self.rawText.Text = self._T.raw
         self._T.rowsInit = false
         self._T.rowState = {}
-        -- Damaged saves read in warning red; a healthy read-only handoff stays cream.
-        self.rawText.FontColor = (corrupt or corruptFormation) and Color(1, 0.690, 0.667, 1) or Color(0.957, 0.914, 0.847, 1)
-        if corrupt or corruptFormation or readHandoff then
-            local frame = self.rawLayout.Entity.UITransformComponent
-            local frameHeight = readHandoff and 432 or (corruptFormation and 152 or 180)
-            frame.anchoredPosition = Vector2(40, corruptFormation and -458 or -398)
-            frame.RectSize = Vector2(frame.RectSize.x, frameHeight)
-            local width = self.rawText.Entity.UITransformComponent.RectSize.x
-            local height = self.rawText:GetPreferredHeight(self._T.raw, width)
-            self.rawText.Entity.UITransformComponent.RectSize = Vector2(width, math.max(frameHeight, height + 24))
-            self.rawLayout:ResetScrollPosition(UITransformAxis.Vertical)
-        end
-        for index, data in ipairs(ready and self._T.rows or {}) do
+        self.rawText.FontColor = _GMPanelStyle:RawText(layout.corrupt or layout.corruptFormation)
+        if showRaw then self:RenderRawFrame(layout) end
+        if layout.ready then self:RenderRows()
+        elseif layout.editFormation then self:RenderFormationEditor(layout) end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void RenderRawFrame(table layout)
+        -- Size the raw-text frame for its mode and fit the text inside it.
+        local geometry = _GMPanelStyle:RawFrame(layout.readHandoff, layout.corruptFormation)
+        local textPadding = 24
+        local frame = self.rawLayout.Entity.UITransformComponent
+        frame.anchoredPosition = Vector2(geometry.x, geometry.y)
+        frame.RectSize = Vector2(frame.RectSize.x, geometry.height)
+        local width = self.rawText.Entity.UITransformComponent.RectSize.x
+        local height = self.rawText:GetPreferredHeight(self._T.raw, width)
+        self.rawText.Entity.UITransformComponent.RectSize = Vector2(width, math.max(geometry.height, height + textPadding))
+        self.rawLayout:ResetScrollPosition(UITransformAxis.Vertical)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void RenderRows()
+        -- Clone one row per monster; native inputs only accept text once their row is enabled.
+        for index, data in ipairs(self._T.rows) do
             data.index = index
             local row = self.rowTemplate:Clone("GMRow_" .. tostring(index))
-            -- Zebra rows: alternate two warm browns so long tables stay scannable.
-            row.SpriteGUIRendererComponent.Color = self:ZebraColor(index)
+            row.SpriteGUIRendererComponent.Color = _GMPanelStyle:Zebra(index)
             row:GetChildByName("Name").TextGUIRendererComponent.Text = data.monsterName .. "（" .. data.monsterId .. "）"
-            local level = row:GetChildByName("LevelInput")
-            local experience = row:GetChildByName("ExperienceInput")
-            level:SetEnable(true)
-            experience:SetEnable(true)
+            row:GetChildByName("LevelInput"):SetEnable(true)
+            row:GetChildByName("ExperienceInput"):SetEnable(true)
             row:SetEnable(true)
             self._T.rowViews[index] = row
         end
-        if ready then
-            self.listLayout:ResetScrollPosition(UITransformAxis.Vertical)
-            -- A newly enabled input initializes its native text after the row is cloned.
-            self._T.rowsTimer = _TimerService:SetTimerOnce(function()
-                self._T.rowsTimer = nil
-                for index, data in ipairs(self._T.rows) do
-                    local row = self._T.rowViews[index]
-                    row:GetChildByName("LevelInput").TextGUIRendererInputComponent.Text = tostring(data.level)
-                    row:GetChildByName("ExperienceInput").TextGUIRendererInputComponent.Text = tostring(data.experience)
-                end
-                self._T.rowsInit = true
-                self.saveButton.Enable = not self._T.pending
-            end, 0.1)
-        elseif editFormation then
-            local frame = self.formationInput.Entity.UITransformComponent
-            frame.anchoredPosition = Vector2(40, corruptFormation and -620 or -458)
-            frame.RectSize = Vector2(frame.RectSize.x, corruptFormation and 210 or 372)
-            self._T.rowsTimer = _TimerService:SetTimerOnce(function()
-                self._T.rowsTimer = nil
-                self.formationInput.Text = self._T.formationDraft or self._T.raw
-                self.formationSaveButton.Enable = not self._T.pending
-            end, 0.1)
-        end
+        self.listLayout:ResetScrollPosition(UITransformAxis.Vertical)
+        self._T.rowsTimer = _TimerService:SetTimerOnce(function()
+            self._T.rowsTimer = nil
+            for index, data in ipairs(self._T.rows) do
+                local row = self._T.rowViews[index]
+                row:GetChildByName("LevelInput").TextGUIRendererInputComponent.Text = tostring(data.level)
+                row:GetChildByName("ExperienceInput").TextGUIRendererInputComponent.Text = tostring(data.experience)
+            end
+            self._T.rowsInit = true
+            self.saveButton.Enable = not self._T.pending
+        end, self.InputInitDelaySeconds)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void RenderFormationEditor(table layout)
+        -- Place the JSON editor below the raw view when the stored save is damaged.
+        local geometry = _GMPanelStyle:FormationFrame(layout.corruptFormation)
+        local frame = self.formationInput.Entity.UITransformComponent
+        frame.anchoredPosition = Vector2(geometry.x, geometry.y)
+        frame.RectSize = Vector2(frame.RectSize.x, geometry.height)
+        self._T.rowsTimer = _TimerService:SetTimerOnce(function()
+            self._T.rowsTimer = nil
+            self.formationInput.Text = self._T.formationDraft or self._T.raw
+            self.formationSaveButton.Enable = not self._T.pending
+        end, self.InputInitDelaySeconds)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void RenderControls(table layout)
+        -- Show and enable each action only where its precondition holds; never enable while a request is pending.
         local busy = self._T.pending
+        local item = layout.item
         self.loadButton.Enable = not busy
         self.selfButton.Enable = not busy
         self.targetInput.RaycastTarget = not busy
-        self.levelsTab.Enable = not busy and (not levels or not showingSave)
-        self.formationsTab.Enable = not busy and (not formations or not showingSave)
-        self.handoffTab.Enable = not busy and (item ~= "HANDOFF" or not showingSave)
-        self:StyleTabs(item, busy, showingSave)
-        self.saveButton.Entity:SetEnable(ready)
+        self.levelsTab.Enable = not busy and (not layout.levels or not layout.showingSave)
+        self.formationsTab.Enable = not busy and (not layout.formations or not layout.showingSave)
+        self.handoffTab.Enable = not busy and (item ~= "HANDOFF" or not layout.showingSave)
+        self:StyleTabs(item, busy, layout.showingSave)
+        self.saveButton.Entity:SetEnable(layout.ready)
         self.saveButton.Enable = false
-        self.formationSaveButton.Entity:SetEnable(editFormation)
+        self.formationSaveButton.Entity:SetEnable(layout.editFormation)
         self.formationSaveButton.Enable = false
-        self.resetButton.Entity:SetEnable(ready)
-        self.resetButton.Enable = ready and not busy
-        self.repairButton.Entity:SetEnable(corrupt)
-        self.repairButton.Enable = corrupt and not busy
-        local canDelete = corrupt or editFormation and self._T.exists or readHandoff
+        self.resetButton.Entity:SetEnable(layout.ready)
+        self.resetButton.Enable = layout.ready and not busy
+        self.repairButton.Entity:SetEnable(layout.corrupt)
+        self.repairButton.Enable = layout.corrupt and not busy
+        local canDelete = layout.corrupt or layout.editFormation and self._T.exists or layout.readHandoff
         self.deleteButton.Entity:SetEnable(canDelete)
         self.deleteButton.Enable = canDelete and not busy
-        self.deleteButton.Entity.TextGUIRendererComponent.Text = formations and "清空編隊" or "刪除"
+        self.deleteButton.Entity.TextGUIRendererComponent.Text = layout.formations and "清空編隊" or "刪除"
         local conflicted = self._T.status == "CONFLICT"
         self.forceButton.Entity:SetEnable(conflicted and self._T.draft ~= nil)
         self.forceButton.Enable = conflicted and self._T.draft ~= nil and not busy
@@ -745,12 +720,16 @@ script GMPanel extends Logic
         self.reloadButton.Enable = conflicted and not busy
         self.historyButton.Entity:SetEnable(self._T.loaded ~= "" and not self._T.online)
         self.historyButton.Enable = self._T.loaded ~= "" and not busy and not self._T.online
-        self:RenderHistory()
+    end
+
+    @ExecSpace("ClientOnly")
+    method void RenderOnlineControls()
+        -- The online-list button doubles as refresh while the list is showing.
+        local busy = self._T.pending
         self.onlineButton.Enable = not busy
         self.onlineButton.Entity.TextGUIRendererComponent.Text = self._T.online and "重新整理在線名單" or "在線玩家"
         self.onlineBackButton.Entity:SetEnable(self._T.online)
         self.onlineBackButton.Enable = not busy
-        self:RenderOnlinePlayers()
     end
 
     @ExecSpace("ClientOnly")
