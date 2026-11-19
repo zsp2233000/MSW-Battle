@@ -1,0 +1,249 @@
+@Logic
+script FactionWar extends Logic
+
+    property string FactionKey = "CountryWarFactionV1"
+    property string TownStorageName = "CountryWarV1"
+    property string TownStorageKey = "Towns"
+    property table TownOrder = { "nanzih", "zuoying", "gushan", "yancheng" }
+    property table TownNames = { nanzih = "楠梓", zuoying = "左營", gushan = "鼓山", yancheng = "鹽埕" }
+
+    @ExecSpace("ServerOnly")
+    method void OnBeginPlay()
+        self._T.pending = {}
+        log("[VRF][FactionWar] ready")
+    end
+
+    method boolean IsTown(string name)
+        return self.TownNames[name] ~= nil
+    end
+
+    @ExecSpace("ServerOnly")
+    method table InitialTowns()
+        return {
+            nanzih = { owner = "RED", strength = 100 },
+            zuoying = { owner = "RED", strength = 100 },
+            gushan = { owner = "BLUE", strength = 100 },
+            yancheng = { owner = "BLUE", strength = 100 }
+        }
+    end
+
+    @ExecSpace("ServerOnly")
+    method table DecodeTowns(string raw)
+        local ok, towns = pcall(function() return _HttpService:JSONDecode(raw) end)
+        if not ok or type(towns) ~= "table" then return nil end
+        for _, id in ipairs(self.TownOrder) do
+            local town = towns[id]
+            if type(town) ~= "table" or (town.owner ~= "RED" and town.owner ~= "BLUE")
+                or type(town.strength) ~= "number" or town.strength % 1 ~= 0
+                or town.strength < 1 or town.strength > 100 then return nil end
+        end
+        if towns.nanzih.owner ~= "RED" or towns.nanzih.strength ~= 100
+            or towns.yancheng.owner ~= "BLUE" or towns.yancheng.strength ~= 100 then return nil end
+        return towns
+    end
+
+    @ExecSpace("ServerOnly")
+    method void ReadTowns(any complete)
+        _DataStorageService:GetGlobalDataStorage(self.TownStorageName):GetAsync(self.TownStorageKey, function(code, key, raw)
+            if code == 1000002 or (code == 0 and raw == nil) then
+                complete(self:InitialTowns())
+            elseif code == 0 then
+                complete(self:DecodeTowns(raw))
+            else
+                complete(nil)
+            end
+        end)
+    end
+
+    @ExecSpace("ServerOnly")
+    method Entity FindGate(string origin, string destination)
+        if not self:IsTown(origin) or not self:IsTown(destination) or origin == destination then return nil end
+        local map = _EntityService:GetEntityByPath("/maps/" .. origin)
+        if not isvalid(map) then return nil end
+        local gate = map:GetChildByName("Gate_" .. destination)
+        if not isvalid(gate) or not gate.EnabledInHierarchy then return nil end
+        return gate
+    end
+
+    @ExecSpace("ServerOnly")
+    method string FindFrontline(string faction, table towns)
+        -- Search from the opposing end so a faction with two borders starts furthest from home.
+        for index = 1, #self.TownOrder do
+            local id = self.TownOrder[faction == "RED" and #self.TownOrder - index + 1 or index]
+            if towns[id].owner == faction then
+                for _, enemy in ipairs(self.TownOrder) do
+                    if towns[enemy].owner ~= faction and isvalid(self:FindGate(id, enemy)) then return id end
+                end
+            end
+        end
+        return ""
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean CanEnterFromLobby(Entity player, string userId)
+        if not isvalid(player) or player.CurrentMapName ~= "formationlobby" or _FormationHandoff:IsLockedForUser(userId) then return false end
+        local formation = _FormationService:GetSession(userId)
+        return formation ~= nil and not formation.pending and formation.uncertain == nil
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean Finish(string userId, Entity player)
+        if self._T.pending[userId] ~= player then return false end
+        self._T.pending[userId] = nil
+        return isvalid(player) and _UserService:GetUserEntityByUserId(userId) == player
+    end
+
+    @ExecSpace("ServerOnly")
+    method void ReadFaction(string profile, any complete)
+        _FormationStorage:Read(profile, self.FactionKey, function(code, key, raw)
+            if code == 1000002 or (code == 0 and raw == nil) then
+                complete("")
+            elseif code == 0 and (raw == "RED" or raw == "BLUE") then
+                complete(raw)
+            else
+                complete(nil)
+            end
+        end)
+    end
+
+    @ExecSpace("Server")
+    method void RequestEntry(string choice)
+        if choice ~= "" and choice ~= "RED" and choice ~= "BLUE" then return end
+        local userId = senderUserId
+        local player = _UserService:GetUserEntityByUserId(userId)
+        if not self:CanEnterFromLobby(player, userId) then
+            self:ReceiveEntry("BLOCKED", userId)
+            return
+        end
+        if self._T.pending[userId] == player then return end
+        self._T.pending[userId] = player
+        local profile = player.PlayerComponent.ProfileCode
+        self:ReadFaction(profile, function(faction)
+            if not self:CanEnterFromLobby(player, userId) or self._T.pending[userId] ~= player then
+                if self:Finish(userId, player) then self:ReceiveEntry("BLOCKED", userId) end
+                return
+            end
+            if faction == "" and choice ~= "" then
+                _FormationStorage:Write(profile, self.FactionKey, "", choice, function(code)
+                    if code == 0 then
+                        self:EnterFrontline(userId, player, choice)
+                    else
+                        self:ReadFaction(profile, function(saved)
+                            if saved ~= nil and saved ~= "" then
+                                self:EnterFrontline(userId, player, saved)
+                            elseif self:Finish(userId, player) then
+                                self:ReceiveEntry("SAVE_FAILED", userId)
+                            end
+                        end)
+                    end
+                end)
+            else
+                self:EnterFrontline(userId, player, faction)
+            end
+        end)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void EnterFrontline(string userId, Entity player, any faction)
+        if faction == nil or faction == "" then
+            if self:Finish(userId, player) then
+                self:ReceiveEntry(faction == "" and "CHOOSE" or "UNAVAILABLE", userId)
+            end
+            return
+        end
+        self:ReadTowns(function(towns)
+            if not self:Finish(userId, player) then return end
+            if not self:CanEnterFromLobby(player, userId) then self:ReceiveEntry("BLOCKED", userId) return end
+            local destination = towns ~= nil and self:FindFrontline(faction, towns) or ""
+            if destination ~= "" and self:Move(player, destination) then
+                self:ReceiveEntry("ENTERED", userId)
+                log("[VRF][FactionWar] front=" .. destination .. " faction=" .. faction)
+            else
+                self:ReceiveEntry("UNAVAILABLE", userId)
+            end
+        end)
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean NearGate(Entity player, Entity gate)
+        if not isvalid(player) or not isvalid(gate) or player.CurrentMap ~= gate.CurrentMap then return false end
+        local interaction = gate:GetComponent("InteractionComponent")
+        if not isvalid(interaction) or not interaction.Enable then return false end
+        local p = player.TransformComponent.WorldPosition
+        local g = gate.TransformComponent.WorldPosition
+        local size = interaction.BoxSize
+        return math.abs(p.x - g.x) <= size.x / 2 + 0.35 and math.abs(p.y - g.y) <= size.y / 2 + 0.35
+    end
+
+    @ExecSpace("Server")
+    method void RequestGate(string destination)
+        local userId = senderUserId
+        local player = _UserService:GetUserEntityByUserId(userId)
+        if not isvalid(player) or not isvalid(player.PlayerComponent) or self._T.pending[userId] == player then return end
+        local origin = player.CurrentMapName
+        local gate = self:FindGate(origin, destination)
+        if not self:NearGate(player, gate) then return end
+        self._T.pending[userId] = player
+        self:ReadFaction(player.PlayerComponent.ProfileCode, function(faction)
+            self:ReadTowns(function(towns)
+                if not self:Finish(userId, player) or not self:NearGate(player, gate) then return end
+                if towns == nil or faction == nil then
+                    self:ReceiveTownNotice(origin, "暫時無法讀取國戰資料，請再試一次。", userId)
+                elseif towns[origin].owner ~= faction or towns[destination].owner ~= faction then
+                    self:ReceiveTownNotice(origin, "只能前往相連的己方城鎮。", userId)
+                    log("[VRF][FactionWar] gate denied " .. origin .. " -> " .. destination)
+                elseif self:Move(player, destination) then
+                    log("[VRF][FactionWar] gate " .. origin .. " -> " .. destination)
+                else
+                    self:ReceiveTownNotice(origin, "暫時無法進入這座城鎮，請再試一次。", userId)
+                end
+            end)
+        end)
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean Move(Entity player, string destination)
+        local map = _EntityService:GetEntityByPath("/maps/" .. destination)
+        if not isvalid(map) then return false end
+        local arrival = map:GetChildByName("TownArrival")
+        if not isvalid(arrival) then return false end
+        local movement = player.MovementComponent
+        if isvalid(movement) then movement:Stop() end
+        _TeleportService:TeleportToMapPosition(player, arrival.TransformComponent.WorldPosition, destination)
+        return true
+    end
+
+    @ExecSpace("Server")
+    method void RequestTownStatus()
+        local userId = senderUserId
+        local player = _UserService:GetUserEntityByUserId(userId)
+        if not isvalid(player) or not self:IsTown(player.CurrentMapName) then return end
+        local town = player.CurrentMapName
+        self:ReadTowns(function(towns)
+            if not isvalid(player) or _UserService:GetUserEntityByUserId(userId) ~= player or player.CurrentMapName ~= town then return end
+            local strength = towns ~= nil and tostring(towns[town].strength) or "讀取失敗"
+            self:ReceiveTownStatus(town, strength, userId)
+        end)
+    end
+
+    @ExecSpace("Client")
+    method void ReceiveEntry(string result)
+        _FactionWarUI:ShowEntryResult(result)
+    end
+
+    @ExecSpace("Client")
+    method void ReceiveTownStatus(string town, string strength)
+        _FactionWarUI:ShowTownStatus(town, strength)
+    end
+
+    @ExecSpace("Client")
+    method void ReceiveTownNotice(string town, string message)
+        _FactionWarUI:ShowTownNotice(town, message)
+    end
+
+    @ExecSpace("ServerOnly")
+    @EventSender("Service", "UserService")
+    handler HandleUserLeaveEvent(UserLeaveEvent event)
+        self._T.pending[event.UserId] = nil
+    end
+end

@@ -51,7 +51,7 @@ script FormationLobby extends Logic
             self._T.editWhenSelected = 0
         end
         self:Run(_FormationEditSession:Tick(delta))
-        if player.CurrentMapName == "matchprobe" then
+        if player.CurrentMapName == "matchprobe" or _FactionWar:IsTown(player.CurrentMapName) then
             self.root:SetEnable(false)
             return
         end

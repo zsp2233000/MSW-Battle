@@ -1,0 +1,131 @@
+@Logic
+script FactionWarUI extends Logic
+
+    @ExecSpace("ClientOnly")
+    method Entity Ui(string path)
+        return _EntityService:GetEntityByPath("/ui/FactionWarGroup/" .. path)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnBeginPlay()
+        self._T.bindings = {}
+        self._T.mapName = ""
+        self._T.pending = false
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnUpdate(number delta)
+        local player = _UserService.LocalPlayer
+        local entry = self:Ui("LobbyEntry")
+        local choice = self:Ui("FactionChoice")
+        local hud = self:Ui("TownHUD")
+        if not isvalid(player) or not isvalid(entry) or not isvalid(hud) or not isvalid(choice) then return end
+        if #self._T.bindings == 0 then
+            self:Bind("LobbyEntry", function() self:Open() end)
+            self:Bind("FactionChoice/Window/Red", function() self:Request("RED") end)
+            self:Bind("FactionChoice/Window/Blue", function() self:Request("BLUE") end)
+            self:Bind("FactionChoice/Window/Close", function() if not self._T.pending then choice:SetEnable(false) end end)
+        end
+        local name = player.CurrentMapName
+        if name == self._T.mapName then return end
+        self._T.mapName = name
+        local inLobby = name == "formationlobby"
+        entry:SetEnable(inLobby)
+        if not inLobby then
+            self._T.pending = false
+            choice:SetEnable(false)
+        end
+        local inTown = _FactionWar:IsTown(name)
+        hud:SetEnable(inTown)
+        if inTown then
+            self:ShowTownStatus(name, "讀取中")
+            self:ShowTownNotice(name, "")
+            _FactionWar:RequestTownStatus()
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Bind(string path, any action)
+        local entity = self:Ui(path)
+        if not isvalid(entity) then return end
+        table.insert(self._T.bindings, { entity = entity, key = entity:ConnectEvent(ButtonClickEvent, action) })
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnEndPlay()
+        for _, binding in ipairs(self._T.bindings or {}) do
+            if isvalid(binding.entity) then binding.entity:DisconnectEvent(ButtonClickEvent, binding.key) end
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Open()
+        local player = _UserService.LocalPlayer
+        local choice = self:Ui("FactionChoice")
+        if not isvalid(player) or player.CurrentMapName ~= "formationlobby" or not isvalid(choice) or self._T.pending then return end
+        choice:SetEnable(true)
+        self._T.canChoose = false
+        self:Request("")
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Request(string faction)
+        if self._T.pending or (faction ~= "" and not self._T.canChoose) then return end
+        self._T.pending = true
+        self:ShowEntryControls(faction == "" and "正在讀取國戰資料…" or "正在加入陣營…", self._T.canChoose)
+        _FactionWar:RequestEntry(faction)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ShowEntryResult(string result)
+        local player = _UserService.LocalPlayer
+        if not isvalid(player) or player.CurrentMapName ~= "formationlobby" then return end
+        self._T.pending = false
+        self._T.canChoose = result == "CHOOSE" or result == "SAVE_FAILED"
+        if result == "ENTERED" then
+            self:Ui("FactionChoice"):SetEnable(false)
+        elseif result == "CHOOSE" then
+            self:ShowEntryControls("請選擇國戰陣營。", true)
+        elseif result == "SAVE_FAILED" then
+            self:ShowEntryControls("陣營儲存未確認，請再試一次。", true)
+        elseif result == "BLOCKED" then
+            self:ShowEntryControls("請先完成目前的配對或存檔操作。", false)
+        else
+            self:ShowEntryControls("暫時無法進入國戰，請關閉後重試。", false)
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ShowEntryControls(string message, boolean choosing)
+        self:Ui("FactionChoice/Window/Status").TextGUIRendererComponent.Text = message
+        for _, id in ipairs({ "Red", "Blue" }) do
+            local button = self:Ui("FactionChoice/Window/" .. id)
+            button:SetEnable(choosing)
+            button.ButtonComponent.Enable = not self._T.pending
+        end
+        self:Ui("FactionChoice/Window/Close").ButtonComponent.Enable = not self._T.pending
+    end
+
+    @ExecSpace("ClientOnly")
+    method boolean IsCurrentTown(string town)
+        local player = _UserService.LocalPlayer
+        return isvalid(player) and player.CurrentMapName == town and _FactionWar:IsTown(town)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ShowTownStatus(string town, string strength)
+        if not self:IsCurrentTown(town) then return end
+        local label = self:Ui("TownHUD/Strength")
+        if not isvalid(label) then return end
+        local capital = town == "nanzih" or town == "yancheng"
+        label.TextGUIRendererComponent.Text = _FactionWar.TownNames[town] .. (capital and "（主城）" or "") .. "  ｜  兵力 " .. strength
+        log("[VRF][FactionWar] hud town=" .. town .. " strength=" .. strength)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ShowTownNotice(string town, string message)
+        if not self:IsCurrentTown(town) then return end
+        local notice = self:Ui("TownHUD/Notice")
+        if isvalid(notice) then notice.TextGUIRendererComponent.Text = message end
+    end
+end

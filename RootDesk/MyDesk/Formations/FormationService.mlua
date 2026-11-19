@@ -433,7 +433,7 @@ script FormationService extends Logic
         -- Limit destinations and derive the traveller from the RPC sender.
         if destination ~= "formationlobby" and destination ~= "formationsim" and destination ~= "template" then return end
         local player = _UserService:GetUserEntityByUserId(senderUserId)
-        if not isvalid(player) then return end
+        if not isvalid(player) or _FactionWar:IsTown(player.CurrentMapName) then return end
         local record = self:GetSession(senderUserId)
         local reconciled = record ~= nil and _FormationSchema:IsLoadConfirmed(record.loadState)
         if _FormationHandoff:IsLockedForUser(senderUserId) or (record ~= nil and (record.pending or (record.uncertain ~= nil and not reconciled))) then

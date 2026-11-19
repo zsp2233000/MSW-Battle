@@ -29,9 +29,11 @@ script FormationLobbyIdentity extends Logic
         local previous = self._T.lobbyPlayer
         if previous ~= player or not inLobby then
             if isvalid(previous) then
-                previous:SetVisible(self._T.lobbyVisible, false, false)
+                -- A town always shows the avatar even if a previous lobby visit left it hidden.
+                local intoTown = isvalid(player) and _FactionWar:IsTown(player.CurrentMapName)
+                previous:SetVisible(intoTown or self._T.lobbyVisible, false, false)
                 local controller = previous.PlayerControllerComponent
-                if isvalid(controller) then controller.Enable = self._T.lobbyControllerEnabled end
+                if isvalid(controller) then controller.Enable = intoTown or self._T.lobbyControllerEnabled end
                 log("[VRF][LobbyScene] restored player on exit")
             end
             self._T.lobbyPlayer = nil
