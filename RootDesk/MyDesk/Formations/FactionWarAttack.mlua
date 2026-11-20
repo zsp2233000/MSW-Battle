@@ -3,6 +3,7 @@ script FactionWarAttack extends Logic
 
     property table Capitals = { nanzih = true, yancheng = true }
     property integer HumanDeduction = 20
+    property integer GuardDeduction = 10
     property integer SettleAttempts = 4
     property number SettleRetrySeconds = 1
     property integer SettledHistory = 20
@@ -21,10 +22,10 @@ script FactionWarAttack extends Logic
         return self.Capitals[town] == true
     end
 
-    method integer Deduction(string target, string result)
-        -- Strength a human win takes from the target town; a draw, a loss or a capital takes nothing.
+    method integer Deduction(string target, string result, any kind)
+        -- Strength a win takes from the target town (a guard win takes less than a human win); a draw, a loss or a capital takes nothing.
         if result ~= "WIN" or self:IsCapital(target) then return 0 end
-        return self.HumanDeduction
+        return kind == "GUARD" and self.GuardDeduction or self.HumanDeduction
     end
 
     @ExecSpace("ServerOnly")
@@ -151,8 +152,9 @@ script FactionWarAttack extends Logic
     end
 
     @ExecSpace("ServerOnly")
-    method void Settle(string matchKey, string homeTown, string awayTown, string homeResult, any complete)
-        -- Take the human-win deduction from the losing side's town exactly once; the match key makes a retry harmless.
+    method void Settle(string matchKey, string homeTown, string awayTown, string homeResult, string kind, any complete)
+        -- Take the win deduction from the losing side's town exactly once; the match key makes a retry harmless.
+        -- A guard match only ever costs the guarded town: the guard has no town of its own to win strength for.
         local operation = { matchKey = matchKey, loser = "", amount = 0, attempts = 0, complete = complete }
         if matchKey == "" or not _FactionWar:IsTown(homeTown) or not _FactionWar:IsTown(awayTown) or homeTown == awayTown then
             self:Finish(operation, "SKIPPED", nil)
@@ -160,10 +162,10 @@ script FactionWarAttack extends Logic
         end
         if homeResult == "WIN" then
             operation.winner, operation.loser = homeTown, awayTown
-        elseif homeResult == "LOSE" then
+        elseif homeResult == "LOSE" and kind ~= "GUARD" then
             operation.winner, operation.loser = awayTown, homeTown
         end
-        if operation.winner ~= nil then operation.amount = self:Deduction(operation.loser, "WIN") end
+        if operation.winner ~= nil then operation.amount = self:Deduction(operation.loser, "WIN", kind) end
         if operation.amount == 0 then
             self:Finish(operation, "NO_CHANGE", nil)
             return

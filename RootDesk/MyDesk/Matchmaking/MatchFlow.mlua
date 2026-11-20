@@ -19,6 +19,7 @@ script MatchFlow extends Logic
         self._T.recoveryTimers = {}
         self._T.notifyTimers = {}
         self._T.queueTimers = {}
+        self._T.guardTimers = {}
         self._T.presentationSequence = {}
         self._T.queueCommands = {}
         self._T.offline = {}
@@ -102,6 +103,7 @@ script MatchFlow extends Logic
         local attempt = ticket ~= nil and ticket.data.attempt or ""
         local origin = ticket ~= nil and ticket.data.origin or ""
         local target = ticket ~= nil and ticket.data.target or ""
+        local guardAt = ticket ~= nil and ticket.guardStarted ~= nil and ticket.guardStarted + _FactionWarGuard.WaitSeconds * 1000 or 0
         self._T.presentationSequence[userId] = (self._T.presentationSequence[userId] or 0) + 1
         local snapshot = _MatchFlowState:Resolve({ state = state, inMatchRoom = inMatchRoom,
             instanceRoom = _RoomService:IsInstanceRoom(), admissionFailed = isvalid(flow) and flow.AdmissionFailed,
@@ -110,7 +112,7 @@ script MatchFlow extends Logic
             result = isvalid(battle) and battle:ResultForProfile(ticket.data.profile) or "",
             failure = self._T.failures[userId], snapshot = { eventCode = message, reasonCode = message,
                 started = started, players = count, sourceRoom = _RoomService.RoomKey,
-                busy = self._T.busy[userId] == true, summary = summary, attempt = attempt, origin = origin, target = target,
+                busy = self._T.busy[userId] == true, summary = summary, attempt = attempt, origin = origin, target = target, guardAt = guardAt, guard = self:IsGuard(ticket),
                 sequenceKey = _WorldInstanceService.WorldInstanceId .. ":" .. _RoomService.RoomKey,
                 sequence = self._T.presentationSequence[userId] } })
         self:ReceiveState(snapshot, userId)
@@ -235,7 +237,7 @@ script MatchFlow extends Logic
             source = ticket.data.source, leaderboardId = self.LeaderboardId, queueName = self.QueueName,
             origin = ticket.data.origin or "", target = ticket.data.target or "",
             live = function()
-                return self._T.records[userId] == ticket and ticket.data ~= nil and ticket.data.state == "QUEUED" and self:Player(userId) ~= nil
+                return self._T.records[userId] == ticket and ticket.data ~= nil and ticket.data.state == "QUEUED" and not ticket.guarding and self:Player(userId) ~= nil
             end }
         ticket.submitting = true
         self:Report(userId, { code = "SUBMITTING" })
@@ -248,9 +250,105 @@ script MatchFlow extends Logic
             self:QueueResult(userId, ticket, requestId, submitted.outcome, submitted.code)
             return
         end
+        self:StartGuardClock(userId, ticket)
         self:Report(userId, { code = submitted.report })
         -- An in-process adapter pairs here; a pushing adapter answers false and reports through its callback instead.
         if self:QueueAdapter():Poll() then self:AdvancePending() end
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean IsGuard(any ticket)
+        -- A ticket is a guard match from the moment the guard claims it, and for good once the pairing is stored.
+        if ticket == nil then return false end
+        if ticket.guardPairing ~= nil then return true end
+        local pairing = ticket.data ~= nil and ticket.data.match or nil
+        return type(pairing) == "table" and pairing.guard == true
+    end
+
+    @ExecSpace("ServerOnly")
+    method any Pairing(table data)
+        -- A guard pairing is stored in the ticket itself; every other pairing is the queue adapter's to confirm.
+        if type(data.match) == "table" and data.match.guard == true then return data.match end
+        return self:QueueAdapter():Lookup(data.profile)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void ClearGuardClock(string userId)
+        -- A matched, cancelled or departed ticket no longer waits for the guard.
+        local timer = self._T.guardTimers[userId]
+        if timer ~= nil then _TimerService:ClearTimer(timer) self._T.guardTimers[userId] = nil end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void ScheduleGuard(string userId, table ticket, number seconds)
+        -- One live timer per player; whatever the previous one waited for is replaced.
+        self:ClearGuardClock(userId)
+        self._T.guardTimers[userId] = _TimerService:SetTimerOnce(function()
+            self._T.guardTimers[userId] = nil
+            self:GuardFire(userId, ticket)
+        end, seconds)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void StartGuardClock(string userId, table ticket)
+        -- A war ticket waits for a human once; a renewed queue request keeps the original clock.
+        if (ticket.data.origin or "") == "" or ticket.guardStarted ~= nil then return end
+        ticket.guardStarted = DateTime.UtcNow.Elapsed
+        self:ScheduleGuard(userId, ticket, _FactionWarGuard.WaitSeconds)
+        log("[VRF][Guard] clock started target=" .. tostring(ticket.data.target))
+    end
+
+    @ExecSpace("ServerOnly")
+    method void GuardFire(string userId, table ticket)
+        -- The wait is over: a ticket that is still waiting for a human is taken out of the human pool, then fights the guard.
+        if self._T.ended or self._T.records[userId] ~= ticket or ticket.data == nil or self:Player(userId) == nil then return end
+        local state = ticket.data.state
+        if (state ~= "QUEUED" and state ~= "RENEWING") or ticket.guarding or ticket.matchPending then return end
+        if ticket.cancelling or ticket.submitting or self._T.busy[userId] or state == "RENEWING" then
+            self:ScheduleGuard(userId, ticket, _FactionWarGuard.RetrySeconds)
+            return
+        end
+        local origin, target = ticket.data.origin or "", ticket.data.target or ""
+        if origin == "" or _FactionWarGuard.Rosters[target] == nil then return end
+        -- From here a human result is deferred; the adapter decides whether the ticket really left its pool.
+        ticket.guarding = true
+        self._T.busy[userId] = true
+        local removed = self:CancelMatching(ticket.data.profile)
+        self._T.busy[userId] = nil
+        if self._T.ended or self._T.records[userId] ~= ticket or self:Player(userId) == nil then ticket.guarding = nil return end
+        -- A human result that already arrived, or a pairing the adapter still holds for this attempt, wins over the guard.
+        local human = ticket.matchPending == true
+        if removed and not human then
+            local held = self:QueueAdapter():Lookup(ticket.data.profile)
+            human = held ~= nil and self:Belongs(ticket.data, held)
+        end
+        if human then
+            ticket.guarding = nil
+            ticket.matchPending = nil
+            log("[VRF][Guard] a human match stands; no guard fight")
+            self:Matched(userId, ticket, nil)
+            return
+        end
+        if not removed then
+            -- The adapter could not confirm the withdrawal; the ticket keeps waiting and the guard tries again.
+            ticket.guarding = nil
+            self:ScheduleGuard(userId, ticket, _FactionWarGuard.RetrySeconds)
+            return
+        end
+        local requestId = ticket.data.requestId
+        local pairing = { key = "guard-" .. _UtilLogic:NewGuid(), home = ticket.data.profile, away = _FactionWarGuard:Profile(target),
+            homeAttempt = requestId, awayAttempt = "guard", homeSource = ticket.data.source, awaySource = ticket.data.source,
+            differentSources = false, homeOrigin = origin, awayOrigin = target, guard = true }
+        ticket.guardPairing = pairing
+        ticket.matchPending = nil
+        log("[VRF][Guard] ticket claimed by the " .. target .. " guard match=" .. pairing.key)
+        self:Matched(userId, ticket, pairing)
+        ticket.guarding = nil
+        if self._T.records[userId] == ticket and ticket.data ~= nil and ticket.data.state == "QUEUED" then
+            -- The claim failed before the handoff left the queue; wait again instead of stranding the ticket.
+            ticket.guardPairing = nil
+            self:ScheduleGuard(userId, ticket, _FactionWarGuard.RetrySeconds)
+        end
     end
 
     @ExecSpace("ServerOnly")
@@ -289,7 +387,7 @@ script MatchFlow extends Logic
         -- Ignore stale generations and duplicate completion; expiry renews the same frozen game attempt.
         if self._T.records[userId] ~= ticket or ticket.data.requestId ~= requestId or ticket.data.state ~= "QUEUED" then return end
         if outcome == "MATCHED" then
-            self:Matched(userId, ticket)
+            self:Matched(userId, ticket, nil)
         elseif outcome == "REJECTED" then
             -- The adapter refused this ticket; close it so the player can start over, and say why.
             if self:Finish(userId, ticket, "CANCELLED", function() return _FormationHandoff:Close(userId, ticket, "CANCELLED") end) then self._T.records[userId] = nil end
@@ -319,9 +417,16 @@ script MatchFlow extends Logic
     end
 
     @ExecSpace("ServerOnly")
-    method void Matched(string userId, table ticket)
+    method void Matched(string userId, table ticket, any pairing)
         -- Seal the handoff with confirmed content only; matching never saves, and the queue-time roster stays fixed (#50).
+        -- A guard match arrives as pairing; every human match reads its pairing from the queue adapter instead.
         if self._T.records[userId] ~= ticket or ticket.data == nil then return end
+        if pairing == nil and ticket.guarding then
+            ticket.matchPending = true
+            log("[VRF][Guard] human result deferred until the guard claim settles")
+            return
+        end
+        self:ClearGuardClock(userId)
         if ticket.data.state == "QUEUED" then
             if not self:Settled(userId, ticket) then self:Report(userId, { code = "HANDOFF_SAVE_FAILED" }) return end
             if not _FormationHandoff:BeginSave(userId, ticket, function()
@@ -340,7 +445,7 @@ script MatchFlow extends Logic
         end
         self._T.failures[userId] = nil
         self:PublishState(userId, "MATCHED")
-        local matched = self:QueueAdapter():Lookup(ticket.data.profile)
+        local matched = pairing or self:QueueAdapter():Lookup(ticket.data.profile)
         if self._T.records[userId] ~= ticket or ticket.data.state ~= "SAVING" then return end
         if matched == nil or not self:Belongs(ticket.data, matched) then
             self._T.busy[userId] = true
@@ -376,7 +481,8 @@ script MatchFlow extends Logic
         if not committed then self:Report(userId, { code = "HANDOFF_SAVE_FAILED" }) return end
         if self._T.records[userId] ~= ticket or self:Player(userId) == nil then return end
         self:Report(userId, { code = "SEALED", details = { matchKey = matched.key, differentSources = matched.differentSources } })
-        self:NotifyReady(matched)
+        -- Nobody else has to be woken for a guard match: the guard has no coordinator of its own.
+        if matched.guard ~= true then self:NotifyReady(matched) end
         self:Recover(userId)
     end
 
@@ -466,7 +572,8 @@ script MatchFlow extends Logic
         if not ticket.matchPending or ticket.data == nil or ticket.data.state ~= "SAVING" then return end
         ticket.matchPending = nil
         log("[VRF][MatchCancel] resume pending match")
-        self:Matched(userId, ticket)
+        -- A deferred guard claim resumes with its own pairing; a human match reads it from the adapter.
+        self:Matched(userId, ticket, ticket.guardPairing)
     end
 
     @ExecSpace("ServerOnly")
@@ -507,6 +614,7 @@ script MatchFlow extends Logic
             return
         end
         ticket.matchPending = nil
+        self:ClearGuardClock(userId)
         local stored = self:Finish(userId, ticket, "CANCELLED", function() return _FormationHandoff:Close(userId, ticket, "CANCELLED") end)
         ticket.cancelling = nil
         self._T.busy[userId] = nil
@@ -526,6 +634,8 @@ script MatchFlow extends Logic
         if current ~= nil and current.cancelling then log("[VRF][MatchCancel] recovery waits for cleanup") return end
         -- A reply deferred while offline continues now that its failed cancellation left the match valid.
         if current ~= nil and current.matchPending then self:ResumeDeferredMatch(userId, current) return end
+        -- Until the guard match is stored, the claim owns the ticket; reading storage now would replace it mid-claim.
+        if current ~= nil and current.guarding and (current.data.state == "QUEUED" or current.data.state == "SAVING") then return end
         if current ~= nil and (current.data.state == "QUEUED" or current.data.state == "SAVING" or current.data.state == "RENEWING" or current.data.state == "QUEUE_ERROR") then
             if self:QueueAdapter():Reclaim(userId, current.data, true) == "HELD" then
                 if (current.data.state == "RENEWING" or current.renewRequestId ~= nil) and not current.renewPending and self._T.queueTimers[userId] == nil then self:ResumeRenew(userId, current, "") end
@@ -552,7 +662,9 @@ script MatchFlow extends Logic
             end
             self._T.records[userId] = ticket
             -- The adapter knows whether anything still stands behind a stored reservation or match.
-            local verdict = self:QueueAdapter():Reclaim(userId, data, false)
+            -- The adapter never held a guard match, so it has no opinion on one.
+            local verdict = nil
+            if not self:IsGuard(ticket) then verdict = self:QueueAdapter():Reclaim(userId, data, false) end
             if verdict == "RENEW" then
                 self._T.busy[userId] = nil
                 self:ResumeRenew(userId, ticket, "")
@@ -586,7 +698,7 @@ script MatchFlow extends Logic
                     self:Report(userId, { code = "RETURN_SAVE_FAILED" })
                 end
             elseif data.state == "COMMITTING" and data.expires > DateTime.UtcNow.Elapsed and not _RoomService:IsInstanceRoom() then
-                local matched = self:QueueAdapter():Lookup(data.profile)
+                local matched = self:Pairing(data)
                 if matched ~= nil and self:Belongs(data, matched) and data.matchKey == matched.key then
                     if _FormationHandoff:Commit(userId, ticket, matched, self.TransferLifetimeSeconds) then
                         self:Rendezvous(userId, ticket, matched)
@@ -595,7 +707,7 @@ script MatchFlow extends Logic
                     end
                 end
             elseif data.state == "TRANSFER" and data.expires > DateTime.UtcNow.Elapsed and not _RoomService:IsInstanceRoom() then
-                local matched = self:QueueAdapter():Lookup(data.profile)
+                local matched = self:Pairing(data)
                 if matched ~= nil and self:Belongs(data, matched) and data.matchKey == matched.key then
                     self:Rendezvous(userId, ticket, matched)
                 end
@@ -659,6 +771,8 @@ script MatchFlow extends Logic
     method void Rendezvous(string userId, table ticket, table matched)
         -- Both durable capsules must be ready before any native warp can remove either source session.
         if self:Player(userId) == nil or self._T.records[userId] ~= ticket or ticket.data.state ~= "TRANSFER" or self._T.closedMatches[matched.key] then return end
+        -- A guard match has no peer capsule to wait for.
+        if matched.guard == true then self:Admit(userId, ticket, matched) return end
         local otherProfile = ticket.data.profile == matched.home and matched.away or matched.home
         local peer = _FormationHandoff:Read(otherProfile)
         if peer == nil or peer.data == nil or not self:Belongs(peer.data, matched) or peer.data.matchKey ~= matched.key then return end
@@ -719,7 +833,7 @@ script MatchFlow extends Logic
     method void Depart(string userId)
         -- Invalidate callbacks before yielding, then settle queue cleanup; combat actors remain owned by BattleSession.
         self._T.offline[userId] = true
-        for _, timers in ipairs({ self._T.arrivalTimers, self._T.recoveryTimers, self._T.queueTimers }) do
+        for _, timers in ipairs({ self._T.arrivalTimers, self._T.recoveryTimers, self._T.queueTimers, self._T.guardTimers }) do
             if timers[userId] ~= nil then _TimerService:ClearTimer(timers[userId]) timers[userId] = nil end
         end
         self._T.pendingRecover[userId] = nil
@@ -789,8 +903,8 @@ script MatchFlow extends Logic
         self:Recover(userId)
         local ticket = self._T.records[userId]
         if ticket ~= nil and ticket.data.state == "TRANSFER" then
-            local matched = self:QueueAdapter():Lookup(ticket.data.profile)
-            if matched ~= nil then self:NotifyReady(matched) end
+            local matched = self:Pairing(ticket.data)
+            if matched ~= nil and matched.guard ~= true then self:NotifyReady(matched) end
         end
         local state = ticket ~= nil and ticket.data.state or "IDLE"
         local elapsed = ticket ~= nil and math.floor((DateTime.UtcNow.Elapsed - ticket.data.started) / 1000) or 0
@@ -916,20 +1030,27 @@ script MatchFlow extends Logic
             if type(matched) ~= "table" or matched.key ~= _RoomService.RoomKey
                 or type(matched.home) ~= "string" or type(matched.away) ~= "string" or matched.home == matched.away
                 or not self:Belongs(entry.data, matched) then return nil end
-            home, away = byProfile[matched.home], byProfile[matched.away]
-            if home == nil or away == nil then return nil end
-            local peer = away.data.match
-            local first = home.data.match
-            if type(peer) ~= "table" or type(first) ~= "table" then return nil end
-            for _, key in ipairs({ "key", "home", "away", "homeAttempt", "awayAttempt" }) do
-                if first[key] ~= matched[key] or peer[key] ~= matched[key] then return nil end
+            home = byProfile[matched.home]
+            if matched.guard == true then
+                -- The guard is the away side; it has no capsule, so the lone player's own pairing is the whole authority.
+                if home == nil or home.data.profile ~= matched.home or not self:Belongs(home.data, matched) then return nil end
+                away = { data = { profile = matched.away, attempt = "" } }
+            else
+                away = byProfile[matched.away]
+                if home == nil or away == nil then return nil end
+                local peer = away.data.match
+                local first = home.data.match
+                if type(peer) ~= "table" or type(first) ~= "table" then return nil end
+                for _, key in ipairs({ "key", "home", "away", "homeAttempt", "awayAttempt" }) do
+                    if first[key] ~= matched[key] or peer[key] ~= matched[key] then return nil end
+                end
+                if not self:Belongs(home.data, matched) or not self:Belongs(away.data, matched) then return nil end
             end
-            if not self:Belongs(home.data, matched) or not self:Belongs(away.data, matched) then return nil end
         end
         if home == nil or away == nil then return nil end
         local pairing = home.data.match
         return { key = _RoomService.RoomKey, home = home.data.profile, away = away.data.profile, homeTicket = home.data.attempt, awayTicket = away.data.attempt,
-            homeTown = pairing.homeOrigin or "", awayTown = pairing.awayOrigin or "" }
+            homeTown = pairing.homeOrigin or "", awayTown = pairing.awayOrigin or "", guard = pairing.guard == true }
     end
 
     @ExecSpace("ServerOnly")
@@ -940,6 +1061,7 @@ script MatchFlow extends Logic
         for _, timer in pairs(self._T.recoveryTimers or {}) do _TimerService:ClearTimer(timer) end
         for _, timer in ipairs(self._T.notifyTimers or {}) do _TimerService:ClearTimer(timer) end
         for _, timer in pairs(self._T.queueTimers or {}) do _TimerService:ClearTimer(timer) end
+        for _, timer in pairs(self._T.guardTimers or {}) do _TimerService:ClearTimer(timer) end
         for timer, _ in pairs(self._T.progressTimers or {}) do _TimerService:ClearTimer(timer) end
         log("[VRF][MatchCleanup] room=" .. _RoomService.RoomKey .. " timers=0")
     end

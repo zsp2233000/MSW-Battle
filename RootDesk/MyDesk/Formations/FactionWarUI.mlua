@@ -245,12 +245,19 @@ script FactionWarUI extends Logic
         local name = _FactionWar.TownNames[snapshot.target] or snapshot.target
         local text = "進攻 " .. name
         local elapsed = snapshot.started > 0 and math.max(0, math.floor((DateTime.UtcNow.Elapsed - snapshot.started) / self.MillisecondsPerSecond)) or 0
+        -- The guard comes at the server's deadline; the countdown never shows a negative second.
+        local guardAt = snapshot.guardAt or 0
+        local remaining = math.max(0, math.ceil((guardAt - DateTime.UtcNow.Elapsed) / self.MillisecondsPerSecond))
         if snapshot.state == "CANCELLING" or snapshot.state == "CANCELLED" then
             return { text = text .. "\n正在取消配對…", action = "" }
         elseif snapshot.state == "QUEUE_ERROR" then
             return { text = text .. "\n配對已停止，請取消後重新配對", action = "CANCEL" }
+        elseif snapshot.guard == true and (waiting[snapshot.state] or entering[snapshot.state]) then
+            -- Matched against the guard: the state names are the human flow's, the words are not.
+            return { text = text .. "\n" .. name .. "守衛迎戰，正在進入戰場", action = waiting[snapshot.state] and "" or "RETURN" }
         elseif waiting[snapshot.state] then
-            return { text = text .. "\n正在尋找對手 · 已等候 " .. tostring(elapsed) .. " 秒", action = "CANCEL" }
+            local wait = guardAt > 0 and ("守衛倒數 " .. tostring(remaining) .. " 秒") or ("已等候 " .. tostring(elapsed) .. " 秒")
+            return { text = text .. "\n正在尋找對手 · " .. wait, action = "CANCEL" }
         elseif entering[snapshot.state] then
             return { text = text .. "\n配對成功，正在進入戰場", action = "RETURN" }
         end

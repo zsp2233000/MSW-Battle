@@ -12,9 +12,9 @@ local function read()
     assert(await(function() return done end), "town read answered")
     return result
 end
-local function settle(matchKey, home, away, homeResult)
+local function settle(matchKey, home, away, homeResult, kind)
     local status, detail, done = nil, nil, false
-    _FactionWarAttack:Settle(matchKey, home, away, homeResult, function(s, d) status, detail, done = s, d, true end)
+    _FactionWarAttack:Settle(matchKey, home, away, homeResult, kind or "HUMAN", function(s, d) status, detail, done = s, d, true end)
     assert(await(function() return done end, 80), "settlement completed " .. matchKey)
     return status, detail
 end
@@ -24,9 +24,10 @@ local ok, reason = pcall(function()
     -- Rules.
     assert(attack:IsCapital("nanzih") and attack:IsCapital("yancheng"), "both capitals are protected")
     assert(not attack:IsCapital("zuoying") and not attack:IsCapital("gushan"), "front towns are contestable")
-    assert(attack:Deduction("gushan", "WIN") == 20, "human win takes 20 from a contestable town")
-    assert(attack:Deduction("gushan", "LOSE") == 0 and attack:Deduction("gushan", "DRAW") == 0, "only a win deducts")
-    assert(attack:Deduction("yancheng", "WIN") == 0 and attack:Deduction("nanzih", "WIN") == 0, "a capital never loses strength")
+    assert(attack:Deduction("gushan", "WIN", "HUMAN") == 20, "human win takes 20 from a contestable town")
+    assert(attack:Deduction("gushan", "WIN", "GUARD") == 10, "guard win takes 10 from a contestable town")
+    assert(attack:Deduction("gushan", "LOSE", "HUMAN") == 0 and attack:Deduction("gushan", "DRAW", "GUARD") == 0, "only a win deducts")
+    assert(attack:Deduction("yancheng", "WIN", "HUMAN") == 0 and attack:Deduction("nanzih", "WIN", "GUARD") == 0, "a capital never loses strength")
 
     -- Options: only adjacent enemy towns, from the authored gates.
     local towns = _FactionWar:InitialTowns()
@@ -74,6 +75,24 @@ local ok, reason = pcall(function()
     data.target = "nanzih"
     assert(not _MatchFlow:Belongs(data, matched), "a different target does not belong")
     assert(_MatchFlow:Belongs({ profile = "profile1", requestId = "p1r" }, matched), "a lobby ticket still belongs by attempt")
+    local guardMatch = { key = "guard-x", home = "profile1", away = "guard:gushan", homeAttempt = "p1r", awayAttempt = "guard",
+        homeOrigin = "zuoying", awayOrigin = "gushan", guard = true }
+    assert(_MatchFlow:Belongs({ profile = "profile1", requestId = "p1r", origin = "zuoying", target = "gushan" }, guardMatch), "the ticket owner belongs to its guard match")
+    assert(not _MatchFlow:Belongs({ profile = "profile1", requestId = "p1r", origin = "zuoying", target = "nanzih" }, guardMatch), "a guard match of another target does not belong")
+    assert(not _MatchFlow:Belongs({ profile = "profile1", requestId = "stale", origin = "zuoying", target = "gushan" }, guardMatch), "a stale attempt does not belong")
+
+    -- Guard identity and rosters.
+    local guards = _FactionWarGuard
+    assert(guards.WaitSeconds == 10, "the guard waits ten seconds")
+    assert(guards:Profile("gushan") == "guard:gushan" and guards:IsGuardProfile("guard:gushan") and guards:TownOf("guard:gushan") == "gushan", "guard profile round trip")
+    assert(not guards:IsGuardProfile("wp2601") and guards:TownOf("wp2601") == "", "a player profile is never a guard")
+    for _, id in ipairs(_FactionWar.TownOrder) do
+        local roster = guards:Roster(id)
+        assert(roster ~= nil and #roster >= 1 and #roster <= 6, id .. " has a guard roster")
+        roster[1].x = 99
+        assert(guards:Roster(id)[1].x ~= 99, id .. " roster is a detached copy")
+    end
+    assert(guards:Roster("nowhere") == nil, "no guard outside the four towns")
 
     -- Settlement on isolated storage.
     _FactionWar.TownStorageName = STORAGE
@@ -97,6 +116,14 @@ local ok, reason = pcall(function()
     assert(status == "SAVED", "a red home loss means Gushan won and Zuoying settles")
     towns = read()
     assert(towns.zuoying.strength == 60, "Zuoying is down to 60")
+    -- Guard matches: only a home win costs the guarded town, and only 10.
+    local g, left = settle("probe-g1", "zuoying", "gushan", "WIN", "GUARD")
+    assert(g == "SAVED" and left == 70, "red guard win lowers Gushan from 80 to 70, got " .. tostring(g) .. "/" .. tostring(left))
+    assert(settle("probe-g1", "zuoying", "gushan", "WIN", "GUARD") == "DUPLICATE", "a repeated guard result is ignored")
+    assert(settle("probe-g2", "zuoying", "gushan", "LOSE", "GUARD") == "NO_CHANGE", "losing to the guard changes no town")
+    assert(settle("probe-g3", "zuoying", "gushan", "DRAW", "GUARD") == "NO_CHANGE", "drawing the guard changes no town")
+    towns = read()
+    assert(towns.gushan.strength == 70 and towns.zuoying.strength == 60, "only the one guard win was applied")
     -- Capital protection needs an enemy capital: make Zuoying blue, then red-side Nanzih loses nothing when blue wins.
     towns.zuoying.owner = "BLUE"
     written = false
@@ -106,6 +133,7 @@ local ok, reason = pcall(function()
     assert(status == "NO_CHANGE", "winning against a capital deducts nothing")
     towns = read()
     assert(towns.nanzih.strength == 100 and towns.nanzih.owner == "RED", "the capital keeps its strength and owner")
+    assert(settle("probe-g4", "zuoying", "nanzih", "WIN", "GUARD") == "NO_CHANGE", "beating a capital guard deducts nothing")
     status = settle("probe-m6", "zuoying", "gushan", "WIN")
     assert(status == "SKIPPED", "a result between towns of the same faction deducts nothing")
     assert(settle("", "zuoying", "gushan", "WIN") == "SKIPPED", "a result without a match key is refused")

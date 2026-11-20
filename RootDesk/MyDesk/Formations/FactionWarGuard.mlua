@@ -1,0 +1,58 @@
+@Logic
+script FactionWarGuard extends Logic
+
+    property integer WaitSeconds = 10
+    property number RetrySeconds = 0.5
+    property string ProfilePrefix = "guard:"
+    -- Every town fields its own guard. Positions follow the formation convention: the left side, mirrored by the match for the away side.
+    property table Rosters = {
+        nanzih = {
+            { monsterId = "monster_tank", x = -3.25, y = -1.25 },
+            { monsterId = "monster_tank", x = -4.0, y = -1.25 },
+            { monsterId = "monster_shooter", x = -4.75, y = -1.25 }
+        },
+        zuoying = {
+            { monsterId = "monster_tank", x = -3.25, y = -1.25 },
+            { monsterId = "monster_warrior", x = -4.0, y = -1.25 },
+            { monsterId = "monster_shooter", x = -4.75, y = -1.25 }
+        },
+        gushan = {
+            { monsterId = "monster_metal_beetle", x = -3.25, y = -1.25 },
+            { monsterId = "monster_warrior", x = -4.0, y = -1.25 },
+            { monsterId = "monster_moon_pixie", x = -4.75, y = -1.25 }
+        },
+        yancheng = {
+            { monsterId = "monster_metal_beetle", x = -3.25, y = -1.25 },
+            { monsterId = "monster_oak_beetle", x = -4.0, y = -1.25 },
+            { monsterId = "monster_star_pixie", x = -4.75, y = -1.25 }
+        }
+    }
+
+    method string Profile(string town)
+        -- The match records the guard as its away participant under this name; a player profile code can never contain a colon.
+        return self.ProfilePrefix .. town
+    end
+
+    method boolean IsGuardProfile(string profile)
+        -- True for any participant name that stands for a town guard rather than a connected player.
+        return type(profile) == "string" and string.sub(profile, 1, #self.ProfilePrefix) == self.ProfilePrefix
+    end
+
+    method string TownOf(string profile)
+        -- The town a guard profile defends, or an empty string for anything else.
+        if not self:IsGuardProfile(profile) then return "" end
+        return string.sub(profile, #self.ProfilePrefix + 1)
+    end
+
+    @ExecSpace("ServerOnly")
+    method any Roster(string town)
+        -- A detached copy of the town's guard formation; nil for a town without a guard.
+        local source = self.Rosters[town]
+        if source == nil then return nil end
+        local roster = {}
+        for _, unit in ipairs(source) do
+            table.insert(roster, { monsterId = unit.monsterId, x = unit.x, y = unit.y })
+        end
+        return roster
+    end
+end

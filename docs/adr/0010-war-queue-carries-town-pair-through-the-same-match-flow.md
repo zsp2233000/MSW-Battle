@@ -4,7 +4,7 @@
 
 誰和誰配對由 adapter 決定。`MatchQueueLocal.Poll` 對戰爭票券只配對「各自站在對方目標城」的兩張票（`Pairs`）；兩個同城玩家、目標不對稱的玩家、以及大廳票券與戰爭票券都不會互相配對。流程本身只在 `MatchFlow.Belongs` 核對配對結果與票券記錄的城鎮相符，性質和它核對嘗試編號一樣，是對 adapter 回覆的防呆，不含環境分支（ADR 0006 的限制仍成立），所以過期通知不能把票券接到別的城的對手。
 
-配對成立後，兩城寫在 `match.homeOrigin / awayOrigin`，隨交接資料進入戰場房間。`MatchedBattle` 在戰果只發布一次時呼叫 `FactionWarAttack:Settle(matchKey, homeTown, awayTown, homeResult)`；以全域儲存裡的 `settled` 清單去重，所以重複接收戰果不會重複扣兵力。真人戰勝利扣目標城 20 兵力，對主城、平手與同陣營城鎮不扣；兵力不會降到零，奪城與換旗另行處理。
+配對成立後，兩城寫在 `match.homeOrigin / awayOrigin`，隨交接資料進入戰場房間。`MatchedBattle` 在戰果只發布一次時呼叫 `FactionWarAttack:Settle(matchKey, homeTown, awayTown, homeResult)`；以全域儲存裡的 `settled` 清單去重，所以重複接收戰果不會重複扣兵力。真人戰勝利扣目標城 20 兵力（守衛戰勝利扣 10，見 ADR 0011，`Settle` 因此多一個 `kind` 參數），對主城、平手與同陣營城鎮不扣；兵力不會降到零，奪城與換旗另行處理。
 
 戰後返回改走 `MatchTransfer:MoveToTown`：有 `origin` 的票券回到出發城，其餘仍回大廳。離城鎖定也用同一份票券：`FactionWarAttack:IsEngaged` 讀 `MatchFlow:StateForUser` 與 `FormationHandoff:IsLockedForUser`，傳送門與 NPC 都以它判斷。
 
