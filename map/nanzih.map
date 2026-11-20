@@ -637,6 +637,87 @@
             "replaced_model_id": null
           }
         }
+      },
+      {
+        "id": "68c7adba-2968-4bb0-8366-65087a9cbc0b",
+        "path": "/maps/nanzih/LobbyNpc",
+        "componentNames": "MOD.Core.TransformComponent,MOD.Core.SpriteRendererComponent,MOD.Core.InteractionComponent,script.FactionWarLobbyNpc",
+        "jsonString": {
+          "name": "LobbyNpc",
+          "path": "/maps/nanzih/LobbyNpc",
+          "nameEditable": true,
+          "enable": true,
+          "visible": true,
+          "localize": false,
+          "displayOrder": 42,
+          "pathConstraints": "///",
+          "revision": 1,
+          "modelId": "factionwarlobbynpc",
+          "@components": [
+            {
+              "@type": "MOD.Core.TransformComponent",
+              "Position": {
+                "x": -1.8,
+                "y": -0.41,
+                "z": 0
+              },
+              "QuaternionRotation": {
+                "x": 0,
+                "y": 0,
+                "z": 0,
+                "w": 1
+              },
+              "Scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "Enable": true
+            },
+            {
+              "@type": "MOD.Core.SpriteRendererComponent",
+              "SpriteRUID": "97a13088ff2144968ead0620ef6863f9",
+              "Color": {
+                "r": 1,
+                "g": 1,
+                "b": 1,
+                "a": 1
+              },
+              "DrawMode": 0,
+              "FlipX": false,
+              "FlipY": false,
+              "PlayRate": 1,
+              "OrderInLayer": 2,
+              "StartFrameIndex": 0,
+              "EndFrameIndex": 2147483647,
+              "Enable": true,
+              "SortingLayer": "MapLayer0"
+            },
+            {
+              "@type": "MOD.Core.InteractionComponent",
+              "Enable": true,
+              "BoxSize": {
+                "$type": "MOD.Core.MODVector2, MOD.Core",
+                "x": 1.4,
+                "y": 1.65
+              },
+              "ActionName": "整備隊伍",
+              "ShowActionInfo": true
+            },
+            {
+              "Enable": true,
+              "@type": "script.FactionWarLobbyNpc"
+            }
+          ],
+          "@version": 1,
+          "origin": {
+            "type": "Model",
+            "entry_id": "factionwarlobbynpc",
+            "sub_entity_id": null,
+            "root_entity_id": "68c7adba-2968-4bb0-8366-65087a9cbc0b",
+            "replaced_model_id": null
+          }
+        }
       }
     ]
   }

@@ -37,11 +37,6 @@
               "FallSpeedMaxYFactor": 1,
               "Gravity": 1,
               "IsInstanceMap": false,
-              "TileMapMode": 0,
-              "UseCustomBound": true,
-              "WalkAccelerationFactor": 1,
-              "WalkDrag": 1,
-              "Enable": true,
               "LeftBottom": {
                 "x": -8.65,
                 "y": -3.25
@@ -49,7 +44,12 @@
               "RightTop": {
                 "x": 8.65,
                 "y": 4.65
-              }
+              },
+              "TileMapMode": 0,
+              "UseCustomBound": true,
+              "WalkAccelerationFactor": 1,
+              "WalkDrag": 1,
+              "Enable": true
             },
             {
               "@type": "MOD.Core.FootholdComponent",
@@ -112,6 +112,26 @@
           "@components": [
             {
               "@type": "MOD.Core.BackgroundComponent",
+              "BottomColor": {
+                "r": 0.5372549,
+                "g": 0.596078455,
+                "b": 0.443137258,
+                "a": 1
+              },
+              "MiddleBottomColor": {
+                "r": 0.831372559,
+                "g": 0.858823538,
+                "b": 0.654902,
+                "a": 1
+              },
+              "MiddleBottomRatio": 0.31,
+              "MiddleTopColor": {
+                "r": 0.7294118,
+                "g": 0.819607854,
+                "b": 0.6745098,
+                "a": 1
+              },
+              "MiddleTopRatio": 0.59,
               "SolidColor": {
                 "r": 0.5019608,
                 "g": 0.5019608,
@@ -119,35 +139,15 @@
                 "a": 0.7058824
               },
               "TemplateRUID": "794ad8421e2543d8a6d2c70307637450",
+              "TopColor": {
+                "r": 0.5137255,
+                "g": 0.68235296,
+                "b": 0.698039234,
+                "a": 1
+              },
               "Type": 4,
               "WebUrl": "",
-              "Enable": true,
-              "TopColor": {
-                "r": 0.5137254901960784,
-                "g": 0.6823529411764706,
-                "b": 0.6980392156862745,
-                "a": 1
-              },
-              "MiddleTopColor": {
-                "r": 0.7294117647058823,
-                "g": 0.8196078431372549,
-                "b": 0.6745098039215687,
-                "a": 1
-              },
-              "MiddleBottomColor": {
-                "r": 0.8313725490196079,
-                "g": 0.8588235294117647,
-                "b": 0.6549019607843137,
-                "a": 1
-              },
-              "BottomColor": {
-                "r": 0.5372549019607843,
-                "g": 0.596078431372549,
-                "b": 0.44313725490196076,
-                "a": 1
-              },
-              "MiddleTopRatio": 0.59,
-              "MiddleBottomRatio": 0.31
+              "Enable": true
             }
           ],
           "@version": 1
@@ -340,10 +340,22 @@
           "displayOrder": 4,
           "pathConstraints": "///",
           "revision": 1,
+          "origin": {
+            "type": "Model",
+            "entry_id": "mapempty",
+            "sub_entity_id": null,
+            "root_entity_id": "1faa8348-a488-4fd7-b6b6-bd7be8816ace",
+            "replaced_model_id": null
+          },
           "modelId": "mapempty",
           "@components": [
             {
               "@type": "MOD.Core.TransformComponent",
+              "Rotation": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
               "Position": {
                 "x": 0,
                 "y": -0.35,
@@ -360,17 +372,11 @@
                 "y": 1,
                 "z": 1
               },
+              "ZRotation": 0,
               "Enable": true
             }
           ],
-          "@version": 1,
-          "origin": {
-            "type": "Model",
-            "entry_id": "mapempty",
-            "sub_entity_id": null,
-            "root_entity_id": "1faa8348-a488-4fd7-b6b6-bd7be8816ace",
-            "replaced_model_id": null
-          }
+          "@version": 1
         }
       },
       {
@@ -387,10 +393,22 @@
           "displayOrder": 5,
           "pathConstraints": "///",
           "revision": 1,
+          "origin": {
+            "type": "Model",
+            "entry_id": "factionwargate",
+            "sub_entity_id": null,
+            "root_entity_id": "f6782c5d-4ea3-4b42-9f69-c17129e91d8e",
+            "replaced_model_id": null
+          },
           "modelId": "factionwargate",
           "@components": [
             {
               "@type": "MOD.Core.TransformComponent",
+              "Rotation": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
               "Position": {
                 "x": -4,
                 "y": -0.41,
@@ -407,51 +425,47 @@
                 "y": 1,
                 "z": 1
               },
+              "ZRotation": 0,
               "Enable": true
             },
             {
               "@type": "MOD.Core.SpriteRendererComponent",
+              "ActionSheet": {},
+              "DrawMode": 0,
+              "EndFrameIndex": 2147483647,
+              "FlipX": false,
+              "FlipY": false,
+              "OrderInLayer": 2,
+              "PlayRate": 1,
+              "RenderSetting": 0,
+              "SortingLayer": "MapLayer0",
               "SpriteRUID": "aba58d2139ca4736bab39f6b4c39aa37",
+              "StartFrameIndex": 0,
               "Color": {
                 "r": 1,
                 "g": 1,
                 "b": 1,
                 "a": 1
               },
-              "DrawMode": 0,
-              "FlipX": false,
-              "FlipY": false,
-              "PlayRate": 1,
-              "OrderInLayer": 2,
-              "StartFrameIndex": 0,
-              "EndFrameIndex": 2147483647,
-              "Enable": true,
-              "SortingLayer": "MapLayer0"
+              "Enable": true
             },
             {
               "@type": "MOD.Core.InteractionComponent",
-              "Enable": true,
+              "ActionName": "前往左營",
               "BoxSize": {
-                "$type": "MOD.Core.MODVector2, MOD.Core",
                 "x": 1.65,
                 "y": 1.65
               },
-              "ActionName": "前往左營",
-              "ShowActionInfo": true
+              "IsLegacy": true,
+              "ShowActionInfo": true,
+              "Enable": true
             },
             {
-              "Enable": true,
-              "@type": "script.FactionWarGate"
+              "@type": "script.FactionWarGate",
+              "Enable": true
             }
           ],
-          "@version": 1,
-          "origin": {
-            "type": "Model",
-            "entry_id": "factionwargate",
-            "sub_entity_id": null,
-            "root_entity_id": "f6782c5d-4ea3-4b42-9f69-c17129e91d8e",
-            "replaced_model_id": null
-          }
+          "@version": 1
         }
       },
       {
@@ -468,10 +482,22 @@
           "displayOrder": 6,
           "pathConstraints": "///",
           "revision": 1,
+          "origin": {
+            "type": "Model",
+            "entry_id": "factionwargate",
+            "sub_entity_id": null,
+            "root_entity_id": "53dc2183-aa63-48f5-9ad3-46e3c56dcdaa",
+            "replaced_model_id": null
+          },
           "modelId": "factionwargate",
           "@components": [
             {
               "@type": "MOD.Core.TransformComponent",
+              "Rotation": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
               "Position": {
                 "x": 4,
                 "y": -0.41,
@@ -488,51 +514,47 @@
                 "y": 1,
                 "z": 1
               },
+              "ZRotation": 0,
               "Enable": true
             },
             {
               "@type": "MOD.Core.SpriteRendererComponent",
+              "ActionSheet": {},
+              "DrawMode": 0,
+              "EndFrameIndex": 2147483647,
+              "FlipX": false,
+              "FlipY": false,
+              "OrderInLayer": 2,
+              "PlayRate": 1,
+              "RenderSetting": 0,
+              "SortingLayer": "MapLayer0",
               "SpriteRUID": "aba58d2139ca4736bab39f6b4c39aa37",
+              "StartFrameIndex": 0,
               "Color": {
                 "r": 1,
                 "g": 1,
                 "b": 1,
                 "a": 1
               },
-              "DrawMode": 0,
-              "FlipX": false,
-              "FlipY": false,
-              "PlayRate": 1,
-              "OrderInLayer": 2,
-              "StartFrameIndex": 0,
-              "EndFrameIndex": 2147483647,
-              "Enable": true,
-              "SortingLayer": "MapLayer0"
+              "Enable": true
             },
             {
               "@type": "MOD.Core.InteractionComponent",
-              "Enable": true,
+              "ActionName": "前往鹽埕",
               "BoxSize": {
-                "$type": "MOD.Core.MODVector2, MOD.Core",
                 "x": 1.65,
                 "y": 1.65
               },
-              "ActionName": "前往鹽埕",
-              "ShowActionInfo": true
+              "IsLegacy": true,
+              "ShowActionInfo": true,
+              "Enable": true
             },
             {
-              "Enable": true,
-              "@type": "script.FactionWarGate"
+              "@type": "script.FactionWarGate",
+              "Enable": true
             }
           ],
-          "@version": 1,
-          "origin": {
-            "type": "Model",
-            "entry_id": "factionwargate",
-            "sub_entity_id": null,
-            "root_entity_id": "53dc2183-aa63-48f5-9ad3-46e3c56dcdaa",
-            "replaced_model_id": null
-          }
+          "@version": 1
         }
       },
       {
@@ -546,13 +568,25 @@
           "enable": true,
           "visible": true,
           "localize": false,
-          "displayOrder": 15,
+          "displayOrder": 7,
           "pathConstraints": "///",
           "revision": 1,
+          "origin": {
+            "type": "Model",
+            "entry_id": "factionwarterrain",
+            "sub_entity_id": null,
+            "root_entity_id": "29a7c0cd-881b-4bb6-a3f5-78316cd09dd9",
+            "replaced_model_id": null
+          },
           "modelId": "factionwarterrain",
           "@components": [
             {
               "@type": "MOD.Core.TransformComponent",
+              "Rotation": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
               "Position": {
                 "x": -7.27,
                 "y": -1.57,
@@ -569,34 +603,39 @@
                 "y": 1,
                 "z": 1
               },
+              "ZRotation": 0,
               "Enable": true
             },
             {
               "@type": "MOD.Core.SpriteRendererComponent",
+              "ActionSheet": {},
+              "DrawMode": 2,
+              "EndFrameIndex": 2147483647,
+              "FlipX": false,
+              "FlipY": false,
+              "OrderInLayer": 1,
+              "PlayRate": 1,
+              "RenderSetting": 0,
+              "SortingLayer": "MapLayer0",
               "SpriteRUID": "5095616250da4a20877721f835df0dc6",
+              "StartFrameIndex": 0,
+              "TiledSize": {
+                "x": 18,
+                "y": 1.34
+              },
               "Color": {
                 "r": 1,
                 "g": 1,
                 "b": 1,
                 "a": 1
               },
-              "DrawMode": 2,
-              "FlipX": false,
-              "FlipY": false,
-              "PlayRate": 1,
-              "OrderInLayer": 1,
-              "StartFrameIndex": 0,
-              "EndFrameIndex": 2147483647,
-              "Enable": true,
-              "SortingLayer": "MapLayer0",
-              "TiledSize": {
-                "x": 18,
-                "y": 1.34
-              }
+              "Enable": true
             },
             {
               "@type": "MOD.Core.CustomFootholdComponent",
-              "Enable": true,
+              "FootholdDrag": 1,
+              "FootholdForce": 0,
+              "FootholdWalkSpeedFactor": 1,
               "edgeLists": [
                 [
                   {
@@ -609,19 +648,10 @@
                   }
                 ]
               ],
-              "FootholdDrag": 1,
-              "FootholdForce": 0,
-              "FootholdWalkSpeedFactor": 1
+              "Enable": true
             }
           ],
-          "@version": 1,
-          "origin": {
-            "type": "Model",
-            "entry_id": "factionwarterrain",
-            "sub_entity_id": null,
-            "root_entity_id": "29a7c0cd-881b-4bb6-a3f5-78316cd09dd9",
-            "replaced_model_id": null
-          }
+          "@version": 1
         }
       },
       {
@@ -635,15 +665,104 @@
           "enable": true,
           "visible": true,
           "localize": false,
-          "displayOrder": 16,
+          "displayOrder": 8,
           "pathConstraints": "///",
           "revision": 1,
+          "origin": {
+            "type": "Model",
+            "entry_id": "factionwarnpc",
+            "sub_entity_id": null,
+            "root_entity_id": "f09870eb-9a08-4915-b3fd-aecf72f949ff",
+            "replaced_model_id": null
+          },
           "modelId": "factionwarnpc",
           "@components": [
             {
               "@type": "MOD.Core.TransformComponent",
+              "Rotation": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
               "Position": {
                 "x": 1.8,
+                "y": -0.41,
+                "z": 0
+              },
+              "QuaternionRotation": {
+                "x": 0,
+                "y": 0,
+                "z": 0,
+                "w": 1
+              },
+              "Scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "ZRotation": 0,
+              "Enable": true
+            },
+            {
+              "@type": "MOD.Core.SpriteRendererComponent",
+              "ActionSheet": {},
+              "DrawMode": 0,
+              "EndFrameIndex": 2147483647,
+              "FlipX": false,
+              "FlipY": false,
+              "OrderInLayer": 2,
+              "PlayRate": 1,
+              "RenderSetting": 0,
+              "SortingLayer": "MapLayer0",
+              "SpriteRUID": "6df1a436b0d447e8a45783b7356f9521",
+              "StartFrameIndex": 0,
+              "Color": {
+                "r": 1,
+                "g": 1,
+                "b": 1,
+                "a": 1
+              },
+              "Enable": true
+            },
+            {
+              "@type": "MOD.Core.InteractionComponent",
+              "ActionName": "進攻",
+              "BoxSize": {
+                "x": 1.4,
+                "y": 1.65
+              },
+              "IsLegacy": true,
+              "ShowActionInfo": true,
+              "Enable": true
+            },
+            {
+              "@type": "script.FactionWarNpc",
+              "Enable": true
+            }
+          ],
+          "@version": 1
+        }
+      },
+      {
+        "id": "c09d8dc5-c74d-48db-a125-74b68342929c",
+        "path": "/maps/gushan/LobbyNpc",
+        "componentNames": "MOD.Core.TransformComponent,MOD.Core.SpriteRendererComponent,MOD.Core.InteractionComponent,script.FactionWarLobbyNpc",
+        "jsonString": {
+          "name": "LobbyNpc",
+          "path": "/maps/gushan/LobbyNpc",
+          "nameEditable": true,
+          "enable": true,
+          "visible": true,
+          "localize": false,
+          "displayOrder": 9,
+          "pathConstraints": "///",
+          "revision": 1,
+          "modelId": "factionwarlobbynpc",
+          "@components": [
+            {
+              "@type": "MOD.Core.TransformComponent",
+              "Position": {
+                "x": -1.8,
                 "y": -0.41,
                 "z": 0
               },
@@ -662,7 +781,7 @@
             },
             {
               "@type": "MOD.Core.SpriteRendererComponent",
-              "SpriteRUID": "6df1a436b0d447e8a45783b7356f9521",
+              "SpriteRUID": "97a13088ff2144968ead0620ef6863f9",
               "Color": {
                 "r": 1,
                 "g": 1,
@@ -687,20 +806,20 @@
                 "x": 1.4,
                 "y": 1.65
               },
-              "ActionName": "進攻",
+              "ActionName": "整備隊伍",
               "ShowActionInfo": true
             },
             {
               "Enable": true,
-              "@type": "script.FactionWarNpc"
+              "@type": "script.FactionWarLobbyNpc"
             }
           ],
           "@version": 1,
           "origin": {
             "type": "Model",
-            "entry_id": "factionwarnpc",
+            "entry_id": "factionwarlobbynpc",
             "sub_entity_id": null,
-            "root_entity_id": "f09870eb-9a08-4915-b3fd-aecf72f949ff",
+            "root_entity_id": "c09d8dc5-c74d-48db-a125-74b68342929c",
             "replaced_model_id": null
           }
         }

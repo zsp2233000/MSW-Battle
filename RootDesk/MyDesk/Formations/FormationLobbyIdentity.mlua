@@ -16,7 +16,7 @@ script FormationLobbyIdentity extends Logic
         self:UpdateLobbyPlayer(player)
         if not isvalid(player) then return end
         self._T.elapsed = self._T.elapsed + delta
-        if player.CurrentMapName == "formationlobby" and self._T.elapsed >= 0.5 then
+        if _FormationLobby:OnLobbyScreen() and self._T.elapsed >= 0.5 then
             self._T.elapsed = 0
             self:UpdateIdentity()
         end

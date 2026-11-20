@@ -21,6 +21,7 @@ script FactionWarUI extends Logic
         self._T.queueAction = ""
         self._T.queuePending = false
         self._T.queueAttempt = ""
+        self._T.panelOpen = false
     end
 
     @ExecSpace("ClientOnly")
@@ -39,10 +40,24 @@ script FactionWarUI extends Logic
             self:Bind("AttackPanel/Window/Row1/Option", function() self:Attack(1) end)
             self:Bind("AttackPanel/Window/Row2/Option", function() self:Attack(2) end)
             self:Bind("QueueBar/Cancel", function() self:CancelQueue() end)
+            self:Bind("LobbyClose", function() _FormationLobby:CloseTownPanel() end)
         end
         local name = player.CurrentMapName
         if name ~= self._T.mapName then self:EnterMap(name, entry, choice, hud) end
+        self:SyncTownPanel(name, hud)
         self:RenderQueue(name)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void SyncTownPanel(string map, Entity hud)
+        -- While the lobby screen covers the town, hide the town HUD and dialogs and offer its close button.
+        local open = _FormationLobby:IsTownPanelOpen()
+        if open == self._T.panelOpen then return end
+        self._T.panelOpen = open
+        local close = self:Ui("LobbyClose")
+        if isvalid(close) then close:SetEnable(open) end
+        if open then self:CloseAttack() end
+        hud:SetEnable(_FactionWar:IsTown(map) and not open)
     end
 
     @ExecSpace("ClientOnly")
@@ -255,7 +270,7 @@ script FactionWarUI extends Logic
             self._T.queueState = snapshot.state
             self._T.queuePending = false
         end
-        bar:SetEnable(war)
+        bar:SetEnable(war and not self._T.panelOpen)
         if not war then
             self._T.queueAction = ""
             return

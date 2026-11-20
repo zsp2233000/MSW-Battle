@@ -1,0 +1,12 @@
+@Component
+script FactionWarLobbyNpc extends Component
+
+    @ExecSpace("ClientOnly")
+    @EventSender("Self")
+    handler HandleInteractionEvent(InteractionEvent event)
+        -- Only the player who pressed the interaction key opens their own lobby panel.
+        if event.InteractionEntity == _UserService.LocalPlayer then
+            _FormationLobby:OpenTownPanel()
+        end
+    end
+end
