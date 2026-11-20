@@ -138,8 +138,8 @@ test('opening is refused first thing outside Maker Play and only from the lobby 
     'the published-environment refusal is the first statement');
   const gate = statements(methodBody(source, 'CanOpen')).join('\n');
   assert.match(gate, /Environment:IsMakerPlay\(\)/);
-  assert.match(gate, /CurrentMapName ~= self.LobbyMapName/);
-  assert.match(read(MODULE), /property string LobbyMapName = "formationlobby"/);
+  assert.match(gate, /_FormationLobby:OnLobbyScreen\(\)/, 'follows the lobby screen, which a town NPC can also open');
+  assert.doesNotMatch(read(MODULE), /LobbyMapName/);
   assert.match(gate, /_MatchFlowInput:AllowsFormationActions\(\)/, 'reuses the lobby\'s existing matchmaking lock');
 });
 
@@ -154,7 +154,7 @@ test('the lobby button is only shown in Maker Play and follows the same gate', (
 
 test('opening and closing touch no storage, formation, edit-session or matchmaking state', () => {
   const source = read(MODULE);
-  assert.doesNotMatch(source, /DataStorage|_FormationService|_FormationStorage|_MonsterLevelStorage|_MatchFlow\b|_FormationLobby|_FormationEditorSlide/);
+  assert.doesNotMatch(source, /DataStorage|_FormationService|_FormationStorage|_MonsterLevelStorage|_MatchFlow\b|_FormationLobby(?!:OnLobbyScreen\(\))|_FormationEditorSlide/);
   assert.doesNotMatch(source, /_FormationEditSession:(Request|Select|Confirm|Continue|Reset|Observe|Run|Ensure)/);
   assert.doesNotMatch(source, /_MatchFlowInput:(Click|Observe|Render|SelectScreen)/);
   assert.doesNotMatch(source, /@Sync|@TargetUserSync/);

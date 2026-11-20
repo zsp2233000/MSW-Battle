@@ -1,5 +1,5 @@
 -- Maker `client` context, fresh Play, local player standing in any faction war town (the authored start map).
--- Run PART 1 first (final line: [VRF][TownLobby] CLIENT PASS), then PART 2 (final line: [VRF][TownLobby] EDIT PASS).
+-- Run PART 1 first (final line: [VRF][TownLobby] CLIENT PASS), then PART 3 (GM PASS, needs a GM account), then PART 2 (EDIT PASS).
 -- PART 2 leaves the player in the formation editor; stop Play afterwards.
 local PART = 1
 local function await(predicate, tries) for _ = 1, tries or 100 do if predicate() then return true end wait(0.1) end return false end
@@ -25,6 +25,17 @@ local ok, reason = pcall(function()
         assert(controller.Enable == before, "controls restored")
         assert(await(function() return _FactionWarUI:Ui("TownHUD").Enable and not _FactionWarUI:Ui("LobbyClose").Enable end), "town HUD back, close hidden")
         log("[VRF][TownLobby] CLIENT PASS in " .. player.CurrentMapName)
+    elseif PART == 3 then
+        -- The GM entry (and the Maker-only dex entry) must follow the lobby screen onto the town panel.
+        local gm = _GMPanel
+        local button = gm.lobbyButton.Entity
+        assert(not button.Enable, "GM entry hidden while the town panel is closed")
+        lobby:OpenTownPanel()
+        assert(await(function() return gm._T.authorized end, 100), "GM identity answered for this player")
+        assert(await(function() return button.Enable end, 50), "GM entry shown on the town panel")
+        lobby:CloseTownPanel()
+        assert(await(function() return not button.Enable end, 50), "GM entry hidden again after closing")
+        log("[VRF][TownLobby] GM PASS")
     else
         lobby:OpenTownPanel()
         assert(await(function() return _FormationSchema:IsLoadConfirmed(_FormationEditSession.Snapshot.loadState) end, 200), "saved teams loaded")

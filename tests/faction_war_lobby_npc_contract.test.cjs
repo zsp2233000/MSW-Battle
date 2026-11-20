@@ -44,6 +44,14 @@ test('the town lobby panel opens over the town and has its own close button abov
   assert.match(source('RootDesk/MyDesk/Formations/FactionWarLobbyNpc.mlua'), /_FormationLobby:OpenTownPanel\(\)/);
 });
 
+test('the GM and monster dex entries follow the lobby screen, so they appear on the town panel too', () => {
+  for (const file of ['GM/GMPanel', 'Dex/MonsterDex']) {
+    const text = source(`RootDesk/MyDesk/${file}.mlua`);
+    assert.match(text, /_FormationLobby:OnLobbyScreen\(\)/, file);
+    assert.doesNotMatch(text, /CurrentMapName\s*[=~]=\s*(?:self\.LobbyMapName|"formationlobby")/, `${file} no longer keys on the lobby map name`);
+  }
+});
+
 test('travel from a town stays behind the same engaged lock as from the lobby', () => {
   const travel = body(source('RootDesk/MyDesk/Formations/FormationService.mlua'), 'RequestTravel');
   assert.doesNotMatch(travel, /_FactionWar:IsTown/, 'a town player may travel to the editor');
