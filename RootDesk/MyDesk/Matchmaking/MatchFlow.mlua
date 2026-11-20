@@ -100,6 +100,8 @@ script MatchFlow extends Logic
         local flow = isvalid(map) and map:GetFirstChildComponentByTypeName("script.MatchedBattle", true) or nil
         local summary = ticket ~= nil and ticket.data.summary or ""
         local attempt = ticket ~= nil and ticket.data.attempt or ""
+        local origin = ticket ~= nil and ticket.data.origin or ""
+        local target = ticket ~= nil and ticket.data.target or ""
         self._T.presentationSequence[userId] = (self._T.presentationSequence[userId] or 0) + 1
         local snapshot = _MatchFlowState:Resolve({ state = state, inMatchRoom = inMatchRoom,
             instanceRoom = _RoomService:IsInstanceRoom(), admissionFailed = isvalid(flow) and flow.AdmissionFailed,
@@ -108,7 +110,7 @@ script MatchFlow extends Logic
             result = isvalid(battle) and battle:ResultForProfile(ticket.data.profile) or "",
             failure = self._T.failures[userId], snapshot = { eventCode = message, reasonCode = message,
                 started = started, players = count, sourceRoom = _RoomService.RoomKey,
-                busy = self._T.busy[userId] == true, summary = summary, attempt = attempt,
+                busy = self._T.busy[userId] == true, summary = summary, attempt = attempt, origin = origin, target = target,
                 sequenceKey = _WorldInstanceService.WorldInstanceId .. ":" .. _RoomService.RoomKey,
                 sequence = self._T.presentationSequence[userId] } })
         self:ReceiveState(snapshot, userId)
@@ -127,7 +129,15 @@ script MatchFlow extends Logic
     method boolean Belongs(table data, table matched)
         -- A stale successful notification cannot authorize another attempt or a cancelled ticket.
         local requestId = data.requestId or data.attempt
-        return (data.profile == matched.home and requestId == matched.homeAttempt) or (data.profile == matched.away and requestId == matched.awayAttempt)
+        local isHome = data.profile == matched.home and requestId == matched.homeAttempt
+        local isAway = data.profile == matched.away and requestId == matched.awayAttempt
+        if not isHome and not isAway then return false end
+        -- A war ticket only joins a match whose other side stands in the town it attacks and attacks back.
+        local origin = data.origin or ""
+        if origin == "" then return true end
+        local mine = isHome and matched.homeOrigin or matched.awayOrigin
+        local theirs = isHome and matched.awayOrigin or matched.homeOrigin
+        return mine == origin and theirs == data.target
     end
 
     @ExecSpace("Server")
@@ -169,6 +179,23 @@ script MatchFlow extends Logic
         local player = self:Player(userId)
         if player == nil then self:Report(userId, { code = "DISABLED_OR_NOT_PUBLISHED" }) return end
         if player.CurrentMapName ~= "formationlobby" then self:Report(userId, { code = "LOBBY_ONLY" }) return end
+        self:QueueTicket(userId, nil)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void QueueForWar(string userId, string origin, string target)
+        -- A war queue starts from the player's own town and names the one enemy town it attacks.
+        local player = self:Player(userId)
+        if player == nil then self:Report(userId, { code = "DISABLED_OR_NOT_PUBLISHED" }) return end
+        if origin == "" or target == "" or origin == target or player.CurrentMapName ~= origin then self:Report(userId, { code = "TOWN_ONLY" }) return end
+        self:QueueTicket(userId, { origin = origin, target = target })
+    end
+
+    @ExecSpace("ServerOnly")
+    method void QueueTicket(string userId, any war)
+        -- Freeze the active formation and enter the queue; war carries the optional origin and target towns.
+        local player = self:Player(userId)
+        if player == nil then return end
         if not self:QueueAdapter():Configured(self.LeaderboardId) then self:Report(userId, { code = "MATCHMAKING_NOT_CONFIGURED" }) return end
         if _RoomService:IsInstanceRoom() or self._T.busy[userId] or self._T.records[userId] ~= nil then return end
         self._T.busy[userId] = true
@@ -185,7 +212,8 @@ script MatchFlow extends Logic
             self:Report(userId, { code = "EXISTING_TICKET_USE_STATUS_OR_CANCEL" })
             return
         end
-        local request = { attempt = _UtilLogic:NewGuid(), requestId = _UtilLogic:NewGuid(), source = _WorldInstanceService.WorldInstanceId, adapter = self:QueueAdapter():Kind() }
+        local request = { attempt = _UtilLogic:NewGuid(), requestId = _UtilLogic:NewGuid(), source = _WorldInstanceService.WorldInstanceId, adapter = self:QueueAdapter():Kind(),
+            origin = war ~= nil and war.origin or "", target = war ~= nil and war.target or "" }
         self._T.records[userId] = ticket
         if not self:Finish(userId, ticket, "QUEUED", function() return _FormationHandoff:Reserve(userId, ticket, request) end) then
             if ticket.failure ~= "RESERVATION_SAVE_FAILED" then self._T.records[userId] = nil end
@@ -205,6 +233,7 @@ script MatchFlow extends Logic
         local requestId = ticket.data.requestId
         local request = { userId = userId, profile = ticket.data.profile, requestId = requestId, attempt = ticket.data.attempt,
             source = ticket.data.source, leaderboardId = self.LeaderboardId, queueName = self.QueueName,
+            origin = ticket.data.origin or "", target = ticket.data.target or "",
             live = function()
                 return self._T.records[userId] == ticket and ticket.data ~= nil and ticket.data.state == "QUEUED" and self:Player(userId) ~= nil
             end }
@@ -789,7 +818,7 @@ script MatchFlow extends Logic
             local profile = player.PlayerComponent.ProfileCode
             if isvalid(battle) and battle:IsBattleActive() and (profile == battle.HomeProfile or profile == battle.AwayProfile) then self:Report(userId, { code = "BATTLE_IN_PROGRESS" }) return end
             if ticket == nil or ticket.data.state == "CANCELLED" or ticket.data.state == "RETURNED" then
-                local moved = self:TransferAdapter():MoveToLobby(userId)
+                local moved = self:MoveHome(userId, ticket)
                 self:Report(userId, { code = moved and "RETURN_MOVE_OK" or "RETURN_MOVE_FAILED", details = { moved = moved } })
                 return
             end
@@ -813,7 +842,7 @@ script MatchFlow extends Logic
         if ticket.data.state == "RETURNING" then
             -- A prior move may have failed after RETURNING was durably stored; keep the visible retry usable.
             self._T.busy[userId] = true
-            local moved = self:TransferAdapter():MoveToLobby(userId)
+            local moved = self:MoveHome(userId, ticket)
             self._T.busy[userId] = nil
             self:Report(userId, { code = moved and "RETURN_RETRY_MOVE_OK" or "RETURN_RETRY_MOVE_FAILED", details = { moved = moved } })
             return
@@ -826,7 +855,7 @@ script MatchFlow extends Logic
                 self:Report(userId, { code = "ROOM_MISMATCH_SAVE_FAILED" })
                 return
             end
-            local moved = self:TransferAdapter():MoveToLobby(userId)
+            local moved = self:MoveHome(userId, ticket)
             self._T.busy[userId] = nil
             if not moved then
                 self:Report(userId, { code = "ROOM_MISMATCH_RETURN_FAILED" })
@@ -843,9 +872,17 @@ script MatchFlow extends Logic
             self:Report(userId, { code = "RETURN_SAVE_FAILED" })
             return
         end
-        local moved = self:TransferAdapter():MoveToLobby(userId)
+        local moved = self:MoveHome(userId, ticket)
         self._T.busy[userId] = nil
         self:Report(userId, { code = moved and "RETURN_MOVE_OK" or "RETURN_MOVE_FAILED", details = { moved = moved } })
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean MoveHome(string userId, any ticket)
+        -- A war player goes back to the town they queued from; every other player returns to the lobby.
+        local origin = ticket ~= nil and ticket.data ~= nil and ticket.data.origin or ""
+        if origin ~= "" and _FactionWar:IsTown(origin) then return self:TransferAdapter():MoveToTown(userId, origin) end
+        return self:TransferAdapter():MoveToLobby(userId)
     end
 
     @ExecSpace("ServerOnly")
@@ -890,7 +927,9 @@ script MatchFlow extends Logic
             if not self:Belongs(home.data, matched) or not self:Belongs(away.data, matched) then return nil end
         end
         if home == nil or away == nil then return nil end
-        return { key = _RoomService.RoomKey, home = home.data.profile, away = away.data.profile, homeTicket = home.data.attempt, awayTicket = away.data.attempt }
+        local pairing = home.data.match
+        return { key = _RoomService.RoomKey, home = home.data.profile, away = away.data.profile, homeTicket = home.data.attempt, awayTicket = away.data.attempt,
+            homeTown = pairing.homeOrigin or "", awayTown = pairing.awayOrigin or "" }
     end
 
     @ExecSpace("ServerOnly")

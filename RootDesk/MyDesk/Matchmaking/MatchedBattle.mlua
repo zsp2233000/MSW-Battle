@@ -33,6 +33,9 @@ script MatchedBattle extends Component
                 local homeUnits = _FormationHandoff:Roster(admission.homeTicket)
                 local awayUnits = _FormationHandoff:Roster(admission.awayTicket)
                 self._T.started = homeUnits ~= nil and awayUnits ~= nil and battle:InitializeMatchedBattle(admission.key, admission.home, admission.away, homeUnits, awayUnits)
+                -- A war match carries the two towns it was queued for; a lobby match leaves them empty.
+                self._T.homeTown = admission.homeTown
+                self._T.awayTown = admission.awayTown
                 if not self._T.started then self.AdmissionFailed = true end
             elseif battle.Phase == "CONFIG_ERROR" or self._T.elapsed >= self.AdmissionTimeoutSeconds then
                 self.AdmissionFailed = true
@@ -50,6 +53,10 @@ script MatchedBattle extends Component
                 if result ~= "" then _MatchFlow:PublishState(user.PlayerComponent.UserId, "RESULT_" .. result) end
             end
             log("[VRF][MatchedBattle] result published once match=" .. self._T.matchKey .. " home=" .. battle:ResultForProfile(battle.HomeProfile) .. " away=" .. battle:ResultForProfile(battle.AwayProfile))
+            -- The result is settled on the towns here, once per match; the match key makes a repeated delivery harmless.
+            if (self._T.homeTown or "") ~= "" then
+                _FactionWarAttack:Settle(self._T.matchKey, self._T.homeTown, self._T.awayTown, battle:ResultForProfile(battle.HomeProfile), nil)
+            end
         end
     end
 end

@@ -1,0 +1,228 @@
+@Logic
+script FactionWarAttack extends Logic
+
+    property table Capitals = { nanzih = true, yancheng = true }
+    property integer HumanDeduction = 20
+    property integer SettleAttempts = 4
+    property number SettleRetrySeconds = 1
+    property integer SettledHistory = 20
+
+    @ExecSpace("ServerOnly")
+    method void OnBeginPlay()
+        -- Each room settles its own match results; the timers and in-flight keys never outlive the room.
+        self._T.reading = {}
+        self._T.settling = {}
+        self._T.timers = {}
+        log("[VRF][FactionWarAttack] ready")
+    end
+
+    method boolean IsCapital(string town)
+        -- A capital can be targeted but never falls and never loses strength.
+        return self.Capitals[town] == true
+    end
+
+    method integer Deduction(string target, string result)
+        -- Strength a human win takes from the target town; a draw, a loss or a capital takes nothing.
+        if result ~= "WIN" or self:IsCapital(target) then return 0 end
+        return self.HumanDeduction
+    end
+
+    @ExecSpace("ServerOnly")
+    method table Targets(string origin, string faction, table towns)
+        -- Enemy towns directly connected to origin by an authored gate, in map order.
+        local list = {}
+        if towns[origin] == nil or towns[origin].owner ~= faction then return list end
+        for _, id in ipairs(_FactionWar.TownOrder) do
+            if towns[id].owner ~= faction and isvalid(_FactionWar:FindGate(origin, id)) then
+                table.insert(list, { town = id, name = _FactionWar.TownNames[id], capital = self:IsCapital(id) })
+            end
+        end
+        return list
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean CanTarget(string origin, string target, string faction, table towns)
+        -- Only an adjacent enemy town can be attacked from the player's own town.
+        for _, option in ipairs(self:Targets(origin, faction, towns)) do
+            if option.town == target then return true end
+        end
+        return false
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean IsEngaged(string userId)
+        -- From the first queue command until the match settles and the ticket is released, the player stays put.
+        return _MatchFlow:StateForUser(userId) ~= "IDLE" or _FormationHandoff:IsLockedForUser(userId)
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean StillHere(Entity player, string userId, string town)
+        -- An answer may arrive after the player left the town or the server.
+        return isvalid(player) and _UserService:GetUserEntityByUserId(userId) == player and player.CurrentMapName == town
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Resolve(Entity player, string userId, string town, any answer)
+        -- Read the caller's faction and the live town table once, then hand both to answer.
+        local profile = player.PlayerComponent.ProfileCode
+        _FactionWar:ReadFaction(profile, function(faction)
+            _FactionWar:ReadTowns(function(towns)
+                self._T.reading[userId] = nil
+                if not self:StillHere(player, userId, town) then return end
+                answer(faction, towns)
+            end)
+        end)
+    end
+
+    @ExecSpace("Server")
+    method void RequestOptions()
+        -- The NPC dialog asks for the caller's own options; the caller identity comes from the server.
+        self:OptionsFor(senderUserId)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void OptionsFor(string userId)
+        -- List the attackable towns for the player's current town; the dialog shows exactly this answer.
+        local player = _UserService:GetUserEntityByUserId(userId)
+        if not isvalid(player) or not isvalid(player.PlayerComponent) then return end
+        local town = player.CurrentMapName
+        if not _FactionWar:IsTown(town) or self._T.reading[userId] then return end
+        self._T.reading[userId] = true
+        self:Resolve(player, userId, town, function(faction, towns)
+            if towns == nil or faction == nil or faction == "" then
+                self:ReceiveOptions(town, {}, "UNAVAILABLE", userId)
+            elseif towns[town].owner ~= faction then
+                self:ReceiveOptions(town, {}, "NOT_OWNED", userId)
+            else
+                self:ReceiveOptions(town, self:Targets(town, faction, towns), self:IsEngaged(userId) and "ENGAGED" or "READY", userId)
+            end
+        end)
+    end
+
+    @ExecSpace("Server")
+    method void RequestAttack(string target)
+        -- Queue the caller against one adjacent enemy town; the caller identity comes from the server.
+        self:AttackFor(senderUserId, target)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void AttackFor(string userId, string target)
+        -- Every check repeats on the server: ownership, adjacency and that the player is not already engaged.
+        local player = _UserService:GetUserEntityByUserId(userId)
+        if not isvalid(player) or not isvalid(player.PlayerComponent) then return end
+        local origin = player.CurrentMapName
+        if not _FactionWar:IsTown(origin) or not _FactionWar:IsTown(target) or self._T.reading[userId] then return end
+        self._T.reading[userId] = true
+        self:Resolve(player, userId, origin, function(faction, towns)
+            if self:IsEngaged(userId) then
+                self:ReceiveAttackResult("ENGAGED", userId)
+            elseif towns == nil or faction == nil or faction == "" then
+                self:ReceiveAttackResult("UNAVAILABLE", userId)
+            elseif not self:CanTarget(origin, target, faction, towns) then
+                self:ReceiveAttackResult("INVALID", userId)
+            else
+                log("[VRF][FactionWarAttack] queue " .. origin .. " -> " .. target)
+                self:ReceiveAttackResult("QUEUING", userId)
+                _MatchFlow:QueueForWar(userId, origin, target)
+            end
+        end)
+    end
+
+    @ExecSpace("Client")
+    method void ReceiveOptions(string town, table options, string status)
+        -- Deliver the server's attack options to the caller's dialog.
+        _FactionWarUI:ShowAttackOptions(town, options, status)
+    end
+
+    @ExecSpace("Client")
+    method void ReceiveAttackResult(string result)
+        -- Tell the caller whether the attack request was queued or why it was refused.
+        _FactionWarUI:ShowAttackResult(result)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Finish(table operation, string status, any detail)
+        -- Settle exactly once per match; stale retries and late callbacks cannot report again.
+        if operation.finished then return end
+        operation.finished = true
+        self._T.settling[operation.matchKey] = nil
+        log("[VRF][FactionWarAttack] settle match=" .. operation.matchKey .. " status=" .. status .. " loser=" .. operation.loser .. " amount=" .. tostring(operation.amount))
+        if operation.complete ~= nil then operation.complete(status, detail) end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Settle(string matchKey, string homeTown, string awayTown, string homeResult, any complete)
+        -- Take the human-win deduction from the losing side's town exactly once; the match key makes a retry harmless.
+        local operation = { matchKey = matchKey, loser = "", amount = 0, attempts = 0, complete = complete }
+        if matchKey == "" or not _FactionWar:IsTown(homeTown) or not _FactionWar:IsTown(awayTown) or homeTown == awayTown then
+            self:Finish(operation, "SKIPPED", nil)
+            return
+        end
+        if homeResult == "WIN" then
+            operation.winner, operation.loser = homeTown, awayTown
+        elseif homeResult == "LOSE" then
+            operation.winner, operation.loser = awayTown, homeTown
+        end
+        if operation.winner ~= nil then operation.amount = self:Deduction(operation.loser, "WIN") end
+        if operation.amount == 0 then
+            self:Finish(operation, "NO_CHANGE", nil)
+            return
+        end
+        if self._T.settling[matchKey] then return end
+        self._T.settling[matchKey] = true
+        self:Attempt(operation)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Retry(table operation)
+        -- Bounded retries; an exhausted settlement is reported failed and left for the next result delivery.
+        if operation.finished then return end
+        if operation.attempts >= self.SettleAttempts then self:Finish(operation, "FAILED", nil) return end
+        local timer = 0
+        timer = _TimerService:SetTimerOnce(function()
+            self._T.timers[timer] = nil
+            self:Attempt(operation)
+        end, self.SettleRetrySeconds)
+        self._T.timers[timer] = true
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Attempt(table operation)
+        -- Read, apply the deduction to a new document and write it back; the settled list dedupes across attempts and rooms.
+        if operation.finished then return end
+        operation.attempts = operation.attempts + 1
+        _FactionWar:ReadTowns(function(towns)
+            if operation.finished then return end
+            if towns == nil or (towns.settled ~= nil and type(towns.settled) ~= "table") then self:Retry(operation) return end
+            for _, id in ipairs(towns.settled or {}) do
+                if id == operation.matchKey then self:Finish(operation, "DUPLICATE", nil) return end
+            end
+            if towns[operation.winner].owner == towns[operation.loser].owner then self:Finish(operation, "SKIPPED", nil) return end
+            local updated = { settled = {} }
+            for _, id in ipairs(_FactionWar.TownOrder) do
+                updated[id] = { owner = towns[id].owner, strength = towns[id].strength }
+            end
+            for _, id in ipairs(towns.settled or {}) do table.insert(updated.settled, id) end
+            table.insert(updated.settled, operation.matchKey)
+            while #updated.settled > self.SettledHistory do table.remove(updated.settled, 1) end
+            -- Strength never reaches zero here; taking the town is a separate rule.
+            updated[operation.loser].strength = math.max(1, towns[operation.loser].strength - operation.amount)
+            _FactionWar:WriteTowns(updated, function(saved)
+                if operation.finished then return end
+                if saved then self:Finish(operation, "SAVED", updated[operation.loser].strength) else self:Retry(operation) end
+            end)
+        end)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void OnEndPlay()
+        -- Abandon pending retries without issuing shutdown writes.
+        for timer, _ in pairs(self._T.timers or {}) do _TimerService:ClearTimer(timer) end
+    end
+
+    @ExecSpace("ServerOnly")
+    @EventSender("Service", "UserService")
+    handler HandleUserLeaveEvent(UserLeaveEvent event)
+        self._T.reading[event.UserId] = nil
+    end
+end

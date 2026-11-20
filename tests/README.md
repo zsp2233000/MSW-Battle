@@ -20,6 +20,18 @@ Verified #64 in Maker on 2026-11-09: `MonsterProgression` (20:19:05), `MonsterLe
 
 `match_state_runtime_probe.lua` runs in the client of a fresh Play after the lobby is ready. It checks the public snapshot receiver and `MatchFlowState` projection/presentation: action selection, busy locks, elapsed wait, explicit failure effects, attempt isolation, return-failure precedence, and stale/foreign-room rejection. It sends no queue or storage commands; stop Play afterwards to discard its synthetic observations. Require `[VRF][MatchState] PASS`. Matchmaking probes read the single `MatchFlowInput.Snapshot` (`state`, `reasonCode`, `started`, `busy`, `summary`, `attempt`) rather than the former separate properties.
 
+## Faction war attack via the town NPC (#105)
+
+`faction_war_attack_contract.test.cjs` checks the shared NPC model and its placement in all four towns, the attack panel and queue bar in `ui/FactionWarGroup.ui`, and the source seams (ticket towns, mutual pairing, settlement, return to the departure town). Runtime probes, each in a fresh Play (`stop` → `refresh` → `play`):
+
+| Probe | Context | Final line |
+| --- | --- | --- |
+| `faction_war_attack_runtime_probe.lua` | `server_main` | `[VRF][FactionWarAttack] PROBE PASS` (rules, adjacent-enemy options, local mutual pairing, `Belongs`, settlement on an isolated storage name) |
+| `faction_war_attack_client_runtime_probe.lua` | `client`, local player in Gushan | `[VRF][WarUI] CLIENT PASS` |
+| `faction_war_attack_e2e_runtime_probe.lua` | `server_main` plus the match room, two virtual players `wp2601` / `wp2602` | `[VRF][WarE2E] E2E PASS`, then the STEP 5 CLEANUP line (the room writes the real `CountryWarV1` storage) |
+
+Verified in Maker on 2026-11-20 (build 0 Error, existing `IsPCPlatform` warning): `PROBE PASS`; `CLIENT PASS`; the e2e queued a RED player in Zuoying and a BLUE player in Gushan through `AttackFor`, formed one local match on mutual targets, the 3-unit side won, `settle … status=SAVED loser=gushan` took Gushan from 100 to 80 once, both profiles' monster experience was saved, and both players returned to their own town unlocked. A queued player counts as engaged, a second target is refused, and cancelling in place releases the lock. Not verified: a real client walking up to the NPC and pressing the interaction key, the published native matchmaking and two real accounts (ADR 0010 records the same-town pairing gap), and a win over a capital end to end (the settlement probe covers it). The virtual players' formation and level data remain in the Maker local storage under `wp2601` / `wp2602`.
+
 ## Monster dex verification (#73 / #80)
 
 `node --test tests/*.test.cjs` covers the dex structure: `monster_dex_contract.test.cjs` (catalog rows, server guard), `monster_dex_ui_contract.test.cjs` (book, lobby entry, bindings), `monster_dex_details_contract.test.cjs`, `monster_dex_stage_contract.test.cjs`, and `monster_dex_integration_contract.test.cjs` (#80). The last one checks that every field a dex row copies is a `MonsterData` column or a documented load-time delay, that every row field the book reads is published by `GetDexRows`, that every entity property bound in `MonsterDex` exists in `ui/MonsterDexGroup.ui` or `ui/FormationGroup.ui`, and that the published world gets no entry and no served reply (the `Environment:IsMakerPlay()` guard is the first statement of `Open` and of `RequestRows`, the only `@ExecSpace("Server")` method of the service). These are source and `.ui` checks only; they cannot run a published world.

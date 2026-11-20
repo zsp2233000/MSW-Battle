@@ -27,9 +27,16 @@ script MatchQueueLocal extends Logic
         return { accepted = true, report = "QUEUED_LOCAL" }
     end
 
+    method boolean Pairs(table first, table second)
+        -- Lobby tickets pair in FIFO order; war tickets pair only when each stands in the town the other attacks.
+        local origin = first.origin or ""
+        if origin == "" then return (second.origin or "") == "" end
+        return origin == second.target and first.target == second.origin
+    end
+
     @ExecSpace("ServerOnly")
     method boolean Poll()
-        -- Pair the two oldest live entries in order; true means a pairing was delivered and pending work should advance.
+        -- Pair the oldest live entry with the next live entry it may fight; true means a pairing was delivered.
         local available = {}
         local seen = {}
         for _, entry in ipairs(self._T.entries) do
@@ -40,9 +47,19 @@ script MatchQueueLocal extends Logic
             end
         end
         self._T.entries = available
-        if #available < 2 then return false end
-        local first = table.remove(self._T.entries, 1)
-        local second = table.remove(self._T.entries, 1)
+        local firstIndex, secondIndex = nil, nil
+        for index = 1, #available - 1 do
+            for other = index + 1, #available do
+                if self:Pairs(available[index].request, available[other].request) then
+                    firstIndex, secondIndex = index, other
+                    break
+                end
+            end
+            if firstIndex ~= nil then break end
+        end
+        if firstIndex == nil then return false end
+        local second = table.remove(self._T.entries, secondIndex)
+        local first = table.remove(self._T.entries, firstIndex)
         if first.request.profile == second.request.profile then
             table.insert(self._T.entries, first)
             second.deliver("REJECTED", "DUPLICATE_PROFILE")
@@ -51,7 +68,8 @@ script MatchQueueLocal extends Logic
         local home, away = first.request, second.request
         local matched = { key = "local-" .. _UtilLogic:NewGuid(), home = home.profile, away = away.profile,
             homeAttempt = home.requestId or home.attempt, awayAttempt = away.requestId or away.attempt,
-            homeSource = home.source, awaySource = away.source, differentSources = false }
+            homeSource = home.source, awaySource = away.source, differentSources = false,
+            homeOrigin = home.origin or "", awayOrigin = away.origin or "" }
         self._T.matches[home.profile] = matched
         self._T.matches[away.profile] = matched
         first.deliver("MATCHED", "")

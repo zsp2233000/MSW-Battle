@@ -7,7 +7,7 @@ const body = (source, name) => source.match(new RegExp(`method \\w+ ${name}\\([^
 
 // The seam between the match flow and whatever finds opponents. MatchFlow owns the flow; adapters own the variation.
 const QUEUE_PORT = ['Kind', 'Configured', 'Enqueue', 'Poll', 'Cancel', 'Lookup', 'Destinations', 'Warp', 'Withdraw', 'Release', 'Reclaim'];
-const TRANSFER_PORT = ['MoveToMatch', 'MoveToLobby'];
+const TRANSFER_PORT = ['MoveToMatch', 'MoveToLobby', 'MoveToTown'];
 
 test('every queue adapter implements the whole queue port', () => {
   for (const adapter of ['MatchQueueLocal', 'MatchQueueNative', 'MatchFaults']) {

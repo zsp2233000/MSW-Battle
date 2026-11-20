@@ -1,0 +1,12 @@
+@Component
+script FactionWarNpc extends Component
+
+    @ExecSpace("ClientOnly")
+    @EventSender("Self")
+    handler HandleInteractionEvent(InteractionEvent event)
+        -- Only the player who pressed the interaction key asks for their own attack options.
+        if event.InteractionEntity == _UserService.LocalPlayer then
+            _FactionWarAttack:RequestOptions()
+        end
+    end
+end

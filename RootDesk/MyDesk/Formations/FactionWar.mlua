@@ -56,6 +56,14 @@ script FactionWar extends Logic
     end
 
     @ExecSpace("ServerOnly")
+    method void WriteTowns(table towns, any complete)
+        -- Persist the whole town document; complete(true) only for a confirmed write.
+        _DataStorageService:GetGlobalDataStorage(self.TownStorageName):SetAsync(self.TownStorageKey, _HttpService:JSONEncode(towns), function(code)
+            complete(code == 0)
+        end)
+    end
+
+    @ExecSpace("ServerOnly")
     method Entity FindGate(string origin, string destination)
         if not self:IsTown(origin) or not self:IsTown(destination) or origin == destination then return nil end
         local map = _EntityService:GetEntityByPath("/maps/" .. origin)
@@ -183,6 +191,10 @@ script FactionWar extends Logic
         local origin = player.CurrentMapName
         local gate = self:FindGate(origin, destination)
         if not self:NearGate(player, gate) then return end
+        if _FactionWarAttack:IsEngaged(userId) then
+            self:ReceiveTownNotice(origin, "配對中請先取消配對再離開城鎮。", userId)
+            return
+        end
         self._T.pending[userId] = player
         self:ReadFaction(player.PlayerComponent.ProfileCode, function(faction)
             self:ReadTowns(function(towns)

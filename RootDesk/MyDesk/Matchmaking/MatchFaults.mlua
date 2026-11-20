@@ -134,4 +134,14 @@ script MatchFaults extends Logic
         end
         return self._T.transfer:MoveToLobby(userId)
     end
+
+    @ExecSpace("ServerOnly")
+    method boolean MoveToTown(string userId, string town)
+        -- Fail like MoveToLobby while armed; otherwise forward the departure-town return.
+        if (self._T.returnFailures or 0) > 0 then
+            self._T.returnFailures = self._T.returnFailures - 1
+            return false
+        end
+        return self._T.transfer:MoveToTown(userId, town)
+    end
 end

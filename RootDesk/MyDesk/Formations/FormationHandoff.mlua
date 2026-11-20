@@ -17,7 +17,7 @@ script FormationHandoff extends Logic
     method table Metadata(table data)
         -- Expose only matchmaking fields; callers never receive serialized formations or storage bytes.
         local copy = {}
-        for _, key in ipairs({ "schema", "profile", "attempt", "requestId", "summary", "source", "adapter", "state", "started", "expires", "matchKey", "warpIssued" }) do
+        for _, key in ipairs({ "schema", "profile", "attempt", "requestId", "summary", "source", "adapter", "state", "started", "expires", "matchKey", "warpIssued", "origin", "target" }) do
             copy[key] = data[key]
         end
         if type(data.match) == "table" then
@@ -329,7 +329,8 @@ script FormationHandoff extends Logic
         transfer.fixed = _HttpService:JSONEncode(formation.units)
         local metadata = { schema = 1, profile = ticket.profile, attempt = request.attempt, requestId = request.requestId,
             summary = "第 " .. tostring(formation.slotId) .. " 組 · 版本 " .. tostring(formation.revision) .. " · " .. tostring(formation.count) .. " / 6",
-            source = request.source, adapter = request.adapter, state = "QUEUED", started = DateTime.UtcNow.Elapsed, expires = 0, matchKey = "" }
+            source = request.source, adapter = request.adapter, state = "QUEUED", started = DateTime.UtcNow.Elapsed, expires = 0, matchKey = "",
+            origin = request.origin or "", target = request.target or "" }
         record.transfer = transfer
         local raw = self:Encode(record, metadata)
         if raw == nil then record.transfer = previous.transfer return false end

@@ -623,6 +623,87 @@
             "replaced_model_id": null
           }
         }
+      },
+      {
+        "id": "f09870eb-9a08-4915-b3fd-aecf72f949ff",
+        "path": "/maps/gushan/WarNpc",
+        "componentNames": "MOD.Core.TransformComponent,MOD.Core.SpriteRendererComponent,MOD.Core.InteractionComponent,script.FactionWarNpc",
+        "jsonString": {
+          "name": "WarNpc",
+          "path": "/maps/gushan/WarNpc",
+          "nameEditable": true,
+          "enable": true,
+          "visible": true,
+          "localize": false,
+          "displayOrder": 16,
+          "pathConstraints": "///",
+          "revision": 1,
+          "modelId": "factionwarnpc",
+          "@components": [
+            {
+              "@type": "MOD.Core.TransformComponent",
+              "Position": {
+                "x": 1.8,
+                "y": -0.41,
+                "z": 0
+              },
+              "QuaternionRotation": {
+                "x": 0,
+                "y": 0,
+                "z": 0,
+                "w": 1
+              },
+              "Scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "Enable": true
+            },
+            {
+              "@type": "MOD.Core.SpriteRendererComponent",
+              "SpriteRUID": "6df1a436b0d447e8a45783b7356f9521",
+              "Color": {
+                "r": 1,
+                "g": 1,
+                "b": 1,
+                "a": 1
+              },
+              "DrawMode": 0,
+              "FlipX": false,
+              "FlipY": false,
+              "PlayRate": 1,
+              "OrderInLayer": 2,
+              "StartFrameIndex": 0,
+              "EndFrameIndex": 2147483647,
+              "Enable": true,
+              "SortingLayer": "MapLayer0"
+            },
+            {
+              "@type": "MOD.Core.InteractionComponent",
+              "Enable": true,
+              "BoxSize": {
+                "$type": "MOD.Core.MODVector2, MOD.Core",
+                "x": 1.4,
+                "y": 1.65
+              },
+              "ActionName": "進攻",
+              "ShowActionInfo": true
+            },
+            {
+              "Enable": true,
+              "@type": "script.FactionWarNpc"
+            }
+          ],
+          "@version": 1,
+          "origin": {
+            "type": "Model",
+            "entry_id": "factionwarnpc",
+            "sub_entity_id": null,
+            "root_entity_id": "f09870eb-9a08-4915-b3fd-aecf72f949ff",
+            "replaced_model_id": null
+          }
+        }
       }
     ]
   }

@@ -12,4 +12,10 @@ script MatchTransfer extends Logic
         -- Preserve the return capsule until native movement and restoration both succeed.
         return _RoomService:MoveUserToStaticRoom(userId, "formationlobby")
     end
+
+    @ExecSpace("ServerOnly")
+    method boolean MoveToTown(string userId, string town)
+        -- A war player leaves the match room for the town they attacked from; the handoff stays until restore is confirmed.
+        return _RoomService:MoveUserToStaticRoom(userId, town)
+    end
 end
