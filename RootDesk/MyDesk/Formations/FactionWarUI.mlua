@@ -162,9 +162,13 @@ script FactionWarUI extends Logic
 
     @ExecSpace("ClientOnly")
     method void ShowTownNotice(string town, string message)
+        -- The warning sits on its own bar under the strength line; hide that bar when there is nothing to say.
         if not self:IsCurrentTown(town) then return end
         local notice = self:Ui("TownHUD/Notice")
-        if isvalid(notice) then notice.TextGUIRendererComponent.Text = message end
+        if not isvalid(notice) then return end
+        notice.TextGUIRendererComponent.Text = message
+        notice:SetEnable(message ~= "")
+        log("[VRF][FactionWar] notice shown=" .. tostring(message ~= ""))
     end
 
     @ExecSpace("ClientOnly")
