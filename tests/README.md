@@ -56,9 +56,9 @@ Not verified: a real player watching the countdown in the town (the queue bar te
 | Probe | Context | Final line |
 | --- | --- | --- |
 | `faction_war_conquest_runtime_probe.lua` | `server_main`, no virtual player, isolated storage `CountryWarProbe107V1` | `[VRF][FactionWarConquest] PROBE PASS` (capital / landing / passage rules, the board after Gushan turns red, flip + refill from 20 by a human win and from 10 by a guard win, repeat = `DUPLICATE` with the same capture, capitals never change, blue with only Yancheng and red at Gushan, legacy `settled` keys, document size) |
-| `faction_war_conquest_e2e_runtime_probe.lua` | `server_main` plus the match room, four virtual players `wp2601`–`wp2604` | `SETUP PASS`, `CAPTURE PASS`, `LANDING1 PASS`, `LANDING2 PASS`, then STEP 8 CLEANUP (the room writes the real `CountryWarV1` storage) |
+| `faction_war_conquest_e2e_runtime_probe.lua` | `server_main` plus the match room, four virtual players `wp2601`–`wp2604` | `SETUP PASS`, `CAPTURE PASS`, `LANDING1 PASS`, `LANDING2 PASS`, then the review-fix STEP 8 (`EVICTRACE ... PASS` three times, see "Review fixes" below), then STEP 9 CLEANUP (the room writes the real `CountryWarV1` storage) |
 
-Status: both probes are written but not yet run in Maker; record the date and the `[VRF]` evidence here after the first pass.
+Verified in Maker (on the main checkout, before the review fixes recorded below): the rules probe, the two-room e2e probe, the regression probes (`faction_war_attack_runtime_probe.lua`, the #105 e2e) and the #106 guard flow all passed. The date and the individual `[VRF]` lines were not recorded in this repository; the review-fix re-run below should record them.
 
 ## Two matches contest one town (#108)
 
@@ -69,9 +69,26 @@ Status: both probes are written but not yet run in Maker; record the date and th
 | `faction_war_contest_runtime_probe.lua` | `server_main`, no virtual player, isolated storage `CountryWarProbe108V1` and an isolated monster-level key | `[VRF][FactionWarContest] PROBE PASS` (count decoder, stamp helpers, stale swap loses, two first creators, two overlapping settlements of Gushan at 20 with one flip and one `EXEMPT`, overlapping non-flipping wins both counted, a match whose town was flipped and taken back is exempt, both towns changed hands, repeated result = `DUPLICATE` / `EXEMPT` with nothing written, failed writes retried once and exhausted writes reported, experience credited once, document size) |
 | `faction_war_contest_e2e_runtime_probe.lua` | `server_main` plus the two match rooms (`server_instance_<matchKey>`), five virtual players `wp2611`–`wp2615` | `SETUP PASS`, `CAPTURE PASS`, `REDELIVER PASS` (each room), `LANDING1 PASS`, `LANDING2 PASS`, then STEP 9 CLEANUP (the rooms write the real `CountryWarV1` storage) |
 
-Probe plan, expected `[VRF]` evidence and the per-criterion mapping are in the #108 report; STEP numbers and the room-side steps are documented at the top of the e2e probe.
+Criteria and the probe that carries them: AC1 (only the settlement that really flips the town counts) is the two overlapping settlements of the rules probe and e2e STEP 3; AC2 (a town flipped and taken back deducts nothing, the match keeps its result and experience) is the rules probe's flip-and-retake case and e2e STEP 7 and 8; AC3 (where the players of a stale match end up) is the rules probe's `Landing` cases and e2e STEP 6 and 8; AC4 (a repeated result applies once) is the rules probe's repeat cases. STEP numbers and the room-side steps are documented at the top of the e2e probe. e2e STEP 5 (REDELIVER) has to run in each match room before STEP 4 (RETURN): once its players have left, the match room is recycled and there is nothing left to dispatch into, so a redelivery after RETURN is covered by the rules probe instead (same match key, with and without the stamp, after the world moved on).
 
-Status: both probes are written but not yet run in Maker (the #108 worktree cannot reach Maker); record the date and the `[VRF]` evidence here after the first pass. The assumed native behaviour to confirm first: `UpdateAsync` with stale expected bytes answers `2000000` (or `1000002`, mapped to the same), see the `swap code=` lines.
+Verified in Maker (on the main checkout, before the review fixes recorded below): the rules probe, the two-room e2e probe, the regression probes and the guard flow all passed. The stale-swap case of the rules probe passing means a stale compare comes back as a conflict in Maker (the `swap code=` lines show the raw native code). Not verified: two world instances settling the same town in a published world (#110). The date and the individual `[VRF]` lines were not recorded in this repository; the review-fix re-run below should record them.
+
+## Review fixes for #107 and #108
+
+`faction_war_review_contract.test.cjs` pins the seams of the review fixes and the documents that have to agree with the code (`node --test tests/faction_war_review_contract.test.cjs`, no Maker). Design notes are in [ADR 0012](../docs/adr/0012-capture-is-one-write-and-the-fallen-town-is-emptied-by-event-plus-recheck.md) (eviction) and [ADR 0013](../docs/adr/0013-contested-town-is-decided-by-a-byte-compare-swap-and-the-pairing-time-change-count.md) (conflict backoff, the stamp). Each spec correctness item has a probe step; every probe runs in a fresh Play (`stop` → `refresh` → `play`):
+
+| Item | Probe step | Evidence |
+| --- | --- | --- |
+| C1 an `Enforce` request that arrives while a check runs is queued, an unreleased slot expires | `faction_war_conquest_e2e_runtime_probe.lua` STEP 8 (a) and (b) | `EVICTRACE check race PASS`, `EVICTRACE lease PASS`; `[VRF][FactionWar] enforce queued`, `recheck`, `enforce lease expired`, `evicted ... moved=true` |
+| C2 `Evict` re-reads the board after the last yield (a town taken back keeps its people) | the same e2e, STEP 8 (c) | `EVICTRACE retaken PASS`; `[VRF][FactionWar] evict cancelled ... the faction holds it again`, then `evicted` on the fallen board |
+| C3 `Vacate` tries the passing ticket states again, bounded | `faction_war_conquest_runtime_probe.lua` (planted tickets, no player) | `[VRF][FactionWarConquest] vacate ok`; `[VRF][MatchFlow] vacate waits attempt=`, `vacate gave up attempts=6` |
+| C4 `Vacate` never cancels a matched ticket (`SAVING` onward) | the same rules probe | `[VRF][MatchFlow] vacate held state=SAVING` (and `COMMITTING`, `TRANSFER`, `IN_ROOM`) |
+| C5 the board is read right after the pairing is known, before the cancel check and the seal | `faction_war_contest_e2e_runtime_probe.lua` STEP 2 (each ticket keeps its first reading) and STEP 7 and 8 (a flip written after the stamp, during the handoff, is honoured); the cancel-in-flight ordering is covered by `match_cancel_race_runtime_probe.lua` | `[VRF][FactionWarAttack] stamp match=` once per ticket, `LANDING2 PASS` |
+| C6 a lost race backs off with jitter and is bounded by time, not by ten tries | `faction_war_contest_runtime_probe.lua` (an interfering writer, no player) | `[VRF][FactionWarContest] lost races ok conflicts=` (more than 10), `settle gave up match=c108-never-wins`, `time budget ok`, then `PROBE PASS` |
+
+Also re-run, because the review touched them: `faction_war_attack_runtime_probe.lua`, the #105 and #106 e2e probes (the pairing is now stamped before the cancel check), `faction_war_attack_client_runtime_probe.lua` (the HUD asks `IsCapital`), the cancellation probes `match_cancel_runtime_probe.lua` and `match_cancel_race_runtime_probe.lua` (`SUCCESS`, `SEAL_FAILURE`, `RECONNECT_MATCH`, `ENTRY`), and the storage probes that go through `FormationStorage.Read` / `Write` (`formation_storage_runtime_probe.lua`, `editor_save_failure_runtime_probe.lua` phases 1 and 3, `matched_battle_return_save_runtime_probe.lua`), whose fault injection now comes from one helper.
+
+Status: written in a worktree that cannot reach Maker, so none of this has run yet; record the date and the `[VRF]` evidence here after the first pass.
 
 ## Monster dex verification (#73 / #80)
 
