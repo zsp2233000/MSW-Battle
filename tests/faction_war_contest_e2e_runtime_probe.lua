@@ -38,7 +38,12 @@ local function find()
     end
     return found
 end
-local function id(user) return user.PlayerComponent.UserId end
+-- A user entity loses its PlayerComponent once the player is transferred to a match room, so remember the id from the first valid read.
+local ids = {}
+local function id(user)
+    if isvalid(user) and isvalid(user.PlayerComponent) then ids[user] = user.PlayerComponent.UserId end
+    return ids[user]
+end
 local function readTowns()
     local towns, done = nil, false
     _FactionWar:ReadTowns(function(result) towns, done = result, true end)
@@ -46,7 +51,8 @@ local function readTowns()
     return towns
 end
 local function ticketData(user)
-    local ticket = _MatchFlow._T.records[id(user)]
+    local userId = id(user)
+    local ticket = userId ~= nil and _MatchFlow._T.records[userId] or nil
     return ticket ~= nil and ticket.data or nil
 end
 local function history(profile)
