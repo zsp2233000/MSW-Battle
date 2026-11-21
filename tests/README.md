@@ -60,6 +60,19 @@ Not verified: a real player watching the countdown in the town (the queue bar te
 
 Status: both probes are written but not yet run in Maker; record the date and the `[VRF]` evidence here after the first pass.
 
+## Two matches contest one town (#108)
+
+`faction_war_contest_contract.test.cjs` pins the seams (`node --test tests/faction_war_contest_contract.test.cjs`, no Maker): the per-town change count `e` in the town document and its decoder, the byte compare-and-swap (`FactionWar:ReadTownsRaw` / `SwapTowns` over `FormationStorage:Swap`, the `global:` owner), the stamp a pairing carries (`FactionWarAttack:Snapshot` / `Stamped` / `Combine`, `MatchFlow:Matched`, `RoomBattleAdmission`, `MatchedBattle`), the exempt rule (`ChangedSince`, `EXEMPT`, decided after `DUPLICATE` and before any write), lost races read again (`Retry(operation, true)`), the landing reading the live board again, and that experience and the match result never wait for the settlement. Design: [ADR 0013](../docs/adr/0013-contested-town-is-decided-by-a-byte-compare-swap-and-the-pairing-time-change-count.md). Runtime probes, each in a fresh Play (`stop` → `refresh` → `play`):
+
+| Probe | Context | Final line |
+| --- | --- | --- |
+| `faction_war_contest_runtime_probe.lua` | `server_main`, no virtual player, isolated storage `CountryWarProbe108V1` and an isolated monster-level key | `[VRF][FactionWarContest] PROBE PASS` (count decoder, stamp helpers, stale swap loses, two first creators, two overlapping settlements of Gushan at 20 with one flip and one `EXEMPT`, overlapping non-flipping wins both counted, a match whose town was flipped and taken back is exempt, both towns changed hands, repeated result = `DUPLICATE` / `EXEMPT` with nothing written, failed writes retried once and exhausted writes reported, experience credited once, document size) |
+| `faction_war_contest_e2e_runtime_probe.lua` | `server_main` plus the two match rooms (`server_instance_<matchKey>`), five virtual players `wp2611`–`wp2615` | `SETUP PASS`, `CAPTURE PASS`, `REDELIVER PASS` (each room), `LANDING1 PASS`, `LANDING2 PASS`, then STEP 9 CLEANUP (the rooms write the real `CountryWarV1` storage) |
+
+Probe plan, expected `[VRF]` evidence and the per-criterion mapping are in the #108 report; STEP numbers and the room-side steps are documented at the top of the e2e probe.
+
+Status: both probes are written but not yet run in Maker (the #108 worktree cannot reach Maker); record the date and the `[VRF]` evidence here after the first pass. The assumed native behaviour to confirm first: `UpdateAsync` with stale expected bytes answers `2000000` (or `1000002`, mapped to the same), see the `swap code=` lines.
+
 ## Monster dex verification (#73 / #80)
 
 `node --test tests/*.test.cjs` covers the dex structure: `monster_dex_contract.test.cjs` (catalog rows, server guard), `monster_dex_ui_contract.test.cjs` (book, lobby entry, bindings), `monster_dex_details_contract.test.cjs`, `monster_dex_stage_contract.test.cjs`, and `monster_dex_integration_contract.test.cjs` (#80). The last one checks that every field a dex row copies is a `MonsterData` column or a documented load-time delay, that every row field the book reads is published by `GetDexRows`, that every entity property bound in `MonsterDex` exists in `ui/MonsterDexGroup.ui` or `ui/FormationGroup.ui`, and that the published world gets no entry and no served reply (the `Environment:IsMakerPlay()` guard is the first statement of `Open` and of `RequestRows`, the only `@ExecSpace("Server")` method of the service). These are source and `.ui` checks only; they cannot run a published world.

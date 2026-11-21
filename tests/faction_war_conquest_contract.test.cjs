@@ -31,7 +31,8 @@ test('a town that reaches zero strength changes flag and refills in the same sto
   assert.match(attempt, /<= 0/, 'zero strength is the capture condition');
   assert.match(attempt, /owner = towns\[operation\.winner\]\.owner/, 'the winner side\'s current owner takes the town');
   assert.match(attempt, /strength = self\.FullStrength/, 'the flip is written as owner + full strength, never as a zero');
-  assert.equal(attempt.match(/WriteTowns\(/g).length, 1, 'ownership and strength are one document write');
+  // #108: the one write is a compare-and-swap on the bytes that were read (see faction_war_contest_contract.test.cjs).
+  assert.equal(attempt.match(/SwapTowns\(/g).length, 1, 'ownership and strength are one document write');
   assert.match(source('RootDesk/MyDesk/Formations/FactionWar.mlua'), /town\.strength < 1 or town\.strength > 100/, 'the decoder still rejects a stored zero');
 });
 

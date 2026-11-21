@@ -30,6 +30,12 @@ script FactionWar extends Logic
         return self:CapitalOf(faction)
     end
 
+    method number EpochOf(any towns, string id)
+        -- How many times the town has changed hands; a document written before #108 has no count and reads as zero.
+        if type(towns) ~= "table" or type(towns[id]) ~= "table" then return 0 end
+        return towns[id].e or 0
+    end
+
     method boolean CanPass(string faction, string origin, string destination, table towns)
         -- A gate leads only between two towns that both belong to the traveller's faction, judged on the live town table.
         return towns[origin].owner == faction and towns[destination].owner == faction
@@ -53,7 +59,8 @@ script FactionWar extends Logic
             local town = towns[id]
             if type(town) ~= "table" or (town.owner ~= "RED" and town.owner ~= "BLUE")
                 or type(town.strength) ~= "number" or town.strength % 1 ~= 0
-                or town.strength < 1 or town.strength > 100 then return nil end
+                or town.strength < 1 or town.strength > 100
+                or (town.e ~= nil and (type(town.e) ~= "number" or town.e % 1 ~= 0 or town.e < 0)) then return nil end
         end
         if towns.nanzih.owner ~= "RED" or towns.nanzih.strength ~= 100
             or towns.yancheng.owner ~= "BLUE" or towns.yancheng.strength ~= 100 then return nil end
@@ -61,21 +68,46 @@ script FactionWar extends Logic
     end
 
     @ExecSpace("ServerOnly")
-    method void ReadTowns(any complete)
-        _DataStorageService:GetGlobalDataStorage(self.TownStorageName):GetAsync(self.TownStorageKey, function(code, key, raw)
+    method string StorageOwner()
+        -- The town document is a world-wide table; the storage boundary addresses it as "global:<name>".
+        return _FormationStorage.GlobalPrefix .. self.TownStorageName
+    end
+
+    @ExecSpace("ServerOnly")
+    method void ReadTownsRaw(any complete)
+        -- Read the town document together with its exact stored bytes (nil while nothing is stored yet); a swap names those bytes.
+        _FormationStorage:Read(self:StorageOwner(), self.TownStorageKey, function(code, key, raw)
             if code == 1000002 or (code == 0 and raw == nil) then
-                complete(self:InitialTowns())
+                complete(self:InitialTowns(), nil)
             elseif code == 0 then
-                complete(self:DecodeTowns(raw))
+                local towns = self:DecodeTowns(raw)
+                complete(towns, towns ~= nil and raw or nil)
             else
-                complete(nil)
+                complete(nil, nil)
             end
         end)
     end
 
     @ExecSpace("ServerOnly")
+    method void ReadTowns(any complete)
+        -- Every reader sees the same document the settlement works on.
+        self:ReadTownsRaw(function(towns, raw) complete(towns) end)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void SwapTowns(any expected, table towns, any complete)
+        -- Replace the document only if it still holds exactly the bytes that were read (nil: only if still absent); complete("OK" | "CONFLICT" | "FAILED").
+        -- A conflict means another settlement wrote first (2000000 changed bytes, 1000007 another first creation in progress); the caller reads again.
+        _FormationStorage:Swap(self:StorageOwner(), self.TownStorageKey, expected or "", _HttpService:JSONEncode(towns), function(code)
+            local result = code == 0 and "OK" or ((code == 2000000 or code == 1000007) and "CONFLICT" or "FAILED")
+            log("[VRF][FactionWar] swap code=" .. tostring(code) .. " result=" .. result)
+            complete(result)
+        end)
+    end
+
+    @ExecSpace("ServerOnly")
     method void WriteTowns(table towns, any complete)
-        -- Persist the whole town document; complete(true) only for a confirmed write.
+        -- Persist the whole town document unconditionally (seeding and test fixtures); a settlement never uses this, it swaps.
         _DataStorageService:GetGlobalDataStorage(self.TownStorageName):SetAsync(self.TownStorageKey, _HttpService:JSONEncode(towns), function(code)
             complete(code == 0)
         end)

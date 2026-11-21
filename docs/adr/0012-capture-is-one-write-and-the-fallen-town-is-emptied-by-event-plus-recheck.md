@@ -1,12 +1,12 @@
 # 奪城是一次文件寫入；失守城鎮用靜態房事件加動作時複查來清空
 
-兵力降到零的那場戰果，與「該城換旗並回滿 100」是同一次寫入。`FactionWarAttack.Settle` 在 `Attempt` 裡算出 `remaining = 兵力 - 扣除量`，`<= 0` 時把該城寫成 `{ owner = 勝方城鎮目前的歸屬, strength = FullStrength(100) }`，其餘城鎮原樣複製，整份城鎮文件只 `WriteTowns` 一次。儲存的兵力仍不可能是 0：`FactionWar.DecodeTowns` 依舊拒收 `< 1` 或 `> 100`，也依舊把兩座主城強制讀成 `RED/100`、`BLUE/100`，所以主城即使被誤寫也不會讀回易主。主城的「永不扣兵、永不易主」仍由 `Deduction` 回傳 0、`Settle` 以 `NO_CHANGE` 結束而不碰儲存來保證。
+兵力降到零的那場戰果，與「該城換旗並回滿 100」是同一次寫入。`FactionWarAttack.Settle` 在 `Attempt` 裡算出 `remaining = 兵力 - 扣除量`，`<= 0` 時把該城寫成 `{ owner = 勝方城鎮目前的歸屬, strength = FullStrength(100) }`，其餘城鎮原樣複製，整份城鎮文件只寫一次（#107 當時是 `WriteTowns`；#108 起改為比較並寫入的 `SwapTowns`，見 ADR 0013）。儲存的兵力仍不可能是 0：`FactionWar.DecodeTowns` 依舊拒收 `< 1` 或 `> 100`，也依舊把兩座主城強制讀成 `RED/100`、`BLUE/100`，所以主城即使被誤寫也不會讀回易主。主城的「永不扣兵、永不易主」仍由 `Deduction` 回傳 0、`Settle` 以 `NO_CHANGE` 結束而不碰儲存來保證。
 
 ## 戰果要能被重複取得
 
 `towns.settled` 由「比賽鍵字串清單」改為「每場一筆紀錄」：`{ k = 比賽鍵, w = 勝方城, l = 敗方城, s = 結算後敗方城兵力, o = 換旗後的歸屬（沒換旗為空字串） }`。`FactionWarAttack:EntryKey` 同時讀得懂舊的字串項目，舊文件不必遷移。重複送來的同一場戰果回 `DUPLICATE`，並帶出當初的 `s`、`o`，所以「寫入成功但回應遺失」之後的重試仍能知道這一場奪了城，後面的撤離與落點才不會漏掉。清單上限仍是 20 筆（`SettledHistory`），單筆約 110 位元組，整份文件預估約 2.4 KB，要低於一個儲存額度（4000 位元組）；`tests/faction_war_conquest_runtime_probe.lua` 寫滿 20 筆後會量並要求小於 4000。
 
-`Settle` 回報 `complete(status, detail, outcome)`：`detail` 仍是敗方城的新兵力（奪城時為 100），新增的 `outcome` 是 `{ status, winner, loser, amount, strength, flipped, owner }`。`SAVED` 與 `DUPLICATE` 的結果也記在 `FactionWarAttack._T.outcomes[比賽鍵]`，供這個房間裡之後按「返回」的玩家查詢。這個形狀是為 #108（同時爭城）預留的：它要在同一份紀錄上加「誰讓城換旗」的判斷與出戰時的換旗世代，不必再改回傳值。
+`Settle` 回報 `complete(status, detail, outcome)`：`detail` 仍是敗方城的新兵力（奪城時為 100），新增的 `outcome` 是 `{ status, winner, loser, amount, strength, flipped, owner }`。`SAVED` 與 `DUPLICATE` 的結果也記在 `FactionWarAttack._T.outcomes[比賽鍵]`，供這個房間裡之後按「返回」的玩家查詢。這個形狀是為 #108（同時爭城）預留的。#108 的實際做法（ADR 0013）：回傳值不變，只多了 `EXEMPT` 一種 `status`（`flipped = false`）；「出戰時的換旗世代」放在城鎮文件每座城的 `e` 與配對的 `homeEpoch` / `awayEpoch`，不放進這份逐場紀錄。
 
 ## 落點：依戰果與即時歸屬，在玩家按「返回」時決定
 
@@ -30,6 +30,6 @@
 - 城鎮 HUD 的兵力仍只在進入城鎮與排隊回到 IDLE 時重讀，不是即時推送。
 - 重複的城鎮事件與動作時複查可能同時對一位玩家觸發；`FactionWar._T.evicting` 讓同一位玩家一次只跑一個檢查。
 
-## 留給 #108
+## 留給 #108（已由 ADR 0013 處理）
 
-這份設計沒有做：兩場以上同時結算同一座城時「只有造成換旗的那一場完成奪城」（讀取—修改—寫入仍無比較並寫入，ADR 0010 的缺口不變）；配對成立後出戰城曾換旗就免扣兵的出戰世代；「勝方城鎮在比賽期間易主」時新歸屬取勝方城鎮目前的歸屬，這在雙方城鎮都換過旗的極端情形會得到錯誤陣營，#108 的世代判斷需要在 `Attempt` 先排除。落點的「留在自己陣營的出發城，否則去主城」已由 `Landing` 即時判斷涵蓋，#108 只需補上讀回結算結果時的版本判斷。
+原本留下三件事，#108 的處理方式：兩場以上同時結算同一座城，只有造成換旗的那一場完成奪城（文件改為以讀到的位元組做比較並寫入，輸家重新讀取）；配對成立後出戰城曾換旗就免扣兵（配對時蓋下兩城的換旗次數，結算時任一不同即為 `EXEMPT`）；勝方城鎮在比賽期間易主時新歸屬取勝方城鎮目前歸屬的錯誤，有蓋章的場次在計算新歸屬之前就已排除。落點的即時判斷（`Landing`）不變，每次返回都重新讀取即時城鎮表。

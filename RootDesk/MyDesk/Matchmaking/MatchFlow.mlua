@@ -456,6 +456,11 @@ script MatchFlow extends Logic
         self._T.failures[userId] = nil
         self:PublishState(userId, "MATCHED")
         local matched = pairing or self:QueueAdapter():Lookup(ticket.data.profile)
+        if matched ~= nil then
+            -- The war board this pairing was made on is read now, once per ticket, and travels in the sealed pairing; a deferred match that resumes keeps its first reading.
+            if ticket.snapshot == nil then ticket.snapshot = _FactionWarAttack:Snapshot(matched) end
+            matched = _FactionWarAttack:Stamped(matched, ticket.snapshot)
+        end
         if self._T.records[userId] ~= ticket or ticket.data.state ~= "SAVING" then return end
         if matched == nil or not self:Belongs(ticket.data, matched) then
             self._T.busy[userId] = true
@@ -1075,8 +1080,10 @@ script MatchFlow extends Logic
         end
         if home == nil or away == nil then return nil end
         local pairing = home.data.match
+        -- Each ticket brought the war board of its own pairing reading; the room hands the earlier one to the settlement.
         return { key = _RoomService.RoomKey, home = home.data.profile, away = away.data.profile, homeTicket = home.data.attempt, awayTicket = away.data.attempt,
-            homeTown = pairing.homeOrigin or "", awayTown = pairing.awayOrigin or "", guard = pairing.guard == true }
+            homeTown = pairing.homeOrigin or "", awayTown = pairing.awayOrigin or "", guard = pairing.guard == true,
+            epochs = _FactionWarAttack:Combine(pairing, away.data.match) }
     end
 
     @ExecSpace("ServerOnly")
