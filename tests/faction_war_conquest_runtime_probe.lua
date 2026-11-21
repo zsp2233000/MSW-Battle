@@ -25,7 +25,8 @@ local function seed(owners, strengths, settled)
     local towns = _FactionWar:InitialTowns()
     for id, owner in pairs(owners or {}) do towns[id].owner = owner end
     for id, strength in pairs(strengths or {}) do towns[id].strength = strength end
-    towns.settled = settled or {}
+    -- The engine's JSONEncode rejects an empty table, so an empty history is stored as no field at all.
+    if settled ~= nil and #settled > 0 then towns.settled = settled end
     write(towns)
 end
 local function settle(matchKey, home, away, homeResult, kind)

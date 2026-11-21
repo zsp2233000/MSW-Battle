@@ -82,7 +82,8 @@ script MatchFlow extends Logic
     method string StateForUser(string userId)
         -- Return the coordinator phase without payloads; battle presentation resolves IN_ROOM separately.
         local ticket = self._T.records[userId]
-        if ticket == nil then return "IDLE" end
+        -- A ticket is registered before its reservation fills data in; until then there is no phase to report.
+        if ticket == nil or ticket.data == nil then return "IDLE" end
         if ticket.cancelling or ticket.data.state == "CANCELLED" then return "CANCELLING" end
         return ticket.data.state
     end
