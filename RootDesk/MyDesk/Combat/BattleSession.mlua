@@ -1094,6 +1094,8 @@ script BattleSession extends Component
                     -- A town guard owns no monster progress, so only a connected opponent earns experience.
                     if not _FactionWarGuard:IsGuardProfile(self.AwayProfile) then
                         self._T.settlements[self.AwayProfile] = _MonsterLevelStorage:Settle(self.AwayProfile, self.MatchKey, self._T.deaths.ENEMY)
+                    else
+                        log("[VRF][ResultExperience] guard profile skipped match=" .. self.MatchKey)
                     end
                 end
                 self:EmitPresentation("RESULT", nil, nil, 0)

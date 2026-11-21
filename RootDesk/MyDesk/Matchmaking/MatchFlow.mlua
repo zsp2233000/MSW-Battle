@@ -309,13 +309,20 @@ script MatchFlow extends Logic
             return
         end
         local origin, target = ticket.data.origin or "", ticket.data.target or ""
-        if origin == "" or _FactionWarGuard.Rosters[target] == nil then return end
+        if origin == "" or _FactionWarGuard.Rosters[target] == nil then
+            log("[VRF][Guard] no guard for target=" .. target .. "; ticket keeps waiting")
+            return
+        end
         -- From here a human result is deferred; the adapter decides whether the ticket really left its pool.
         ticket.guarding = true
         self._T.busy[userId] = true
         local removed = self:CancelMatching(ticket.data.profile)
         self._T.busy[userId] = nil
-        if self._T.ended or self._T.records[userId] ~= ticket or self:Player(userId) == nil then ticket.guarding = nil return end
+        if self._T.ended or self._T.records[userId] ~= ticket or self:Player(userId) == nil then
+            ticket.guarding = nil
+            log("[VRF][Guard] claim dropped; ticket gone during withdrawal")
+            return
+        end
         -- A human result that already arrived, or a pairing the adapter still holds for this attempt, wins over the guard.
         local human = ticket.matchPending == true
         if removed and not human then
@@ -331,6 +338,7 @@ script MatchFlow extends Logic
         end
         if not removed then
             -- The adapter could not confirm the withdrawal; the ticket keeps waiting and the guard tries again.
+            log("[VRF][Guard] withdrawal unconfirmed; retry")
             ticket.guarding = nil
             self:ScheduleGuard(userId, ticket, _FactionWarGuard.RetrySeconds)
             return
@@ -346,6 +354,7 @@ script MatchFlow extends Logic
         ticket.guarding = nil
         if self._T.records[userId] == ticket and ticket.data ~= nil and ticket.data.state == "QUEUED" then
             -- The claim failed before the handoff left the queue; wait again instead of stranding the ticket.
+            log("[VRF][Guard] claim failed before handoff; retry")
             ticket.guardPairing = nil
             self:ScheduleGuard(userId, ticket, _FactionWarGuard.RetrySeconds)
         end
@@ -481,14 +490,15 @@ script MatchFlow extends Logic
         if not committed then self:Report(userId, { code = "HANDOFF_SAVE_FAILED" }) return end
         if self._T.records[userId] ~= ticket or self:Player(userId) == nil then return end
         self:Report(userId, { code = "SEALED", details = { matchKey = matched.key, differentSources = matched.differentSources } })
-        -- Nobody else has to be woken for a guard match: the guard has no coordinator of its own.
-        if matched.guard ~= true then self:NotifyReady(matched) end
+        self:NotifyReady(matched)
         self:Recover(userId)
     end
 
     @ExecSpace("ServerOnly")
     method void NotifyReady(table matched)
         -- Wake every other source coordinator once; readiness events are hints and admission revalidates stored authority.
+        -- A guard match wakes nobody: the guard has no coordinator of its own.
+        if matched.guard == true then return end
         for _, destination in ipairs(self:QueueAdapter():Destinations(matched)) do
             self:SendReady(matched.key, destination, 0)
         end
@@ -904,7 +914,7 @@ script MatchFlow extends Logic
         local ticket = self._T.records[userId]
         if ticket ~= nil and ticket.data.state == "TRANSFER" then
             local matched = self:Pairing(ticket.data)
-            if matched ~= nil and matched.guard ~= true then self:NotifyReady(matched) end
+            if matched ~= nil then self:NotifyReady(matched) end
         end
         local state = ticket ~= nil and ticket.data.state or "IDLE"
         local elapsed = ticket ~= nil and math.floor((DateTime.UtcNow.Elapsed - ticket.data.started) / 1000) or 0
