@@ -27,7 +27,10 @@ local PROFILES = { "wp2611", "wp2612", "wp2613", "wp2614", "wp2615" }
 local function await(predicate, tries) for _ = 1, tries or 300 do if predicate() then return true end wait(0.1) end return false end
 local function find()
     local found = {}
-    for _, user in ipairs(_UserService.UserEntities.Values) do found[user.PlayerComponent.ProfileCode] = user end
+    -- A user mid-transfer has no PlayerComponent for a moment; skip it instead of failing the whole step.
+    for _, user in ipairs(_UserService.UserEntities.Values) do
+        if isvalid(user) and isvalid(user.PlayerComponent) then found[user.PlayerComponent.ProfileCode] = user end
+    end
     return found
 end
 local function id(user) return user.PlayerComponent.UserId end
