@@ -13,8 +13,14 @@
 --   5 LANDING1   server_main: A is in Gushan (the conqueror), B in Yancheng (the loser), nobody is locked
 --   6 QUEUE2     server_main: A (red, Gushan) -> Yancheng, B (blue, Yancheng) -> Gushan  (red wins a capital: nothing changes)
 --   7 LANDING2   server_main, after STEP 4 again: Yancheng is still BLUE/100, Gushan RED/100, A in Gushan, B in Yancheng
---   8 CLEANUP
--- Expected [VRF] lines (read with logs): see the probe plan in the #107 report.
+--   8 EVICTRACE server_main (review fixes C1 + C2), run after STEP 7: D (blue, idle) is put into Gushan, which is red, and
+--                (a) a check that holds the board from before the flip is still running when the sweep's request arrives: the request is queued,
+--                    not dropped, and D ends in Yancheng ("[VRF][FactionWar] enforce queued" then "recheck" then "evicted");
+--                (b) a slot that was never released expires and the next request takes it over;
+--                (c) Evict on a board that says "fallen" while the stored board says the town was taken back: D stays in Gushan, and on the
+--                    fallen stored board it is moved ("[VRF][FactionWar] evict cancelled" then "evicted")
+--   9 CLEANUP
+-- Expected [VRF] lines (read with logs): see tests/README.md, "Capture, landing and eviction (#107)".
 local STEP = 1
 local PROFILES = { "wp2601", "wp2602", "wp2603", "wp2604" }
 local function await(predicate, tries) for _ = 1, tries or 300 do if predicate() then return true end wait(0.1) end return false end
@@ -121,6 +127,51 @@ local ok, reason = pcall(function()
         assert(towns.gushan.owner == "RED" and towns.gushan.strength == 100, "Gushan stays red and full")
         log("[VRF][ConquestE2E] LANDING2 PASS")
     elseif STEP == 8 then
+        users = find()
+        d = users.wp2604
+        assert(isvalid(d), "D connected")
+        local live = readTowns()
+        assert(live.gushan.owner == "RED", "Gushan is red")
+        -- The board a HUD check read before the flip: the same document with Gushan still blue.
+        local stale = _HttpService:JSONDecode(_HttpService:JSONEncode(live))
+        stale.gushan.owner = "BLUE"
+        local function putInGushan()
+            assert(_FactionWar:Move(d, "gushan"), "move dispatched")
+            assert(await(function() return d.CurrentMapName == "gushan" end, 100), "D stands in Gushan")
+        end
+        local function store(towns)
+            local saved = false
+            _FactionWar:WriteTowns(towns, function(ok) saved = ok end)
+            assert(await(function() return saved end, 100), "board stored")
+        end
+        -- (a) C1: the first check holds the pre-flip board; the sweep's request arrives while it still waits for the faction read.
+        putInGushan()
+        _FactionWar:Enforce(id(d), "gushan", stale)
+        assert(_FactionWar._T.evicting[id(d)] ~= nil, "the first check is still waiting for the faction read; if this fails the read answered at once and the race was not exercised")
+        _FactionWar:Enforce(id(d), "gushan", live)
+        assert(await(function() return d.CurrentMapName == "yancheng" end, 150), "the queued request moved D to Yancheng (a dropped request leaves D in Gushan)")
+        assert(await(function() return _FactionWar._T.evicting[id(d)] == nil end, 50), "the slot was released")
+        log("[VRF][ConquestE2E] EVICTRACE check race PASS")
+        -- (b) C1: a slot nobody ever released expires, so the next request takes it over instead of being ignored for good.
+        putInGushan()
+        _FactionWar._T.evicting[id(d)] = { started = DateTime.UtcNow.Elapsed - (_FactionWar.EnforceLeaseSeconds + 5) * 1000 }
+        _FactionWar:Enforce(id(d), "gushan", live)
+        assert(await(function() return d.CurrentMapName == "yancheng" end, 150), "the expired slot was taken over and D was moved")
+        assert(await(function() return _FactionWar._T.evicting[id(d)] == nil end, 50), "the new check released its slot")
+        log("[VRF][ConquestE2E] EVICTRACE lease PASS")
+        -- (c) C2: the board that called for the move is out of date. Gushan was taken and taken back (blue again, counted twice more).
+        putInGushan()
+        local retaken = _HttpService:JSONDecode(_HttpService:JSONEncode(live))
+        retaken.gushan.owner = "BLUE"
+        retaken.gushan.e = (retaken.gushan.e or 0) + 2
+        store(retaken)
+        assert(_FactionWar:Evict(id(d), d, "gushan", "BLUE", live) == false, "Evict does not send D away from a town its faction holds again")
+        assert(d.CurrentMapName == "gushan", "D stays in Gushan")
+        store(live)
+        assert(_FactionWar:Evict(id(d), d, "gushan", "BLUE", live) == true, "on the fallen stored board the same call moves D")
+        assert(await(function() return d.CurrentMapName == "yancheng" end, 150), "D is in Yancheng")
+        log("[VRF][ConquestE2E] EVICTRACE retaken PASS")
+    elseif STEP == 9 then
         _FactionWarGuard.WaitSeconds = 10
         local code = _DataStorageService:DeleteGlobalDataStorageAndWait(_FactionWar.TownStorageName)
         log("[VRF][ConquestE2E] CLEANUP town storage deleted code=" .. tostring(code))

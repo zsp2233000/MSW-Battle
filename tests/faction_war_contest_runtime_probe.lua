@@ -7,9 +7,13 @@
 -- a match whose town was flipped and taken back (AC2), the board where both towns changed hands, where the players of an exempt
 -- match end up (AC3), and repeated results: strength, ownership and experience applied once (AC4).
 -- The matching two-room scene is faction_war_contest_e2e_runtime_probe.lua.
+-- Review fix C6 is covered here too: the pause after a lost race (ConflictDelay), a settlement that loses more races than the old bound
+-- of ten and still lands exactly once, and the time budget that ends a settlement which can never win.
 local STORAGE = "CountryWarProbe108V1"
 local original = _FactionWar.TownStorageName
 local originalLevelKey = _MonsterLevelStorage.StorageKey
+local tuning = { retry = _FactionWarAttack.ConflictRetrySeconds, cap = _FactionWarAttack.ConflictBackoffCap, budget = _FactionWarAttack.ConflictBudgetSeconds }
+local stopInterference = nil
 local function await(predicate, tries)
     for _ = 1, tries or 100 do if predicate() then return true end wait(0.1) end
     return false
@@ -148,6 +152,70 @@ local ok, reason = pcall(function()
     towns = read()
     assert(pa == "SAVED" and pb == "SAVED" and towns.gushan.strength == 20 and towns.gushan.owner == "BLUE" and #towns.settled == 2, "both wins counted once each: 60 -> 20")
 
+    -- C6: the pause after the nth lost race doubles from the base, is capped, and the roll jitters it inside its upper half.
+    local function near(a, b) return math.abs(a - b) < 1e-9 end
+    assert(near(attack:ConflictDelay(1, 1), tuning.retry) and near(attack:ConflictDelay(1, 0), tuning.retry / 2), "the first pause is the base, jittered into its upper half")
+    assert(near(attack:ConflictDelay(2, 1), tuning.retry * 2) and near(attack:ConflictDelay(3, 1), tuning.retry * 4 > tuning.cap and tuning.cap or tuning.retry * 4), "it doubles until the cap")
+    assert(near(attack:ConflictDelay(40, 1), tuning.cap) and near(attack:ConflictDelay(40, 0), tuning.cap / 2), "and never exceeds the cap")
+    local previous = 0
+    for lost = 1, 30 do
+        local top = attack:ConflictDelay(lost, 1)
+        assert(top >= previous - 1e-9 and top <= tuning.cap + 1e-9 and attack:ConflictDelay(lost, 0) >= top / 2 - 1e-9 and attack:ConflictDelay(lost, 0.5) <= top + 1e-9, "pause " .. tostring(lost) .. " stays in range")
+        previous = top
+    end
+    -- An interfering writer that changes the stored bytes every 100 ms (fire and forget, every write different), so a settlement whose swap
+    -- lands 0.5 s after its read loses every round for as long as the interference runs.
+    local function interfere()
+        local store = _DataStorageService:GetGlobalDataStorage(STORAGE)
+        local base = read()
+        local counter = 0
+        local timer = _TimerService:SetTimerRepeat(function()
+            counter = counter + 1
+            base.zuoying.strength = 100 - (counter % 50)
+            store:SetAsync(_FactionWar.TownStorageKey, _HttpService:JSONEncode(base), function() end)
+        end, 0.1)
+        stopInterference = function() _TimerService:ClearTimer(timer) stopInterference = nil end
+    end
+    -- A settlement that loses more than ten races (the old bound) is retried and still lands once.
+    attack.ConflictRetrySeconds, attack.ConflictBackoffCap = 0.05, 0.1
+    seed({}, { gushan = 100 })
+    local lostStamp = stamp("c108-lost-races", "zuoying", "gushan")
+    _FormationStorage:ConfigureMakerFaults(0, 0, 0.5)
+    local lostBox = begin("c108-lost-races", "zuoying", "gushan", "WIN", "HUMAN", lostStamp)
+    interfere()
+    local lostDeadline = DateTime.UtcNow.Elapsed + 60000
+    while not lostBox.done and DateTime.UtcNow.Elapsed < lostDeadline do
+        local running = attack._T.settling["c108-lost-races"]
+        if running ~= nil and running.conflicts >= 12 then break end
+        wait(0.1)
+    end
+    stopInterference()
+    local lostStatus, _, lostOutcome = finish(lostBox, "c108-lost-races")
+    _FormationStorage:ConfigureMakerFaults(0, 0, 0)
+    assert(lostStatus == "SAVED" and lostOutcome.conflicts > 10, "the settlement lost more than ten races and still landed, got " .. tostring(lostStatus) .. " after " .. tostring(lostOutcome.conflicts) .. " lost races")
+    wait(0.5)
+    towns = read()
+    assert(towns.gushan.strength == 80 and towns.gushan.owner == "BLUE" and #towns.settled == 1 and towns.settled[1].k == "c108-lost-races", "applied exactly once: Gushan 100 -> 80, one record")
+    log("[VRF][FactionWarContest] lost races ok conflicts=" .. tostring(lostOutcome.conflicts))
+    -- A settlement that can never win is ended by the time budget, reported failed, and its redelivery lands once.
+    attack.ConflictBudgetSeconds = 1.5
+    seed({}, { gushan = 100 })
+    local neverStamp = stamp("c108-never-wins", "zuoying", "gushan")
+    _FormationStorage:ConfigureMakerFaults(0, 0, 0.5)
+    local neverBox = begin("c108-never-wins", "zuoying", "gushan", "WIN", "HUMAN", neverStamp)
+    interfere()
+    local neverStatus, _, neverOutcome = finish(neverBox, "c108-never-wins")
+    stopInterference()
+    _FormationStorage:ConfigureMakerFaults(0, 0, 0)
+    assert(neverStatus == "FAILED" and neverOutcome.conflicts >= 2, "the budget ended it, got " .. tostring(neverStatus))
+    attack.ConflictBudgetSeconds = tuning.budget
+    wait(0.5)
+    towns = read()
+    assert(towns.gushan.strength == 100 and (towns.settled == nil or #towns.settled == 0), "a failed settlement changed nothing")
+    assert(settle("c108-never-wins", "zuoying", "gushan", "WIN", "HUMAN", neverStamp) == "SAVED" and read().gushan.strength == 80, "its redelivery lands once")
+    attack.ConflictRetrySeconds, attack.ConflictBackoffCap = tuning.retry, tuning.cap
+    log("[VRF][FactionWarContest] time budget ok")
+
     -- AC2: a match paired before Gushan changed hands deducts nothing, even after the town is taken back.
     seed({}, { gushan = 20 })
     local early = stamp("c108-late", "zuoying", "gushan")
@@ -241,7 +309,9 @@ local ok, reason = pcall(function()
     log("[VRF][FactionWarContest] document bytes=" .. tostring(#big))
 end)
 
+if stopInterference ~= nil then stopInterference() end
 _FormationStorage:ConfigureMakerFaults(0, 0, 0)
+_FactionWarAttack.ConflictRetrySeconds, _FactionWarAttack.ConflictBackoffCap, _FactionWarAttack.ConflictBudgetSeconds = tuning.retry, tuning.cap, tuning.budget
 _FactionWar.TownStorageName = original
 _MonsterLevelStorage.StorageKey = originalLevelKey
 _DataStorageService:DeleteGlobalDataStorageAndWait(STORAGE)

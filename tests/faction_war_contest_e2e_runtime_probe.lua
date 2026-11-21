@@ -12,8 +12,10 @@
 --   3 CAPTURE    server_main, after BOTH match rooms logged "[VRF][MatchedBattle] result published once", one of them with
 --                "status=SAVED", the other with "status=EXEMPT": Gushan is red, 100, counted once; one record; the idle blue player was sent home
 --   4 RETURN     server_instance_<matchKey>, run in EACH of the two rooms: ReturnForUser for every user in the room
---   5 REDELIVER  server_instance_<matchKey>, run in EACH room (before or after RETURN): the same result is delivered again; the towns and the
---                experience do not move (DUPLICATE for the room that flipped, EXEMPT for the other)
+--   5 REDELIVER  server_instance_<matchKey>, run in EACH room BEFORE STEP 4 (RETURN): the same result is delivered again; the towns and the
+--                experience do not move (DUPLICATE for the room that flipped, EXEMPT for the other). It cannot run after RETURN: the
+--                match room is recycled once its players have left. A redelivery without a room (the same match key, with and
+--                without the stamp, after the world moved on) is covered by faction_war_contest_runtime_probe.lua.
 --   6 LANDING1   server_main: exactly one red player stands in Gushan (the conqueror), the other in Zuoying; both blue players and the idle
 --                one stand in Yancheng; nobody is locked; both matches are in the blue players' monster-level history
 --   7 QUEUE2     server_main: Gushan is put back to blue/60; the red player who stayed in Zuoying and the blue player who went to Yancheng
@@ -21,7 +23,10 @@
 --   8 LANDING2   server_main, after STEP 4 in the new room: no deduction (Gushan still 60, counted twice), the red player stays in Zuoying,
 --                the blue player stays in Gushan (its own town again)
 --   9 CLEANUP
--- Expected [VRF] lines (read with logs): see the probe plan in the #108 report.
+-- Expected [VRF] lines (read with logs): see tests/README.md, "Two matches contest one town (#108)".
+-- Review fix C5 (the board is read as soon as the pairing is known, before the cancel check and the seal): STEP 2 requires every ticket
+-- to hold its first reading, and STEP 7 writes the "taken and taken back" board AFTER the pairing was stamped, which is the flip during the
+-- handoff that the stamp has to see.
 local STEP = 1
 local PROFILES = { "wp2611", "wp2612", "wp2613", "wp2614", "wp2615" }
 local function await(predicate, tries) for _ = 1, tries or 300 do if predicate() then return true end wait(0.1) end return false end
@@ -104,6 +109,9 @@ local ok, reason = pcall(function()
         for _, user in ipairs({ r1, b1, r2, b2 }) do
             local match = ticketData(user).match
             assert(match.homeEpoch == 0 and match.awayEpoch == 0, "the pairing is stamped with Gushan and Zuoying at count zero, got " .. tostring(match.homeEpoch) .. "/" .. tostring(match.awayEpoch))
+            -- The ticket keeps its first reading (a match that resumes after a cancellation never restamps).
+            local snapshot = _MatchFlow._T.records[id(user)].snapshot
+            assert(type(snapshot) == "table" and snapshot.home == 0 and snapshot.away == 0, "the ticket kept its first reading of the board")
         end
         assert(ticketData(r1).matchKey == ticketData(b1).matchKey and ticketData(r2).matchKey == ticketData(b2).matchKey and ticketData(r1).matchKey ~= ticketData(r2).matchKey, "two matches, two rooms")
         log("[VRF][ContestE2E] QUEUED match1=" .. ticketData(r1).matchKey .. " match2=" .. ticketData(r2).matchKey .. "; wait for both results, then STEP 3")

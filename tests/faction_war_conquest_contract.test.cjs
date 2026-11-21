@@ -25,15 +25,15 @@ test('FactionWar decides where a faction may stand: its own capital is the one l
 
 test('a town that reaches zero strength changes flag and refills in the same stored document', () => {
   const text = attack();
-  assert.match(text, /property integer FullStrength = 100\b/, 'a captured town refills to the full strength the storage decoder allows');
+  assert.match(source('RootDesk/MyDesk/Formations/FactionWar.mlua'), /property integer FullStrength = 100\b/, 'a captured town refills to the full strength the storage decoder allows (FactionWar owns the document rules)');
   const attempt = body(text, 'Attempt');
   assert.doesNotMatch(attempt, /math\.max\(1,/, 'strength is no longer clamped above zero');
   assert.match(attempt, /<= 0/, 'zero strength is the capture condition');
   assert.match(attempt, /owner = towns\[operation\.winner\]\.owner/, 'the winner side\'s current owner takes the town');
-  assert.match(attempt, /strength = self\.FullStrength/, 'the flip is written as owner + full strength, never as a zero');
+  assert.match(attempt, /strength = _FactionWar\.FullStrength/, 'the flip is written as owner + full strength, never as a zero');
   // #108: the one write is a compare-and-swap on the bytes that were read (see faction_war_contest_contract.test.cjs).
   assert.equal(attempt.match(/SwapTowns\(/g).length, 1, 'ownership and strength are one document write');
-  assert.match(source('RootDesk/MyDesk/Formations/FactionWar.mlua'), /town\.strength < 1 or town\.strength > 100/, 'the decoder still rejects a stored zero');
+  assert.match(source('RootDesk/MyDesk/Formations/FactionWar.mlua'), /town\.strength < 1 or town\.strength > self\.FullStrength/, 'the decoder still rejects a stored zero');
 });
 
 test('a settlement reports a structured outcome and remembers it per match so a repeat answers the same thing', () => {
@@ -84,7 +84,7 @@ test('a fallen town is emptied in the static room: waiting tickets are cancelled
   assert.ok(evict.indexOf('_MatchFlow:Vacate(userId)') > -1 && evict.indexOf('_MatchFlow:Vacate(userId)') < evict.indexOf('self:Move('), 'the queue is released before the move');
   assert.match(evict, /ReceiveTownNotice/, 'the player is told why they moved');
   const vacate = body(flow(), 'Vacate');
-  assert.match(vacate, /CanCancel\(ticket\)/, 'only a waiting ticket can be cancelled');
+  assert.match(vacate, /IsWaiting\(ticket\)/, 'only a ticket still waiting for an opponent can be cancelled (the review tightened this from CanCancel, see faction_war_review_contract.test.cjs)');
   assert.match(vacate, /CancelForUser\(userId\)/, 'the common cancellation path is used');
   assert.match(vacate, /return false/, 'a matched ticket keeps its place');
 });

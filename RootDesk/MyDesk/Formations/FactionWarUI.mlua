@@ -159,7 +159,7 @@ script FactionWarUI extends Logic
         if not self:IsCurrentTown(town) then return end
         local label = self:Ui("TownHUD/Strength")
         if not isvalid(label) then return end
-        local capital = town == "nanzih" or town == "yancheng"
+        local capital = _FactionWarAttack:IsCapital(town)
         label.TextGUIRendererComponent.Text = _FactionWar.TownNames[town] .. (capital and "（主城）" or "") .. "  ｜  兵力 " .. strength
         log("[VRF][FactionWar] hud town=" .. town .. " strength=" .. strength)
     end
@@ -169,7 +169,10 @@ script FactionWarUI extends Logic
         -- The warning sits on its own bar under the strength line; hide that bar when there is nothing to say.
         if not self:IsCurrentTown(town) then
             -- A relocation notice can beat the client's own map change; keep it for the town the player is about to enter.
-            if message ~= "" then self._T.arrivalNotice = { town = town, message = message } end
+            if message ~= "" then
+                self._T.arrivalNotice = { town = town, message = message }
+                log("[VRF][FactionWar] notice kept for arrival town=" .. town)
+            end
             return
         end
         local notice = self:Ui("TownHUD/Notice")

@@ -8,6 +8,8 @@ script MatchFlow extends Logic
     property string QueueName = "battle-centered-v2"
     property number SaveDelaySeconds = 0
     property integer TransferLifetimeSeconds = 900
+    property integer VacateAttempts = 6
+    property number VacateRetrySeconds = 0.5
 
     @ExecSpace("ServerOnly")
     method void OnBeginPlay()
@@ -448,6 +450,12 @@ script MatchFlow extends Logic
             self:Report(userId, { code = "HANDOFF_SAVE_FAILED" })
             return
         end
+        -- The pairing is looked up and the war board read first (BeginSave only flipped an in-memory state): every wait that follows, a cancellation that is still
+        -- answering and the seal and commit writes, falls after the reading, so a town that changes hands during them is seen. A deferred match that resumes keeps its first reading.
+        local matched = pairing or self:QueueAdapter():Lookup(ticket.data.profile)
+        if matched ~= nil and ticket.snapshot == nil then ticket.snapshot = _FactionWarAttack:Snapshot(matched) end
+        -- The reading yields, so the ticket may have been cancelled, replaced or left meanwhile.
+        if self._T.records[userId] ~= ticket or ticket.data == nil or ticket.data.state ~= "SAVING" then return end
         if ticket.cancelling then
             ticket.matchPending = true
             log("[VRF][MatchCancel] matched response deferred until cancellation settles")
@@ -455,13 +463,8 @@ script MatchFlow extends Logic
         end
         self._T.failures[userId] = nil
         self:PublishState(userId, "MATCHED")
-        local matched = pairing or self:QueueAdapter():Lookup(ticket.data.profile)
-        if matched ~= nil then
-            -- The war board this pairing was made on is read now, once per ticket, and travels in the sealed pairing; a deferred match that resumes keeps its first reading.
-            if ticket.snapshot == nil then ticket.snapshot = _FactionWarAttack:Snapshot(matched) end
-            matched = _FactionWarAttack:Stamped(matched, ticket.snapshot)
-        end
-        if self._T.records[userId] ~= ticket or ticket.data.state ~= "SAVING" then return end
+        -- The war board this pairing was made on travels in the sealed pairing, on a copy.
+        if matched ~= nil then matched = _FactionWarAttack:Stamped(matched, ticket.snapshot) end
         if matched == nil or not self:Belongs(ticket.data, matched) then
             self._T.busy[userId] = true
             self:Finish(userId, ticket, "QUEUE_ERROR", function() return _FormationHandoff:FailQueue(userId, ticket) end)
@@ -1015,19 +1018,36 @@ script MatchFlow extends Logic
         return self:TransferAdapter():MoveToLobby(userId)
     end
 
+    method boolean IsWaiting(table ticket)
+        -- A ticket is still waiting for an opponent (or is already cancelled and only closing) until its pairing is recognised; SAVING and every state after it is a match.
+        local state = ticket.data.state
+        return state == "QUEUED" or state == "RENEWING" or state == "QUEUE_ERROR" or state == "CANCELLED"
+    end
+
     @ExecSpace("ServerOnly")
     method boolean Vacate(string userId)
-        -- A player who has to leave a fallen town: no ticket is free to go, a waiting ticket is cancelled first, a matched ticket keeps its place.
-        local ticket = self._T.records[userId]
-        if ticket == nil then return true end
-        if ticket.data == nil or not _FormationHandoff:CanCancel(ticket) then
-            log("[VRF][MatchFlow] vacate held state=" .. (ticket.data ~= nil and ticket.data.state or "UNKNOWN"))
-            return false
+        -- A player who has to leave a fallen town: no ticket is free to go, a ticket still waiting for an opponent is cancelled first, and a matched ticket keeps its place
+        -- (that fight is played out and the landing decides afterwards; this is stricter than the player's own cancel button, which CanCancel lets through until the seal).
+        -- A ticket in a passing state (its reservation not filled in yet, a cancellation or a claim in flight, an unconfirmed cancel) is tried again a few times before giving up.
+        for attempt = 1, self.VacateAttempts do
+            local ticket = self._T.records[userId]
+            if ticket == nil then return true end
+            if ticket.data ~= nil and not self:IsWaiting(ticket) then
+                log("[VRF][MatchFlow] vacate held state=" .. ticket.data.state)
+                return false
+            end
+            if ticket.data ~= nil and not ticket.cancelling and not self._T.busy[userId] then
+                self:CancelForUser(userId)
+                if self._T.records[userId] == nil then
+                    log("[VRF][MatchFlow] vacate cancelled=true attempt=" .. tostring(attempt))
+                    return true
+                end
+            end
+            log("[VRF][MatchFlow] vacate waits attempt=" .. tostring(attempt) .. " state=" .. (ticket.data ~= nil and ticket.data.state or "UNKNOWN"))
+            if attempt < self.VacateAttempts then wait(self.VacateRetrySeconds) end
         end
-        self:CancelForUser(userId)
-        local released = self._T.records[userId] == nil
-        log("[VRF][MatchFlow] vacate cancelled=" .. tostring(released))
-        return released
+        log("[VRF][MatchFlow] vacate gave up attempts=" .. tostring(self.VacateAttempts))
+        return false
     end
 
     @ExecSpace("ServerOnly")

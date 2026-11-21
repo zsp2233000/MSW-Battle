@@ -21,10 +21,10 @@ test('the town document counts how many times each town has changed hands', () =
   const decode = body(text, 'DecodeTowns');
   assert.match(decode, /town\.e/, 'the decoder looks at the stored count');
   assert.match(decode, /town\.e % 1 ~= 0|town\.e < 0/, 'and refuses a count that is not a non-negative integer');
-  assert.match(decode, /town\.strength < 1 or town\.strength > 100/, 'a stored zero strength is still refused');
+  assert.match(decode, /town\.strength < 1 or town\.strength > self\.FullStrength/, 'a stored zero strength is still refused');
   const settle = body(attack(), 'Attempt');
   assert.match(settle, /e = towns\[id\]\.e/, 'a town that did not change hands keeps its count as it was');
-  assert.match(settle, /e = \(towns\[operation\.loser\]\.e or 0\) \+ 1/, 'a flip is the one write that counts a town one more time');
+  assert.match(settle, /e = _FactionWar:EpochOf\(towns, operation\.loser\) \+ 1/, 'a flip is the one write that counts a town one more time');
 });
 
 test('the town document is replaced only if it still holds the bytes that were read', () => {
@@ -100,9 +100,9 @@ test('two settlements of one town race on the stored bytes: one swap wins, the o
   assert.match(attempt, /self:Retry\(operation, false\)/, 'a failed write is retried on the slower clock');
   const retry = body(text, 'Retry');
   assert.match(retry, /operation\.conflicts/, 'lost races are counted apart from failures');
-  assert.match(retry, /ConflictRetrySeconds/, 'a lost race reads again almost at once');
-  assert.match(retry, /"FAILED"/, 'both counters are bounded');
-  assert.match(text, /property integer SettleConflicts = \d+/);
+  assert.match(retry, /ConflictDelay\(/, 'a lost race reads again after a short, jittered pause');
+  assert.match(retry, /"FAILED"/, 'both the lost races (by elapsed time) and the failures (by count) are bounded');
+  assert.match(retry, /ConflictBudgetSeconds/, 'the lost races are bounded by time, see faction_war_review_contract.test.cjs');
   assert.match(text, /property number ConflictRetrySeconds = /);
 });
 

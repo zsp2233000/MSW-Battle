@@ -4,8 +4,12 @@
 -- Covers: flip + refill at zero, repeat result, guard flip, capital invariants, who lands where, and the board the
 -- NPC / gate / front line read after a flip (AC1, AC3, AC4 rules). The matching two-player scene is
 -- faction_war_conquest_e2e_runtime_probe.lua.
+-- Review fixes covered here without a player: Vacate keeps a matched ticket (C4) and retries the passing ticket states a bounded number
+-- of times (C3), on tickets planted under made-up user ids; the full strength is one constant (S7).
 local STORAGE = "CountryWarProbe107V1"
 local original = _FactionWar.TownStorageName
+local vacatePause = _MatchFlow.VacateRetrySeconds
+local plantedTickets = { "probe-vacate-SAVING", "probe-vacate-COMMITTING", "probe-vacate-TRANSFER", "probe-vacate-IN_ROOM", "probe-vacate-early", "probe-vacate-stuck", "probe-vacate-cancelling", "probe-vacate-none" }
 local function await(predicate, tries)
     for _ = 1, tries or 100 do if predicate() then return true end wait(0.1) end
     return false
@@ -58,6 +62,45 @@ local ok, reason = pcall(function()
     assert(names(attack:Targets("yancheng", "BLUE", board)) == "gushan" and attack:Targets("yancheng", "BLUE", board)[1].capital == false, "blue at its capital can pick Gushan")
     assert(names(attack:Targets("gushan", "BLUE", board)) == "", "a town the faction lost offers nothing")
     assert(attack:CanTarget("yancheng", "gushan", "BLUE", board) and attack:CanTarget("gushan", "yancheng", "RED", board), "blue with only Yancheng and red at Gushan pick each other")
+
+    assert(war.FullStrength == 100 and war:InitialTowns().gushan.strength == war.FullStrength, "one constant for the full strength, used by the initial board")
+
+    -- C4 + C3: Vacate on planted tickets. The ids are made up, so no player, queue or storage is involved; the retry pause is shortened and restored at the end.
+    local flow = _MatchFlow
+    flow.VacateRetrySeconds = 0.2
+    local function vacate(userId)
+        local started = DateTime.UtcNow.Elapsed
+        local released = flow:Vacate(userId)
+        return released, DateTime.UtcNow.Elapsed - started
+    end
+    -- C4: a matched ticket (SAVING onward) is held at once: it is neither cancelled nor retried.
+    for _, state in ipairs({ "SAVING", "COMMITTING", "TRANSFER", "IN_ROOM" }) do
+        local userId = "probe-vacate-" .. state
+        flow._T.records[userId] = { data = { state = state } }
+        local released, elapsed = vacate(userId)
+        assert(released == false and elapsed < 150, state .. " is a match and is held at once, got " .. tostring(released) .. " after " .. tostring(elapsed) .. " ms")
+        assert(flow._T.records[userId] ~= nil, "the " .. state .. " ticket was left alone")
+        flow._T.records[userId] = nil
+    end
+    assert(flow:IsWaiting({ data = { state = "QUEUED" } }) and flow:IsWaiting({ data = { state = "RENEWING" } }) and flow:IsWaiting({ data = { state = "QUEUE_ERROR" } }), "a ticket that has not found an opponent is waiting")
+    assert(not flow:IsWaiting({ data = { state = "SAVING" } }), "SAVING is the first matched state")
+    -- C3: a reservation that has not filled in yet (data is nil) is a passing state: Vacate waits for it and reports the player free once the ticket is gone.
+    flow._T.records["probe-vacate-early"] = {}
+    _TimerService:SetTimerOnce(function() flow._T.records["probe-vacate-early"] = nil end, 0.5)
+    local released, elapsed = vacate("probe-vacate-early")
+    assert(released == true and elapsed >= 300, "an unfilled reservation that goes away is waited for, got " .. tostring(released) .. " after " .. tostring(elapsed) .. " ms")
+    -- ... and a ticket that never settles is given up on after a bounded number of tries.
+    flow._T.records["probe-vacate-stuck"] = {}
+    released, elapsed = vacate("probe-vacate-stuck")
+    assert(released == false, "a ticket that never settles is given up on")
+    assert(elapsed >= (flow.VacateAttempts - 1) * 200 - 50 and elapsed < flow.VacateAttempts * 2000, "after about attempts-1 pauses, got " .. tostring(elapsed) .. " ms")
+    flow._T.records["probe-vacate-stuck"] = nil
+    -- C3: a cancellation another caller is running is not joined; once it has finished the ticket is gone and the player is free.
+    flow._T.records["probe-vacate-cancelling"] = { data = { state = "QUEUED" }, cancelling = true }
+    _TimerService:SetTimerOnce(function() flow._T.records["probe-vacate-cancelling"] = nil end, 0.5)
+    assert(vacate("probe-vacate-cancelling") == true, "a cancellation in flight is waited out")
+    assert(vacate("probe-vacate-none") == true, "no ticket: free to go")
+    log("[VRF][FactionWarConquest] vacate ok")
 
     _FactionWar.TownStorageName = STORAGE
 
@@ -134,5 +177,7 @@ local ok, reason = pcall(function()
 end)
 
 _FactionWar.TownStorageName = original
+_MatchFlow.VacateRetrySeconds = vacatePause
+for _, userId in ipairs(plantedTickets) do _MatchFlow._T.records[userId] = nil end
 _DataStorageService:DeleteGlobalDataStorageAndWait(STORAGE)
 if ok then log("[VRF][FactionWarConquest] PROBE PASS") else log_error("[VRF][FactionWarConquest] PROBE FAIL " .. tostring(reason)) end
