@@ -1003,10 +1003,25 @@ script MatchFlow extends Logic
 
     @ExecSpace("ServerOnly")
     method boolean MoveHome(string userId, any ticket)
-        -- A war player goes back to the town they queued from; every other player returns to the lobby.
+        -- A war player lands where their faction holds ground (the town they took, the one they left, else their capital); every other player returns to the lobby.
         local origin = ticket ~= nil and ticket.data ~= nil and ticket.data.origin or ""
-        if origin ~= "" and _FactionWar:IsTown(origin) then return self:TransferAdapter():MoveToTown(userId, origin) end
+        if origin ~= "" and _FactionWar:IsTown(origin) then return self:TransferAdapter():MoveToTown(userId, _FactionWarAttack:LandingFor(userId, ticket)) end
         return self:TransferAdapter():MoveToLobby(userId)
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean Vacate(string userId)
+        -- A player who has to leave a fallen town: no ticket is free to go, a waiting ticket is cancelled first, a matched ticket keeps its place.
+        local ticket = self._T.records[userId]
+        if ticket == nil then return true end
+        if ticket.data == nil or not _FormationHandoff:CanCancel(ticket) then
+            log("[VRF][MatchFlow] vacate held state=" .. (ticket.data ~= nil and ticket.data.state or "UNKNOWN"))
+            return false
+        end
+        self:CancelForUser(userId)
+        local released = self._T.records[userId] == nil
+        log("[VRF][MatchFlow] vacate cancelled=" .. tostring(released))
+        return released
     end
 
     @ExecSpace("ServerOnly")

@@ -7,12 +7,16 @@ script FactionWarAttack extends Logic
     property integer SettleAttempts = 4
     property number SettleRetrySeconds = 1
     property integer SettledHistory = 20
+    property integer FullStrength = 100
+    property number LandingWaitSeconds = 5
+    property number ReadWaitSeconds = 5
 
     @ExecSpace("ServerOnly")
     method void OnBeginPlay()
         -- Each room settles its own match results; the timers and in-flight keys never outlive the room.
         self._T.reading = {}
         self._T.settling = {}
+        self._T.outcomes = {}
         self._T.timers = {}
         log("[VRF][FactionWarAttack] ready")
     end
@@ -94,6 +98,8 @@ script FactionWarAttack extends Logic
                 self:ReceiveOptions(town, {}, "UNAVAILABLE", userId)
             elseif towns[town].owner ~= faction then
                 self:ReceiveOptions(town, {}, "NOT_OWNED", userId)
+                -- A player standing in a town that fell is sent to their capital, whichever room delivered the news.
+                _FactionWar:Enforce(userId, town, towns)
             else
                 self:ReceiveOptions(town, self:Targets(town, faction, towns), self:IsEngaged(userId) and "ENGAGED" or "READY", userId)
             end
@@ -147,8 +153,15 @@ script FactionWarAttack extends Logic
         if operation.finished then return end
         operation.finished = true
         self._T.settling[operation.matchKey] = nil
-        log("[VRF][FactionWarAttack] settle match=" .. operation.matchKey .. " status=" .. status .. " loser=" .. operation.loser .. " amount=" .. tostring(operation.amount))
-        if operation.complete ~= nil then operation.complete(status, detail) end
+        local outcome = { status = status, winner = operation.winner or "", loser = operation.loser, amount = operation.amount,
+            strength = operation.strength or 0, flipped = operation.flipped == true, owner = operation.owner or "" }
+        local applied = status == "SAVED" or status == "DUPLICATE"
+        -- The returning players land by what this match did, so the room keeps it for them.
+        if applied then self._T.outcomes[operation.matchKey] = outcome end
+        log("[VRF][FactionWarAttack] settle match=" .. operation.matchKey .. " status=" .. status .. " loser=" .. operation.loser .. " amount=" .. tostring(operation.amount) .. " flipped=" .. tostring(outcome.flipped) .. " owner=" .. outcome.owner)
+        if operation.complete ~= nil then operation.complete(status, detail, outcome) end
+        -- A repeat announces again on purpose: the sweep is idempotent and the first announcement may have been lost.
+        if applied and outcome.flipped then _FactionWar:AnnounceFall(outcome.loser, outcome.owner) end
     end
 
     @ExecSpace("ServerOnly")
@@ -188,6 +201,12 @@ script FactionWarAttack extends Logic
         self._T.timers[timer] = true
     end
 
+    method string EntryKey(any entry)
+        -- A settled entry is a bare match key (older documents) or a record that carries the key and what the match did.
+        if type(entry) == "table" then return tostring(entry.k) end
+        return tostring(entry)
+    end
+
     @ExecSpace("ServerOnly")
     method void Attempt(table operation)
         -- Read, apply the deduction to a new document and write it back; the settled list dedupes across attempts and rooms.
@@ -196,24 +215,91 @@ script FactionWarAttack extends Logic
         _FactionWar:ReadTowns(function(towns)
             if operation.finished then return end
             if towns == nil or (towns.settled ~= nil and type(towns.settled) ~= "table") then self:Retry(operation) return end
-            for _, id in ipairs(towns.settled or {}) do
-                if id == operation.matchKey then self:Finish(operation, "DUPLICATE", nil) return end
+            for _, entry in ipairs(towns.settled or {}) do
+                if self:EntryKey(entry) == operation.matchKey then
+                    -- A repeat reports what the first delivery did, so a lost answer still reaches the landing and the sweep.
+                    if type(entry) == "table" then
+                        operation.strength = entry.s
+                        operation.owner = entry.o
+                        operation.flipped = entry.o ~= nil and entry.o ~= ""
+                    end
+                    self:Finish(operation, "DUPLICATE", nil)
+                    return
+                end
             end
             if towns[operation.winner].owner == towns[operation.loser].owner then self:Finish(operation, "SKIPPED", nil) return end
             local updated = { settled = {} }
             for _, id in ipairs(_FactionWar.TownOrder) do
                 updated[id] = { owner = towns[id].owner, strength = towns[id].strength }
             end
-            for _, id in ipairs(towns.settled or {}) do table.insert(updated.settled, id) end
-            table.insert(updated.settled, operation.matchKey)
+            for _, entry in ipairs(towns.settled or {}) do table.insert(updated.settled, entry) end
+            -- Zero strength hands the town to the winner's side and refills it in the same write; a stored town never holds zero.
+            local remaining = towns[operation.loser].strength - operation.amount
+            local flipped = remaining <= 0
+            if flipped then
+                updated[operation.loser] = { owner = towns[operation.winner].owner, strength = self.FullStrength }
+            else
+                updated[operation.loser].strength = remaining
+            end
+            local record = { k = operation.matchKey, w = operation.winner, l = operation.loser, s = updated[operation.loser].strength, o = flipped and updated[operation.loser].owner or "" }
+            table.insert(updated.settled, record)
             while #updated.settled > self.SettledHistory do table.remove(updated.settled, 1) end
-            -- Strength never reaches zero here; taking the town is a separate rule.
-            updated[operation.loser].strength = math.max(1, towns[operation.loser].strength - operation.amount)
             _FactionWar:WriteTowns(updated, function(saved)
                 if operation.finished then return end
-                if saved then self:Finish(operation, "SAVED", updated[operation.loser].strength) else self:Retry(operation) end
+                if saved then
+                    operation.strength = record.s
+                    operation.owner = record.o
+                    operation.flipped = flipped
+                    self:Finish(operation, "SAVED", record.s)
+                else
+                    self:Retry(operation)
+                end
             end)
         end)
+    end
+
+    @ExecSpace("ServerOnly")
+    method any Await(any start)
+        -- Run a callback-style read and wait a bounded time for its answer; nil means it never answered (or answered nothing usable).
+        local box = { done = false }
+        start(function(value)
+            box.value = value
+            box.done = true
+        end)
+        local waited = 0
+        while not box.done and waited < self.ReadWaitSeconds do
+            wait(0.1)
+            waited = waited + 0.1
+        end
+        return box.value
+    end
+
+    @ExecSpace("ServerOnly")
+    method string LandingFor(string userId, any ticket)
+        -- Where a war player stands after the match: the town they took, else the one they left while their faction still holds it, else their capital.
+        local origin = ticket.data.origin or ""
+        local matchKey = ticket.data.matchKey or ""
+        local player = _UserService:GetUserEntityByUserId(userId)
+        if origin == "" or not isvalid(player) then return origin end
+        -- A fast return click can beat the settlement write; the landing must see the finished town table.
+        local waited = 0
+        while self._T.settling[matchKey] and waited < self.LandingWaitSeconds do
+            wait(0.1)
+            waited = waited + 0.1
+        end
+        local outcome = self._T.outcomes[matchKey]
+        local preferred = origin
+        if outcome ~= nil and outcome.flipped and outcome.winner == origin then preferred = outcome.loser end
+        local profile = player.PlayerComponent.ProfileCode
+        local faction = self:Await(function(done) _FactionWar:ReadFaction(profile, done) end)
+        local towns = self:Await(function(done) _FactionWar:ReadTowns(done) end)
+        if faction == nil or faction == "" or towns == nil then
+            log("[VRF][FactionWarAttack] landing unreadable user=" .. userId .. " origin=" .. origin .. "; keeps the departure town")
+            return origin
+        end
+        local destination = _FactionWar:Landing(faction, preferred, towns)
+        log("[VRF][FactionWarAttack] landing user=" .. userId .. " faction=" .. faction .. " origin=" .. origin .. " preferred=" .. preferred .. " destination=" .. destination .. " conqueror=" .. tostring(preferred ~= origin))
+        return destination
     end
 
     @ExecSpace("ServerOnly")

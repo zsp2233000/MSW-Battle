@@ -49,6 +49,17 @@ Verified in Maker on 2026-11-20 (build 0 Error): the rules probe passed (ran inl
 
 Not verified: a real player watching the countdown in the town (the queue bar text is checked by the contract test only), two real accounts racing a human match against the guard on the native service (`MatchQueueNative.Cancel` also confirms `AlreadyMatched`, so a human result that lands in the same instant can leave the partner waiting; see ADR 0011), a guard loss and a guard draw in a live room, and a capital guard fight in a live room.
 
+## Capture, landing and eviction (#107)
+
+`faction_war_conquest_contract.test.cjs` pins the seams (`node --test tests/faction_war_conquest_contract.test.cjs`, no Maker): the capital/landing/passage rules in `FactionWar`, zero strength becoming owner + 100 in one document write, the structured `Settle` outcome and the per-match record in `towns.settled`, the landing by outcome and live ownership (`FactionWarAttack:LandingFor` through `MatchFlow:MoveHome`), the sweep of a fallen town in the static room (`TownFellEvent`, `AnnounceFall`, `SweepFallen`, `Evict`, `MatchFlow:Vacate`), the lazy re-check on town entry / gate / NPC, and the HUD keeping the relocation notice. Runtime probes, each in a fresh Play (`stop` → `refresh` → `play`):
+
+| Probe | Context | Final line |
+| --- | --- | --- |
+| `faction_war_conquest_runtime_probe.lua` | `server_main`, no virtual player, isolated storage `CountryWarProbe107V1` | `[VRF][FactionWarConquest] PROBE PASS` (capital / landing / passage rules, the board after Gushan turns red, flip + refill from 20 by a human win and from 10 by a guard win, repeat = `DUPLICATE` with the same capture, capitals never change, blue with only Yancheng and red at Gushan, legacy `settled` keys, document size) |
+| `faction_war_conquest_e2e_runtime_probe.lua` | `server_main` plus the match room, four virtual players `wp2601`–`wp2604` | `SETUP PASS`, `CAPTURE PASS`, `LANDING1 PASS`, `LANDING2 PASS`, then STEP 8 CLEANUP (the room writes the real `CountryWarV1` storage) |
+
+Status: both probes are written but not yet run in Maker; record the date and the `[VRF]` evidence here after the first pass.
+
 ## Monster dex verification (#73 / #80)
 
 `node --test tests/*.test.cjs` covers the dex structure: `monster_dex_contract.test.cjs` (catalog rows, server guard), `monster_dex_ui_contract.test.cjs` (book, lobby entry, bindings), `monster_dex_details_contract.test.cjs`, `monster_dex_stage_contract.test.cjs`, and `monster_dex_integration_contract.test.cjs` (#80). The last one checks that every field a dex row copies is a `MonsterData` column or a documented load-time delay, that every row field the book reads is published by `GetDexRows`, that every entity property bound in `MonsterDex` exists in `ui/MonsterDexGroup.ui` or `ui/FormationGroup.ui`, and that the published world gets no entry and no served reply (the `Environment:IsMakerPlay()` guard is the first statement of `Open` and of `RequestRows`, the only `@ExecSpace("Server")` method of the service). These are source and `.ui` checks only; they cannot run a published world.

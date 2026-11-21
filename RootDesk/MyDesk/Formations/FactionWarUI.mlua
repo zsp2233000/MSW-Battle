@@ -78,6 +78,10 @@ script FactionWarUI extends Logic
         if inTown then
             self:ShowTownStatus(name, "讀取中")
             self:ShowTownNotice(name, "")
+            -- A notice that arrived before this map change belongs to this town; anything else is stale.
+            local arrival = self._T.arrivalNotice
+            if arrival ~= nil and arrival.town == name then self:ShowTownNotice(name, arrival.message) end
+            self._T.arrivalNotice = nil
             _FactionWar:RequestTownStatus()
         end
     end
@@ -163,7 +167,11 @@ script FactionWarUI extends Logic
     @ExecSpace("ClientOnly")
     method void ShowTownNotice(string town, string message)
         -- The warning sits on its own bar under the strength line; hide that bar when there is nothing to say.
-        if not self:IsCurrentTown(town) then return end
+        if not self:IsCurrentTown(town) then
+            -- A relocation notice can beat the client's own map change; keep it for the town the player is about to enter.
+            if message ~= "" then self._T.arrivalNotice = { town = town, message = message } end
+            return
+        end
         local notice = self:Ui("TownHUD/Notice")
         if not isvalid(notice) then return end
         notice.TextGUIRendererComponent.Text = message
