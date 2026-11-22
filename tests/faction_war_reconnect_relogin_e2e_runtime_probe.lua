@@ -1,8 +1,8 @@
 -- Maker end-to-end for #109 (P6): a player really leaves in the middle of a guard fight and logs in again with a NEW user id (KickUser, then add_virtual_player
 -- -profile_code wp2625). Two modes, set MODE below; each run is a fresh Play (stop, refresh, play) with one virtual player:
 --   add_virtual_player -profile_code wp2625 -nickname Relogin109   (RED, Zuoying, 4 units; Gushan is seeded at 10, so a guard win captures it)
--- ABORTED the only player really leaves in the middle of the fight: the engine reclaims a match room the moment its last user leaves (measured in Maker,
---         about 1 s), so the fight never reaches a result and nothing is settled. The login finds no room ("[VRF][MatchFlow] rejoin match=... room=none"),
+-- ABORTED the only player really leaves in the middle of the fight: the engine reclaims a match room about a second after its last user leaves (measured in
+--         Maker), so the fight never reaches a result and nothing is settled. The login finds no room ("[VRF][MatchFlow] rejoin match=... room=none"),
 --         closes the stale ticket ("STALE_ROOM_RECOVERY"), finds no stored result and lands the player in the town they set out from, with the towns untouched
 -- STALE   the match was settled and the room is gone (the fault adapter hides every room, as if the engine had reclaimed it): the login closes the stale ticket
 --         ("STALE_ROOM_RECOVERY", "RETURN_COMPLETED"), the outcome is rebuilt from the stored record ("[VRF][FactionWarAttack] landing ... rebuilt=true",
@@ -21,6 +21,7 @@
 --                       result and the match is not in the experience history ("ABORTED PASS")
 --              STALE:  the new entity is in Gushan, holds no ticket, the town document is untouched, the match is in the history once ("STALE PASS");
 --                      read the log for "login placement left to the ticket" and the town notice path ("landing after restore ... to=gushan")
+--   6, 7      not used (the numbers stay so that CLEANUP is STEP 8, as in the README)
 --   8 CLEANUP  puts the rooms back, deletes the war town storage
 -- Expected [VRF] lines (read with logs): see tests/README.md, "Disconnect and reconnect (#109)".
 local MODE = "ABORTED"

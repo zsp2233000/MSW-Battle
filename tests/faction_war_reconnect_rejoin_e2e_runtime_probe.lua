@@ -1,6 +1,6 @@
 -- Maker end-to-end for #109 (P6b): a player REALLY leaves in the middle of a human fight and logs in again with a NEW user id; the other player keeps the
 -- room alive, so the static room finds the room (InstanceRooms) and moves the new entity back into it. (A guard fight cannot show this in Maker: its only
--- human is the last user, and the engine reclaims a room the moment its last user leaves, so nothing is left to rejoin; that case is P6 STALE.)
+-- human is the last user, and the engine reclaims a room about a second after its last user leaves, so nothing is left to rejoin; that case is P6 STALE.)
 -- Two virtual players, added in Play before running this in server_main; the blue one is added AGAIN after STEP 3 (3 of the 10 virtual players a Play allows):
 --   add_virtual_player -profile_code wp2623 -nickname RedStay109    (RED,  Zuoying, 3 tanks; stays connected, keeps the room alive)
 --   add_virtual_player -profile_code wp2624 -nickname BlueLeave109  (BLUE, Gushan,  1 tank;  is kicked mid-fight, then logs in again)

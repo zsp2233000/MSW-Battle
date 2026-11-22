@@ -290,7 +290,7 @@ script FactionWarAttack extends Logic
 
     method any OutcomeFrom(any towns, string matchKey)
         -- What the stored record says the match did to the towns, or nil when the document holds no record of it (which reads as no capture).
-        -- A record carries the winner, the loser, the loser's strength afterwards and the new owner if the town changed flag; an older bare key says only that the match was settled.
+        -- A record carries the winner, the loser, the loser's strength afterwards and the new owner if the town changed hands; an older bare key says only that the match was settled.
         if type(towns) ~= "table" or type(towns.settled) ~= "table" or matchKey == "" then return nil end
         for _, entry in ipairs(towns.settled) do
             if self:EntryKey(entry) == matchKey then

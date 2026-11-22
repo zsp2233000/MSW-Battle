@@ -27,7 +27,8 @@ test('the outcome of a match is read from the stored record by one pure reader, 
   assert.match(reader, /towns\.settled/, 'it reads the settled list of the town document');
   assert.match(reader, /EntryKey\(entry\)/, 'it matches on the same key rule as the settlement');
   for (const field of ['entry.w', 'entry.l', 'entry.s', 'entry.o']) assert.ok(reader.includes(field), `it rebuilds from ${field}`);
-  assert.match(reader, /flipped = /, 'it says whether the town changed flag');
+  assert.match(reader, /flipped = /, 'it says whether the town changed hands');
+  assert.doesNotMatch(text, /town changed flag/, 'the comment of the reader says the town changed hands, not that it "changed flag"');
   assert.match(body(text, 'Attempt'), /self:OutcomeFrom\(towns, operation\.matchKey\)/, 'a repeated result answers with what the first delivery did, through the reader');
   assert.doesNotMatch(body(text, 'Attempt'), /entry\.o ~= nil/, 'the repeat answer no longer reads the record by hand');
 });
@@ -198,6 +199,8 @@ test('a war ticket whose leave cleanup failed is cancelled again on reconnect in
   assert.match(depart, /ticket\.departFailed = true/, 'a cleanup that did not finish marks the ticket');
   assert.match(depart, /ticket\.data ~= nil and ticket\.data\.matchKey or ""/, 'a ticket whose reservation never filled in does not break the final log');
   assert.match(depart, /\[VRF\]\[MatchDisconnect\][^\n]*reason=/, 'the leave reason is logged');
+  assert.doesNotMatch(depart, /a caller that has none \(a probe\) passes nothing/, 'the comment does not claim that probes pass no reason (the #109 probes pass "Probe")');
+  assert.match(depart, /a probe "Probe"/, 'it says what the callers pass');
   const recover = body(text, 'Recover');
   assert.match(recover, /current\.departFailed and \(current\.data\.origin or ""\) ~= "" and self:IsWaiting\(current\)/, 'only a war ticket that was still waiting for an opponent');
   assert.match(recover, /self:CancelForUser\(userId\)[^]*return/, 'it cancels through the ordinary cancel and does not resume');
@@ -296,7 +299,7 @@ test('ADR 0014 records the decisions in glossary vocabulary, and ADR 0011 / 0012
 // ---- the probes ---------------------------------------------------------------------------------------------------------------
 
 const probes = {
-  'faction_war_reconnect_runtime_probe.lua': { prefix: 'FactionWarReconnect', pass: /\[VRF\]\[FactionWarReconnect\] PROBE PASS/, profiles: ['wp2621'] },
+  'faction_war_reconnect_runtime_probe.lua': { prefix: 'FactionWarReconnect', pass: /\[VRF\]\[FactionWarReconnect\] PROBE PASS/, profiles: ['wp2621'], rules: true },
   'faction_war_reconnect_queue_e2e_runtime_probe.lua': { prefix: 'ReconnectQueue', pass: /E2E PASS/, profiles: ['wp2621'], steps: ['SETUP PASS', 'EIGHT PASS', 'RECONNECT PASS', 'RECANCEL PASS', 'AGAIN PASS', 'CLEANUP'], guard: 10 },
   'faction_war_reconnect_guard_e2e_runtime_probe.lua': { prefix: 'ReconnectGuard', pass: /LANDING PASS/, profiles: ['wp2622'], steps: ['SETUP PASS', 'DISCONNECT PASS', 'RESULT PASS', 'RECONNECT PASS', 'REDELIVER PASS', 'LANDING PASS', 'CLEANUP'], guard: 10 },
   'faction_war_reconnect_human_e2e_runtime_probe.lua': { prefix: 'ReconnectHuman', pass: /LANDING PASS/, profiles: ['wp2623', 'wp2624'], steps: ['SETUP PASS', 'DISCONNECT PASS', 'RESULT PASS', 'RECONNECT PASS', 'REDELIVER PASS', 'LANDING PASS', 'CLEANUP'], guard: 600 },
@@ -312,7 +315,9 @@ test('the #109 probes use their own profiles and storage, number their steps and
     assert.match(text, /\[VRF\]\[/, `${name} logs [VRF] lines`);
     assert.ok(text.includes(`[VRF][${spec.prefix}]`), `${name} uses its own prefix`);
     assert.match(text, spec.pass, `${name} has its pass line`);
-    assert.match(text, /Expected \[VRF\] lines[^\n]*Disconnect and reconnect \(#109\)|isolated/, `${name} says where the expected lines are, or is a rules probe`);
+    // The rules probe has no scene to describe; it says its final line itself. Every other probe says where its expected lines are written down.
+    if (spec.rules) assert.match(text, /Final line: \[VRF\]\[FactionWarReconnect\] PROBE PASS/, `${name} is the rules probe and says its final line in its header`);
+    else assert.match(text, /Expected \[VRF\] lines[^\n]*Disconnect and reconnect \(#109\)/, `${name} says where the expected lines are`);
     for (const used of text.match(/wp26\d\d/g) || []) assert.ok(['wp2621', 'wp2622', 'wp2623', 'wp2624', 'wp2625', 'wp2626'].includes(used), `${name} uses only wp2621-wp2626, found ${used}`);
     for (const profile of spec.profiles) assert.ok(text.includes(profile), `${name} drives ${profile}`);
     for (const step of spec.steps || []) assert.ok(text.includes(step), `${name} announces ${step}`);
@@ -332,6 +337,18 @@ test('the #109 probes use their own profiles and storage, number their steps and
   assert.match(login, /add_virtual_player -profile_code wp2625/, 'and a true login');
   assert.match(login, /_FactionWar\.TownStorageName = STORAGE/, 'on an isolated town board');
   assert.match(source('tests/faction_war_reconnect_relogin_e2e_runtime_probe.lua'), /ConfigureRooms\(true\)/, 'the stale-room mode hides the rooms through the fault adapter');
+});
+
+test('the probe headers say what the code and the README say: the engine reclaims an empty room about a second after its last user leaves, and the relogin probe ends in STEP 8', () => {
+  for (const name of ['faction_war_reconnect_rejoin_e2e_runtime_probe.lua', 'faction_war_reconnect_relogin_e2e_runtime_probe.lua']) {
+    const header = source(`tests/${name}`).split('\n').filter(line => line.startsWith('--')).join('\n');
+    assert.doesNotMatch(header, /the moment its last user leaves/, `${name} does not say the room goes at once`);
+    assert.match(header, /about a second after its last user leaves/, `${name} says the room is reclaimed about a second after its last user leaves`);
+  }
+  const relogin = source('tests/faction_war_reconnect_relogin_e2e_runtime_probe.lua');
+  assert.match(relogin, /\n--\s+6, 7\s+not used[^\n]*\n--\s+8 CLEANUP/, 'the header lists the steps as the README does: 1 to 5, 6 and 7 not used, 8 CLEANUP');
+  assert.match(relogin, /STEP == 8 then/, 'and STEP 8 is the cleanup the header names');
+  assert.match(source('tests/README.md'), /`ABORTED PASS` or `STALE PASS`, then STEP 8 CLEANUP/, 'the README names the same step');
 });
 
 test('the README records the #109 probes and is honest about what has not run', () => {

@@ -994,7 +994,7 @@ script MatchFlow extends Logic
     @ExecSpace("ServerOnly")
     method void Depart(string userId, any reason)
         -- Invalidate callbacks before yielding, then settle queue cleanup; combat actors remain owned by BattleSession.
-        -- reason is the leave reason for the log only; a caller that has none (a probe) passes nothing.
+        -- reason is the leave reason for the log only: the leave handler passes the engine's, the disconnect handler "Disconnect", a probe "Probe" (older probes pass nothing).
         self._T.offline[userId] = true
         self._T.arrival[userId] = nil
         for _, timers in ipairs({ self._T.arrivalTimers, self._T.recoveryTimers, self._T.queueTimers, self._T.guardTimers }) do
