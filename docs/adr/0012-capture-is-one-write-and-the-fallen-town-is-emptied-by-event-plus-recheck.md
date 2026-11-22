@@ -6,7 +6,7 @@
 
 `towns.settled` 由「比賽鍵字串清單」改為「每場一筆紀錄」：`{ k = 比賽鍵, w = 勝方城, l = 敗方城, s = 結算後敗方城兵力, o = 換旗後的歸屬（沒換旗為空字串） }`。`FactionWarAttack:EntryKey` 同時讀得懂舊的字串項目，舊文件不必遷移。重複送來的同一場戰果回 `DUPLICATE`，並帶出當初的 `s`、`o`，所以「寫入成功但回應遺失」之後的重試仍能知道這一場奪了城，後面的撤離與落點才不會漏掉。清單上限仍是 20 筆（`SettledHistory`），單筆約 110 位元組，整份文件預估約 2.4 KB，要低於一個儲存額度（4000 位元組）；`tests/faction_war_conquest_runtime_probe.lua` 寫滿 20 筆後會量並要求小於 4000。
 
-`Settle` 回報 `complete(status, detail, outcome)`：`detail` 仍是敗方城的新兵力（奪城時為 100），新增的 `outcome` 是 `{ status, winner, loser, amount, strength, flipped, owner }`。`SAVED` 與 `DUPLICATE` 的結果也記在 `FactionWarAttack._T.outcomes[比賽鍵]`，供這個房間裡之後按「返回」的玩家查詢。這個形狀是為 #108（同時爭城）預留的。#108 的實際做法（ADR 0013）：回傳值不變，只多了 `EXEMPT` 一種 `status`（`flipped = false`）；「出戰時的換旗次數」放在城鎮文件每座城的 `e` 與配對的 `homeEpoch` / `awayEpoch`，不放進這份逐場紀錄。
+`Settle` 回報 `complete(status, detail, outcome)`：`detail` 仍是敗方城的新兵力（奪城時為 100），新增的 `outcome` 是 `{ status, winner, loser, amount, strength, flipped, owner }`。`SAVED` 與 `DUPLICATE` 的結果也記在 `FactionWarAttack._T.outcomes[比賽鍵]`，供這個房間裡之後按「返回」的玩家查詢。#109 起，房間沒有記住這場戰果時（玩家斷線重連、比賽房已被回收），`FactionWarAttack:OutcomeFrom` 從這份 `towns.settled` 紀錄重建同樣的結果，`Attempt` 的 `DUPLICATE` 回應與 `LandingFor` 共用它（見 ADR 0014 決定六）。這個形狀是為 #108（同時爭城）預留的。#108 的實際做法（ADR 0013）：回傳值不變，只多了 `EXEMPT` 一種 `status`（`flipped = false`）；「出戰時的換旗次數」放在城鎮文件每座城的 `e` 與配對的 `homeEpoch` / `awayEpoch`，不放進這份逐場紀錄。
 
 ## 落點：依戰果與即時歸屬，在玩家按「返回」時決定
 
@@ -24,6 +24,8 @@
 
 因為歸屬只看戰果寫入後的即時文件，掃描對重複通知是冪等的；`DUPLICATE` 回來時 `Finish` 會再通知一次，補救第一次通知的遺失。
 
+#109 起，掃描跳過斷線中的玩家（`MatchFlow:IsOffline`）：引擎保留的離線實體若在失城當下被移走，之後城鎮在他回來前被奪回，就違反「曾失守但已奪回就回原城」。他們回來時由登入落點判斷（ADR 0014 決定二、三）。
+
 ### 同一位玩家的檢查：後到的請求不丟棄，移動前重讀城鎮表
 
 `Enforce` 對一位玩家一次只跑一個檢查，但後到的請求不再被丟掉。HUD、NPC 或傳送門的檢查手上可能是換旗**之前**讀的城鎮表；失城事件的掃描若因為「已有檢查在跑」被丟棄，待命不動的玩家就留在失守的城裡（規格：在失城待命的玩家回己方主城）。現在檢查槽是一筆 `{ started, again }`：檢查進行中又有請求時只標記 `again`，目前的檢查結束後 `Recheck` **重新讀城鎮表**再 `Enforce` 一次（用剛讀到的表，不用那個請求帶來的表）。整段檢查包在 `pcall` 裡，槽一定會清掉；槽另有租期（`EnforceLeaseSeconds`，30 秒），回呼一直沒回來時下一個請求接手舊檢查，舊回呼之後即使回來也什麼都不做；玩家離開時槽也一併清除。
@@ -36,6 +38,7 @@
 - 城鎮 HUD 的兵力仍只在進入城鎮與排隊回到 IDLE 時重讀，不是即時推送。
 - 重複的城鎮事件與動作時複查可能同時對一位玩家觸發；上面的檢查槽讓同一位玩家一次只跑一個檢查，後到的請求排在後面再查一次。
 - 一張已被保留（`SAVING` 起）的票券若封存失敗而退回等待狀態，玩家會留在失守的城裡，直到下一個城鎮動作的複查；`Vacate` 重試用盡、或 `Evict` 重讀城鎮表失敗時也是如此（都已記 `[VRF]`）。
+- 斷線中的玩家不被失城清掃移動（#109）：他們留在原地，直到重連或重新登入時由登入落點判斷，不再要求下一個城鎮動作。
 
 ## 留給 #108（已由 ADR 0013 處理）
 

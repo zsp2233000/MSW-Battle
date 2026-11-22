@@ -202,6 +202,25 @@ test('a war ticket closed in the static room puts the player where the match lea
   assert.match(body(text, 'MoveHome'), /_FactionWarAttack:LandingFor\(userId, ticket\)/, 'the room-side return is unchanged');
 });
 
+// ---- the documents agree with the code ---------------------------------------------------------------------------------------
+
+test('ADR 0014 records the decisions in glossary vocabulary, and ADR 0011 / 0012 no longer leave #109 open', () => {
+  const glossary = source('CONTEXT.md');
+  assert.match(glossary, /\*\*登入落點\*\*:/, 'the glossary names the concept');
+  const entry = term => glossary.match(new RegExp(`\\*\\*${term}\\*\\*:[^]*?_Avoid_: ([^\\n]+)`));
+  const avoided = term => entry(term)[1].replace(/（.*$/, '').split('、').map(word => word.trim()).filter(Boolean);
+  const forbidden = [...avoided('換旗次數'), ...avoided('過期戰果'), ...avoided('登入落點'), '失效戰果', '免扣'];
+  const text = adr('0014');
+  for (const word of forbidden) assert.ok(!text.includes(word), `ADR 0014 does not use "${word}"`);
+  for (const name of ['登入落點', '戰果', '奪城', '過期戰果', '守衛']) assert.ok(text.includes(name), `ADR 0014 speaks of ${name}`);
+  for (const symbol of ['CountryWarTownV1', 'PlaceAtLogin', 'IsOffline', 'RearmExperienceReceipt', 'Rejoin', 'FindRoom', 'OutcomeFrom', 'LandAfterRestore', 'NoticeText', 'departFailed']) assert.ok(text.includes(symbol), `ADR 0014 names ${symbol}`);
+  assert.match(text, /#110/, 'what stays open goes to #110');
+  assert.doesNotMatch(adr('0011'), /屬 #109。/, 'ADR 0011 no longer says the guard ticket details belong to #109');
+  assert.match(adr('0011'), /ADR 0014/, 'ADR 0011 points at the decision');
+  assert.match(adr('0012'), /OutcomeFrom/, 'ADR 0012 says the record rebuilds the outcome');
+  assert.match(adr('0012'), /IsOffline/, 'ADR 0012 says the sweep leaves a disconnected player alone');
+});
+
 test('rooms are looked up behind the transfer adapter, which the fault adapter can hide in Maker', () => {
   const transfer = source('RootDesk/MyDesk/Matchmaking/MatchTransfer.mlua');
   const faults = source('RootDesk/MyDesk/Matchmaking/MatchFaults.mlua');
