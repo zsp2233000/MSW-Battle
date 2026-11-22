@@ -99,6 +99,20 @@ script MatchFlow extends Logic
     end
 
     @ExecSpace("ServerOnly")
+    method any MatchMap()
+        -- The map of the match this room runs, or nil in a room that has none (the static room).
+        local map = _EntityService:GetEntityByPath("/maps/matchprobe")
+        return isvalid(map) and map or nil
+    end
+
+    @ExecSpace("ServerOnly")
+    method any Battle()
+        -- The battle session of this room's match map, or nil when there is none.
+        local map = self:MatchMap()
+        return map ~= nil and map:GetComponent("script.BattleSession") or nil
+    end
+
+    @ExecSpace("ServerOnly")
     method void PublishState(string userId, string message)
         -- Publish private presentation state without exposing capsule contents or accepting client identities.
         if self:Player(userId) == nil then return end
@@ -107,8 +121,8 @@ script MatchFlow extends Logic
         local started = ticket ~= nil and ticket.data.started or 0
         local inMatchRoom = ticket ~= nil and state == "IN_ROOM" and _RoomService:IsInstanceRoom() and _RoomService.RoomKey == ticket.data.matchKey
         local count = inMatchRoom and #_UserService.UserEntities.Values or 0
-        local map = inMatchRoom and _EntityService:GetEntityByPath("/maps/matchprobe") or nil
-        local battle = isvalid(map) and map:GetComponent("script.BattleSession") or nil
+        local map = inMatchRoom and self:MatchMap() or nil
+        local battle = inMatchRoom and self:Battle() or nil
         local flow = isvalid(map) and map:GetFirstChildComponentByTypeName("script.MatchedBattle", true) or nil
         local summary = ticket ~= nil and ticket.data.summary or ""
         local attempt = ticket ~= nil and ticket.data.attempt or ""
@@ -967,8 +981,7 @@ script MatchFlow extends Logic
     @ExecSpace("ServerOnly")
     method void RearmExperience(string userId)
         -- A reconnected client starts with no receipt, so the one already sent to this entity goes out again (the battle sends each receipt once per entity).
-        local map = _EntityService:GetEntityByPath("/maps/matchprobe")
-        local battle = isvalid(map) and map:GetComponent("script.BattleSession") or nil
+        local battle = self:Battle()
         if isvalid(battle) then
             battle:RearmExperienceReceipt(userId)
         else
@@ -1080,8 +1093,7 @@ script MatchFlow extends Logic
         self._T.failures[userId] = nil
         local ticket = self._T.records[userId]
         if _RoomService:IsInstanceRoom() then
-            local map = _EntityService:GetEntityByPath("/maps/matchprobe")
-            local battle = isvalid(map) and map:GetComponent("script.BattleSession") or nil
+            local battle = self:Battle()
             local profile = player.PlayerComponent.ProfileCode
             if isvalid(battle) and battle:IsBattleActive() and (profile == battle.HomeProfile or profile == battle.AwayProfile) then self:Report(userId, { code = "BATTLE_IN_PROGRESS" }) return end
             if ticket == nil or ticket.data.state == "CANCELLED" or ticket.data.state == "RETURNED" then

@@ -79,6 +79,11 @@ script FactionWar extends Logic
         return towns
     end
 
+    method boolean IsMissing(any code, any raw)
+        -- A storage read that found nothing: the key is absent (1000002), or the read worked and returned no value.
+        return code == 1000002 or (code == 0 and raw == nil)
+    end
+
     method string StorageOwner()
         -- The town document is a world-wide table; the storage boundary addresses it as "global:<name>".
         return _FormationStorage.GlobalPrefix .. self.TownStorageName
@@ -88,7 +93,7 @@ script FactionWar extends Logic
     method void ReadTownsRaw(any complete)
         -- Read the town document together with its exact stored bytes (nil while nothing is stored yet); a swap names those bytes.
         _FormationStorage:Read(self:StorageOwner(), self.TownStorageKey, function(code, key, raw)
-            if code == 1000002 or (code == 0 and raw == nil) then
+            if self:IsMissing(code, raw) then
                 complete(self:InitialTowns(), nil)
             elseif code == 0 then
                 local towns = self:DecodeTowns(raw)
@@ -163,11 +168,12 @@ script FactionWar extends Logic
     end
 
     @ExecSpace("ServerOnly")
-    method void ReadFaction(string profile, any complete)
-        _FormationStorage:Read(profile, self.FactionKey, function(code, key, raw)
-            if code == 1000002 or (code == 0 and raw == nil) then
+    method void ReadProfileKey(string profile, string storageKey, any accepts, any complete)
+        -- One small per-profile value: "" when nothing was stored yet, the value itself when accepts(raw) says it is one, nil when storage failed or holds something else.
+        _FormationStorage:Read(profile, storageKey, function(code, stored, raw)
+            if self:IsMissing(code, raw) then
                 complete("")
-            elseif code == 0 and (raw == "RED" or raw == "BLUE") then
+            elseif code == 0 and accepts(raw) then
                 complete(raw)
             else
                 complete(nil)
@@ -176,27 +182,29 @@ script FactionWar extends Logic
     end
 
     @ExecSpace("ServerOnly")
+    method void ReadFaction(string profile, any complete)
+        -- The player's faction: "" when none was chosen yet, nil when storage failed or holds something that is no faction.
+        self:ReadProfileKey(profile, self.FactionKey, function(raw) return raw == "RED" or raw == "BLUE" end, complete)
+    end
+
+    @ExecSpace("ServerOnly")
     method void ReadTown(string profile, any complete)
         -- The last town the player stood in: "" when none was stored yet, nil when storage failed or holds something that is no town.
-        _FormationStorage:Read(profile, self.TownKey, function(code, key, raw)
-            if code == 1000002 or (code == 0 and raw == nil) then
-                complete("")
-            elseif code == 0 and self:IsTown(raw) then
-                complete(raw)
-            else
-                complete(nil)
-            end
-        end)
+        self:ReadProfileKey(profile, self.TownKey, function(raw) return self:IsTown(raw) end, complete)
     end
 
     @ExecSpace("ServerOnly")
     method void Remember(string profile, string town)
         -- Keep the last town a player stood in so a later login can bring them back. Best effort: a failed write only costs that one login placement.
         -- One write per profile runs at a time; a newer town that arrives meanwhile is written when the running one ends.
-        if profile == "" or not self:IsTown(town) then return end
+        if profile == "" or not self:IsTown(town) then
+            log("[VRF][FactionWar] town remember skipped profile=" .. profile .. " town=" .. town .. "; no profile or not a town")
+            return
+        end
         local running = self._T.remembering[profile]
         if running ~= nil then
             running.want = town
+            log("[VRF][FactionWar] town remember coalesced profile=" .. profile .. " town=" .. town .. "; written when the running write ends")
             return
         end
         running = { want = town }
@@ -216,7 +224,7 @@ script FactionWar extends Logic
             end
         end
         _FormationStorage:Read(profile, self.TownKey, function(code, key, raw)
-            local missing = code == 1000002 or (code == 0 and raw == nil)
+            local missing = self:IsMissing(code, raw)
             if not missing and code ~= 0 then
                 log("[VRF][FactionWar] town not remembered profile=" .. profile .. " town=" .. town .. " read code=" .. tostring(code))
                 done()

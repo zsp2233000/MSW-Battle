@@ -94,8 +94,20 @@ test('the last town is one small per-profile key written through the storage bou
   const text = war();
   assert.match(text, /property string TownKey = "CountryWarTownV1"/, 'a key of its own next to the faction key');
   for (const name of ['ReadTown', 'Remember', 'StoreTown']) assert.ok(methods(text).includes(name), `${name} exists`);
-  assert.match(body(text, 'ReadTown'), /_FormationStorage:Read\(profile, self\.TownKey/, 'it reads through the same boundary as the faction');
-  assert.match(body(text, 'ReadTown'), /complete\(nil\)/, 'a storage error or a value that is no town reads as unreadable, never as a guess');
+  // The faction and the last town are the same kind of small per-profile value, so one reader serves both.
+  assert.ok(methods(text).includes('ReadProfileKey') && methods(text).includes('IsMissing'), 'one reader of a per-profile key and one rule for "nothing stored yet"');
+  assert.equal(tag(text, 'IsMissing'), '', 'the missing-value rule is pure');
+  assert.match(body(text, 'ReadTown'), /self:ReadProfileKey\(profile, self\.TownKey, function\(raw\) return self:IsTown\(raw\) end, complete\)/, 'it reads through the same boundary as the faction');
+  assert.match(body(text, 'ReadFaction'), /self:ReadProfileKey\(profile, self\.FactionKey, function\(raw\) return raw == "RED" or raw == "BLUE" end, complete\)/, 'the faction is the same reader with its own accepted values');
+  const reader = body(text, 'ReadProfileKey');
+  assert.match(reader, /_FormationStorage:Read\(profile, storageKey/, 'it reads through FormationStorage');
+  assert.match(reader, /complete\(""\)[^]*complete\(raw\)[^]*complete\(nil\)/, 'nothing stored reads as "", a value that is accepted as itself, a storage error or any other value as unreadable, never as a guess');
+  assert.equal((text.match(/code == 0 and raw == nil/g) || []).length, 1, 'the "nothing stored yet" test is written once, in IsMissing');
+  assert.match(body(text, 'IsMissing'), /code == 1000002 or \(code == 0 and raw == nil\)/);
+  for (const name of ['ReadTownsRaw', 'StoreTown']) assert.match(body(text, name), /self:IsMissing\(code, raw\)/, `${name} asks the one rule`);
+  assert.deepEqual(silentExits(body(text, 'Remember')), [], 'a request that is refused or coalesced says so instead of returning silently');
+  assert.match(body(text, 'Remember'), /town remember skipped[^\n]*\n\s+return/, 'the invalid input is logged');
+  assert.match(body(text, 'Remember'), /town remember coalesced[^\n]*\n\s+return/, 'the write that is already running is logged');
   const store = body(text, 'StoreTown');
   assert.match(store, /_FormationStorage:Write\(profile, self\.TownKey/, 'the write goes through FormationStorage');
   assert.match(store, /raw == town/, 'an unchanged town costs no write');
@@ -141,6 +153,15 @@ test('FactionWar judges a returning player once per login: the town they stand i
   assert.match(place, /login placement unreadable/, 'unreadable data does nothing and says so');
   assert.doesNotMatch(text, /Environment:/, 'no environment branch');
   assert.match(handler(text, 'HandleUserLeaveEvent'), /placing\[event\.UserId\] = nil/, 'a leaver frees the slot');
+});
+
+test('the match room\'s battle session is looked up in one place', () => {
+  const text = flow();
+  assert.ok(methods(text).includes('Battle') && methods(text).includes('MatchMap'), 'one lookup of the match map and one of its battle');
+  assert.equal((text.match(/"\/maps\/matchprobe"/g) || []).length, 1, 'the path is written once');
+  assert.equal((text.match(/script\.BattleSession/g) || []).length, 1, 'and so is the component');
+  for (const name of ['PublishState', 'RearmExperience', 'ReturnForUser']) assert.match(body(text, name), /self:Battle\(\)/, `${name} asks Battle()`);
+  assert.match(body(text, 'RearmExperience'), /isvalid\(battle\)[^]*RearmExperienceReceipt\(userId\)/, 'a room without a battle is still logged and skipped');
 });
 
 test('MatchFlow hands every login to FactionWar after its own recovery, once the ticket state is settled', () => {
