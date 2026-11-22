@@ -8,6 +8,15 @@ script MatchTransfer extends Logic
     end
 
     @ExecSpace("ServerOnly")
+    method any FindRoom(string matchKey)
+        -- The match room that still runs in this world instance, or nil; a room of another world instance is not visible here.
+        if matchKey == "" then return nil end
+        local found, room = _RoomService.InstanceRooms:TryGetValue(matchKey)
+        if found and room ~= nil and room:IsValid() then return room end
+        return nil
+    end
+
+    @ExecSpace("ServerOnly")
     method boolean MoveToLobby(string userId)
         -- Preserve the return capsule until native movement and restoration both succeed.
         return _RoomService:MoveUserToStaticRoom(userId, "formationlobby")

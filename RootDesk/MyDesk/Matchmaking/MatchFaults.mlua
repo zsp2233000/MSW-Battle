@@ -25,6 +25,7 @@ script MatchFaults extends Logic
         self._T.entryFailures = 0
         self._T.returnFailures = 0
         self._T.keepQueue = false
+        self._T.hideRooms = false
     end
 
     @ExecSpace("ServerOnly")
@@ -51,6 +52,14 @@ script MatchFaults extends Logic
         if not Environment:IsMakerPlay() then return end
         self:Install()
         self._T.keepQueue = keepQueue
+    end
+
+    @ExecSpace("ServerOnly")
+    method void ConfigureRooms(boolean hidden)
+        -- Make every match room look gone to the flow, as if the engine had reclaimed it; the rooms themselves are untouched.
+        if not Environment:IsMakerPlay() then return end
+        self:Install()
+        self._T.hideRooms = hidden
     end
 
     @ExecSpace("ServerOnly")
@@ -124,6 +133,13 @@ script MatchFaults extends Logic
             return false
         end
         return self._T.transfer:MoveToMatch(room, userId)
+    end
+
+    @ExecSpace("ServerOnly")
+    method any FindRoom(string matchKey)
+        -- Forward the room lookup, unless a probe armed the room as gone.
+        if self._T.hideRooms then return nil end
+        return self._T.transfer:FindRoom(matchKey)
     end
 
     @ExecSpace("ServerOnly")

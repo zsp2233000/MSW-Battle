@@ -2,6 +2,7 @@
 script FactionWar extends Logic
 
     property string FactionKey = "CountryWarFactionV1"
+    property string TownKey = "CountryWarTownV1"
     property string TownStorageName = "CountryWarV1"
     property string TownStorageKey = "Towns"
     property table TownOrder = { "nanzih", "zuoying", "gushan", "yancheng" }
@@ -9,11 +10,14 @@ script FactionWar extends Logic
     property table CapitalByFaction = { RED = "nanzih", BLUE = "yancheng" }
     property integer FullStrength = 100
     property number EnforceLeaseSeconds = 30
+    property number LoginReadySeconds = 5
 
     @ExecSpace("ServerOnly")
     method void OnBeginPlay()
         self._T.pending = {}
         self._T.evicting = {}
+        self._T.remembering = {}
+        self._T.placing = {}
         log("[VRF][FactionWar] ready")
     end
 
@@ -171,6 +175,67 @@ script FactionWar extends Logic
         end)
     end
 
+    @ExecSpace("ServerOnly")
+    method void ReadTown(string profile, any complete)
+        -- The last town the player stood in: "" when none was stored yet, nil when storage failed or holds something that is no town.
+        _FormationStorage:Read(profile, self.TownKey, function(code, key, raw)
+            if code == 1000002 or (code == 0 and raw == nil) then
+                complete("")
+            elseif code == 0 and self:IsTown(raw) then
+                complete(raw)
+            else
+                complete(nil)
+            end
+        end)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Remember(string profile, string town)
+        -- Keep the last town a player stood in so a later login can bring them back. Best effort: a failed write only costs that one login placement.
+        -- One write per profile runs at a time; a newer town that arrives meanwhile is written when the running one ends.
+        if profile == "" or not self:IsTown(town) then return end
+        local running = self._T.remembering[profile]
+        if running ~= nil then
+            running.want = town
+            return
+        end
+        running = { want = town }
+        self._T.remembering[profile] = running
+        self:StoreTown(profile, running)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void StoreTown(string profile, table running)
+        -- Read what is stored, write only a different town, and go round again if a newer town was asked for meanwhile.
+        local town = running.want
+        local function done()
+            if running.want ~= town then
+                self:StoreTown(profile, running)
+            else
+                self._T.remembering[profile] = nil
+            end
+        end
+        _FormationStorage:Read(profile, self.TownKey, function(code, key, raw)
+            local missing = code == 1000002 or (code == 0 and raw == nil)
+            if not missing and code ~= 0 then
+                log("[VRF][FactionWar] town not remembered profile=" .. profile .. " town=" .. town .. " read code=" .. tostring(code))
+                done()
+            elseif raw == town then
+                log("[VRF][FactionWar] town already remembered profile=" .. profile .. " town=" .. town)
+                done()
+            else
+                _FormationStorage:Write(profile, self.TownKey, missing and "" or raw, town, function(writeCode)
+                    if writeCode == 0 then
+                        log("[VRF][FactionWar] town remembered profile=" .. profile .. " town=" .. town)
+                    else
+                        log("[VRF][FactionWar] town not remembered profile=" .. profile .. " town=" .. town .. " write code=" .. tostring(writeCode))
+                    end
+                    done()
+                end)
+            end
+        end)
+    end
+
     @ExecSpace("Server")
     method void RequestEntry(string choice)
         if choice ~= "" and choice ~= "RED" and choice ~= "BLUE" then return end
@@ -281,6 +346,8 @@ script FactionWar extends Logic
         local movement = player.MovementComponent
         if isvalid(movement) then movement:Stop() end
         _TeleportService:TeleportToMapPosition(player, arrival.TransformComponent.WorldPosition, destination)
+        -- Gate, entry and eviction all end here, so this is where the new town is kept for the next login.
+        if isvalid(player.PlayerComponent) then self:Remember(player.PlayerComponent.ProfileCode, destination) end
         return true
     end
 
@@ -314,7 +381,15 @@ script FactionWar extends Logic
         if not self:IsTown(town) then return end
         local ids = {}
         for _, user in ipairs(_UserService.UserEntities.Values) do
-            if isvalid(user) and isvalid(user.PlayerComponent) and user.CurrentMapName == town then table.insert(ids, user.PlayerComponent.UserId) end
+            if isvalid(user) and isvalid(user.PlayerComponent) and user.CurrentMapName == town then
+                local userId = user.PlayerComponent.UserId
+                -- A disconnected player's entity may be kept for a while; it is not moved now, because the town may be taken back before they return.
+                if _MatchFlow:IsOffline(userId) then
+                    log("[VRF][FactionWar] sweep skipped offline user=" .. userId .. " town=" .. town .. "; judged when they reconnect")
+                else
+                    table.insert(ids, userId)
+                end
+            end
         end
         log("[VRF][FactionWar] sweep town=" .. town .. " present=" .. tostring(#ids))
         if #ids == 0 then return end
@@ -405,6 +480,89 @@ script FactionWar extends Logic
         return moved
     end
 
+    @ExecSpace("ServerOnly")
+    method void PlaceAtLogin(string userId, string cause, boolean owned)
+        -- Judge once per login where the player belongs: a town they stand in is kept only while their faction holds it, and a fresh arrival in the lobby goes back to the last town.
+        -- owned says a ticket (a queue, a match room, a return) still has the player; the enter and the reconnect event of one login may both ask, the second finds the first running.
+        if _RoomService:IsInstanceRoom() then return end
+        if self._T.placing[userId] ~= nil then
+            log("[VRF][FactionWar] login placement already running user=" .. userId .. " cause=" .. cause)
+            return
+        end
+        local slot = { cause = cause }
+        self._T.placing[userId] = slot
+        local ok, failure = pcall(function() self:PlaceOnce(userId, cause, owned) end)
+        if not ok then log_error("[VRF][FactionWar] login placement failed user=" .. userId .. " " .. tostring(failure)) end
+        if self._T.placing[userId] == slot then self._T.placing[userId] = nil end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void PlaceOnce(string userId, string cause, boolean owned)
+        -- The body of one placement. The login event can come before the entity has a map, so it polls for both first.
+        local player = nil
+        local ready = _FactionWarAttack:WaitWhile(function()
+            player = _UserService:GetUserEntityByUserId(userId)
+            return not (isvalid(player) and isvalid(player.PlayerComponent) and player.CurrentMapName ~= "")
+        end, self.LoginReadySeconds)
+        if not ready then
+            log("[VRF][FactionWar] login placement skipped user=" .. userId .. " cause=" .. cause .. "; the entity is not ready")
+            return
+        end
+        if _MatchFlow:IsOffline(userId) then
+            log("[VRF][FactionWar] login placement skipped user=" .. userId .. " cause=" .. cause .. "; offline, judged when they reconnect")
+            return
+        end
+        local profile = player.PlayerComponent.ProfileCode
+        local here = player.CurrentMapName
+        if self:IsTown(here) then
+            -- Arriving anywhere in a town (a return from a match room, a reconnect) keeps it for the next login, then the usual check decides whether they may stay.
+            self:Remember(profile, here)
+            if owned then
+                log("[VRF][FactionWar] login placement left to the ticket user=" .. userId .. " town=" .. here)
+                return
+            end
+            local board = _FactionWarAttack:Await(function(done) self:ReadTowns(done) end)
+            if board == nil then
+                log("[VRF][FactionWar] login placement unreadable user=" .. userId .. " town=" .. here .. "; judged at the next town action")
+                return
+            end
+            log("[VRF][FactionWar] login judged user=" .. userId .. " cause=" .. cause .. " town=" .. here)
+            self:Enforce(userId, here, board)
+            return
+        end
+        if cause ~= "enter" or here ~= "formationlobby" or owned then
+            log("[VRF][FactionWar] login placement not needed user=" .. userId .. " cause=" .. cause .. " map=" .. here .. " owned=" .. tostring(owned))
+            return
+        end
+        local faction = _FactionWarAttack:Await(function(done) self:ReadFaction(profile, done) end)
+        local home = _FactionWarAttack:Await(function(done) self:ReadTown(profile, done) end)
+        if faction == nil or home == nil then
+            log("[VRF][FactionWar] login placement unreadable user=" .. userId .. " faction=" .. tostring(faction) .. " home=" .. tostring(home) .. "; the player stays in the lobby")
+            return
+        end
+        if faction == "" or home == "" then
+            log("[VRF][FactionWar] login placement not needed user=" .. userId .. " faction=" .. faction .. " home=" .. home .. "; no faction or no last town")
+            return
+        end
+        local towns = _FactionWarAttack:Await(function(done) self:ReadTowns(done) end)
+        if towns == nil then
+            log("[VRF][FactionWar] login placement unreadable user=" .. userId .. " the town table could not be read; the player stays in the lobby")
+            return
+        end
+        -- Each read yielded: the player may have moved on, left, or gone offline again.
+        if _MatchFlow:IsOffline(userId) or _UserService:GetUserEntityByUserId(userId) ~= player or player.CurrentMapName ~= here then
+            log("[VRF][FactionWar] login placement dropped user=" .. userId .. "; the player is no longer in the lobby")
+            return
+        end
+        local destination = self:Landing(faction, home, towns)
+        local moved = self:Move(player, destination)
+        log("[VRF][FactionWar] login placed user=" .. userId .. " faction=" .. faction .. " home=" .. home .. " destination=" .. destination .. " moved=" .. tostring(moved))
+        if moved then
+            local message = destination == home and ("已回到" .. self.TownNames[destination] .. "。") or (self.TownNames[home] .. "已失守，已撤回主城。")
+            self:ReceiveTownNotice(destination, message, userId)
+        end
+    end
+
     @ExecSpace("Server")
     method void RequestTownStatus()
         local userId = senderUserId
@@ -440,5 +598,6 @@ script FactionWar extends Logic
     handler HandleUserLeaveEvent(UserLeaveEvent event)
         self._T.pending[event.UserId] = nil
         self._T.evicting[event.UserId] = nil
+        self._T.placing[event.UserId] = nil
     end
 end

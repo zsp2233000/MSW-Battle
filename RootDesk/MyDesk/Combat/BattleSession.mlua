@@ -683,6 +683,16 @@ script BattleSession extends Component
         end
     end
 
+    @ExecSpace("ServerOnly")
+    method void RearmExperienceReceipt(string userId)
+        -- A player who reconnects starts with no receipt on the client, so the one already sent to this entity goes out again at the next update. Nothing is settled again.
+        local user = _UserService:GetUserEntityByUserId(userId)
+        if isvalid(user) and self._T.experienceSent ~= nil and self._T.experienceSent[user] ~= nil then
+            self._T.experienceSent[user] = nil
+            log("[VRF][BattleSession] experience receipt re-armed user=" .. userId)
+        end
+    end
+
     @ExecSpace("Client")
     method void ReceiveExperienceResult(table receipt)
         -- Retain early targeted receipts until player/map synchronization catches up.

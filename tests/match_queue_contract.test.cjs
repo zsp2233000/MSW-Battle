@@ -7,7 +7,7 @@ const body = (source, name) => source.match(new RegExp(`method \\w+ ${name}\\([^
 
 // The seam between the match flow and whatever finds opponents. MatchFlow owns the flow; adapters own the variation.
 const QUEUE_PORT = ['Kind', 'Configured', 'Enqueue', 'Poll', 'Cancel', 'Lookup', 'Destinations', 'Warp', 'Withdraw', 'Release', 'Reclaim'];
-const TRANSFER_PORT = ['MoveToMatch', 'MoveToLobby', 'MoveToTown'];
+const TRANSFER_PORT = ['MoveToMatch', 'MoveToLobby', 'MoveToTown', 'FindRoom'];
 
 test('every queue adapter implements the whole queue port', () => {
   for (const adapter of ['MatchQueueLocal', 'MatchQueueNative', 'MatchFaults']) {
@@ -44,7 +44,7 @@ test('queue outcomes reach the flow only as MATCHED, EXPIRED, FAILED or REJECTED
 
 test('fault injection is Maker only and wraps the live adapters instead of editing the flow', () => {
   const faults = read('MatchFaults');
-  for (const name of ['ConfigureCancel', 'ConfigureTransfer', 'ConfigureWithdraw']) {
+  for (const name of ['ConfigureCancel', 'ConfigureTransfer', 'ConfigureWithdraw', 'ConfigureRooms']) {
     assert.match(body(faults, name), /Environment:IsMakerPlay\(\)/, `${name} refuses to arm outside Maker`);
   }
   assert.match(body(faults, 'Install'), /_MatchFlow:UseAdapters\(/);
