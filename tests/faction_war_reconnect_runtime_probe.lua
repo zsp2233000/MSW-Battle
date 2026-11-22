@@ -162,8 +162,8 @@ local ok, reason = pcall(function()
 
     -- The room lookup lives behind the transfer adapter; the fault adapter can make every room look gone (Maker only).
     assert(flow:TransferAdapter():FindRoom("") == nil and flow:TransferAdapter():FindRoom("probe-109-no-such-room") == nil, "no room, no handle")
-    -- A real (empty) instance room; the engine destroys it by itself after the 5 s wait for a first user.
-    local room = _RoomService:CreateInstanceRoom("probe-109-room", { "matchprobe" }, 5)
+    -- A real (empty) instance room; the engine destroys it by itself after the 30 s wait for a first user (the engine rejects a 5 s wait with LEA-3021).
+    local room = _RoomService:CreateInstanceRoom("probe-109-room", { "matchprobe" }, 30)
     assert(room ~= nil and room:IsValid(), "a room to look up")
     local found = flow:TransferAdapter():FindRoom("probe-109-room")
     assert(found ~= nil and found.InstanceKey == "probe-109-room", "the real adapter finds a room that runs in this world instance")

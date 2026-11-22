@@ -32,14 +32,21 @@
 
 `SweepFallen` 跳過 `MatchFlow:IsOffline(userId)` 為真的人，並記 `sweep skipped offline`。引擎會把斷線的實體保留一段時間；若在失城當下就把他移走，之後城鎮在他回來前被奪回，就違反「曾失守但已奪回就回原城」。他們在登入或重連時由 `PlaceAtLogin` 依當下的城鎮表判斷。
 
-## 決定四：「戰鬥繼續」靠引擎保留房間，不補算
+## 決定四：「戰鬥繼續」靠引擎保留房間，不補算；最後一位玩家真的離開，房間就沒了
 
-Maker 實測：只有一位真人的守衛戰，真人被踢出後比賽房仍存活 60 秒以上，戰鬥自己打到結果，`result published once` 與結算各執行一次。所以不寫「離線時無頭快轉到結果」：那要在離開處理裡跑很長的迴圈，且離開處理有時限。房間被回收後的行為沒有改：該局中止、不扣兵力、沒有經驗（ADR 0003 已記）。已發布世界保留離線實體與房間多久，沒有驗證過，留給 #110。
+Maker 實測兩種離線：
+
+- **實體被保留**（`Depart` 加上合成的 `UserReconnectEvent`，等同引擎保留的斷線實體）：房間照常存在，戰鬥自己打到結果，`result published once` 與結算各執行一次，離線玩家的經驗也照算。
+- **真的離開**（`KickUser`，實體消失）：只要房間裡還有別的玩家，房間照常存活（真人對真人，另一方還在）。但**最後一位玩家離開後，引擎約 1 秒內回收房間**（`BattleCleanup`、`MatchCleanup`，`InstanceRooms` 清空），戰鬥沒有結果、沒有結算、沒有經驗。守衛戰只有一位真人，所以他真的離開就是這個情形。這個局面等於該局中止、不扣兵力（ADR 0003），重新登入時 `Recover` 關閉過期票券，玩家回到出發的城鎮。
+
+所以不寫「離線時無頭快轉到結果」：那要在離開處理裡跑很長的迴圈，離開處理有時限，而且房間在最後一人離開後 1 秒就被回收，來不及。規格「已開戰的真人與守衛戰都繼續」因此只在「實體被保留」或「房間裡還有別人」時成立；網路斷線時引擎保留實體多久、之後才送出 Leave，已發布世界沒有驗證過，這決定守衛戰的單人斷線能撐多久，留給 #110。
+
+> 更正：本 ADR 初稿與探索筆記曾寫「只有一位真人的守衛戰，真人被踢出後比賽房仍存活 60 秒以上」。那次踢人是從 `server_main` 送出，只移除了靜態房對玩家的視圖，玩家其實還在比賽房裡。
 
 ## 決定五：重連回同一場
 
 - **實體還在**（`UserReconnectEvent` 發生在比賽房）：以前這個處理器在比賽房直接 return，而 `Depart` 又丟掉了該玩家的票券紀錄，狀態會變成 `ENTRY_FAILED`、返回鈕回大廳。現在 `Recover`（`IN_ROOM` 且房間鍵相同就回報 `ARRIVED`）加 `PublishState`，並呼叫 `BattleSession:RearmExperienceReceipt`：怪物經驗收據每個實體只發一次，重連的 client 沒有舊收據，所以清掉那個實體的標記，下一次更新重發。這不是重新結算：不呼叫 `MonsterLevelStorage:Settle`，也沒有任何兵力或經驗被改。不重新入場：保留的實體本來就在房間裡。
-- **實體已消失**（真的離開後重新登入）：票券仍是 `IN_ROOM`。靜態房的 `Recover` 先 `Rejoin`：`TransferAdapter:FindRoom(matchKey)`（`_RoomService.InstanceRooms:TryGetValue`，且 `IsValid()`）找得到比賽房，就用和入場相同的 `MoveToMatch` 送回去，由房間自己的協調者接手（`UserEnterEvent` → `Recover` → `ARRIVED`）。靜態房讀不到別的房間的戰鬥階段，所以不判斷「戰鬥是否已到結果」：已到結果的房間也進去，玩家看到結果與經驗收據，按返回時依該房間自己的戰果落點。找不到房間就和以前一樣：關閉票券（`STALE_ROOM_RECOVERY`），再走決定六的落點。`Admit` 在移動期間標記 `_T.moving`，`Rejoin` 看到就不與它搶。只限同一個 world instance 的房間；別的 instance 的房間在這裡看不到，留給 #110。
+- **實體已消失**（真的離開後重新登入）：票券仍是 `IN_ROOM`。房間裡還有別的玩家時房間還在（決定四），靜態房的 `Recover` 先 `Rejoin`：`TransferAdapter:FindRoom(matchKey)`（`_RoomService.InstanceRooms:TryGetValue`，且 `IsValid()`）找得到比賽房，就用和入場相同的 `MoveToMatch` 送回去，由房間自己的協調者接手（`UserEnterEvent` → `Recover` → `ARRIVED`）。靜態房讀不到別的房間的戰鬥階段，所以不判斷「戰鬥是否已到結果」：已到結果的房間也進去，玩家看到結果與經驗收據，按返回時依該房間自己的戰果落點。找不到房間就和以前一樣：關閉票券（`STALE_ROOM_RECOVERY`），再走決定六的落點。`Admit` 在移動期間標記 `_T.moving`，`Rejoin` 看到就不與它搶。只限同一個 world instance 的房間；別的 instance 的房間在這裡看不到，留給 #110。
 - 房間查詢放在轉接 adapter（`MatchTransfer:FindRoom`），`MatchFaults:ConfigureRooms(true)` 可以在 Maker 裡讓所有房間「看起來已被回收」，不必等引擎回收就能走「房間已消失」那條路徑。
 
 ## 決定六：戰後重連，戰果從已存的紀錄重建
@@ -62,7 +69,7 @@ Maker 實測：只有一位真人的守衛戰，真人被踢出後比賽房仍�
 
 ## 已知缺口
 
-- 已發布世界保留離線實體與比賽房的時間沒有驗證；跨 world instance 回到原比賽房也做不到（#110）。
+- 已發布世界保留離線實體與比賽房的時間沒有驗證；單人的守衛戰在玩家真的離開時中止（決定四），能撐多久取決於這個時間；跨 world instance 回到原比賽房也做不到（#110）。
 - 最後城鎮寫入失敗，該玩家下次登入留在大廳；城鎮表讀不到時也一樣。
 - 房間被回收後，勝負與怪物經驗收據不再顯示，只剩一行城鎮提示。
 - `settled` 只留 20 筆（ADR 0012）：更晚才重新登入、且之後又有 20 場以上結算的玩家，戰果讀成沒有奪城。

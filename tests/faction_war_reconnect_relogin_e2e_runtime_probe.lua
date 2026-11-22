@@ -1,9 +1,9 @@
 -- Maker end-to-end for #109 (P6): a player really leaves in the middle of a guard fight and logs in again with a NEW user id (KickUser, then add_virtual_player
 -- -profile_code wp2625). Two modes, set MODE below; each run is a fresh Play (stop, refresh, play) with one virtual player:
 --   add_virtual_player -profile_code wp2625 -nickname Relogin109   (RED, Zuoying, 4 units; Gushan is seeded at 10, so a guard win captures it)
--- REJOIN  the room is still running when the player logs in again: the ticket still says IN_ROOM, the static room finds the room (InstanceRooms) and moves
---         the new entity back into it ("[VRF][MatchFlow] rejoin match=... moved=true", then the room's own "ARRIVED"); the fight ends there, the player
---         returns by the normal button and lands by the room's result
+-- ABORTED the only player really leaves in the middle of the fight: the engine reclaims a match room the moment its last user leaves (measured in Maker,
+--         about 1 s), so the fight never reaches a result and nothing is settled. The login finds no room ("[VRF][MatchFlow] rejoin match=... room=none"),
+--         closes the stale ticket ("STALE_ROOM_RECOVERY"), finds no stored result and lands the player in the town they set out from, with the towns untouched
 -- STALE   the match was settled and the room is gone (the fault adapter hides every room, as if the engine had reclaimed it): the login closes the stale ticket
 --         ("STALE_ROOM_RECOVERY", "RETURN_COMPLETED"), the outcome is rebuilt from the stored record ("[VRF][FactionWarAttack] landing ... rebuilt=true",
 --         the static room holds no outcome of its own) and the conqueror ends in Gushan with a town notice
@@ -12,19 +12,18 @@
 -- server_instance_<matchKey>; the key is in the "QUEUED match=" line).
 --   1 SETUP    ~30 s, wait "SETUP PASS"
 --   2 QUEUE    AttackFor Gushan; the guard claims the ticket after 10 s and the player is moved into the room ("QUEUED match=<key>")
---   3 KICK     room. REJOIN: right after "[VRF][MatchedBattle] admission started=true" (mid-fight): KickUser. STALE: waits (up to 5 minutes) until the stored
---              record of this match exists, then KickUser. The player's entity lives in the room, so the kick is dispatched there; if it has no effect there,
---              dispatch the same step in server_main. Then (REJOIN) run the console command above at once, or (STALE) run STEP 4 first
+--   3 KICK     room. ABORTED: right after "[VRF][MatchedBattle] admission started=true" (mid-fight): KickUser. STALE: waits (up to 5 minutes) until the stored
+--              record of this match exists, then KickUser. The player's entity lives in the room, so the kick MUST be dispatched there (a kick sent from server_main only removes the static room's
+--              view of the player: the entity stays in the match room and keeps it alive). Then (ABORTED) run the console command above at once, or (STALE) run STEP 4 first
 --   4 PREPARE  server_main, STALE only: the fault adapter hides every room. Then run the console command above
 --   5 CHECK    server_main, after the new virtual player appeared.
---              REJOIN: the new entity went back into the room (the room counts a user again) ("REJOIN PASS"); then wait for the result
+--              ABORTED: no room is left, the ticket is closed, the new entity stands in Zuoying (where it set out from), Gushan is still BLUE / 10 with no stored
+--                       result and the match is not in the experience history ("ABORTED PASS")
 --              STALE:  the new entity is in Gushan, holds no ticket, the town document is untouched, the match is in the history once ("STALE PASS");
 --                      read the log for "login placement left to the ticket" and the town notice path ("landing after restore ... to=gushan")
---   6 RETURN   room, REJOIN only, after "[VRF][MatchedBattle] result published once": ReturnForUser for the player in the room
---   7 LANDING  server_main, REJOIN only: the player is in Gushan (Zuoying after a guard loss), unlocked, the match is in the history once ("LANDING PASS")
 --   8 CLEANUP  puts the rooms back, deletes the war town storage
 -- Expected [VRF] lines (read with logs): see tests/README.md, "Disconnect and reconnect (#109)".
-local MODE = "REJOIN"
+local MODE = "ABORTED"
 local STEP = 1
 local PROFILE = "wp2625"
 local function await(predicate, tries) for _ = 1, tries or 300 do if predicate() then return true end wait(0.1) end return false end
@@ -127,11 +126,19 @@ local ok, reason = pcall(function()
     elseif STEP == 5 then
         local key = matchKey()
         assert(key ~= "", "the ticket on storage knows its match")
-        if MODE == "REJOIN" then
+        if MODE == "ABORTED" then
             local found, room = _RoomService.InstanceRooms:TryGetValue(key)
-            assert(found and room ~= nil and room:IsValid(), "the room is still there")
-            assert(await(function() return room:GetUserCount() >= 1 end, 150), "the new entity went back into the room")
-            log("[VRF][ReconnectRelogin] REJOIN PASS match=" .. key .. "; wait for [VRF][MatchedBattle] result published once, run STEP 6 in the room, then STEP 7")
+            assert(not (found and room ~= nil and room:IsValid()), "the engine reclaimed the room when its last user left")
+            assert(await(function()
+                a = find()
+                return isvalid(a) and a.CurrentMapName == "zuoying"
+            end, 250), "the new entity is back where it set out from")
+            userId = a.PlayerComponent.UserId
+            assert(await(function() return _MatchFlow._T.records[userId] == nil and not _FactionWarAttack:IsEngaged(userId) end, 100), "the stale ticket is closed and nothing is locked")
+            local towns = readTowns()
+            assert(towns.gushan.owner == "BLUE" and towns.gushan.strength == 10 and recordsOf(towns, key) == 0 and #(towns.settled or {}) == 0, "nothing was settled")
+            assert(creditedOnce(key) == 0, "no experience was credited for a match that never finished")
+            log("[VRF][ReconnectRelogin] ABORTED PASS match=" .. key)
         else
             assert(await(function()
                 a = find()
@@ -145,25 +152,6 @@ local ok, reason = pcall(function()
             assert(creditedOnce(key) == 1, "the match is in the history exactly once")
             log("[VRF][ReconnectRelogin] STALE PASS match=" .. key)
         end
-    elseif STEP == 6 then
-        local user = find()
-        assert(isvalid(user), "the player is in the room")
-        _MatchFlow:ReturnForUser(user.PlayerComponent.UserId)
-        log("[VRF][ReconnectRelogin] RETURN issued")
-    elseif STEP == 7 then
-        local towns = readTowns()
-        local captured = towns.gushan.owner == "RED"
-        local expected = captured and "gushan" or "zuoying"
-        assert(await(function()
-            a = find()
-            return isvalid(a) and a.CurrentMapName == expected
-        end, 600), "landed in " .. expected)
-        userId = a.PlayerComponent.UserId
-        assert(await(function() return not _FactionWarAttack:IsEngaged(userId) end), "unlocked")
-        local key = matchKey()
-        assert(key ~= "" and creditedOnce(key) == 1, "the match is in the history exactly once")
-        if captured then assert(recordsOf(towns, key) == 1 and #towns.settled == 1, "one settlement, one capture") end
-        log("[VRF][ReconnectRelogin] LANDING PASS in " .. expected)
     elseif STEP == 8 then
         _FactionWarGuard.WaitSeconds = 10
         _MatchFaults:Remove()

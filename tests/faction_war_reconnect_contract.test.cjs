@@ -231,7 +231,8 @@ const probes = {
   'faction_war_reconnect_guard_e2e_runtime_probe.lua': { prefix: 'ReconnectGuard', pass: /LANDING PASS/, profiles: ['wp2622'], steps: ['SETUP PASS', 'DISCONNECT PASS', 'RESULT PASS', 'RECONNECT PASS', 'REDELIVER PASS', 'LANDING PASS', 'CLEANUP'], guard: 10 },
   'faction_war_reconnect_human_e2e_runtime_probe.lua': { prefix: 'ReconnectHuman', pass: /LANDING PASS/, profiles: ['wp2623', 'wp2624'], steps: ['SETUP PASS', 'DISCONNECT PASS', 'RESULT PASS', 'RECONNECT PASS', 'REDELIVER PASS', 'LANDING PASS', 'CLEANUP'], guard: 600 },
   'faction_war_reconnect_login_runtime_probe.lua': { prefix: 'ReconnectLogin', pass: /<CASE> PASS|" PASS"/, profiles: ['wp2625', 'wp2626'], steps: ['FRIENDLY', 'FALLEN', 'RETAKEN', 'NOFACTION', 'NOTOWN', 'OFFLINE_FALL', 'OFFLINE_RETAKEN', 'CLEANUP'] },
-  'faction_war_reconnect_relogin_e2e_runtime_probe.lua': { prefix: 'ReconnectRelogin', pass: /STALE PASS/, profiles: ['wp2625'], steps: ['SETUP PASS', 'REJOIN PASS', 'STALE PASS', 'LANDING PASS', 'CLEANUP'], guard: 10 },
+  'faction_war_reconnect_relogin_e2e_runtime_probe.lua': { prefix: 'ReconnectRelogin', pass: /STALE PASS/, profiles: ['wp2625'], steps: ['SETUP PASS', 'ABORTED PASS', 'STALE PASS', 'CLEANUP'], guard: 10 },
+  'faction_war_reconnect_rejoin_e2e_runtime_probe.lua': { prefix: 'ReconnectRejoin', pass: /LANDING PASS/, profiles: ['wp2623', 'wp2624'], steps: ['SETUP PASS', 'REJOIN PASS', 'RESULT PASS', 'LANDING PASS', 'CLEANUP'], guard: 600 },
 };
 
 test('the #109 probes use their own profiles and storage, number their steps and end in a pass line, as the e2e probes before them do', () => {
@@ -248,7 +249,7 @@ test('the #109 probes use their own profiles and storage, number their steps and
     if (spec.steps) assert.match(text, /^local STEP = 1$/m, `${name} is stepped by one variable`);
     if (spec.guard) {
       assert.match(text, new RegExp(`_FactionWarGuard\\.WaitSeconds = ${spec.guard}\\b`), `${name} sets the guard clock it needs (${spec.guard} s) explicitly`);
-      if (spec.guard === 600) assert.match(text, /STEP == 9 then\n\s+_FactionWarGuard\.WaitSeconds = 10/, `${name} puts the clock back in CLEANUP`);
+      if (spec.guard === 600) assert.match(text, /STEP == (?:8|9) then\n\s+_FactionWarGuard\.WaitSeconds = 10/, `${name} puts the clock back in CLEANUP`);
     }
     if (/e2e/.test(name)) assert.match(text, /DeleteGlobalDataStorageAndWait\(_FactionWar\.TownStorageName\)/, `${name} deletes the real town storage it wrote`);
   }
@@ -270,7 +271,9 @@ test('the README records the #109 probes and is honest about what has not run', 
   for (const name of Object.keys(probes)) assert.ok(section.includes(name), `the section names ${name}`);
   assert.match(section, /faction_war_reconnect_contract\.test\.cjs/, 'and the contract test');
   assert.match(section, /\| Probe \| Context \| Final line \|/, 'in the table format of the earlier sections');
-  assert.match(section, /Status: written in a worktree that cannot reach Maker, so none of the probes above has run yet/, 'it does not claim a Maker run');
+  assert.match(section, /Verified in Maker \(2026-11-22/, 'it records the Maker run with its date');
+  assert.doesNotMatch(section, /none of the probes above has run yet/, 'and no longer says nothing has run');
+  assert.match(section, /last user really leaves is reclaimed by the engine/, 'and records that an empty match room is reclaimed at once');
   assert.match(section, /\nNot verified: /, 'and lists what is not verified');
   assert.match(section, /try_reconnect/, 'including the real network drop');
 });
