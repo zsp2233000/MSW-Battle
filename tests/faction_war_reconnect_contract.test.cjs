@@ -283,6 +283,12 @@ test('ADR 0014 records the decisions in glossary vocabulary, and ADR 0011 / 0012
   assert.match(text, /IsLockedForUser/, 'a handoff that still locks the profile also holds the player');
   assert.doesNotMatch(adr('0011'), /屬 #109。/, 'ADR 0011 no longer says the guard ticket details belong to #109');
   assert.match(adr('0011'), /ADR 0014/, 'ADR 0011 points at the decision');
+  assert.doesNotMatch(adr('0011'), /守衛戰進行中離線時戰鬥照打、結算一次/, 'ADR 0011 no longer promises that every offline guard fight is played out and settled once');
+  assert.match(adr('0011'), /只有一位真人的守衛戰[^\n]*真的離開[^\n]*約 1 秒內回收[^\n]*中止/, 'a lone human who really leaves a guard fight: the room is reclaimed within about a second and the match is aborted (ADR 0014 decision 4)');
+  for (const [name, text] of [['ADR 0003', adr('0003')], ['the roadmap', source('docs/BattlePOC-Roadmap.md')]]) {
+    assert.match(text, /斷線重返[^\n]*#109[^\n]*ADR 0014 決定四與決定五/, `${name} says reconnect now exists and where it is decided`);
+    assert.match(text, /只有一位真人的守衛戰[^\n]*中止/, `${name} says a guard fight with one human aborts when that human really leaves`);
+  }
   assert.match(adr('0012'), /OutcomeFrom/, 'ADR 0012 says the record rebuilds the outcome');
   assert.match(adr('0012'), /IsOffline/, 'ADR 0012 says the sweep leaves a disconnected player alone');
 });

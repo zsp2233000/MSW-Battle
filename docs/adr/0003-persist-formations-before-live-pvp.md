@@ -22,6 +22,8 @@
 
 已開始的自動戰鬥不因玩家斷線直接判負，仍繼續完成；若雙方都離開且戰場被回收，該局視為中止，預存編隊保留。本次只顯示當局戰鬥結果，結束後返回個人功能大廳；歷史戰績與斷線重返原戰場留到後續，安排以 Roadmap 為準。
 
+> 補記：斷線重返已於 #109 完成，見 ADR 0014 決定四與決定五。實體被保留，或房間裡還有別的玩家時，戰鬥照打、重連回同一場；「雙方都離開才中止」只適用於真人對真人。只有一位真人的守衛戰，這位玩家真的離開後房間約 1 秒內被回收，該局中止、不扣兵力。跨登入的歷史戰績仍留到後續。
+
 2026-10-18 已核對完整流程並確認本次設計基線。套件整合選用與原生配對能力的技術驗證，仍須在實作規劃中具體確認。
 
 2026-10-18 已查核官方 [MSWPackages](https://github.com/MSW-Git/MSWPackages) 的完整目錄與相關程式，查核版本為 `80f5613e3479539465aa67446bfe4ee23f2ff553`。候選重用範圍為 [PlayerData](https://github.com/MSW-Git/MSWPackages/blob/main/player-data-package/README.md) 的玩家存讀骨架與兩鍵提示視窗、[CardGame UI](https://github.com/MSW-Git/MSWPackages/blob/main/ui-resource-cardgame-package/README.md) 的 Lobby／RankedMatch 視覺模組，以及 [UI Component](https://github.com/MSW-Git/MSWPackages/blob/main/ui-component-package/README.md) 的等待動畫等零件；尚未安裝或決定整合哪些模組。編隊編輯與配對流程仍需本遊戲串接；RankedMatch 視覺模組本身不提供配對服務。
