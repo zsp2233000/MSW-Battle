@@ -17,14 +17,14 @@
 
 ## 決定二：登入只判斷一次，而且等票券先說完話
 
-`MatchFlow` 在每次 `UserEnterEvent` 的 0.5 秒計時器裡先 `Recover`，再 `PlaceAtLogin`；靜態房的 `UserReconnectEvent` 也是 `Recover` 之後 `PlaceAtLogin`。`Recover` 順便記下哪一種票券管著這位玩家（`_T.arrival`：`WAR`、`LOBBY`，沒有或已結束則為空）。`MatchFlow:PlaceAtLogin` 等 `Recover` 跑完（最多 5 秒），再把「有票券管著」交給 `FactionWar:PlaceAtLogin(userId, cause, owned)`。
+`MatchFlow` 在每次 `UserEnterEvent` 的 0.5 秒計時器裡先 `Recover`，再 `PlaceAtLogin`；靜態房的 `UserReconnectEvent` 也是 `Recover` 之後 `PlaceAtLogin`。`Recover` 順便記下有沒有票券管著這位玩家（`_T.arrival`，是或否：沒有或已結束就是否；沒有任何地方讀「哪一種」票券，所以不存種類）。`MatchFlow:PlaceAtLogin` 用 `FactionWarAttack:WaitWhile` 等 `Recover` 跑完（最多 `FactionWar.LoginReadySeconds` 秒，逾時記一行 `[VRF]` 並視為有票券管著），再把「有票券管著」（票券紀錄、`_T.arrival`，或交接仍鎖住該 profile：`_FormationHandoff:IsLockedForUser`）交給 `FactionWar:PlaceAtLogin(userId, cause, owned)`；`FactionWar` 自己也再看一次 `IsLockedForUser`，因為票券紀錄可能還沒存進來（`Recover` 逾時、開啟失敗）而交接已經鎖住了。
 
 `FactionWar:PlaceAtLogin` 一位玩家同時只跑一個（`_T.placing`）：同一次登入可能同時送來 `UserEnterEvent` 與 `UserReconnectEvent`，第二個發現第一個在跑就記一行 log 離開。它先輪詢到實體與地圖都存在（事件可能比實體早到），斷線中的玩家不判斷，然後：
 
 - 已經站在城鎮裡（保留的實體重連、從比賽房落回來）：記下這座城；沒有票券管著時走和其他城鎮動作同一個 `Enforce` 檢查，所以己方仍擁有（或已奪回）就留下，否則回主城。
 - 剛登入、站在遊戲大廳、沒有票券管著：讀陣營、最後城鎮、城鎮表，目的地是 `Landing(陣營, 最後城鎮, 城鎮表)`：仍屬己方（失守後奪回也算）就回該城，否則回己方主城，`Move` 過去並顯示城鎮提示。
 - 沒有陣營、沒有最後城鎮（新玩家、探針裡留在大廳的真人）：什麼都不做。資料讀不到：也什麼都不做並記 `[VRF]`，不猜城鎮。
-- 從大廳對戰回來的人（`LOBBY` 票券）一律留在大廳。Maker 裡 `UserEnterEvent.EnterType` 永遠是 `Normal`，分不出「房間移動」與「新登入」，所以用票券區分。
+- 從大廳對戰回來的人（大廳票券）一律留在大廳。Maker 裡 `UserEnterEvent.EnterType` 永遠是 `Normal`，分不出「房間移動」與「新登入」，所以用票券區分。
 
 不加屬性開關：只有「有陣營又有最後城鎮」的玩家受影響。副作用是開發用的真人 profile 一旦進過城鎮，之後每次 Play 都會被放進該城；探針要求真人留在大廳時，該 profile 不要有最後城鎮（見 tests/README.md）。
 

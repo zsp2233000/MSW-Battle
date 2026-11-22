@@ -583,16 +583,18 @@ script MatchFlow extends Logic
     method void PlaceAtLogin(string userId, string cause)
         -- Hand a login to the war once the ticket has had its say: a player a ticket still owns (a queue, a match room, a return) is left to it.
         if _RoomService:IsInstanceRoom() then return end
-        local waited = 0
-        while (self._T.busy[userId] or self._T.pendingRecover[userId]) and waited < 5 do
-            wait(0.1)
-            waited = waited + 0.1
-        end
+        local settled = _FactionWarAttack:WaitWhile(function() return self._T.busy[userId] or self._T.pendingRecover[userId] end, _FactionWar.LoginReadySeconds)
         if self._T.ended or self:Player(userId) == nil then
             log("[VRF][MatchFlow] login placement skipped user=" .. userId .. " cause=" .. cause .. "; the player is not available")
             return
         end
-        local owned = self._T.records[userId] ~= nil or self._T.arrival[userId] ~= nil
+        -- A ticket, a hint left by the recovery, or a handoff that still locks the profile each mean the ticket has the player.
+        local owned = self._T.records[userId] ~= nil or self._T.arrival[userId] == true or _FormationHandoff:IsLockedForUser(userId)
+        if not settled then
+            -- The recovery has not finished, so what it will say is not known: leave the player to it instead of judging on a half-read state.
+            log("[VRF][MatchFlow] login placement user=" .. userId .. " cause=" .. cause .. "; the recovery is still running after " .. tostring(_FactionWar.LoginReadySeconds) .. "s, treated as owned")
+            owned = true
+        end
         _FactionWar:PlaceAtLogin(userId, cause, owned)
     end
 
@@ -715,8 +717,8 @@ script MatchFlow extends Logic
                 return
             end
             self._T.records[userId] = ticket
-            -- Which kind of ticket owns the arriving player: a login is placed in a town only when none does.
-            self._T.arrival[userId] = (data.origin or "") ~= "" and "WAR" or "LOBBY"
+            -- A live ticket owns the arriving player (war or lobby alike): a login is placed in a town only when none does.
+            self._T.arrival[userId] = true
             -- The adapter knows whether anything still stands behind a stored reservation or match.
             -- The adapter never held a guard match, so it has no opinion on one.
             local verdict = nil
@@ -825,7 +827,7 @@ script MatchFlow extends Logic
         if self._T.ended or self._T.records[userId] ~= ticket or self:Player(userId) == nil or ticket.data.state ~= "RETURNING" then return end
         if _FormationHandoff:Restore(userId, ticket.id) then
             -- The landing below reads the towns of the match after the ticket is closed, so it keeps its own copy of them.
-            local war = { data = { origin = ticket.data.origin or "", matchKey = ticket.data.matchKey or "", profile = ticket.data.profile } }
+            local war = { data = { origin = ticket.data.origin or "", matchKey = ticket.data.matchKey or "" } }
             local stored = self:Finish(userId, ticket, "RETURNED", function() return _FormationHandoff:Close(userId, ticket, "RETURNED") end)
             if self._T.records[userId] ~= ticket or self:Player(userId) == nil then return end
             if stored then

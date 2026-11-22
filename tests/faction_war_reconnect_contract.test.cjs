@@ -114,7 +114,10 @@ test('FactionWar judges a returning player once per login: the town they stand i
   assert.match(place, /_MatchFlow:IsOffline\(userId\)/, 'a disconnected player is judged when they reconnect, not now');
   assert.match(place, /self:IsTown\(here\)[^]*self:Remember\(profile, here\)/, 'a player who stands in a town has it remembered');
   assert.match(place, /self:Enforce\(userId, here, board\)/, 'a player in a town is judged by the same check as every other town action');
-  assert.match(place, /cause ~= "enter" or here ~= "formationlobby" or owned/, 'only a fresh arrival in the lobby that no ticket owns is brought to a town');
+  assert.match(place, /local held = owned or _FormationHandoff:IsLockedForUser\(userId\)/, 'a player the handoff still locks is held by a ticket even when the flow has not recorded one yet (a recovery that timed out, a failed open)');
+  assert.match(place, /if held then\n\s+log\("\[VRF\]\[FactionWar\] login placement left to the ticket/, 'a player in a town who is held keeps the town and is not judged');
+  assert.match(place, /cause ~= "enter" or here ~= "formationlobby" or held/, 'only a fresh arrival in the lobby that no ticket holds is brought to a town');
+  assert.doesNotMatch(place, /if owned then|or owned then/, 'the flow\'s hint is only an input of held');
   assert.match(place, /self:Landing\(faction, home, towns\)/, 'home if the faction still holds it (or holds it again), else the capital');
   const lobby = place.slice(place.indexOf('cause ~= "enter"'));
   assert.ok(lobby.indexOf('ReadFaction') < lobby.indexOf('ReadTown(') && lobby.indexOf('ReadTown(') < lobby.indexOf('ReadTowns'), 'faction first, then the last town, then the board');
@@ -131,17 +134,22 @@ test('MatchFlow hands every login to FactionWar after its own recovery, once the
   assert.match(reconnect, /self:Recover\(event\.UserId\)[^]*self:PlaceAtLogin\(event\.UserId, "reconnect"\)/, 'a reconnect in the static room places after the recovery');
   const wrapper = body(text, 'PlaceAtLogin');
   assert.match(wrapper, /IsInstanceRoom\(\)/, 'only the static room holds the towns');
-  assert.match(wrapper, /self\._T\.busy\[userId\] or self\._T\.pendingRecover\[userId\]/, 'it waits for a recovery that is still running');
-  assert.match(wrapper, /self\._T\.arrival\[userId\] ~= nil/, 'a ticket that owns the player (a queue, a room, a return) keeps them');
+  assert.match(wrapper, /_FactionWarAttack:WaitWhile\(function\(\) return self\._T\.busy\[userId\] or self\._T\.pendingRecover\[userId\] end, _FactionWar\.LoginReadySeconds\)/, 'it waits for a recovery that is still running, with the one bounded poll and the one login wait');
+  assert.doesNotMatch(wrapper, /\bwait\(|waited/, 'no polling loop of its own');
+  assert.match(wrapper, /if not settled then[^]*\[VRF\]\[MatchFlow\] login placement[^\n]*recovery[^]*owned = true/, 'a recovery that outlasts the wait is logged and the player is treated as owned');
+  assert.match(wrapper, /self\._T\.arrival\[userId\] == true/, 'a ticket that owns the player (a queue, a room, a return) keeps them');
+  assert.match(wrapper, /_FormationHandoff:IsLockedForUser\(userId\)/, 'so does a handoff that still locks the profile');
   assert.match(wrapper, /_FactionWar:PlaceAtLogin\(userId, cause, owned\)/, 'the town judgement is FactionWar\'s');
 });
 
-test('Recover records which kind of ticket owns an arriving player, so a lobby match return stays in the lobby', () => {
+test('Recover records that a ticket owns an arriving player, so a lobby match return stays in the lobby', () => {
   const text = flow();
   assert.match(text, /self\._T\.arrival = \{\}/, 'the hint is per room and starts empty');
   const recover = body(text, 'Recover');
   assert.match(recover, /self\._T\.arrival\[userId\] = nil/, 'a terminal or missing ticket owns nobody');
-  assert.match(recover, /self\._T\.arrival\[userId\] = \(data\.origin or ""\) ~= "" and "WAR" or "LOBBY"/, 'a live ticket is a war ticket or a lobby ticket');
+  assert.match(recover, /self\._T\.arrival\[userId\] = true\n/, 'a live ticket owns the player: a yes or no, nothing reads which kind of ticket it is');
+  assert.doesNotMatch(text, /_T\.arrival\[userId\] = [^\n]*"(WAR|LOBBY)"/, 'no kind is stored that nothing reads');
+  assert.doesNotMatch(body(text, 'RestoreReturning'), /local war = \{ data = \{[^\n]*profile/, 'the landing copy of the ticket holds only what the landing reads');
   assert.match(body(text, 'Depart'), /self\._T\.arrival\[userId\] = nil/, 'a new login never inherits the last one\'s hint');
 });
 
@@ -217,6 +225,9 @@ test('ADR 0014 records the decisions in glossary vocabulary, and ADR 0011 / 0012
   for (const name of ['登入落點', '戰果', '奪城', '過期戰果', '守衛']) assert.ok(text.includes(name), `ADR 0014 speaks of ${name}`);
   for (const symbol of ['CountryWarTownV1', 'PlaceAtLogin', 'IsOffline', 'RearmExperienceReceipt', 'Rejoin', 'FindRoom', 'OutcomeFrom', 'LandAfterRestore', 'NoticeText', 'departFailed']) assert.ok(text.includes(symbol), `ADR 0014 names ${symbol}`);
   assert.match(text, /#110/, 'what stays open goes to #110');
+  assert.doesNotMatch(text, /`WAR`|`LOBBY`/, 'the arrival hint is a yes or no, so no ticket kind is named as stored');
+  assert.match(text, /FactionWarAttack:WaitWhile/, 'the login wait is the shared bounded poll');
+  assert.match(text, /IsLockedForUser/, 'a handoff that still locks the profile also holds the player');
   assert.doesNotMatch(adr('0011'), /屬 #109。/, 'ADR 0011 no longer says the guard ticket details belong to #109');
   assert.match(adr('0011'), /ADR 0014/, 'ADR 0011 points at the decision');
   assert.match(adr('0012'), /OutcomeFrom/, 'ADR 0012 says the record rebuilds the outcome');

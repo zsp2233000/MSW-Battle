@@ -519,10 +519,12 @@ script FactionWar extends Logic
         end
         local profile = player.PlayerComponent.ProfileCode
         local here = player.CurrentMapName
+        -- A ticket holds the player when the flow says so or when the handoff still locks the profile (a recovery that timed out or could not open its record).
+        local held = owned or _FormationHandoff:IsLockedForUser(userId)
         if self:IsTown(here) then
             -- Arriving anywhere in a town (a return from a match room, a reconnect) keeps it for the next login, then the usual check decides whether they may stay.
             self:Remember(profile, here)
-            if owned then
+            if held then
                 log("[VRF][FactionWar] login placement left to the ticket user=" .. userId .. " town=" .. here)
                 return
             end
@@ -535,8 +537,8 @@ script FactionWar extends Logic
             self:Enforce(userId, here, board)
             return
         end
-        if cause ~= "enter" or here ~= "formationlobby" or owned then
-            log("[VRF][FactionWar] login placement not needed user=" .. userId .. " cause=" .. cause .. " map=" .. here .. " owned=" .. tostring(owned))
+        if cause ~= "enter" or here ~= "formationlobby" or held then
+            log("[VRF][FactionWar] login placement not needed user=" .. userId .. " cause=" .. cause .. " map=" .. here .. " owned=" .. tostring(owned) .. " held=" .. tostring(held))
             return
         end
         local faction = _FactionWarAttack:Await(function(done) self:ReadFaction(profile, done) end)
