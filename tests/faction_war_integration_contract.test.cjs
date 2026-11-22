@@ -246,6 +246,40 @@ test('the runbook carries the steps of the acceptance criterion and of the #109 
   assert.match(source('docs/Issue-30-Matchmaking.md'), /Issue-110-War-Acceptance\.md/, 'the matchmaking acceptance table points at the war runbook');
 });
 
+test('the runbook steps say what two accounts can really do and what the code really writes', () => {
+  const text = runbook();
+  const row = n => runbookRows().map(cells => cells.join(' ')).find(line => line.startsWith(`S${n} `)) || '';
+  // S18: a normal logout removes the entity, so the sweep cannot meet B; B needs the board flipped by A alone against a guard.
+  assert.match(row(18), /正常關閉應用程式[^]*只有 A 排隊[^]*守衛[^]*鼓山 10 → 0/, 'S18: B logs out standing in Gushan at 10, A alone beats the guard and flips it');
+  assert.match(row(18), /左營/, 'S18: A starts from Zuoying');
+  assert.match(row(18), /不會有 `sweep skipped offline`[^]*網路切斷/, 'S18: sweep skipped offline is expected only for a network cut, not for a logout');
+  // S6 and S8: the history holds the match key once; experience is the profile\'s own dead units, and 0 is valid.
+  for (const n of [6, 8]) {
+    assert.match(row(n), /自己陣亡的單位/, `S${n}: the experience is that profile\'s own dead units`);
+    assert.match(row(n), /0 也是有效/, `S${n}: zero experience is valid`);
+  }
+  assert.doesNotMatch(text, /兩人都收到怪物經驗值|只有 A 的 profile 收到/, 'nobody "receives" experience in a way that says every profile earns some');
+  // Prerequisite 6 and S9: four wins reach 20, the fifth flips, S6 and S7 already count for two.
+  assert.match(text, /四場勝利把鼓山壓到 20[^\n]*100 → 80 → 60 → 40 → 20[^\n]*第五場勝利換旗[^\n]*S6、S7 已經算兩場/, 'prerequisite 6 counts the wins');
+  assert.doesNotMatch(text, /連打五場真人戰勝（100/, 'the old five-wins-to-20 sentence is gone');
+  assert.match(row(9), /第五場/, 'S9 is the fifth win');
+  // S12: the native code is mapped by FormationStorage; SwapTowns reads 2000000 or 1000007 as a conflict.
+  assert.match(row(12), /1000002[^]*轉成 `2000000`[^]*`2000000` 或 `1000007`/, 'S12: native 1000002 becomes 2000000, a conflict is 2000000 or 1000007');
+  assert.doesNotMatch(text, /程式以 `2000000` 與 `1000002` 判讀/, 'the old reading of the codes is gone');
+  assert.match(source('RootDesk/MyDesk/Formations/FormationStorage.mlua'), /complete\(code == 1000002 and 2000000 or code\)/, 'FormationStorage does map the native code');
+  assert.match(body(source('RootDesk/MyDesk/Formations/FactionWar.mlua'), 'SwapTowns'), /code == 2000000 or code == 1000007/, 'and SwapTowns does read both codes as a conflict');
+  // S17 / S19: a login in another WorldInstance does not see the departFailed mark that only lives in the first instance\'s memory.
+  assert.match(row(19), /另一個 WorldInstance[^]*QUEUED[^]*`departFailed`[^]*記憶體/, 'S19: a cross-instance re-login finds a durable QUEUED ticket');
+  assert.match(row(19), /`\[VRF\]\[MatchFlow\] world instance=`/, 'S19: the instance is read from the world instance line');
+  // S2: no ambiguous phrases.
+  assert.doesNotMatch(row(2), /沒有主城選項|沒有排隊時按鈕可按/, 'S2 no longer uses the two ambiguous phrases');
+  assert.match(row(2), /READY/, 'S2 names the state of the attack button');
+  // The world instance id and the leave reason are logged now, so the document says so.
+  assert.doesNotMatch(text, /目前程式沒有任何一行日誌印出 WorldInstanceId|WorldInstanceId 沒有日誌|Leave 沒有日誌/, 'the open items no longer say these are not logged');
+  assert.match(text, /未決事項[^]*`\[VRF\]\[MatchFlow\] world instance=`[^]*`\[VRF\]\[MatchDisconnect\] user=`/, 'the open items say where the instance id and a leave without a ticket are logged');
+  assert.equal(runbookRows().length, 19, 'S1 to S19');
+});
+
 test('every log line the runbook asks the reader to find exists in the production code', () => {
   const production = allProductionText();
   const fragments = new Set();
