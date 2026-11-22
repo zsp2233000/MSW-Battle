@@ -70,7 +70,10 @@ script FactionWarAttack extends Logic
         _FactionWar:ReadFaction(profile, function(faction)
             _FactionWar:ReadTowns(function(towns)
                 self._T.reading[userId] = nil
-                if not _FactionWar:StillIn(player, userId, town) then return end
+                if not _FactionWar:StillIn(player, userId, town) then
+                    log("[VRF][FactionWarAttack] answer dropped user=" .. userId .. " town=" .. town .. "; the player is no longer there")
+                    return
+                end
                 answer(faction, towns)
             end)
         end)
@@ -113,16 +116,29 @@ script FactionWarAttack extends Logic
     method void AttackFor(string userId, string target)
         -- Every check repeats on the server: ownership, adjacency and that the player is not already engaged.
         local player = _UserService:GetUserEntityByUserId(userId)
-        if not isvalid(player) or not isvalid(player.PlayerComponent) then return end
+        if not isvalid(player) or not isvalid(player.PlayerComponent) then
+            log("[VRF][FactionWarAttack] queue refused user=" .. userId .. " reason=NO_PLAYER")
+            return
+        end
         local origin = player.CurrentMapName
-        if not _FactionWar:IsTown(origin) or not _FactionWar:IsTown(target) or self._T.reading[userId] then return end
+        if not _FactionWar:IsTown(origin) or not _FactionWar:IsTown(target) then
+            log("[VRF][FactionWarAttack] queue refused user=" .. userId .. " reason=NOT_A_TOWN origin=" .. origin .. " target=" .. target)
+            return
+        end
+        if self._T.reading[userId] then
+            log("[VRF][FactionWarAttack] queue refused user=" .. userId .. " reason=READING a request of this player is still being read")
+            return
+        end
         self._T.reading[userId] = true
         self:Resolve(player, userId, origin, function(faction, towns)
             if self:IsEngaged(userId) then
+                log("[VRF][FactionWarAttack] queue refused user=" .. userId .. " reason=ENGAGED state=" .. _MatchFlow:StateForUser(userId))
                 self:ReceiveAttackResult("ENGAGED", userId)
             elseif towns == nil or faction == nil or faction == "" then
+                log("[VRF][FactionWarAttack] queue refused user=" .. userId .. " reason=UNAVAILABLE faction=" .. tostring(faction) .. " towns=" .. tostring(towns ~= nil))
                 self:ReceiveAttackResult("UNAVAILABLE", userId)
             elseif not self:CanTarget(origin, target, faction, towns) then
+                log("[VRF][FactionWarAttack] queue refused user=" .. userId .. " reason=INVALID " .. origin .. " -> " .. target .. " faction=" .. faction)
                 self:ReceiveAttackResult("INVALID", userId)
             else
                 log("[VRF][FactionWarAttack] queue " .. origin .. " -> " .. target)
@@ -272,6 +288,20 @@ script FactionWarAttack extends Logic
         return tostring(entry)
     end
 
+    method any OutcomeFrom(any towns, string matchKey)
+        -- What the stored record says the match did to the towns, or nil when the document holds no record of it (which reads as no capture).
+        -- A record carries the winner, the loser, the loser's strength afterwards and the new owner if the town changed flag; an older bare key says only that the match was settled.
+        if type(towns) ~= "table" or type(towns.settled) ~= "table" or matchKey == "" then return nil end
+        for _, entry in ipairs(towns.settled) do
+            if self:EntryKey(entry) == matchKey then
+                if type(entry) ~= "table" then return { status = "DUPLICATE", winner = "", loser = "", strength = 0, owner = "", flipped = false } end
+                local owner = entry.o or ""
+                return { status = "DUPLICATE", winner = entry.w or "", loser = entry.l or "", strength = entry.s or 0, owner = owner, flipped = owner ~= "" }
+            end
+        end
+        return nil
+    end
+
     @ExecSpace("ServerOnly")
     method void Attempt(table operation)
         -- Read the town document with its stored bytes, decide on that reading and swap the result in; a lost race goes back to the read.
@@ -280,17 +310,14 @@ script FactionWarAttack extends Logic
         _FactionWar:ReadTownsRaw(function(towns, raw)
             if operation.finished then return end
             if towns == nil or (towns.settled ~= nil and type(towns.settled) ~= "table") then self:Retry(operation, false) return end
-            for _, entry in ipairs(towns.settled or {}) do
-                if self:EntryKey(entry) == operation.matchKey then
-                    -- A repeat reports what the first delivery did, so a lost answer still reaches the landing and the sweep.
-                    if type(entry) == "table" then
-                        operation.strength = entry.s
-                        operation.owner = entry.o
-                        operation.flipped = entry.o ~= nil and entry.o ~= ""
-                    end
-                    self:Finish(operation, "DUPLICATE", nil)
-                    return
-                end
+            -- A repeat reports what the first delivery did, so a lost answer still reaches the landing and the sweep.
+            local recorded = self:OutcomeFrom(towns, operation.matchKey)
+            if recorded ~= nil then
+                operation.strength = recorded.strength
+                operation.owner = recorded.owner
+                operation.flipped = recorded.flipped
+                self:Finish(operation, "DUPLICATE", nil)
+                return
             end
             -- A match paired on an older board than this one touches no town: either of its towns has changed hands since (even if it was taken back).
             -- It keeps its win, loss or draw and its experience; only the town effect is gone, so no strength moves and nobody advances.
@@ -373,8 +400,6 @@ script FactionWarAttack extends Logic
         -- A fast return click can beat the settlement write; the landing must see the finished town table (a contended settlement may take up to ConflictBudgetSeconds).
         self:WaitWhile(function() return self._T.settling[matchKey] ~= nil end, self.LandingWaitSeconds)
         local outcome = self._T.outcomes[matchKey]
-        local preferred = origin
-        if outcome ~= nil and outcome.flipped and outcome.winner == origin then preferred = outcome.loser end
         local profile = player.PlayerComponent.ProfileCode
         -- Every return reads the live board itself (a retried return sees the newest owner); a missing answer is read again before the departure town is trusted.
         local faction, towns = nil, nil
@@ -388,9 +413,37 @@ script FactionWarAttack extends Logic
             log("[VRF][FactionWarAttack] landing unreadable user=" .. userId .. " origin=" .. origin .. "; keeps the departure town")
             return origin
         end
+        -- This room did not settle the match (the player came back after a reconnect, or the room that fought it is gone): the stored record says what it did.
+        -- No record is no capture; a match that left none (a draw, a lost guard fight, an exempt match) changed no town.
+        local rebuilt = false
+        if outcome == nil then
+            outcome = self:OutcomeFrom(towns, matchKey)
+            rebuilt = outcome ~= nil
+        end
+        local preferred = origin
+        if outcome ~= nil and outcome.flipped and outcome.winner == origin then preferred = outcome.loser end
         local destination = _FactionWar:Landing(faction, preferred, towns)
-        log("[VRF][FactionWarAttack] landing user=" .. userId .. " faction=" .. faction .. " origin=" .. origin .. " preferred=" .. preferred .. " destination=" .. destination .. " conqueror=" .. tostring(preferred ~= origin))
+        log("[VRF][FactionWarAttack] landing user=" .. userId .. " faction=" .. faction .. " origin=" .. origin .. " preferred=" .. preferred .. " destination=" .. destination .. " conqueror=" .. tostring(preferred ~= origin) .. " rebuilt=" .. tostring(rebuilt))
         return destination
+    end
+
+    method string NoticeText(any outcome, string origin)
+        -- One line for a player who did not see the result card: what the record says the match did to the towns, and no more than that (it holds no win or loss for the player).
+        local names = _FactionWar.TownNames
+        if outcome == nil or outcome.loser == nil or names[outcome.loser] == nil then return "上一場對戰已結束。" end
+        local town = names[outcome.loser]
+        if outcome.flipped and outcome.winner == origin then return "上一場戰果：奪下" .. town .. "。" end
+        if outcome.flipped then return "上一場戰果：" .. town .. "已易主。" end
+        return "上一場戰果：" .. town .. "兵力降至" .. tostring(outcome.strength) .. "。"
+    end
+
+    @ExecSpace("ServerOnly")
+    method string ResultNotice(string matchKey, string origin)
+        -- The notice for a player put back into a town after their match room was gone: this room's own memory of the match, else the stored record.
+        local towns = self:Await(function(done) _FactionWar:ReadTowns(done) end)
+        local outcome = self._T.outcomes[matchKey] or self:OutcomeFrom(towns, matchKey)
+        log("[VRF][FactionWarAttack] notice match=" .. matchKey .. " recorded=" .. tostring(outcome ~= nil))
+        return self:NoticeText(outcome, origin)
     end
 
     @ExecSpace("ServerOnly")
