@@ -264,3 +264,70 @@ test('every log line the runbook asks the reader to find exists in the productio
     else assert.ok(production.includes(literal), `${quoted}: the production code writes "${literal}"`);
   }
 });
+
+// ---- the README section ------------------------------------------------------------------------------------------------------------
+
+const readmeSection = () => source('tests/README.md').match(/## War integration [(]#110[)][^]*?(?=\n## )/)?.[0] || '';
+
+test('the README records the #110 probes, maps all four criteria to the probes that carry them, and is honest about what has not run', () => {
+  const section = readmeSection();
+  assert.ok(section.length > 0, 'the section "War integration (#110)" exists');
+  assert.match(section, /[|] Probe [|] Context [|] Final line [|]/, 'the probes are listed in the table format of the earlier sections');
+  for (const name of Object.keys(probes)) assert.ok(section.includes(name), `the section names ${name}`);
+  assert.match(section, /faction_war_integration_contract\.test\.cjs/, 'and the contract test');
+  for (const joins of ['six joins', 'two joins']) assert.ok(section.includes(joins), `the table says ${joins}`);
+  assert.match(section, /at most 10 virtual players in total and kicked ones count/, 'the join limit and that kicked players count is stated');
+  for (const ac of ['AC1', 'AC2', 'AC3', 'AC4']) assert.match(section, new RegExp(`[|] ${ac} `), `${ac} is mapped`);
+  assert.match(section, /\nStatus: written in a worktree, not yet run in Maker/, 'it says the probes were written in a worktree and have not run');
+  assert.match(section, /\nNot verified: /, 'and lists what is not verified');
+  assert.doesNotMatch(section, /Verified in Maker \(/, 'and does not claim a Maker run');
+  assert.match(section, /Manual visual checklist/, 'what only a real client can do is a manual checklist');
+  assert.match(section, /\nWhat Maker cannot do for #110: /, 'and what Maker cannot do is stated');
+  assert.match(section, /THE FIGHTS ARE NOT PLAYED|The fights are forced, not played/, 'forced results are called forced');
+  assert.match(section, /plays a whole fight \(about a minute\)/, 'a human trial of the race probe is said to play a whole fight');
+  assert.match(section, /Order for the three probes/, 'the order the lead runs them in is given');
+  for (const step of ['STEP 1', 'STEP 12', 'STEP 15']) assert.ok(section.includes(step), `the order names ${step}`);
+});
+
+test('every file the README section names exists, every probe the criteria map is a real one, and the quoted log lines are real', () => {
+  const section = readmeSection();
+  for (const match of section.matchAll(/`([a-z0-9_]+[.](?:lua|cjs))`/g)) assert.ok(fs.existsSync(`tests/${match[1]}`), `tests/${match[1]} exists`);
+  for (const match of section.matchAll(/`(docs\/[A-Za-z0-9_-]+[.]md)`/g)) assert.ok(fs.existsSync(match[1]), `${match[1]} exists`);
+  // The mapped probes and steps: an earlier probe is named together with a step that its header numbers.
+  const earlier = (name, step) => {
+    const header = source(`tests/${name}`).match(/^(?:--.*\n)+/)?.[0] || '';
+    assert.match(header, new RegExp(`--\\s+${step}\\s+[A-Z]`), `${name} has a STEP ${step}`);
+  };
+  earlier('faction_war_conquest_e2e_runtime_probe.lua', 2);
+  earlier('faction_war_conquest_e2e_runtime_probe.lua', 3);
+  earlier('faction_war_conquest_e2e_runtime_probe.lua', 6);
+  earlier('faction_war_conquest_e2e_runtime_probe.lua', 7);
+  earlier('faction_war_contest_e2e_runtime_probe.lua', 6);
+  earlier('faction_war_contest_e2e_runtime_probe.lua', 5);
+  earlier('faction_war_reconnect_guard_e2e_runtime_probe.lua', 4);
+  earlier('faction_war_reconnect_guard_e2e_runtime_probe.lua', 8);
+  earlier('faction_war_reconnect_queue_e2e_runtime_probe.lua', 2);
+  earlier('faction_war_reconnect_queue_e2e_runtime_probe.lua', 5);
+  assert.match(source('tests/faction_war_guard_e2e_runtime_probe.lua'), /STEP 2 queues against Gushan, cancels after 3 s/, 'the guard e2e STEP 2 is the cancel in place');
+  // Log lines quoted in the "Lines" table: the production code writes them, or the new probe itself does.
+  const production = allProductionText();
+  // The probes build most of their lines as PREFIX .. "text": read that as the prefix followed by the text.
+  const own = Object.entries(probes).map(([name, spec]) => probeText(name).split('PREFIX .. "').join(`[VRF][${spec.prefix}] `)).join('\n');
+  const lines = section.slice(section.indexOf('Expected `[VRF]` lines'), section.indexOf('Manual visual checklist'));
+  const quoted = [...lines.matchAll(/`([[]VRF[\]][^`]*)`/g)].map(m => m[1]);
+  assert.ok(quoted.length >= 15, `the section quotes its log lines, found ${quoted.length}`);
+  for (const line of quoted) {
+    let literal = line;
+    for (const cut of ['<', ' (', '=']) {
+      const at = literal.indexOf(cut);
+      if (at >= 0) literal = literal.slice(0, cut === '=' ? at + 1 : at);
+    }
+    literal = literal.trim();
+    assert.ok(production.includes(literal) || own.includes(literal), `${line}: someone writes "${literal}"`);
+  }
+});
+
+test('the other READMEs sections that the #110 section leans on are still there', () => {
+  const readme = source('tests/README.md');
+  for (const heading of ['## Disconnect and reconnect (#109)', '## Two matches contest one town (#108)', '## Capture, landing and eviction (#107)', '## Guard fight after ten seconds in the queue (#106)', '### Manual visual checklist']) assert.ok(readme.includes(heading), `${heading} exists`);
+});
