@@ -38,6 +38,11 @@ const probes = {
     steps: ['SEED', 'SETUP', 'QUEUE1', 'ROOM1', 'CHECK1', 'QUEUE2', 'ROOM2', 'CHECK2', 'QUEUE3', 'ROOM3', 'CHECK3', 'CLEANUP'],
     lines: ['SETUP PASS', 'CAPITAL PASS', 'LOSS PASS', 'COUNTER PASS', 'E2E PASS'],
   },
+  'faction_war_integration_interleave_e2e_runtime_probe.lua': {
+    prefix: 'Interleave', joins: 2, guard: 10, profiles: ['wp2638', 'wp2639'],
+    steps: ['SEED', 'SETUP', 'TRIAL1', 'ROOM1', 'CHECK1', 'TRIAL2', 'ROOM2', 'CHECK2', 'TRIAL3', 'ROOM3', 'CHECK3', 'TRIAL4', 'ROOM4', 'CHECK4', 'CLEANUP'],
+    lines: ['SETUP PASS', 'RACE1 PASS', 'RACE2 PASS', 'RACE3 PASS', 'RACE4 PASS', 'E2E PASS'],
+  },
 };
 
 const headerSteps = text => [...text.match(/^(?:--.*\n)+/)[0].matchAll(/^--\s+(\d+)\s+([A-Z][A-Z0-9_]*)/gm)].map(m => [Number(m[1]), m[2]]);
@@ -157,4 +162,43 @@ test('the capital probe forces results through seams that exist: the side labels
   assert.match(body(rules, 'Attempt'), /strength = _FactionWar\.FullStrength, e = _FactionWar:EpochOf\(towns, operation\.loser\) \+ 1/, 'and refills to the full strength with one more count');
   assert.match(body(attack(), 'Finish'), /AnnounceFall\(outcome\.loser, outcome\.owner\)/, 'the fall is announced to the static room');
   assert.match(body(war(), 'SweepFallen'), /self:Enforce\(userId, town, towns\)/, 'and the idle player of the fallen town is enforced home');
+});
+
+// ---- the human-versus-guard timeout race ---------------------------------------------------------------------------------------------
+
+const race = () => probeText('faction_war_integration_interleave_e2e_runtime_probe.lua');
+
+test('the race probe queues the opposite ticket around the ten-second clock and measures what it really got', () => {
+  const text = race();
+  for (const offset of ['9.5', '9.9', '10.1']) assert.match(text, new RegExp(`offset = ${offset.replace('.', '\\.')}, delay = 0`), `a trial queues the second ticket at ${offset} s`);
+  assert.match(text, /offset = 10\.5, delay = 2/, 'and one while the claim is in flight (the fault adapter delays every cancel)');
+  assert.match(text, /_MatchFaults:ConfigureCancel\(0, trial\.delay\)/, 'the claim window is made by delaying the cancel the guard performs');
+  assert.match(text, /ticketB\.guardStarted - t0/, 'the realized offset is read from the two tickets, not assumed');
+  assert.match(text, /ticketA\.guarding == true/, 'the in-flight trial asserts that the claim really was in flight');
+  assert.match(text, /A queues[^]*AttackFor\(idA, "gushan"\)[^]*AttackFor\(idB, "zuoying"\)/, 'A attacks Gushan first, B attacks Zuoying: opposite directions');
+  assert.match(text, /count\(seen\.A\) == 1/, 'one match key per ticket');
+  assert.match(text, /rooms == 1 and roomKeys\[1\] == keyA/, 'one room, the one of the match key');
+  assert.match(text, /guardTimers\[idA\] == nil and _MatchFlow\._T\.guardTimers\[idB\] == nil/, 'a human match drops the guard claim: both clocks are gone');
+  assert.match(text, /recordsOf\(towns, key\) == 1/, 'a decisive result leaves exactly one settlement record');
+  assert.match(text, /FORCE = \{ HUMAN = false, GUARD = true \}/, 'a human fight is played, a guard fight is forced');
+  assert.match(text, /A trial that pairs humans plays a WHOLE FIGHT/, 'the header says a human trial plays a whole fight');
+  assert.match(text, /NOT reachable in Maker/, 'and what the local adapter cannot show');
+});
+
+test('the race probe stands on production rules that exist: one guard clock per ticket, a claimed ticket is not live, a pairing clears the clock, and the claim logs', () => {
+  const flowText = flow();
+  assert.match(body(flowText, 'StartGuardClock'), /ticket\.guardStarted ~= nil then return end[^]*ticket\.guardStarted = DateTime\.UtcNow\.Elapsed/, 'the clock starts once per ticket and stamps guardStarted (the probe reads it as t0)');
+  assert.match(body(flowText, 'SubmitQueue'), /ticket\.data\.state == "QUEUED" and not ticket\.guarding and self:Player\(userId\) ~= nil/, 'a ticket being claimed is not live in the queue');
+  assert.match(body(flowText, 'SubmitQueue'), /StartGuardClock\(userId, ticket\)[^]*Poll\(\)/, 'the clock starts when the queue accepted the ticket, before the pairing poll');
+  assert.match(body(flowText, 'Matched'), /self:ClearGuardClock\(userId\)/, 'a pairing clears the guard clock');
+  const fire = body(flowText, 'GuardFire');
+  for (const line of ['[VRF][Guard] ticket claimed by the', '[VRF][Guard] a human match stands; no guard fight', '[VRF][Guard] claim dropped; ticket gone during withdrawal', '[VRF][Guard] human result deferred until the guard claim settles']) {
+    assert.ok(fire.includes(line) || flowText.includes(line), `the flow logs ${line}`);
+  }
+  assert.match(fire, /ticket\.guarding = true[^]*self:CancelMatching\(ticket\.data\.profile\)/, 'the claim holds the guarding mark while it withdraws from the queue');
+  const local = source('RootDesk/MyDesk/Matchmaking/MatchQueueLocal.mlua');
+  assert.match(body(local, 'Cancel'), /return true/, 'the local queue confirms every cancel (why the deferred-human-result path needs the native service)');
+  assert.match(body(local, 'Pairs'), /origin == second\.target and first\.target == second\.origin/, 'tickets pair only in opposite directions');
+  assert.match(body(source('RootDesk/MyDesk/Matchmaking/MatchFaults.mlua'), 'Cancel'), /wait\(self\._T\.cancelDelay\)/, 'the fault adapter can hold a cancel open');
+  assert.match(source('RootDesk/MyDesk/Matchmaking/MatchedBattle.mlua'), /not self\._T\.published/, 'a room publishes its result once');
 });
