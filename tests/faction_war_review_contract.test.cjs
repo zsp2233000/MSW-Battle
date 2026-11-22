@@ -63,6 +63,14 @@ test('S4: no document points at a report or worktree that is not in the reposito
   for (const file of files) assert.doesNotMatch(source(file), dangling, `${file} has no dangling reference`);
   const readme = source('tests/README.md');
   assert.doesNotMatch(readme, /both probes are written but not yet run in Maker/, 'the #107 / #108 status is no longer "not yet run"');
+  // The 2026-11-22 Maker run recorded in the #109 section covers the review-fix probes, so the sections that waited for it say it ran.
+  for (const stale of [/none of this has run yet/, /were not recorded in this repository/, /review-fix re-run below should record them/, /record the date and the `\[VRF\]` evidence here/]) assert.doesNotMatch(readme, stale, `the README no longer carries the stale status ${stale}`);
+  for (const heading of ['Capture, landing and eviction (#107)', 'Two matches contest one town (#108)', 'Review fixes for #107 and #108']) {
+    const section = readme.match(new RegExp(`## ${heading.replace(/[()#]/g, '\\$&')}[^]*?(?=\n## )`))?.[0] || '';
+    assert.ok(section.length > 0, `${heading} exists`);
+    assert.match(section, /2026-11-22/, `${heading} says when it was verified`);
+    assert.match(section, /#disconnect-and-reconnect-109/, `${heading} points at the record`);
+  }
   assert.match(readme, /REDELIVER[^]*?room is recycled/, 'the README says why redelivery cannot run after RETURN');
   const e2e = source('tests/faction_war_contest_e2e_runtime_probe.lua');
   assert.doesNotMatch(e2e, /before or after RETURN/, 'the e2e header no longer claims STEP 5 can run after RETURN');

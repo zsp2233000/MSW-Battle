@@ -346,6 +346,8 @@ test('the README records the #109 probes and is honest about what has not run', 
   assert.match(section, /last user really leaves is reclaimed by the engine/, 'and records that an empty match room is reclaimed at once');
   assert.match(section, /\nNot verified: /, 'and lists what is not verified');
   assert.match(section, /try_reconnect/, 'including the real network drop');
+  assert.match(section, /\nNot verified: [^\n]*the `owned` path[^\n]*no assertion of its own[^\n]*login placement left to the ticket[^\n]*P6b and J/, 'the login placement owned path has no dedicated assertion and was seen only incidentally');
+  assert.match(section, /\nNot verified: [^\n]*#105 and #106 e2e probes[^\n]*not re-run after the login placement landed/, 'the #105 and #106 e2e probes were not re-run after login placement');
 });
 
 test('rooms are looked up behind the transfer adapter, which the fault adapter can hide in Maker', () => {

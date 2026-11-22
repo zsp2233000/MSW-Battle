@@ -287,6 +287,8 @@ test('the README records the #110 probes, maps all four criteria to the probes t
   assert.match(section, /THE FIGHTS ARE NOT PLAYED|The fights are forced, not played/, 'forced results are called forced');
   assert.match(section, /plays a whole fight \(about a minute\)/, 'a human trial of the race probe is said to play a whole fight');
   assert.match(section, /Order for the three probes/, 'the order the lead runs them in is given');
+  assert.match(section, /Only trials 1 and 4 are decisive[^\n]*trials 2 and 3 fall inside the EITHER band/, 'the race probe says which trials decide and which fall in the EITHER band');
+  assert.match(section, /`inClaim`\) is asserted only in trial 4[^\n]*trial 3 logs it without asserting it/, 'and that inClaim is asserted in trial 4 only');
   for (const step of ['STEP 1', 'STEP 12', 'STEP 15']) assert.ok(section.includes(step), `the order names ${step}`);
 });
 
