@@ -33,10 +33,16 @@ const probes = {
     steps: ['SEED', 'SETUP', 'ENTRY', 'GATE', 'OPTIONS', 'CANCEL', 'QUEUE', 'CAPTURE', 'RETURN', 'LANDING', 'RELOGIN', 'CLEANUP'],
     lines: ['SETUP PASS', 'ENTRY PASS', 'GATE PASS', 'OPTIONS PASS', 'CANCEL PASS', 'CAPTURE PASS', 'LANDING PASS', 'RELOGIN PASS', 'JOURNEY PASS'],
   },
+  'faction_war_integration_capital_e2e_runtime_probe.lua': {
+    prefix: 'Capital', joins: 2, guard: 10, profiles: ['wp2636', 'wp2637'],
+    steps: ['SEED', 'SETUP', 'QUEUE1', 'ROOM1', 'CHECK1', 'QUEUE2', 'ROOM2', 'CHECK2', 'QUEUE3', 'ROOM3', 'CHECK3', 'CLEANUP'],
+    lines: ['SETUP PASS', 'CAPITAL PASS', 'LOSS PASS', 'COUNTER PASS', 'E2E PASS'],
+  },
 };
 
 const headerSteps = text => [...text.match(/^(?:--.*\n)+/)[0].matchAll(/^--\s+(\d+)\s+([A-Z][A-Z0-9_]*)/gm)].map(m => [Number(m[1]), m[2]]);
-const codeSteps = text => [...text.matchAll(/STEP == (\d+) then/g)].map(m => Number(m[1]));
+// A branch may serve several steps ("STEP == 4 or STEP == 7 then"): the set of numbers the code tests for.
+const codeSteps = text => [...new Set([...text.matchAll(/STEP == (\d+)/g)].map(m => Number(m[1])))].sort((a, b) => a - b);
 
 test('the #110 probes use their own profiles, say how many joins they cost, number their steps and end in a pass line', () => {
   for (const [name, spec] of Object.entries(probes)) {
@@ -51,7 +57,7 @@ test('the #110 probes use their own profiles, say how many joins they cost, numb
     const header = headerSteps(text);
     assert.deepEqual(header.map(s => s[1]), spec.steps, `${name} numbers the steps ${spec.steps.join(', ')}`);
     assert.deepEqual(header.map(s => s[0]), spec.steps.map((_, index) => index + 1), `${name} numbers them from 1 without gaps`);
-    assert.deepEqual(codeSteps(text), header.map(s => s[0]), `${name} implements every numbered step, in order`);
+    assert.deepEqual(codeSteps(text), header.map(s => s[0]), `${name} implements every numbered step`);
     for (const line of spec.lines) assert.ok(text.includes(`[VRF][${spec.prefix}] ${line}`), `${name} announces ${line}`);
     assert.match(text, /if not ok then log_error\("\[VRF\]\[\w+\] STEP "/, `${name} reports a failed step`);
     // The cleanup step is the last one: it puts the guard clock back and deletes the real town storage the match rooms wrote.
@@ -117,4 +123,38 @@ test('the #110 probes call only methods and services that the production code or
     for (const m of text.matchAll(/:(\w+)\(/g)) assert.ok(known.has(m[1]) || NEW_ENGINE_NAMES[m[1]], `${name} calls :${m[1]}( which nothing else uses (add it to NEW_ENGINE_NAMES with the reason if it is real)`);
     for (const m of text.matchAll(/\b(_[A-Z]\w+)\b/g)) assert.ok(services.has(m[1]), `${name} names ${m[1]} which nothing else uses`);
   }
+});
+
+// ---- the capital and counterattack guard fights ------------------------------------------------------------------------------------
+
+const capital = () => probeText('faction_war_integration_capital_e2e_runtime_probe.lua');
+
+test('the capital probe forces its results, says so, and runs the board the issue describes', () => {
+  const text = capital();
+  assert.match(text, /THE FIGHTS ARE NOT PLAYED/, 'the header says the results are forced, not played');
+  assert.match(text, /ApplyResolvedDamage\(99999, nil, false, "", 0, 0\)/, 'a fight ends by killing one side with the production damage call');
+  assert.match(text, /plan == "WIN" and "ENEMY" or "PLAYER"/, 'a forced win kills the guard, a forced loss kills the human');
+  assert.match(text, /ROOM_PLAN = \{ \[4\] = "WIN", \[7\] = "LOSE", \[10\] = "WIN" \}/, 'a capital win, a guard loss, then the counterattack win, in this order');
+  // BLUE owns only Yancheng; Gushan is RED at strength 10.
+  assert.match(text, /towns\.gushan\.owner = "RED"\n\s+towns\.gushan\.strength = 10/, 'Gushan is seeded RED at 10');
+  assert.match(text, /queue\("CAPITAL P gushan -> yancheng", p, "yancheng"\)/, 'the RED player attacks the enemy capital');
+  assert.match(text, /queue\("COUNTER Q yancheng -> gushan", q, "gushan"\)/, 'the BLUE player counterattacks from its only town');
+  assert.match(text, /string\.sub\(key, 1, 6\) == "guard-"/, 'every fight is a guard match');
+  assert.match(text, /EpochOf\(towns, "gushan"\) == 2/, 'the flip is counted');
+  assert.match(text, /a lost guard fight changes nothing/, 'a lost guard fight is asserted to change nothing');
+});
+
+test('the capital probe forces results through seams that exist: the side labels, the damage call and the rules that make each fight a no-change or a flip', () => {
+  const session = source('RootDesk/MyDesk/Combat/BattleSession.mlua');
+  assert.match(session, /local faction = side == 1 and "PLAYER" or "ENEMY"/, 'the home side is PLAYER and the away side is ENEMY');
+  assert.match(source('RootDesk/MyDesk/Combat/BattleUnit.mlua'), /method void ApplyResolvedDamage\(integer amount, Entity attacker, boolean allowHitStop, string hitEffectRUID, number hitEffectOffsetX, number hitEffectOffsetY\)/, 'the damage call has the signature the probe passes');
+  const rules = attack();
+  assert.match(rules, /property table Capitals = \{ nanzih = true, yancheng = true \}/, 'both capitals are exempt');
+  assert.match(body(rules, 'Deduction'), /result ~= "WIN" or self:IsCapital\(target\)[^]*return 0/, 'a win over a capital takes nothing');
+  assert.match(body(rules, 'Settle'), /homeResult == "LOSE" and kind ~= "GUARD"/, 'a lost guard fight names no winner, so it takes nothing');
+  assert.match(rules, /property integer GuardDeduction = 10/, 'one guard win takes the 10 the board is seeded with');
+  assert.match(body(rules, 'Attempt'), /flipped = remaining <= 0/, 'zero strength flips');
+  assert.match(body(rules, 'Attempt'), /strength = _FactionWar\.FullStrength, e = _FactionWar:EpochOf\(towns, operation\.loser\) \+ 1/, 'and refills to the full strength with one more count');
+  assert.match(body(attack(), 'Finish'), /AnnounceFall\(outcome\.loser, outcome\.owner\)/, 'the fall is announced to the static room');
+  assert.match(body(war(), 'SweepFallen'), /self:Enforce\(userId, town, towns\)/, 'and the idle player of the fallen town is enforced home');
 });
