@@ -202,3 +202,65 @@ test('the race probe stands on production rules that exist: one guard clock per 
   assert.match(body(source('RootDesk/MyDesk/Matchmaking/MatchFaults.mlua'), 'Cancel'), /wait\(self\._T\.cancelDelay\)/, 'the fault adapter can hold a cancel open');
   assert.match(source('RootDesk/MyDesk/Matchmaking/MatchedBattle.mlua'), /not self\._T\.published/, 'a room publishes its result once');
 });
+
+// ---- the published-environment runbook (AC4) ------------------------------------------------------------------------------------
+
+const RUNBOOK = 'docs/Issue-110-War-Acceptance.md';
+const runbook = () => source(RUNBOOK);
+// The step table: one row per "| S<n> | ... |", six cells (#, step, expected, actual, evidence, status).
+const runbookRows = () => runbook().split('\n').filter(line => /^[|] S[0-9]+ [|]/.test(line)).map(line => line.split('|').slice(1, -1).map(cell => cell.trim()));
+
+test('the two-account runbook lists every step with an expected value, an empty actual column and a not-run status', () => {
+  const text = runbook();
+  assert.match(text, /^status: not run$/m, 'the document says in one line that nothing has run');
+  assert.match(text, /[|] # [|] 步驟 [|] 預期值 [|] 實測 [|] 要記錄的證據 [|] 狀態 [|]/, 'the table has the expected, actual, evidence and status columns');
+  const rows = runbookRows();
+  assert.ok(rows.length >= 15, `the runbook has its steps, found ${rows.length}`);
+  rows.forEach((cells, index) => {
+    assert.equal(cells.length, 6, `${cells[0]} has six cells`);
+    assert.equal(cells[0], `S${index + 1}`, 'steps are numbered S1, S2, ... without gaps');
+    assert.ok(cells[1].length > 0 && cells[2].length > 0 && cells[4].length > 0, `${cells[0]} says what to do, what to expect and what to record`);
+    assert.equal(cells[3], '', `${cells[0]} has an EMPTY actual column: nothing was run, so nothing is claimed`);
+    assert.equal(cells[5], 'not run', `${cells[0]} is marked not run`);
+  });
+  assert.doesNotMatch(text, /^status: (?!not run)/m, 'no document-level status other than not run');
+});
+
+test('the runbook carries the steps of the acceptance criterion and of the #109 retention measurements', () => {
+  const text = runbook();
+  const rows = runbookRows().map(cells => cells.join(' '));
+  const stepWith = pattern => rows.find(row => pattern.test(row));
+  assert.ok(stepWith(/互選/) && stepWith(/differentSources/) && stepWith(/WarpMatchUser/), 'mutual pick, pairing across instances and the native warp are steps');
+  assert.ok(stepWith(/QUEUE_RESULT_INVALID/), 'the same-town pairing gap of ADR 0010 is a step');
+  assert.ok(stepWith(/AlreadyMatched/), 'the ten-second race on the native service (ADR 0011) is a step');
+  assert.ok(stepWith(/swap code=/) && stepWith(/settle conflict/), 'two matches settling one town on the native service (ADR 0013) is a step');
+  assert.ok(stepWith(/ADR 0012/) && stepWith(/另一個\*{0,2} WorldInstance/), 'the idle player on another instance (ADR 0012) is a step');
+  assert.ok(stepWith(/flipped=true/) && stepWith(/鼓山降到 20/), 'the flip case is a step');
+  assert.ok(stepWith(/reason=Disconnect/) && stepWith(/BattleCleanup/), 'retention measurement 1: the delay between the disconnect and the leave');
+  assert.ok(stepWith(/recovers ticket/) && stepWith(/receipt re-armed/), 'retention measurement 2: a reconnect inside the retention');
+  assert.ok(stepWith(/STALE_ROOM_RECOVERY/) && stepWith(/room=none/), 'retention measurement 3: past the retention, and a room of another instance');
+  assert.ok(stepWith(/UserLeaveReason/) && stepWith(/native code=/), 'the leave reason and the native cancel after a leave are recorded');
+  assert.ok(stepWith(/login placed user=/), 'the login landing by the live owner is a step');
+  for (const phrase of ['Maker 與發布環境的存檔互不相通', '兩個 WorldInstance', '遮蔽 ProfileCode', '別名 A/B', 'WorldInstanceId', 'RoomKey', '「實測」欄一律留空']) assert.ok(text.includes(phrase), `the runbook states: ${phrase}`);
+  assert.ok(text.includes('Issue-30-Matchmaking.md') && text.includes('tests/README.md'), 'it points at the matchmaking acceptance table and at the Maker probes');
+  assert.match(source('docs/Issue-30-Matchmaking.md'), /Issue-110-War-Acceptance\.md/, 'the matchmaking acceptance table points at the war runbook');
+});
+
+test('every log line the runbook asks the reader to find exists in the production code', () => {
+  const production = allProductionText();
+  const fragments = new Set();
+  for (const m of runbook().matchAll(/`([^`]*[[]VRF[\]][^`]*)`/g)) fragments.add(m[1]);
+  assert.ok(fragments.size >= 20, `the runbook quotes its log lines, found ${fragments.size}`);
+  for (const quoted of fragments) {
+    // A quoted line is checked up to its first placeholder (<..., "...") or first "=", the part the code writes literally.
+    let literal = quoted;
+    for (const cut of ['<', ' ... ', '=']) {
+      const at = literal.indexOf(cut);
+      if (at >= 0) literal = literal.slice(0, cut === '=' ? at + 1 : at);
+    }
+    literal = literal.trim();
+    const report = literal.match(/^[[]VRF[\]][[]MatchFlow[\]] ([A-Z_]+)$/);
+    if (report) assert.ok(production.includes(`code = "${report[1]}"`), `${quoted}: MatchFlow reports ${report[1]}`);
+    else assert.ok(production.includes(literal), `${quoted}: the production code writes "${literal}"`);
+  }
+});

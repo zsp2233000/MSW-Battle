@@ -78,6 +78,8 @@ Maker Play 重開後，本機 FIFO 會消失：舊的 `QUEUED`／`SAVING` 票據
 
 證據僅保留帳號 A/B 別名、WorldInstanceId／RoomKey、代碼、時間、版本及 bytes；遮蔽 ProfileCode、UserId、編隊與 capsule 原文。
 
+國戰（#103）在發布環境的雙帳號驗收（互選鄰城、原生配對、跨實例入場、戰果與返回，以及斷線保留期的量測）是一趟有順序的操作，步驟、預期值與待填的實測欄在 [Issue-110-War-Acceptance.md](Issue-110-War-Acceptance.md)；上表的「同來源配對」與「不同來源配對」兩列由該文件的 S5 提供證據。
+
 ## 執行紀錄與限制
 
 初版已檢查編隊／草稿序列化、隔離房間與雙人返回；本次補上真正的 Maker FIFO 佇列與共用可見按鈕。測試透過原生 ButtonClickEvent 連線、QueueForUser 的相同伺服器入列路徑與原生 InstanceRoom API，沒有直接捏造成功通知。
