@@ -278,9 +278,10 @@ test('the README records the #110 probes, maps all four criteria to the probes t
   for (const joins of ['six joins', 'two joins']) assert.ok(section.includes(joins), `the table says ${joins}`);
   assert.match(section, /at most 10 virtual players in total and kicked ones count/, 'the join limit and that kicked players count is stated');
   for (const ac of ['AC1', 'AC2', 'AC3', 'AC4']) assert.match(section, new RegExp(`[|] ${ac} `), `${ac} is mapped`);
-  assert.match(section, /\nStatus: written in a worktree, not yet run in Maker/, 'it says the probes were written in a worktree and have not run');
+  assert.match(section, /Verified in Maker \(2026-11-22/, 'it records the Maker run with its date');
+  assert.doesNotMatch(section, /not yet run in Maker/, 'and no longer says the probes have not run');
   assert.match(section, /\nNot verified: /, 'and lists what is not verified');
-  assert.doesNotMatch(section, /Verified in Maker \(/, 'and does not claim a Maker run');
+  assert.match(section, /Issue-110-War-Acceptance/, 'and points at the runbook for the part Maker cannot run');
   assert.match(section, /Manual visual checklist/, 'what only a real client can do is a manual checklist');
   assert.match(section, /\nWhat Maker cannot do for #110: /, 'and what Maker cannot do is stated');
   assert.match(section, /THE FIGHTS ARE NOT PLAYED|The fights are forced, not played/, 'forced results are called forced');
