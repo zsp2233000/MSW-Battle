@@ -857,7 +857,10 @@ script MatchFlow extends Logic
         -- the landing the room-side return decides, judged again on the stored record. A player who already stands there (a normal return) is not moved twice.
         if _RoomService:IsInstanceRoom() then return end
         local origin = war.data.origin or ""
-        if origin == "" or not _FactionWar:IsTown(origin) then return end
+        if origin == "" or not _FactionWar:IsTown(origin) then
+            log("[VRF][MatchFlow] landing after restore not needed user=" .. userId .. "; the ticket was not a war ticket")
+            return
+        end
         local player = self:Player(userId)
         if player == nil then
             log("[VRF][MatchFlow] landing after restore skipped user=" .. userId .. "; the player is not available")
@@ -954,7 +957,11 @@ script MatchFlow extends Logic
         -- A reconnected client starts with no receipt, so the one already sent to this entity goes out again (the battle sends each receipt once per entity).
         local map = _EntityService:GetEntityByPath("/maps/matchprobe")
         local battle = isvalid(map) and map:GetComponent("script.BattleSession") or nil
-        if isvalid(battle) then battle:RearmExperienceReceipt(userId) end
+        if isvalid(battle) then
+            battle:RearmExperienceReceipt(userId)
+        else
+            log("[VRF][MatchFlow] experience receipt not re-armed user=" .. userId .. "; no battle in this room")
+        end
     end
 
     @ExecSpace("ServerOnly")

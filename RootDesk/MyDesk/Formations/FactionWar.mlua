@@ -408,6 +408,11 @@ script FactionWar extends Logic
         -- (its board may be newer than the one the running check holds) makes it run again afterwards, on a board read then.
         local player = _UserService:GetUserEntityByUserId(userId)
         if not isvalid(player) or not isvalid(player.PlayerComponent) or player.CurrentMapName ~= town then return end
+        -- A disconnected player is judged when they come back, on the board of that moment.
+        if _MatchFlow:IsOffline(userId) then
+            log("[VRF][FactionWar] enforce skipped offline user=" .. userId .. " town=" .. town .. "; judged when they reconnect")
+            return
+        end
         local running = self._T.evicting[userId]
         if running ~= nil and DateTime.UtcNow.Elapsed - running.started < self.EnforceLeaseSeconds * 1000 then
             running.again = town
@@ -465,8 +470,8 @@ script FactionWar extends Logic
             return false
         end
         -- Both waits may have outlasted the player (or the server).
-        if not self:StillIn(player, userId, town) then
-            log("[VRF][FactionWar] evict dropped user=" .. userId .. " town=" .. town .. "; the player is no longer there")
+        if not self:StillIn(player, userId, town) or _MatchFlow:IsOffline(userId) then
+            log("[VRF][FactionWar] evict dropped user=" .. userId .. " town=" .. town .. "; the player is no longer there or went offline")
             return false
         end
         local destination = self:Landing(faction, town, live)

@@ -92,6 +92,8 @@ test('the fall sweep leaves a disconnected player where they are; they are judge
   const sweep = body(war(), 'SweepFallen');
   assert.match(sweep, /_MatchFlow:IsOffline\(/, 'the sweep asks the flow whether the player is online');
   assert.match(sweep, /\[VRF\]\[FactionWar\] sweep skipped offline/, 'the skip is logged');
+  assert.match(body(war(), 'Enforce'), /_MatchFlow:IsOffline\(userId\)[^]*enforce skipped offline/, 'the per-player check skips a disconnected player too (a queued re-check may outlive the connection)');
+  assert.match(body(war(), 'Evict'), /_MatchFlow:IsOffline\(userId\)[^]*evict dropped/, 'and a move that was decided before the player went offline is dropped');
   assert.equal(tag(flow(), 'IsOffline'), '@ExecSpace("ServerOnly")\n', 'the offline query is a server method of the flow');
   assert.match(body(flow(), 'IsOffline'), /self\._T\.offline\[userId\] == true/, 'it answers from the flow\'s own offline table');
 });
@@ -219,6 +221,58 @@ test('ADR 0014 records the decisions in glossary vocabulary, and ADR 0011 / 0012
   assert.match(adr('0011'), /ADR 0014/, 'ADR 0011 points at the decision');
   assert.match(adr('0012'), /OutcomeFrom/, 'ADR 0012 says the record rebuilds the outcome');
   assert.match(adr('0012'), /IsOffline/, 'ADR 0012 says the sweep leaves a disconnected player alone');
+});
+
+// ---- the probes ---------------------------------------------------------------------------------------------------------------
+
+const probes = {
+  'faction_war_reconnect_runtime_probe.lua': { prefix: 'FactionWarReconnect', pass: /\[VRF\]\[FactionWarReconnect\] PROBE PASS/, profiles: ['wp2621'] },
+  'faction_war_reconnect_queue_e2e_runtime_probe.lua': { prefix: 'ReconnectQueue', pass: /E2E PASS/, profiles: ['wp2621'], steps: ['SETUP PASS', 'EIGHT PASS', 'RECONNECT PASS', 'RECANCEL PASS', 'AGAIN PASS', 'CLEANUP'], guard: 10 },
+  'faction_war_reconnect_guard_e2e_runtime_probe.lua': { prefix: 'ReconnectGuard', pass: /LANDING PASS/, profiles: ['wp2622'], steps: ['SETUP PASS', 'DISCONNECT PASS', 'RESULT PASS', 'RECONNECT PASS', 'REDELIVER PASS', 'LANDING PASS', 'CLEANUP'], guard: 10 },
+  'faction_war_reconnect_human_e2e_runtime_probe.lua': { prefix: 'ReconnectHuman', pass: /LANDING PASS/, profiles: ['wp2623', 'wp2624'], steps: ['SETUP PASS', 'DISCONNECT PASS', 'RESULT PASS', 'RECONNECT PASS', 'REDELIVER PASS', 'LANDING PASS', 'CLEANUP'], guard: 600 },
+  'faction_war_reconnect_login_runtime_probe.lua': { prefix: 'ReconnectLogin', pass: /<CASE> PASS|" PASS"/, profiles: ['wp2625', 'wp2626'], steps: ['FRIENDLY', 'FALLEN', 'RETAKEN', 'NOFACTION', 'NOTOWN', 'OFFLINE_FALL', 'OFFLINE_RETAKEN', 'CLEANUP'] },
+  'faction_war_reconnect_relogin_e2e_runtime_probe.lua': { prefix: 'ReconnectRelogin', pass: /STALE PASS/, profiles: ['wp2625'], steps: ['SETUP PASS', 'REJOIN PASS', 'STALE PASS', 'LANDING PASS', 'CLEANUP'], guard: 10 },
+};
+
+test('the #109 probes use their own profiles and storage, number their steps and end in a pass line, as the e2e probes before them do', () => {
+  for (const [name, spec] of Object.entries(probes)) {
+    const text = source(`tests/${name}`);
+    assert.match(text, /^-- /, `${name} starts with its instructions`);
+    assert.match(text, /\[VRF\]\[/, `${name} logs [VRF] lines`);
+    assert.ok(text.includes(`[VRF][${spec.prefix}]`), `${name} uses its own prefix`);
+    assert.match(text, spec.pass, `${name} has its pass line`);
+    assert.match(text, /Expected \[VRF\] lines[^\n]*Disconnect and reconnect \(#109\)|isolated/, `${name} says where the expected lines are, or is a rules probe`);
+    for (const used of text.match(/wp26\d\d/g) || []) assert.ok(['wp2621', 'wp2622', 'wp2623', 'wp2624', 'wp2625', 'wp2626'].includes(used), `${name} uses only wp2621-wp2626, found ${used}`);
+    for (const profile of spec.profiles) assert.ok(text.includes(profile), `${name} drives ${profile}`);
+    for (const step of spec.steps || []) assert.ok(text.includes(step), `${name} announces ${step}`);
+    if (spec.steps) assert.match(text, /^local STEP = 1$/m, `${name} is stepped by one variable`);
+    if (spec.guard) {
+      assert.match(text, new RegExp(`_FactionWarGuard\\.WaitSeconds = ${spec.guard}\\b`), `${name} sets the guard clock it needs (${spec.guard} s) explicitly`);
+      if (spec.guard === 600) assert.match(text, /STEP == 9 then\n\s+_FactionWarGuard\.WaitSeconds = 10/, `${name} puts the clock back in CLEANUP`);
+    }
+    if (/e2e/.test(name)) assert.match(text, /DeleteGlobalDataStorageAndWait\(_FactionWar\.TownStorageName\)/, `${name} deletes the real town storage it wrote`);
+  }
+  const rules = source('tests/faction_war_reconnect_runtime_probe.lua');
+  assert.match(rules, /war\.TownStorageName = STORAGE/, 'the rules probe isolates the town storage');
+  assert.match(rules, /war\.TownKey = TOWN_KEY/, 'and the last-town key');
+  assert.match(rules, /DeleteGlobalDataStorageAndWait\(STORAGE\)/, 'and deletes both afterwards');
+  const login = source('tests/faction_war_reconnect_login_runtime_probe.lua');
+  assert.match(login, /KickUser\(/, 'the login probe uses a true leave');
+  assert.match(login, /add_virtual_player -profile_code wp2625/, 'and a true login');
+  assert.match(login, /_FactionWar\.TownStorageName = STORAGE/, 'on an isolated town board');
+  assert.match(source('tests/faction_war_reconnect_relogin_e2e_runtime_probe.lua'), /ConfigureRooms\(true\)/, 'the stale-room mode hides the rooms through the fault adapter');
+});
+
+test('the README records the #109 probes and is honest about what has not run', () => {
+  const readme = source('tests/README.md');
+  const section = readme.match(/## Disconnect and reconnect \(#109\)[^]*?(?=\n## )/)?.[0] || '';
+  assert.ok(section.length > 0, 'the section exists');
+  for (const name of Object.keys(probes)) assert.ok(section.includes(name), `the section names ${name}`);
+  assert.match(section, /faction_war_reconnect_contract\.test\.cjs/, 'and the contract test');
+  assert.match(section, /\| Probe \| Context \| Final line \|/, 'in the table format of the earlier sections');
+  assert.match(section, /Status: written in a worktree that cannot reach Maker, so none of the probes above has run yet/, 'it does not claim a Maker run');
+  assert.match(section, /\nNot verified: /, 'and lists what is not verified');
+  assert.match(section, /try_reconnect/, 'including the real network drop');
 });
 
 test('rooms are looked up behind the transfer adapter, which the fault adapter can hide in Maker', () => {
