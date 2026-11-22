@@ -51,11 +51,11 @@ Maker 實測兩種離線：
 
 ## 決定六：戰後重連，戰果從已存的紀錄重建
 
-`FactionWarAttack:OutcomeFrom(towns, matchKey)` 是 `towns.settled` 的唯一讀取者（純函式，`{ k, w, l, s, o }` 還原成勝方城、敗方城、結算後兵力、新歸屬與是否奪城），`Attempt` 的重複回應與 `LandingFor` 共用。`LandingFor` 先用本房記住的戰果，沒有（重連、房間已被回收）就從剛讀到的城鎮表重建。找不到紀錄就是沒有奪城，和房內平手、守衛戰落敗、過期戰果的意義相同；紀錄被擠出 20 筆之後、或結算最後 `FAILED`，同樣讀成沒有奪城（已知缺口）。次序仍是規格的「先戰果、再歸屬」：奪城者的偏好城是被奪下的城，再交給 `Landing` 看登入當下是否仍屬己方。
+`FactionWarAttack:OutcomeFrom(towns, matchKey)` 是 `towns.settled` 的唯一讀取者（純函式，`{ k, w, l, s, o }` 還原成勝方城、敗方城、結算後兵力、新歸屬與是否奪城），`Attempt` 的重複回應與落點共用。落點由 `FactionWarAttack:ResolveLanding(userId, ticket)` 決定，回傳一個表 `{ destination, outcome, reliable }`；`LandingFor` 只是它的薄包裝，回傳 `destination`，給 `MoveHome` 這種當場就移動的返回。`ResolveLanding` 先用本房記住的戰果，沒有（重連、房間已被回收）就從剛讀到的城鎮表重建。找不到紀錄就是沒有奪城，和房內平手、守衛戰落敗、過期戰果的意義相同；紀錄被擠出 20 筆之後、或結算最後 `FAILED`，同樣讀成沒有奪城（已知缺口）。次序仍是規格的「先戰果、再歸屬」：奪城者的偏好城是被奪下的城，再交給 `Landing` 看登入當下是否仍屬己方。
 
-`RestoreReturning` 完成（票券已關閉）後，靜態房呼叫 `MatchFlow:LandAfterRestore`：以同一個落點規則再判一次，已經站在該城（正常返回）就不動，否則 `FactionWar:Move`（靜態房內的傳送，不是又一次換房間）並送出城鎮提示。「大廳或城鎮由誰決定」仍只有 `MoveHome`：`LandAfterRestore` 只處理城鎮票券，大廳票券不碰。
+`RestoreReturning` 完成（票券已關閉）後，靜態房呼叫 `MatchFlow:LandAfterRestore`：以同一個落點規則（`ResolveLanding`）再判一次，已經站在該城（正常返回）就不動；落點讀不到時（退回出發城鎮，`reliable` 為否）也不動人，只記一行 `[VRF]`，因為那座出發城鎮不是目的地，把一位本來就站對的奪城者搬回去違反上述規則；否則 `FactionWar:Move`（靜態房內的傳送，不是又一次換房間）並送出城鎮提示。「大廳或城鎮由誰決定」仍只有 `MoveHome`：`LandAfterRestore` 只處理城鎮票券，大廳票券不碰。
 
-**顯示結果**：房間或實體還在時，玩家看到的是一般結果畫面；沒有房間時，城鎮提示由 `NoticeText` 用已存的紀錄組出一行（「上一場戰果：奪下鼓山。」「…兵力降至 80。」；沒有紀錄只說「上一場對戰已結束。」）。紀錄只有勝方城與敗方城，沒有「這位玩家贏或輸」，所以提示不下勝負結論。不新增逐玩家的結果儲存：勝負與經驗收據目前沒有持久化的路徑（票券狀態機沒有 `IN_ROOM` 到 `IN_ROOM` 的轉換），為了這行字新增寫入不划算。
+**顯示結果**：房間或實體還在時，玩家看到的是一般結果畫面；沒有房間時，城鎮提示由 `NoticeText` 用同一份 `ResolveLanding` 的 outcome（本房記住的戰果，或剛讀到的紀錄）組出一行，不再讀第二次城鎮表（「上一場戰果：奪下鼓山。」「…兵力降至 80。」；沒有紀錄只說「上一場對戰已結束。」）。紀錄只有勝方城與敗方城，沒有「這位玩家贏或輸」，所以提示不下勝負結論。不新增逐玩家的結果儲存：勝負與經驗收據目前沒有持久化的路徑（票券狀態機沒有 `IN_ROOM` 到 `IN_ROOM` 的轉換），為了這行字新增寫入不划算。
 
 所有新路徑對兵力、奪城、經驗都是唯讀：重送的結果只能以同一個比賽鍵呼叫 `Settle`（得到 `DUPLICATE`），重連的程式碼從不呼叫 `MonsterLevelStorage:Settle`。
 

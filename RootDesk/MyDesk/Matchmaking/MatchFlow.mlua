@@ -868,11 +868,17 @@ script MatchFlow extends Logic
             log("[VRF][MatchFlow] landing after restore skipped user=" .. userId .. "; the player is not available")
             return
         end
-        local destination = _FactionWarAttack:LandingFor(userId, war)
+        local result = _FactionWarAttack:ResolveLanding(userId, war)
+        local destination = result.destination
         -- The landing read storage and yielded; the player may have moved on or left.
         local here = self:Player(userId) == player and player.CurrentMapName or ""
         if here == "" or not _FactionWar:IsTown(destination) then
             log("[VRF][MatchFlow] landing after restore dropped user=" .. userId .. " destination=" .. destination .. "; the player is no longer there")
+            return
+        end
+        if not result.reliable then
+            -- The departure town the landing falls back to is no destination: a player who stands correctly stays put.
+            log("[VRF][MatchFlow] landing after restore left in place user=" .. userId .. " town=" .. here .. "; the landing could not be read")
             return
         end
         if here == destination then
@@ -881,7 +887,11 @@ script MatchFlow extends Logic
         end
         local moved = _FactionWar:Move(player, destination)
         log("[VRF][MatchFlow] landing after restore user=" .. userId .. " from=" .. here .. " to=" .. destination .. " moved=" .. tostring(moved))
-        if moved then _FactionWar:ReceiveTownNotice(destination, _FactionWarAttack:ResultNotice(war.data.matchKey, origin), userId) end
+        if moved then
+            -- The notice comes from the outcome that decided the destination, not from another read of the board.
+            log("[VRF][MatchFlow] landing notice user=" .. userId .. " recorded=" .. tostring(result.outcome ~= nil))
+            _FactionWar:ReceiveTownNotice(destination, _FactionWarAttack:NoticeText(result.outcome, origin), userId)
+        end
     end
 
     @ExecSpace("ServerOnly")

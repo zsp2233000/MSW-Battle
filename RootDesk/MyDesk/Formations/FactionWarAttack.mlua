@@ -388,14 +388,16 @@ script FactionWarAttack extends Logic
     end
 
     @ExecSpace("ServerOnly")
-    method string LandingFor(string userId, any ticket)
+    method table ResolveLanding(string userId, any ticket)
         -- Where a war player stands after the match: the town they took, else the one they left while their faction still holds it, else their capital.
+        -- The answer is one table: destination; outcome (what the match did to the towns, nil when nothing says); reliable (false when destination is only the departure town
+        -- because there was nothing to land or the board could not be read, so a caller that would move the player must not).
         local origin = ticket.data.origin or ""
         local matchKey = ticket.data.matchKey or ""
         local player = _UserService:GetUserEntityByUserId(userId)
         if origin == "" or not isvalid(player) then
             log("[VRF][FactionWarAttack] landing skipped user=" .. userId .. " origin=" .. origin .. " present=" .. tostring(isvalid(player)))
-            return origin
+            return { destination = origin, outcome = nil, reliable = false }
         end
         -- A fast return click can beat the settlement write; the landing must see the finished town table (a contended settlement may take up to ConflictBudgetSeconds).
         self:WaitWhile(function() return self._T.settling[matchKey] ~= nil end, self.LandingWaitSeconds)
@@ -411,7 +413,7 @@ script FactionWarAttack extends Logic
         end
         if faction == nil or faction == "" or towns == nil then
             log("[VRF][FactionWarAttack] landing unreadable user=" .. userId .. " origin=" .. origin .. "; keeps the departure town")
-            return origin
+            return { destination = origin, outcome = nil, reliable = false }
         end
         -- This room did not settle the match (the player came back after a reconnect, or the room that fought it is gone): the stored record says what it did.
         -- No record is no capture; a match that left none (a draw, a lost guard fight, an exempt match) changed no town.
@@ -424,7 +426,13 @@ script FactionWarAttack extends Logic
         if outcome ~= nil and outcome.flipped and outcome.winner == origin then preferred = outcome.loser end
         local destination = _FactionWar:Landing(faction, preferred, towns)
         log("[VRF][FactionWarAttack] landing user=" .. userId .. " faction=" .. faction .. " origin=" .. origin .. " preferred=" .. preferred .. " destination=" .. destination .. " conqueror=" .. tostring(preferred ~= origin) .. " rebuilt=" .. tostring(rebuilt))
-        return destination
+        return { destination = destination, outcome = outcome, reliable = true }
+    end
+
+    @ExecSpace("ServerOnly")
+    method string LandingFor(string userId, any ticket)
+        -- The destination alone, for the return that moves the player in the same step (an unreadable landing keeps the departure town).
+        return self:ResolveLanding(userId, ticket).destination
     end
 
     method string NoticeText(any outcome, string origin)
@@ -435,15 +443,6 @@ script FactionWarAttack extends Logic
         if outcome.flipped and outcome.winner == origin then return "上一場戰果：奪下" .. town .. "。" end
         if outcome.flipped then return "上一場戰果：" .. town .. "已易主。" end
         return "上一場戰果：" .. town .. "兵力降至" .. tostring(outcome.strength) .. "。"
-    end
-
-    @ExecSpace("ServerOnly")
-    method string ResultNotice(string matchKey, string origin)
-        -- The notice for a player put back into a town after their match room was gone: this room's own memory of the match, else the stored record.
-        local towns = self:Await(function(done) _FactionWar:ReadTowns(done) end)
-        local outcome = self._T.outcomes[matchKey] or self:OutcomeFrom(towns, matchKey)
-        log("[VRF][FactionWarAttack] notice match=" .. matchKey .. " recorded=" .. tostring(outcome ~= nil))
-        return self:NoticeText(outcome, origin)
     end
 
     @ExecSpace("ServerOnly")

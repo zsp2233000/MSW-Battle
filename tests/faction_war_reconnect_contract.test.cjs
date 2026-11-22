@@ -33,13 +33,30 @@ test('the outcome of a match is read from the stored record by one pure reader, 
 });
 
 test('the landing falls back to the stored record when this room did not settle the match, and keeps its pinned shape', () => {
-  const landing = body(attack(), 'LandingFor');
+  const landing = body(attack(), 'ResolveLanding');
   assert.match(landing, /self\._T\.outcomes\[matchKey\]/, 'the room that settled the match remembers it');
   assert.match(landing, /self:OutcomeFrom\(towns, matchKey\)/, 'any other room rebuilds it from the town document it has just read');
   assert.ok(landing.indexOf('OutcomeFrom') > landing.indexOf('ReadTowns'), 'the record is read after the board, never from a stale copy');
   assert.match(landing, /outcome\.flipped and outcome\.winner == origin/, 'only the side that won the flipping match walks into the conquered town');
   assert.match(landing, /_FactionWar:Landing\(faction, preferred, towns\)/, 'ownership is still judged on the live board');
   assert.doesNotMatch(landing, /\bwait\(/, 'no waiting loop of its own: a room that did not settle has nothing to wait for');
+});
+
+test('the landing says how it was decided: a table with the destination, the outcome and whether it could be read, and LandingFor is a thin wrapper', () => {
+  const text = attack();
+  assert.ok(methods(text).includes('ResolveLanding'), 'ResolveLanding exists');
+  assert.equal(tag(text, 'ResolveLanding'), '@ExecSpace("ServerOnly")\n', 'it reads storage and waits, so it is a server method');
+  assert.match(text, /method table ResolveLanding\(string userId, any ticket\)/, 'it answers with one table, never a second return value');
+  const landing = body(text, 'ResolveLanding');
+  assert.match(landing, /return \{ destination = destination, outcome = outcome, reliable = true \}/, 'a decided landing is reliable and carries the outcome that decided it');
+  assert.equal((landing.match(/reliable = false/g) || []).length, 2, 'both fallbacks to the departure town (nothing to land, unreadable board) are marked unreliable');
+  const code = landing.replace(/--.*$/gm, '');
+  assert.doesNotMatch(code, /return (origin|destination)\s*$/m, 'every exit returns the table');
+  assert.doesNotMatch(code, /^\s*return [^{\n][^\n]*,/m, 'no second return value');
+  const wrapper = body(text, 'LandingFor');
+  assert.equal(tag(text, 'LandingFor'), '@ExecSpace("ServerOnly")\n', 'it yields through ResolveLanding, so it keeps its tag');
+  assert.match(wrapper, /return self:ResolveLanding\(userId, ticket\)\.destination/, 'the in-room return gets exactly the destination it always got');
+  assert.equal(wrapper.replace(/--.*$/gm, '').split('\n').filter(line => line.trim()).length, 3, 'a wrapper (signature, one return, end), with no logic of its own');
 });
 
 // Every early `return` of `text` has a [VRF] log on its own line or the line before it.
@@ -64,10 +81,9 @@ test('a queue request that is refused says why instead of returning silently', (
 
 test('a player who comes back after the room is gone is told what the last match did to the towns, from the stored record only', () => {
   const text = attack();
-  assert.ok(methods(text).includes('NoticeText') && methods(text).includes('ResultNotice'), 'the notice has a pure wording rule and a reader');
+  assert.ok(methods(text).includes('NoticeText'), 'the notice has a pure wording rule');
+  assert.ok(!methods(text).includes('ResultNotice'), 'and no reader of its own: the outcome comes from the landing that decided the destination (no second board read)');
   assert.equal(tag(text, 'NoticeText'), '', 'the wording is a pure helper');
-  assert.equal(tag(text, 'ResultNotice'), '@ExecSpace("ServerOnly")\n', 'the reader reads storage on the server');
-  assert.match(body(text, 'ResultNotice'), /self\._T\.outcomes\[matchKey\] or self:OutcomeFrom\(towns, matchKey\)/, 'the room that settled the match answers from memory, every other room from the record');
   assert.match(body(text, 'NoticeText'), /上一場戰果/, 'it speaks of the 戰果 of the glossary');
   assert.doesNotMatch(body(text, 'NoticeText'), /勝利|落敗|平手/, 'the record holds no win or loss for the player, so the text claims none');
 });
@@ -203,10 +219,13 @@ test('a war ticket closed in the static room puts the player where the match lea
   assert.ok(body(text, 'RestoreReturning').indexOf('Close') < body(text, 'RestoreReturning').indexOf('LandAfterRestore'), 'after the ticket is closed, from a copy taken before it was');
   const landing = body(text, 'LandAfterRestore');
   assert.match(landing, /IsInstanceRoom\(\)/, 'only in the static room');
-  assert.match(landing, /_FactionWarAttack:LandingFor\(userId, war\)/, 'the landing is the same rule the room-side return uses');
+  assert.match(landing, /local result = _FactionWarAttack:ResolveLanding\(userId, war\)/, 'the landing is the same rule the room-side return uses, with its reliability');
+  assert.match(landing, /not result\.reliable then\n(\s+--[^\n]*\n)*\s+log\("\[VRF\]\[MatchFlow\] landing after restore left in place[^\n]*\n\s+return/, 'a landing that could not be read moves nobody (the departure town it falls back to is no destination) and says so');
+  assert.ok(landing.indexOf('result.reliable') < landing.indexOf('_FactionWar:Move('), 'and that is decided before anybody is moved');
   assert.match(landing, /here == destination[^]*landing in place/, 'a player who already stands there is left alone, so a normal return is not moved twice');
   assert.match(landing, /_FactionWar:Move\(player, destination\)/, 'a move inside the static room is a teleport, not another room change');
-  assert.match(landing, /_FactionWarAttack:ResultNotice\(/, 'the notice is built from the stored record');
+  assert.match(landing, /_FactionWarAttack:NoticeText\(result\.outcome, origin\)/, 'the notice is built from the outcome that decided the destination');
+  assert.doesNotMatch(landing, /ReadTowns|ResultNotice|LandingFor/, 'no second board read and no second decision');
   assert.match(landing, /ReceiveTownNotice\(destination, /, 'it reaches the player through the town notice');
   assert.doesNotMatch(landing, /MoveToLobby|MoveToTown/, 'the lobby-or-town decision stays in MoveHome');
   assert.match(body(text, 'MoveHome'), /_FactionWarAttack:LandingFor\(userId, ticket\)/, 'the room-side return is unchanged');

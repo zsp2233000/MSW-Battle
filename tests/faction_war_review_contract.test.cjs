@@ -53,7 +53,7 @@ test('S2: StorageOwner is a pure string builder, so it carries no ExecSpace', ()
 
 test('S3: the branches that used to return silently now say which one was taken', () => {
   assert.deepEqual(silentReturns(body(war(), 'Evict')), [], 'every early return of Evict logs a [VRF] line first');
-  assert.match(body(attack(), 'LandingFor'), /origin == "" or not isvalid\(player\) then\n\s+log\("\[VRF\]\[FactionWarAttack\] landing skipped/, 'LandingFor logs why it returns the departure town untouched');
+  assert.match(body(attack(), 'ResolveLanding'), /origin == "" or not isvalid\(player\) then\n\s+log\("\[VRF\]\[FactionWarAttack\] landing skipped/, 'the landing logs why it returns the departure town untouched');
   assert.match(body(ui(), 'ShowTownNotice'), /arrivalNotice = [^\n]*\n\s+log\("\[VRF\]\[FactionWar\] notice kept/, 'a notice kept for the destination town is logged');
 });
 
@@ -100,8 +100,8 @@ test('S7: shared rules are written once', () => {
   // One bounded poll loop.
   assert.ok(methods(text).includes('WaitWhile'));
   assert.match(body(text, 'Await'), /self:WaitWhile\(/);
-  assert.match(body(text, 'LandingFor'), /self:WaitWhile\(/);
-  assert.doesNotMatch(body(text, 'LandingFor'), /wait\(0\.1\)/, 'LandingFor no longer repeats the loop');
+  assert.match(body(text, 'ResolveLanding'), /self:WaitWhile\(/);
+  assert.doesNotMatch(body(text, 'ResolveLanding'), /wait\(0\.1\)/, 'the landing no longer repeats the loop');
   // One "is the player still in that town" guard, used by the town status, the eviction and the NPC reads.
   assert.ok(methods(war()).includes('StillIn'));
   assert.match(body(war(), 'Evict'), /self:StillIn\(/);

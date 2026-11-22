@@ -59,11 +59,13 @@ test('a capital still never loses strength or changes owner', () => {
 });
 
 test('returning from a war match lands by the match outcome and live ownership, never blindly at the departure town', () => {
-  const landing = body(attack(), 'LandingFor');
+  // LandingFor is the destination alone; ResolveLanding decides it and says how reliably (the landing after a restore needs that).
+  const landing = body(attack(), 'ResolveLanding');
   assert.match(landing, /outcome\.flipped and outcome\.winner == origin/, 'only the side that won the flipping match walks into the conquered town');
   assert.match(landing, /_FactionWar:Landing\(faction, preferred, towns\)/, 'ownership is judged on the live town table');
   assert.match(landing, /self\._T\.settling\[matchKey\]/, 'a fast return waits for the settlement write');
-  assert.match(landing, /return origin/, 'unreadable storage falls back to the previous behaviour');
+  assert.match(landing, /destination = origin, outcome = nil, reliable = false/, 'unreadable storage falls back to the previous behaviour: the departure town, marked unreliable');
+  assert.match(body(attack(), 'LandingFor'), /return self:ResolveLanding\(userId, ticket\)\.destination/, 'the in-room return still gets just the destination');
   const home = body(flow(), 'MoveHome');
   assert.match(home, /_FactionWarAttack:LandingFor\(userId, ticket\)/, 'the town return asks for its landing');
   assert.match(home, /MoveToTown\(userId, /, 'the same adapter boundary moves the player');

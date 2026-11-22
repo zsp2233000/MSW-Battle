@@ -119,7 +119,7 @@ test('experience and the match result never wait for the town settlement', () =>
 test('a returning player is placed by the live board, which is read again before the departure town is trusted', () => {
   const text = attack();
   assert.match(text, /property integer LandingReadAttempts = \d+/, 'the number of tries is a property, not a magic number');
-  const landing = body(text, 'LandingFor');
+  const landing = body(text, 'ResolveLanding');
   assert.match(landing, /for attempt = 1, self\.LandingReadAttempts do/, 'an unreadable faction or town table is read again');
   assert.match(landing, /ReadFaction[^]*ReadTowns/, 'both come from storage on every return, never from the first delivery');
   assert.match(landing, /faction ~= nil and towns ~= nil then break/, 'only a missing answer is retried; "no faction" is an answer');
