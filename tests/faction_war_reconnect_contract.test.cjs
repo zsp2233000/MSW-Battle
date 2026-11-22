@@ -205,6 +205,19 @@ test('a war ticket whose leave cleanup failed is cancelled again on reconnect in
   assert.match(handler(text, 'HandleUserLeaveEvent'), /self:Depart\(event\.UserId, tostring\(event\.LeaveReason\)\)/, 'the leave reason reaches the log');
 });
 
+test('a leave with no ticket is logged with its reason, and each room says which world instance it belongs to', () => {
+  const text = flow();
+  assert.match(body(text, 'Depart'), /if ticket == nil then\n\s+log\("\[VRF\]\[MatchDisconnect\][^\n]*no ticket[^\n]*reason=" \.\. tostring\(reason or ""\)\)\n\s+return\n/, 'a player with no ticket still leaves a line with the leave reason');
+  assert.match(body(text, 'OnBeginPlay'), /log\("\[VRF\]\[MatchFlow\] world instance=" \.\. tostring\(_WorldInstanceService\.WorldInstanceId\)/, 'the room boot logs the world instance id (the one API there is: _WorldInstanceService.WorldInstanceId), so a cross-instance re-login can be read from the logs');
+});
+
+test('an admission clears its moving mark even when the move raises', () => {
+  const admit = body(flow(), 'Admit');
+  assert.match(admit, /pcall\(function\(\) return self:TransferAdapter\(\):MoveToMatch\(slot\.room, userId\) end\)/, 'the native move runs under pcall');
+  assert.ok(admit.indexOf('pcall(') > admit.indexOf('self._T.moving[userId] = ticket') && admit.indexOf('pcall(') < admit.indexOf('self._T.moving[userId] = nil'), 'the mark is set before it and cleared right after it, whatever happened');
+  assert.match(admit, /if not ok then\n\s+log_error\("\[VRF\]\[MatchTransfer\][^\n]*move raised[^\n]*\n\s+moved = false\n\s+end/, 'a raise is logged and counts as a move that did not happen, so the admission is withdrawn like any failed move');
+});
+
 test('a reconnect inside the match room recovers the ticket and sends the experience receipt again', () => {
   const reconnect = handler(flow(), 'HandleUserReconnectEvent');
   assert.match(reconnect, /if _RoomService:IsInstanceRoom\(\) then[^]*RearmExperience\(event\.UserId\)[^]*self:Recover\(event\.UserId\)[^]*return\n\s+end/, 'the room branch re-arms the receipt and recovers, then ends');

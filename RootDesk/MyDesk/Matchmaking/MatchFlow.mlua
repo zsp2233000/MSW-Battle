@@ -36,6 +36,8 @@ script MatchFlow extends Logic
         self._T.queue = Environment:IsMakerPlay() and _MatchQueueLocal or _MatchQueueNative
         self._T.transfer = _MatchTransfer
         log("[VRF][MatchFlow] ready enabled=" .. tostring(self.Enabled) .. " room=" .. _RoomService.RoomKey .. " adapter=" .. self._T.queue:Kind())
+        -- Which world instance this room belongs to: a ticket carries it as its source, so a re-login in another instance can be told apart in the logs.
+        log("[VRF][MatchFlow] world instance=" .. tostring(_WorldInstanceService.WorldInstanceId) .. " room=" .. _RoomService.RoomKey)
     end
 
     @ExecSpace("ServerOnly")
@@ -1003,7 +1005,10 @@ script MatchFlow extends Logic
         self:QueueAdapter():Withdraw(userId)
         self._T.queueCommands[userId] = nil
         local ticket = self._T.records[userId]
-        if ticket == nil then return end
+        if ticket == nil then
+            log("[VRF][MatchDisconnect] user=" .. userId .. " no ticket reason=" .. tostring(reason or ""))
+            return
+        end
         if ticket.cancelling then return end
         if _FormationHandoff:CanCancel(ticket) then
             ticket.cancelling = true
@@ -1052,8 +1057,13 @@ script MatchFlow extends Logic
         if self:Player(userId) == nil or self._T.records[userId] ~= ticket then return end
         -- A recovery that runs while the move is in flight must not send the player back into the same room.
         self._T.moving[userId] = ticket
-        local moved = self:TransferAdapter():MoveToMatch(slot.room, userId)
+        -- The mark must not outlive the move, even when the native call raises: a stuck mark would stop every later Rejoin of this player.
+        local ok, moved = pcall(function() return self:TransferAdapter():MoveToMatch(slot.room, userId) end)
         self._T.moving[userId] = nil
+        if not ok then
+            log_error("[VRF][MatchTransfer] match=" .. matched.key .. " move raised " .. tostring(moved))
+            moved = false
+        end
         log("[VRF][MatchTransfer] match=" .. matched.key .. " entry=" .. tostring(moved))
         if self._T.records[userId] ~= ticket then return end
         if not moved then self:Finish(userId, ticket, "TRANSFER", function() return _FormationHandoff:WithdrawAdmission(userId, ticket) end) end
