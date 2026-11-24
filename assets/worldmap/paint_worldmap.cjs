@@ -1,234 +1,161 @@
 #!/usr/bin/env node
 'use strict';
 
-// Paints the faction-war world map art (msw-painter, maple cartoon pixel style) straight to PNG.
-// Every image is a grid of 2x2-pixel dots: no curves, no gradients, no fractional coordinates.
-// The district shapes follow the real Kaohsiung districts (approximate outlines, lat/lon);
-// the same grid produces the terrain base, one white mask per district (tinted by owner at runtime)
-// and layout.json with each town's node position in UI pixels (map centre origin, +y up).
-//
-//   node assets/worldmap/paint_worldmap.cjs
-//
-// Output: assets/worldmap/{terrain,mask_nanzih,mask_zuoying,mask_gushan,mask_yancheng,crest}.png, layout.json
-
-const fs = require('fs');
-const path = require('path');
-const zlib = require('zlib');
+// Paint the Kaohsiung map on a 2x2 pixel grid. The shared district lines are from
+// the MOI township boundaries (see import_boundaries.py); the four town masks
+// are painted from the same grid and aligned by layout.json.
+const fs = require('node:fs');
+const path = require('node:path');
+const zlib = require('node:zlib');
+const { land, districts } = require('./kaohsiung_boundaries.json');
 
 const OUT = __dirname;
-const DOT = 2;            // pixels per dot
-const GW = 310;           // dots across  -> 620 px
-const GH = 405;           // dots down    -> 810 px
+const DOT = 2;
+const GW = 740;
+const GH = 810;
+const K = 700;
+const LON0 = 120.04;
+const LAT1 = 23.548;
+const LON_SCALE = Math.cos(23 * Math.PI / 180);
+const CODES = { '64000010': 'yancheng', '64000020': 'gushan', '64000030': 'zuoying', '64000040': 'nanzih' };
+const dot = ([lon, lat]) => [(lon - LON0) * K * LON_SCALE, (LAT1 - lat) * K];
+const trace = points => points.map(([lat, lon]) => dot([lon, lat]));
+const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
-// Equirectangular projection around 22.7N: 1 deg lon = 102.7 km, 1 deg lat = 110.6 km.
-const LON0 = 120.225;
-const LON1 = 120.365;
-const LAT1 = 22.770;
-const KX = GW / (LON1 - LON0);
-const KY = KX / 102.7 * 110.6;
-
-function dot([lat, lon]) { return [(lon - LON0) * KX, (LAT1 - lat) * KY]; }
-const poly = (pts) => pts.map(dot);
-
-// Mainland: the coast from the north, the harbour's north shore, then the map's east edge.
-const COAST = poly([
-  [22.772, 120.243], [22.760, 120.245], [22.750, 120.248], [22.742, 120.2525], [22.735, 120.255],
-  [22.722, 120.262], [22.712, 120.266], [22.7075, 120.265], [22.704, 120.2605], [22.700, 120.259],
-  [22.696, 120.2615], [22.690, 120.267], [22.683, 120.268], [22.676, 120.266], [22.670, 120.261],
-  [22.660, 120.255], [22.650, 120.252], [22.640, 120.2515], [22.632, 120.254], [22.626, 120.259],
-  [22.6205, 120.2635], [22.617, 120.267], [22.6155, 120.272], [22.6165, 120.278], [22.6165, 120.284],
-  [22.6155, 120.2905], [22.612, 120.297], [22.607, 120.302], [22.599, 120.305],
-  [22.599, 120.367], [22.772, 120.367],
-]);
-const QIJIN = poly([
-  [22.6135, 120.2655], [22.6115, 120.2685], [22.606, 120.2745], [22.599, 120.2810],
-  [22.599, 120.2765], [22.604, 120.2715], [22.609, 120.2670],
-]);
-// Shared borders keep neighbouring districts gap-free; west edges run out to sea and are clipped by the coast.
-const NZ = [[22.708, 120.200], [22.708, 120.266], [22.706, 120.285], [22.700, 120.300], [22.703, 120.315], [22.700, 120.328]];
-const ZG = [[22.676, 120.200], [22.676, 120.266], [22.672, 120.280], [22.668, 120.292], [22.664, 120.300]];
-const Z_EAST = [[22.700, 120.328], [22.685, 120.326], [22.675, 120.318], [22.668, 120.308], [22.664, 120.300]];
-const G_EAST = [[22.664, 120.300], [22.652, 120.297], [22.640, 120.293], [22.6315, 120.2905]];
-const Y_WEST = [[22.6315, 120.2905], [22.6315, 120.2795], [22.626, 120.2775], [22.618, 120.2775], [22.608, 120.2775]];
-const DISTRICTS = {
-  nanzih: poly([...NZ, [22.712, 120.336], [22.728, 120.338], [22.742, 120.330], [22.748, 120.312], [22.745, 120.292],
-    [22.742, 120.272], [22.740, 120.256], [22.740, 120.200]]),
-  zuoying: poly([...NZ, ...Z_EAST.slice(1), ...ZG.slice().reverse().slice(1)]),
-  gushan: poly([...ZG, ...G_EAST.slice(1), ...Y_WEST.slice(1), [22.608, 120.200]]),
-  yancheng: poly([...Y_WEST, [22.608, 120.2905]]),
-};
-const HILLS = [
-  poly([[22.672, 120.264], [22.668, 120.270], [22.660, 120.274], [22.650, 120.276], [22.640, 120.274], [22.632, 120.268],
-    [22.630, 120.261], [22.638, 120.255], [22.650, 120.2545], [22.662, 120.257]]),       // Shoushan
-  poly([[22.6915, 120.287], [22.695, 120.2915], [22.699, 120.300], [22.6985, 120.306], [22.6945, 120.305], [22.691, 120.296]]), // Banpingshan
-];
-const LAKE = poly([[22.679, 120.2925], [22.687, 120.2945], [22.6875, 120.2985], [22.679, 120.297]]); // Lotus Pond
-const RIVER = poly([[22.612, 120.2905], [22.628, 120.2905], [22.634, 120.2905], [22.640, 120.293], [22.652, 120.297],
-  [22.664, 120.301], [22.668, 120.312], [22.676, 120.322], [22.686, 120.332], [22.696, 120.342], [22.706, 120.354]]); // Love River
-
-function inside(pts, x, y) {
-  let hit = false;
-  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
-    const [xi, yi] = pts[i];
-    const [xj, yj] = pts[j];
-    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) hit = !hit;
-  }
-  return hit;
-}
-
-function distanceToLine(pts, x, y) {
-  let best = Infinity;
-  for (let i = 0; i + 1 < pts.length; i++) {
-    const [ax, ay] = pts[i];
-    const [bx, by] = pts[i + 1];
-    const dx = bx - ax;
-    const dy = by - ay;
-    const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy)));
-    best = Math.min(best, Math.hypot(ax + t * dx - x, ay + t * dy - y));
-  }
-  return best;
-}
-
-// --- classify every dot --------------------------------------------------------
-const IDS = ['nanzih', 'zuoying', 'gushan', 'yancheng'];
 const SEA = 0;
-const LAND = 1;          // 2..5 = IDS[n-2]
-const cell = new Uint8Array(GW * GH);
-const water = new Uint8Array(GW * GH);   // river or lake on land
-const hill = new Uint8Array(GW * GH);
+const LAND = 1;
+const cells = new Uint8Array(GW * GH);
+const water = new Uint8Array(cells.length);
+const hill = new Uint8Array(cells.length);
 const at = (x, y) => y * GW + x;
-for (let y = 0; y < GH; y++) {
-  for (let x = 0; x < GW; x++) {
-    const cx = x + 0.5;
-    const cy = y + 0.5;
-    const mainland = inside(COAST, cx, cy);
-    let kind = mainland || inside(QIJIN, cx, cy) ? LAND : SEA;
-    if (mainland) {
-      IDS.forEach((id, n) => { if (kind === LAND && inside(DISTRICTS[id], cx, cy)) kind = n + 2; });
-    }
-    cell[at(x, y)] = kind;
-    if (kind !== SEA) {
-      if (inside(LAKE, cx, cy) || distanceToLine(RIVER, cx, cy) <= 0.9) water[at(x, y)] = 1;
-      else if (HILLS.some((h) => inside(h, cx, cy))) hill[at(x, y)] = 1;
-    }
-  }
-}
-
-const get = (x, y) => (x < 0 || y < 0 || x >= GW || y >= GH ? -1 : cell[at(x, y)]);
+const inGrid = (x, y) => x >= 0 && x < GW && y >= 0 && y < GH;
+const get = (x, y) => inGrid(x, y) ? cells[at(x, y)] : SEA;
 const N4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 const N8 = [...N4, [1, 1], [1, -1], [-1, 1], [-1, -1]];
+const frame = (x, y) => x < 3 || y < 3 || x >= GW - 3 || y >= GH - 3;
 
-// Distance (in dots, 4-neighbour steps) from the sea to the nearest land, capped.
-const seaDist = new Uint8Array(GW * GH).fill(255);
-{
+// Scan at dot centres. Pair crossings across all rings, including holes;
+// neighbouring districts use precisely the same edge crossings.
+function raster(rings, target, value) {
+  const ys = rings.flatMap(ring => ring.map(p => p[1]));
+  const first = clamp(Math.ceil(Math.min(...ys) - 0.5), 0, GH);
+  const end = clamp(Math.ceil(Math.max(...ys) - 0.5), 0, GH);
+  for (let y = first; y < end; y++) {
+    const cy = y + 0.5;
+    const cuts = [];
+    for (const ring of rings) {
+      for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        const [ax, ay] = ring[i];
+        const [bx, by] = ring[j];
+        if ((ay > cy) !== (by > cy)) {
+          cuts.push(ay < by ? ax + (cy - ay) * (bx - ax) / (by - ay) : bx + (cy - by) * (ax - bx) / (ay - by));
+        }
+      }
+    }
+    cuts.sort((a, b) => a - b);
+    for (let i = 0; i + 1 < cuts.length; i += 2) {
+      const left = clamp(Math.ceil(cuts[i] - 0.5), 0, GW);
+      const right = clamp(Math.ceil(cuts[i + 1] - 0.5), 0, GW);
+      target.fill(value, at(left, y), at(right, y));
+    }
+  }
+}
+
+for (const polygon of land) raster(polygon.map(ring => ring.map(dot)), cells, LAND);
+districts.forEach((district, i) => {
+  for (const polygon of district.polygons) raster(polygon.map(ring => ring.map(dot)), cells, i + 2);
+});
+
+// Shoushan, Banpingshan, Lotus Pond and the Love River retain the hand-drawn detail.
+raster([trace([[22.672,120.264],[22.668,120.270],[22.660,120.274],[22.650,120.276],
+  [22.640,120.274],[22.632,120.268],[22.630,120.261],[22.638,120.255],[22.650,120.2545],[22.662,120.257]])], hill, 1);
+raster([trace([[22.6915,120.287],[22.695,120.2915],[22.699,120.300],[22.6985,120.306],
+  [22.6945,120.305],[22.691,120.296]])], hill, 1);
+raster([trace([[22.679,120.2925],[22.687,120.2945],[22.6875,120.2985],[22.679,120.297]])], water, 1);
+const river = trace([[22.612,120.2905],[22.628,120.2905],[22.634,120.2905],[22.640,120.293],
+  [22.652,120.297],[22.664,120.301],[22.668,120.312],[22.676,120.322],[22.686,120.332],
+  [22.696,120.342],[22.706,120.354]]);
+for (let n = 1; n < river.length; n++) {
+  const [ax, ay] = river[n - 1];
+  const [bx, by] = river[n];
+  const steps = Math.ceil(Math.hypot(bx - ax, by - ay) * 2);
+  for (let i = 0; i <= steps; i++) {
+    const x = Math.floor(ax + (bx - ax) * i / steps);
+    const y = Math.floor(ay + (by - ay) * i / steps);
+    if (get(x, y) > SEA) water[at(x, y)] = 1;
+  }
+}
+
+// City clearance picks an interior anchor for each name, including thin and concave districts.
+const clearance = new Uint16Array(cells.length);
+const coastDistance = new Uint8Array(cells.length).fill(255);
+const border = (x, y, test, offsets = N4) => offsets.some(([dx, dy]) => test(x + dx, y + dy));
+function spread(distance, starts, visit, max) {
   const queue = [];
-  for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) if (cell[at(x, y)] !== SEA) { seaDist[at(x, y)] = 0; queue.push(at(x, y)); }
+  for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
+    if (starts(x, y)) { const i = at(x, y); distance[i] = 1; queue.push(i); }
+  }
   for (let head = 0; head < queue.length; head++) {
     const i = queue[head];
-    const d = seaDist[i];
-    if (d >= 12) continue;
     const x = i % GW;
     const y = (i - x) / GW;
+    if (distance[i] >= max) continue;
     for (const [dx, dy] of N4) {
       const nx = x + dx;
       const ny = y + dy;
-      if (nx < 0 || ny < 0 || nx >= GW || ny >= GH) continue;
+      if (!inGrid(nx, ny)) continue;
       const j = at(nx, ny);
-      if (seaDist[j] > d + 1) { seaDist[j] = d + 1; queue.push(j); }
+      if (distance[j] > distance[i] + 1 && visit(i, j)) { distance[j] = distance[i] + 1; queue.push(j); }
     }
   }
 }
+clearance.fill(65535);
+spread(clearance, (x, y) => border(x, y, (nx, ny) => get(nx, ny) !== get(x, y)),
+  (a, b) => cells[a] === cells[b], 65534);
+spread(coastDistance, (x, y) => get(x, y) === SEA && border(x, y, (nx, ny) => get(nx, ny) !== SEA),
+  (_, b) => cells[b] === SEA, 8);
 
-// Distance from each hill dot to the hill's edge, and each hill's centre, for stepped shading.
-const hillDist = new Uint8Array(GW * GH);
-const hillCentre = [];
-{
-  const queue = [];
-  for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
-    if (!hill[at(x, y)]) continue;
-    const edge = N4.some(([dx, dy]) => { const nx = x + dx; const ny = y + dy; return nx < 0 || ny < 0 || nx >= GW || ny >= GH || !hill[at(nx, ny)]; });
-    hillDist[at(x, y)] = edge ? 1 : 0;
-    if (edge) queue.push(at(x, y));
-  }
-  for (let head = 0; head < queue.length; head++) {
-    const i = queue[head];
-    const x = i % GW;
-    const y = (i - x) / GW;
-    for (const [dx, dy] of N4) {
-      const j = at(x + dx, y + dy);
-      if (hill[j] && hillDist[j] === 0) { hillDist[j] = hillDist[i] + 1; queue.push(j); }
-    }
-  }
-  HILLS.forEach((h) => {
-    const xs = h.map((p) => p[0]);
-    const ys = h.map((p) => p[1]);
-    hillCentre.push({ pts: h, x: (Math.min(...xs) + Math.max(...xs)) / 2, y: (Math.min(...ys) + Math.max(...ys)) / 2 });
-  });
-}
-
-const hex = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16), 255];
+const hex = h => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16), 255];
 const CLEAR = [0, 0, 0, 0];
-const C = {
-  seaDeep: hex('#5B8BA3'), seaDeep2: hex('#5F90A8'), seaMid: hex('#6C9CB2'), seaShallow: hex('#7FB0C2'),
-  seaEdge: hex('#3F6E85'), grid: hex('#77A5BA'),
-  land: hex('#CBB98F'), land2: hex('#C5B289'), landShore: hex('#B39C70'), landBorder: hex('#9A7B56'),
-  district: hex('#ECDDB8'), districtShore: hex('#C8AE80'), districtBorder: hex('#6B4A2E'),
-  river: hex('#6A9DB4'), riverBank: hex('#4C7C93'),
-  hill: hex('#9DB47A'), hillLight: hex('#B6C994'), hillShade: hex('#7E9860'), hillEdge: hex('#5E7446'),
-  frame: hex('#4A3322'), frameInner: hex('#8A6A48'),
-  maskRim: hex('#FFFFFF'), maskFill: hex('#D6D6D6'),
-};
-
-function neighbours(x, y, list, test) { return list.some(([dx, dy]) => test(get(x + dx, y + dy), x + dx, y + dy)); }
-const isDistrict = (k) => k >= 2;
-const isWater = (x, y) => x >= 0 && y >= 0 && x < GW && y < GH && water[at(x, y)] === 1;
-const isHill = (x, y) => x >= 0 && y >= 0 && x < GW && y < GH && hill[at(x, y)] === 1;
+const C = Object.fromEntries(Object.entries({
+  seaDeep: '#5B8BA3', seaDeep2: '#5F90A8', seaMid: '#6C9CB2', seaShallow: '#7FB0C2',
+  seaEdge: '#3F6E85', grid: '#77A5BA', land: '#ADAA91', land2: '#B1AE96',
+  border: '#876C50', cityEdge: '#6B4A2E', town: '#ECDDB8', shore: '#C8AE80', river: '#6A9DB4',
+  hill: '#9DB47A', hillEdge: '#5E7446', frame: '#4A3322', frameInner: '#8A6A48',
+  maskRim: '#FFFFFF', maskFill: '#D6D6D6',
+}).map(([key, value]) => [key, hex(value)]));
+const plain = ['#DFCDA4', '#E7D9B1', '#D8C898', '#E4D0A7'].map(hex);
+const upland = ['#BCCC93', '#B5C68D', '#C8D1A0', '#C1CA92'].map(hex);
+const towns = new Set(Object.keys(CODES));
+const isTown = k => k >= 2 && towns.has(districts[k - 2].code);
 
 function terrainColor(x, y) {
-  if (x < 2 || y < 2 || x >= GW - 2 || y >= GH - 2) return C.frame;
-  if (x < 3 || y < 3 || x >= GW - 3 || y >= GH - 3) return C.frameInner;
-  const k = cell[at(x, y)];
+  if (frame(x, y)) return x < 2 || y < 2 || x >= GW - 2 || y >= GH - 2 ? C.frame : C.frameInner;
+  const i = at(x, y);
+  const k = cells[i];
   if (k === SEA) {
-    const d = seaDist[at(x, y)];
-    if (d <= 1) return C.seaEdge;
+    const d = coastDistance[i];
+    if (d === 1) return C.seaEdge;
     if (d <= 3) return C.seaShallow;
     if (d <= 6) return C.seaMid;
     if ((x % 40 === 0 || y % 40 === 0) && (x + y) % 2 === 0) return C.grid;
     return (x + y) % 2 === 0 ? C.seaDeep : C.seaDeep2;
   }
-  if (water[at(x, y)]) {
-    return neighbours(x, y, N4, (n, nx, ny) => n > SEA && !isWater(nx, ny)) ? C.riverBank : C.river;
+  if (k >= 2 && border(x, y, (nx, ny) => get(nx, ny) === LAND)) return C.cityEdge;
+  if (k >= 2 && border(x, y, (nx, ny) => get(nx, ny) >= 2 && get(nx, ny) !== k)) return C.border;
+  if (water[i]) return C.river;
+  if (hill[i]) return border(x, y, (nx, ny) => !inGrid(nx, ny) || !hill[at(nx, ny)]) ? C.hillEdge : C.hill;
+  if (border(x, y, (nx, ny) => get(nx, ny) === SEA)) return C.shore;
+  if (isTown(k)) return C.town;
+  if (k >= 2) {
+    const code = Number(districts[k - 2].code.slice(-3));
+    return (code >= 320 ? upland : plain)[(k + Math.floor(k / 4)) % 4];
   }
-  const coast = neighbours(x, y, N4, (n) => n === SEA);
-  if (isDistrict(k) && neighbours(x, y, N4, (n) => n > SEA && n !== k)) return C.districtBorder;
-  if (!isDistrict(k) && neighbours(x, y, N4, (n) => isDistrict(n))) return C.landBorder;
-  if (hill[at(x, y)]) {
-    // Stepped relief: outline, a lit band on the north-west slope, a shaded band on the south-east, then the crest.
-    const d = hillDist[at(x, y)];
-    if (d <= 1) return C.hillEdge;
-    const centre = hillCentre.find((h) => inside(h.pts, x + 0.5, y + 0.5)) || hillCentre[0];
-    const northWest = (x - centre.x) + (y - centre.y) < 0;
-    if (d <= 4) return northWest ? C.hillLight : C.hillShade;
-    if (d >= 9 && (x + y) % 2 === 0) return C.hillLight;
-    return C.hill;
-  }
-  if (isDistrict(k)) return coast ? C.districtShore : C.district;
-  if (coast) return C.landShore;
   return (x + y) % 2 === 0 ? C.land : C.land2;
 }
 
-// A district's mask covers its plain land: not its border line, coast dots, hills or water.
-function inMask(id, x, y) {
-  if (x < 3 || y < 3 || x >= GW - 3 || y >= GH - 3) return false;
-  const k = IDS.indexOf(id) + 2;
-  if (cell[at(x, y)] !== k || water[at(x, y)] || hill[at(x, y)]) return false;
-  return !neighbours(x, y, N4, (n) => n !== k);
-}
-
-function maskColor(id, x, y) {
-  if (!inMask(id, x, y)) return CLEAR;
-  return N8.some(([dx, dy]) => !inMask(id, x + dx, y + dy)) ? C.maskRim : C.maskFill;
-}
+const inMask = (k, x, y) => inGrid(x, y) && !frame(x, y) && cells[at(x, y)] === k &&
+  clearance[at(x, y)] > 1 && !water[at(x, y)] && !hill[at(x, y)];
 
 // --- PNG ----------------------------------------------------------------------
 const CRC = (() => {
@@ -284,46 +211,41 @@ function crestColor(x, y) {
   return hex('#EAEAEA');
 }
 
-// --- layout: node position per town = centre of its mask, in UI px (map centre origin, +y up) ---
-function nodeOf(id) {
-  let sx = 0; let sy = 0; let n = 0;
-  for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) if (inMask(id, x, y)) { sx += x + 0.5; sy += y + 0.5; n++; }
-  const px = (sx / n) * DOT;
-  const py = (sy / n) * DOT;
-  return { x: Math.round(px - (GW * DOT) / 2), y: Math.round((GH * DOT) / 2 - py), dots: n };
-}
+// Project to UI pixels: map centre origin, +Y north. Box coordinates align exactly
+// to whole dots so a cropped tint still lands on the terrain when zooming.
+const ui = (x, y) => ({ x: x - GW / 2, y: GH / 2 - y });
+const layout = { size: { w: GW, h: GH }, towns: {}, places: [] };
+const report = [writePng('terrain.png', GW, GH, terrainColor), writePng('crest.png', CG, CG, crestColor)];
 
-const report = [];
-report.push(writePng('terrain.png', GW, GH, terrainColor));
-for (const id of IDS) report.push(writePng(`mask_${id}.png`, GW, GH, (x, y) => maskColor(id, x, y)));
-report.push(writePng('crest.png', CG, CG, crestColor));
-// Neighbouring places the game does not use, as faint map labels.
-const PLACES = [
-  ['台灣海峽', 22.700, 120.2385], ['梓官', 22.762, 120.262], ['橋頭', 22.764, 120.320], ['仁武', 22.712, 120.354],
-  ['三民', 22.648, 120.322], ['壽山', 22.651, 120.264], ['愛河', 22.676, 120.330], ['旗津', 22.603, 120.262],
-];
-function uiPoint(lat, lon) {
-  const [dx, dy] = dot([lat, lon]);
-  return { x: Math.round(dx * DOT - (GW * DOT) / 2), y: Math.round((GH * DOT) / 2 - dy * DOT) };
-}
-const layout = { size: { w: GW * DOT, h: GH * DOT }, towns: {}, places: [] };
-for (const id of IDS) layout.towns[id] = nodeOf(id);
-for (const [name, lat, lon] of PLACES) layout.places.push({ name, ...uiPoint(lat, lon) });
-
-// Local preview only (not uploaded): the terrain with the four masks tinted like the starting board.
-if (process.argv.includes('--preview')) {
-  const tint = { nanzih: [200, 70, 60], zuoying: [200, 70, 60], gushan: [60, 111, 200], yancheng: [60, 111, 200] };
-  const alpha = 0.5;
-  writePng(process.argv[process.argv.indexOf('--preview') + 1], GW, GH, (x, y) => {
-    const base = terrainColor(x, y).slice();
-    for (const id of IDS) {
-      const m = maskColor(id, x, y);
-      if (m[3] === 0) continue;
-      for (let k = 0; k < 3; k++) base[k] = Math.round(base[k] * (1 - alpha) + (m[k] / 255) * tint[id][k] * alpha);
+districts.forEach(({ code, name }, n) => {
+  const k = n + 2;
+  const id = CODES[code];
+  let x0 = GW, x1 = 0, y0 = GH, y1 = 0, best = 0, bx = 0, by = 0, count = 0;
+  for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
+    if (get(x, y) !== k || frame(x, y)) continue;
+    if (!id || inMask(k, x, y)) {
+      if (clearance[at(x, y)] > best) { best = clearance[at(x, y)]; bx = x + 0.5; by = y + 0.5; }
+      x0 = Math.min(x0, x); y0 = Math.min(y0, y);
+      x1 = Math.max(x1, x + 1); y1 = Math.max(y1, y + 1);
+      count++;
     }
-    return base;
-  });
-}
+  }
+  if (!count) throw new Error(`Missing district on the raster: ${name}`);
+  const label = ui(bx, by);
+  if (!id) {
+    layout.places.push({ code, name, ...label, priority: best });
+    return;
+  }
+  const mask = { ...ui((x0 + x1) / 2, (y0 + y1) / 2), w: x1 - x0, h: y1 - y0 };
+  layout.towns[id] = { ...label, dots: count, mask };
+  report.push(writePng(`mask_${id}.png`, mask.w, mask.h, (x, y) => {
+    x += x0; y += y0;
+    if (!inMask(k, x, y)) return CLEAR;
+    return border(x, y, (nx, ny) => !inMask(k, nx, ny), N8) ? C.maskRim : C.maskFill;
+  }));
+});
+
+// Larger districts get first choice of a readable label at low zoom.
+layout.places.sort((a, b) => b.priority - a.priority || a.code.localeCompare(b.code));
 fs.writeFileSync(path.join(OUT, 'layout.json'), JSON.stringify(layout, null, 2) + '\n');
 console.log(report.join('\n'));
-console.log(JSON.stringify(layout));

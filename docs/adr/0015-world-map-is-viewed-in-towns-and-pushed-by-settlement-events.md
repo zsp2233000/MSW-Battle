@@ -5,7 +5,9 @@ Roadmap 原本把「國戰大地圖」放在 Backlog，呈現與操作形式待�
 ## 決定一：地圖是畫好的底圖加上執行時上色，相鄰關係取自傳送門
 
 - 介面在 `ui/WorldMapGroup.ui`，由 `assets/worldmap/build_ui.cjs` 以 UIBuilder 產生；客戶端邏輯 `FactionWarMapUI` 以路徑找元件，和 `FactionWarUI` 相同。
-- 素材找不到現成的高雄地圖，改用 `assets/worldmap/paint_worldmap.cjs` 以像素繪出：行政區外框是以經緯度描的近似輪廓（等距圓柱投影，北上），包含海岸、壽山、半屏山、蓮池潭、愛河與旗津。輸出一張地形底圖、每城一張白色遮罩、一張城徽，上傳為帳號資源（RUID 記在 `assets/worldmap/ruids.json`）。遊戲中把遮罩與城徽依歸屬著色，地形底圖不變。各城節點的位置是遮罩的中心，寫在 `layout.json`，建 UI 時讀它。
+- `assets/worldmap/paint_worldmap.cjs` 用 2×2 像素點畫出高雄 38 區。區界取自內政部國土測繪中心 [鄉鎮市區界線，1140318 版](https://data.gov.tw/dataset/7441)（[政府資料開放授權條款第 1 版](https://data.gov.tw/license)），以北上的等距圓柱投影簡化繪製，並保留壽山、半屏山、蓮池潭與愛河的示意細節。旗津顯示本島近岸部分，東沙、南沙不在同幅地圖範圍內。來源轉換方式見 `assets/worldmap/import_boundaries.py`。
+- 底圖、四城的裁切遮罩與城徽上傳為帳號資源（RUID 記在 `assets/worldmap/ruids.json`）。地圖產生器以同一組投影輸出 `layout.json` 的標籤、城徽與遮罩座標；只有楠梓、左營、鼓山、鹽埕具有兵力、陣營著色與傳送門連線，其他區只供瀏覽。
+- 固定矩形裁切範圍只移動地圖內容，不移動右側戰況。PC 滾輪以游標為中心縮放 1–12 倍，按住左鍵拖曳移動，邊界限制不露出底圖以外的空白；縮至最小或重開回到全覽。密集區名在放大後才顯示，文字不隨底圖等比放大。
 - 連線不寫死在圖上：伺服器以 `FactionWar:FindGate` 列出任一方向有傳送門的城鎮對，客戶端在兩個城徽之間畫線。改了傳送門，地圖跟著改。
 
 ## 決定二：開著地圖的人才是訂閱者

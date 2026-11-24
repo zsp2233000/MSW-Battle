@@ -8,7 +8,7 @@
 //
 // FactionWarMapUI.mlua finds every entity by path under /ui/WorldMapGroup, so keep the paths below in step with it.
 
-const path = require('path');
+const path = require('node:path');
 const { UIBuilder } = require('../../.agents/skills/msw-ui-system/scripts/msw_ui_builder.cjs');
 
 const ROOT = path.join(__dirname, '..', '..');
@@ -27,11 +27,6 @@ const NEUTRAL = { r: 0.62, g: 0.6, b: 0.56, a: 1 };
 const TOWNS = ['nanzih', 'zuoying', 'gushan', 'yancheng'];
 const NAMES = { nanzih: '楠梓', zuoying: '左營', gushan: '鼓山', yancheng: '鹽埕' };
 
-// Crest position per town: the district centre from layout.json, nudged where labels of neighbours would collide.
-const NODE_SHIFT = { nanzih: [0, 28], zuoying: [6, 18], gushan: [3, 57], yancheng: [0, 0] };
-// The gate links run north to south through the crests, so every town keeps its labels (and capital tag) to the east of
-// its crest and the looping "you are here" arrow straight above the crest of the town the player stands in.
-
 function swap(b, entity, states) {
   b.patchComponent(entity, 'MOD.Core.ButtonComponent', {
     Transition: 2,
@@ -44,6 +39,7 @@ function swap(b, entity, states) {
   });
 }
 
+const uiFile = path.join(ROOT, 'ui', 'WorldMapGroup.ui');
 const b = new UIBuilder('WorldMapGroup', 9, true);
 b.patchComponent('/ui/WorldMapGroup', 'MOD.Core.UIGroupComponent', { GroupType: 1, GroupOrder: 9, DefaultShow: true });
 
@@ -55,26 +51,29 @@ b.patchComponent('OpenButton', 'MOD.Core.TextGUIRendererComponent', { OutlineCol
 
 // Full-screen dimmer + window; the script toggles Overlay.
 b.sprite('Overlay', { anchor: 'stretch', color: '#000000', alpha: 0.55, raycast: true, enable: false });
-b.sprite('Overlay/Window', { anchor: 'middle-center', rect_size: [1240, 960], image_ruid: PANEL_BG, color: '#FFFFFF', sprite_type: 1, raycast: true });
+b.sprite('Overlay/Window', { anchor: 'middle-center', rect_size: [1360, 960], image_ruid: PANEL_BG, color: '#FFFFFF', sprite_type: 1, raycast: true });
 b.text('Overlay/Window/Title', '國戰大地圖', { size: 32, color: '#FFFFFF', bold: true, ...OUTLINE, anchor: 'top-center', pos: [0, -30], rect_size: [600, 56] });
 b.button('Overlay/Window/Close', '', { anchor: 'top-right', pos: [-16, -12], rect_size: [88, 96], image_ruid: X_BUTTON.normal, bg_color: '#FFFFFF', sprite_type: 0 });
 swap(b, 'Overlay/Window/Close', X_BUTTON);
 
-// --- the map: terrain, tinted districts, place labels, gate links, town nodes -----------------
-const MAP = 'Overlay/Window/Map';
-b.empty(MAP, { anchor: 'middle-left', pos: [44, -30], rect_size: [layout.size.w, layout.size.h] });
+// The transparent input surface and the mask stay fixed. Only the content moves.
+const VIEW = 'Overlay/Window/Map';
+const MAP = `${VIEW}/Content`;
+const size = [layout.size.w, layout.size.h];
+b.mask(VIEW, { anchor: 'middle-left', pivot: [0.5, 0.5], pos: [44 + size[0] / 2, -24], rect_size: size });
+b.empty(MAP, { rect_size: size });
 b.sprite(`${MAP}/Terrain`, { anchor: 'stretch', image_ruid: art.terrain, color: '#FFFFFF', sprite_type: 0 });
 b.empty(`${MAP}/Districts`, { anchor: 'stretch' });
 for (const id of TOWNS) {
-  b.sprite(`${MAP}/Districts/${id}`, { anchor: 'stretch', image_ruid: art[`mask_${id}`], color: { ...NEUTRAL, a: 0.25 }, sprite_type: 0 });
+  const { x, y, w, h } = layout.towns[id].mask;
+  b.sprite(`${MAP}/Districts/${id}`, { pos: [x, y], rect_size: [w, h], image_ruid: art[`mask_${id}`], color: { ...NEUTRAL, a: 0.25 }, sprite_type: 0 });
 }
 b.empty(`${MAP}/Places`, { anchor: 'stretch' });
-layout.places.forEach((place, n) => {
-  const sea = place.name === '台灣海峽';
-  const y = Math.max(-378, Math.min(378, place.y));
-  b.text(`${MAP}/Places/Place${n + 1}`, place.name, { size: 20, color: sea ? { r: 0.91, g: 0.95, b: 0.97, a: 0.85 } : { r: 0.35, g: 0.27, b: 0.19, a: 0.8 },
-    anchor: 'middle-center', pos: [place.x, y], rect_size: [120, 28] });
+layout.places.forEach(place => {
+  b.text(`${MAP}/Places/${place.code}`, place.name, { size: 19, color: '#493728', bold: true,
+    pos: [place.x, place.y], rect_size: [84, 26] });
 });
+b.text(`${MAP}/Sea`, '台灣海峽', { size: 22, color: '#E6F1F3', pos: [-261, -270], rect_size: [120, 32] });
 b.empty(`${MAP}/Links`, { anchor: 'stretch' });
 for (let n = 1; n <= 3; n++) {
   b.sprite(`${MAP}/Links/Link${n}`, { anchor: 'middle-center', rect_size: [100, 6], color: { r: 0.29, g: 0.18, b: 0.09, a: 0.85 }, sprite_type: 1, enable: false });
@@ -82,17 +81,25 @@ for (let n = 1; n <= 3; n++) {
 b.empty(`${MAP}/Towns`, { anchor: 'stretch' });
 for (const id of TOWNS) {
   const node = layout.towns[id];
-  const [sx, sy] = NODE_SHIFT[id];
   const town = `${MAP}/Towns/${id}`;
-  b.empty(town, { anchor: 'middle-center', pos: [node.x + sx, node.y + sy], rect_size: [64, 64] });
-  b.sprite(`${town}/Crest`, { anchor: 'middle-center', rect_size: [60, 60], image_ruid: art.crest, color: NEUTRAL, sprite_type: 0 });
-  b.text(`${town}/Name`, NAMES[id], { size: 26, color: '#FFFFFF', bold: true, ...OUTLINE, alignment: 3, anchor: 'middle-center', pos: [110, 14], rect_size: [140, 34] });
-  b.text(`${town}/Strength`, '兵力 —', { size: 21, color: '#FFF2C8', ...OUTLINE, alignment: 3, anchor: 'middle-center', pos: [110, -16], rect_size: [140, 28] });
-  b.text(`${town}/Capital`, '主城', { size: 21, color: '#FACA33', bold: true, ...OUTLINE, alignment: 3, anchor: 'middle-center', pos: [100, 44], rect_size: [120, 28], enable: false });
+  b.empty(town, { pos: [node.x, node.y], rect_size: [64, 64] });
+  b.sprite(`${town}/Crest`, { rect_size: [60, 60], image_ruid: art.crest, color: NEUTRAL, sprite_type: 0 });
+  b.text(`${town}/Name`, NAMES[id], { size: 26, color: '#FFFFFF', bold: true, ...OUTLINE, alignment: 5, pos: [-106, 12], rect_size: [140, 30] });
+  b.text(`${town}/Strength`, '兵力 —', { size: 21, color: '#FFF2C8', ...OUTLINE, alignment: 5, pos: [-106, -16], rect_size: [140, 28] });
+  b.text(`${town}/Capital`, '主城', { size: 21, color: '#FACA33', bold: true, ...OUTLINE, alignment: 5, pos: [-96, 40], rect_size: [120, 28], enable: false });
   b.sprite(`${town}/Arrow`, { anchor: 'middle-center', pos: [0, 60], rect_size: [30, 54], image_ruid: HERE_ARROW, color: '#FFFFFF', sprite_type: 0, enable: false });
   // The arrow is a 4-frame animationclip; the builder's default AnimClipPlayType is Onetime (0), which would freeze it after one pass.
   b.patchComponent(`${town}/Arrow`, 'MOD.Core.SpriteGUIRendererComponent', { AnimClipPlayType: 1 });
 }
+
+// No controls inside the moving map can intercept drag input. The fixed surface
+// receives mouse and touch from the entire visible rect, not the scaled terrain.
+const INPUT = `${VIEW}/Input`;
+b.sprite(INPUT, { anchor: 'stretch', alpha: 0, raycast: true });
+b.addComponent(INPUT, 'MOD.Core.UITouchReceiveComponent');
+
+b.text('Overlay/Window/MapHint', '高雄 38 區｜滾輪縮放・拖曳移動', { size: 22, color: '#E8DCC8', ...OUTLINE,
+  anchor: 'middle-left', pos: [44, -452], rect_size: [size[0], 30] });
 
 // --- side panel: own faction, strength list north to south, legend, status -------------------
 const SIDE = 'Overlay/Window/Side';
@@ -123,4 +130,4 @@ b.text(`${SIDE}/Note`, '連線：以傳送門直接相連的相鄰城鎮\n主城
 b.text(`${SIDE}/Status`, '正在讀取戰況…', { size: 20, color: GOLD, ...OUTLINE, anchor: 'bottom-center', pos: [0, 56], rect_size: [460, 30] });
 b.text(`${SIDE}/Hint`, '按 M 鍵或右上角按鈕關閉', { size: 20, color: '#BCBBBB', ...OUTLINE, anchor: 'bottom-center', pos: [0, 20], rect_size: [460, 28] });
 
-b.write(path.join(ROOT, 'ui', 'WorldMapGroup.ui'), { lint_verbose: true });
+b.write(uiFile, { lint_verbose: true });

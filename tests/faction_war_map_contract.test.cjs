@@ -11,7 +11,8 @@ const annotation = (text, name) => text.match(new RegExp(`((?:    @[^\\n]+\\n)+)
 const server = () => source('RootDesk/MyDesk/Formations/FactionWarMap.mlua');
 const client = () => source('RootDesk/MyDesk/Formations/FactionWarMapUI.mlua');
 const TOWNS = ['nanzih', 'zuoying', 'gushan', 'yancheng'];
-const MAP = 'Overlay/Window/Map';
+const VIEW = 'Overlay/Window/Map';
+const MAP = `${VIEW}/Content`;
 
 test('the world map group draws above the town HUD, opens from a hidden town button and starts closed', () => {
   const ui = UIBuilder.read('ui/WorldMapGroup.ui');
@@ -36,7 +37,12 @@ test('the map uses the painted terrain, one tinted mask per district, three link
   assert.equal(ruidOf(`${MAP}/Terrain`), art.terrain);
   assert.deepEqual(ui.getComponent(MAP, 'MOD.Core.UITransformComponent').RectSize, { x: layout.size.w, y: layout.size.h }, 'the map is the size the art was painted at');
   for (const id of TOWNS) {
-    assert.equal(ruidOf(`${MAP}/Districts/${id}`), art[`mask_${id}`], `${id} mask`);
+    const tint = `${MAP}/Districts/${id}`;
+    assert.equal(ruidOf(tint), art[`mask_${id}`], `${id} mask`);
+    const { x, y, w, h } = layout.towns[id].mask;
+    const transform = ui.getComponent(tint, 'MOD.Core.UITransformComponent');
+    assert.deepEqual(transform.anchoredPosition, { x, y }, `${id} cropped mask location`);
+    assert.deepEqual(transform.RectSize, { x: w, y: h }, `${id} cropped mask size`);
     assert.equal(ruidOf(`${MAP}/Towns/${id}/Crest`), art.crest, `${id} crest`);
     for (const part of ['Name', 'Strength', 'Capital', 'Arrow']) assert.ok(ui.find(`${MAP}/Towns/${id}/${part}`), `${id} ${part}`);
     assert.equal(ui.find(`${MAP}/Towns/${id}/Here`), null, `${id} the arrow replaced the map chip`);
@@ -52,6 +58,29 @@ test('the map uses the painted terrain, one tinted mask per district, three link
   // Real geography, north to south: Nanzih above Zuoying above Gushan above Yancheng.
   const y = id => layout.towns[id].y;
   assert.ok(y('nanzih') > y('zuoying') && y('zuoying') > y('gushan') && y('gushan') > y('yancheng'));
+});
+
+test('the clipped map has 38 district names and a stationary input layer', () => {
+  const ui = UIBuilder.read('ui/WorldMapGroup.ui');
+  const layout = JSON.parse(source('assets/worldmap/layout.json'));
+  const districts = JSON.parse(source('assets/worldmap/kaohsiung_boundaries.json')).districts;
+  const xform = path => ui.getComponent(path, 'MOD.Core.UITransformComponent');
+  assert.ok(ui.hasComponent(VIEW, 'MOD.Core.MaskComponent'));
+  assert.deepEqual(xform(VIEW).Pivot, { x: 0.5, y: 0.5 });
+  assert.deepEqual(xform(VIEW).RectSize, xform(MAP).RectSize);
+  assert.ok(ui.getComponent(`${VIEW}/Input`, 'MOD.Core.SpriteGUIRendererComponent').RaycastTarget);
+  assert.ok(ui.hasComponent(`${VIEW}/Input`, 'MOD.Core.UITouchReceiveComponent'));
+  assert.ok(ui.find('Overlay/Window/Side'), 'the war board is outside the pan/zoom layer');
+  const names = ui.listEntities().filter(e => e.path.startsWith(`/ui/WorldMapGroup/${MAP}/Places/`));
+  const mapped = layout.places.map(place => {
+    const path = `${MAP}/Places/${place.code}`;
+    assert.deepEqual(xform(path).anchoredPosition, { x: place.x, y: place.y });
+    return ui.getComponent(path, 'MOD.Core.TextGUIRendererComponent').Text;
+  });
+  assert.equal(names.length, 34);
+  const activeNames = TOWNS.map(id => ui.getComponent(`${MAP}/Towns/${id}/Name`, 'MOD.Core.TextGUIRendererComponent').Text + '區');
+  assert.equal(districts.length, 38);
+  assert.deepEqual(new Set([...mapped, ...activeNames]), new Set(districts.map(d => d.name)));
 });
 
 test('the server answers an opened map at once and pushes later boards only to viewers, without polling storage', () => {
