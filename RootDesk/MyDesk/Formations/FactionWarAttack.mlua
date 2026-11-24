@@ -175,6 +175,8 @@ script FactionWarAttack extends Logic
         if operation.complete ~= nil then operation.complete(status, detail, outcome) end
         -- A repeat announces again on purpose: the sweep is idempotent and the first announcement may have been lost.
         if applied and outcome.flipped then _FactionWar:AnnounceFall(outcome.loser, outcome.owner) end
+        -- Open world maps follow the board; a repeat announces again for the same reason as the fall.
+        if status == "SAVED" or status == "DUPLICATE" then _FactionWarMap:AnnounceChange() end
     end
 
     method any Combine(any first, any second)

@@ -1,0 +1,87 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const test = require('node:test');
+const { UIBuilder } = require('../.agents/skills/msw-ui-system/scripts/msw_ui_builder.cjs');
+
+// Structural contract for the faction-war world map. The behaviour (open, pushed boards, close, leaving a town) is proven by
+// tests/faction_war_map_runtime_probe.lua (server_main) and tests/faction_war_map_client_runtime_probe.lua (client) in Maker.
+const source = path => fs.readFileSync(path, 'utf8').replace(/\r\n/g, '\n');
+const body = (text, name) => text.match(new RegExp(`(?:method \\w+|handler) ${name}\\([^]*?(?=\\n    @|\\n    method|\\n    handler|\\nend)`))?.[0] || '';
+const annotation = (text, name) => text.match(new RegExp(`((?:    @[^\\n]+\\n)+)    (?:method \\w+|handler) ${name}\\(`))?.[1] || '';
+const server = () => source('RootDesk/MyDesk/Formations/FactionWarMap.mlua');
+const client = () => source('RootDesk/MyDesk/Formations/FactionWarMapUI.mlua');
+const TOWNS = ['nanzih', 'zuoying', 'gushan', 'yancheng'];
+const MAP = 'Overlay/Window/Map';
+
+test('the world map group draws above the town HUD, opens from a hidden town button and starts closed', () => {
+  const ui = UIBuilder.read('ui/WorldMapGroup.ui');
+  const group = ui.getComponent('/ui/WorldMapGroup', 'MOD.Core.UIGroupComponent');
+  assert.equal(group.DefaultShow, true, 'the group itself stays shown so the client logic can toggle its children');
+  assert.ok(group.GroupOrder > UIBuilder.read('ui/FactionWarGroup.ui').getComponent('/ui/FactionWarGroup', 'MOD.Core.UIGroupComponent').GroupOrder, 'above the town HUD');
+  for (const button of ['OpenButton', 'Overlay/Window/Close']) {
+    assert.ok(ui.hasComponent(button, 'MOD.Core.ButtonComponent'), button);
+    const size = ui.getComponent(button, 'MOD.Core.UITransformComponent').RectSize;
+    assert.ok(size.x >= 88 && size.y >= 88, `${button} is a full touch target`);
+  }
+  assert.equal(ui.find('OpenButton').jsonString.enable, false, 'the button appears only in towns');
+  assert.equal(ui.find('Overlay').jsonString.enable, false, 'the map starts closed');
+});
+
+test('the map uses the painted terrain, one tinted mask per district, three link bars and a node per town', () => {
+  const ui = UIBuilder.read('ui/WorldMapGroup.ui');
+  const art = JSON.parse(source('assets/worldmap/ruids.json'));
+  const layout = JSON.parse(source('assets/worldmap/layout.json'));
+  for (const ruid of Object.values(art)) assert.match(ruid, /^[0-9a-f]{32}$/);
+  const ruidOf = path => ui.getComponent(path, 'MOD.Core.SpriteGUIRendererComponent').ImageRUID.DataId;
+  assert.equal(ruidOf(`${MAP}/Terrain`), art.terrain);
+  assert.deepEqual(ui.getComponent(MAP, 'MOD.Core.UITransformComponent').RectSize, { x: layout.size.w, y: layout.size.h }, 'the map is the size the art was painted at');
+  for (const id of TOWNS) {
+    assert.equal(ruidOf(`${MAP}/Districts/${id}`), art[`mask_${id}`], `${id} mask`);
+    assert.equal(ruidOf(`${MAP}/Towns/${id}/Crest`), art.crest, `${id} crest`);
+    for (const part of ['Name', 'Strength', 'Capital', 'Here']) assert.ok(ui.find(`${MAP}/Towns/${id}/${part}`), `${id} ${part}`);
+    for (const part of ['Name', 'Owner', 'Value', 'Here', 'Bar/Fill']) assert.ok(ui.find(`Overlay/Window/Side/Rows/${id}/${part}`), `${id} row ${part}`);
+    const node = ui.getComponent(`${MAP}/Towns/${id}`, 'MOD.Core.UITransformComponent').anchoredPosition;
+    assert.ok(Math.abs(node.x) < layout.size.w / 2 && Math.abs(node.y) < layout.size.h / 2, `${id} node on the map`);
+  }
+  for (let n = 1; n <= 3; n++) assert.equal(ui.find(`${MAP}/Links/Link${n}`).jsonString.enable, false, `link ${n} waits for the server`);
+  assert.match(client(), /property integer LinkSlots = 3\b/, 'the client fills exactly the authored bars');
+  // Real geography, north to south: Nanzih above Zuoying above Gushan above Yancheng.
+  const y = id => layout.towns[id].y;
+  assert.ok(y('nanzih') > y('zuoying') && y('zuoying') > y('gushan') && y('gushan') > y('yancheng'));
+});
+
+test('the server answers an opened map at once and pushes later boards only to viewers, without polling storage', () => {
+  const text = server();
+  assert.match(annotation(text, 'RequestOpen'), /@ExecSpace\("Server"\)/);
+  assert.match(annotation(text, 'RequestClose'), /@ExecSpace\("Server"\)/);
+  for (const name of ['ReceiveBoard', 'ReceiveFaction', 'ReceiveUnavailable']) assert.match(annotation(text, name), /@ExecSpace\("Client"\)/, name);
+  assert.match(body(text, 'RequestOpen'), /_FactionWar:IsTown\(player\.CurrentMapName\)/, 'only players in a town subscribe');
+  assert.match(body(text, 'RequestOpen'), /self:Refresh\(userId\)/, 'the opener always gets an answer');
+  assert.match(body(text, 'Refresh'), /self\._T\.again = true/, 'requests during a read are folded into one more read');
+  assert.match(body(text, 'Deliver'), /changed or answering\[userId\]/, 'others hear only of a changed board');
+  assert.match(body(text, 'BoardChanged'), /next\(self\._T\.viewers\) == nil/, 'a room with no viewer reads nothing');
+  assert.doesNotMatch(text, /SetTimerRepeat|SetTimer\(/, 'no storage polling (ADR 0012)');
+  assert.match(body(text, 'Links'), /FindGate/, 'links are the authored gates');
+  assert.match(text, /@EventSender\("Service", "RoomService"\)\n    handler HandleRoomBoardChanged\(TownBoardChangedEvent/);
+  assert.match(text, /@EventSender\("Service", "WorldInstanceService"\)\n    handler HandleInstanceBoardChanged\(TownBoardChangedEvent/);
+  assert.match(body(text, 'HandleInstanceBoardChanged'), /event\.Source == _WorldInstanceService\.WorldInstanceId/, 'the own instance\'s echo is ignored (it arrived as a room event)');
+  assert.match(body(text, 'AnnounceChange'), /RequestSendEventToAllWorldInstancesAsync/);
+  assert.match(body(text, 'HandleUserLeaveEvent'), /self\._T\.viewers\[event\.UserId\] = nil/);
+});
+
+test('every stored settlement announces the change; the client closes outside towns and follows the pushed board', () => {
+  const finish = body(source('RootDesk/MyDesk/Formations/FactionWarAttack.mlua'), 'Finish');
+  assert.match(finish, /status == "SAVED" or status == "DUPLICATE" then _FactionWarMap:AnnounceChange\(\)/);
+  const text = client();
+  assert.match(body(text, 'CanOpen'), /_FactionWar:IsTown\(player\.CurrentMapName\) and not _FormationLobby:IsTownPanelOpen\(\)/);
+  assert.match(body(text, 'OnUpdate'), /if self\._T\.open and not available then self:Close\(\) end/);
+  assert.match(body(text, 'HandleKey'), /KeyboardKey\.M/);
+  assert.match(body(text, 'Close'), /_FactionWarMap:RequestClose\(\)/);
+  assert.match(body(text, 'ShowBoard'), /_FactionWarUI:ShowTownStatus/, 'the town HUD follows the pushed board');
+  assert.match(body(text, 'ShowLinks'), /ZRotation = math\.deg\(math\.atan\(dy, dx\)\)/);
+  const declared = [...text.matchAll(/\n((?:    @[^\n]+\n)*)    method \w+ (\w+)\(/g)];
+  assert.ok(declared.length >= 15, 'every method was found');
+  for (const method of declared) {
+    assert.match(method[1], /@ExecSpace\("ClientOnly"\)/, `${method[2]} runs on the client only`);
+  }
+});

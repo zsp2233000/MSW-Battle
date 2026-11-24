@@ -1,0 +1,277 @@
+@Logic
+script FactionWarMapUI extends Logic
+
+    property Color RedColor = Color(0.84, 0.29, 0.24, 1)
+    property Color BlueColor = Color(0.27, 0.5, 0.88, 1)
+    property Color NeutralColor = Color(0.62, 0.6, 0.56, 1)
+    property number DistrictAlpha = 0.55
+    property number LinkThickness = 8
+    property number LinkInset = 34
+    property integer LinkSlots = 3
+    property number BarWidth = 280
+    property integer FullStrength = 100
+
+    @ExecSpace("ClientOnly")
+    method Entity Ui(string path)
+        -- Entities of the world map group, by path under /ui/WorldMapGroup.
+        return _EntityService:GetEntityByPath("/ui/WorldMapGroup/" .. path)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnBeginPlay()
+        -- Closed until the player opens it from a town; M toggles it like the button.
+        self._T.bindings = {}
+        self._T.open = false
+        self._T.board = nil
+        self._T.links = {}
+        self._T.mapName = ""
+        self._T.receivedAt = 0
+        self._T.age = -1
+        self._T.unavailable = false
+        self._T.key = _InputService:ConnectEvent(KeyDownEvent, self.HandleKey)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnEndPlay()
+        -- Release the key and button handlers.
+        if self._T.key ~= nil then _InputService:DisconnectEvent(KeyDownEvent, self._T.key) end
+        for _, binding in ipairs(self._T.bindings or {}) do
+            if isvalid(binding.entity) then binding.entity:DisconnectEvent(ButtonClickEvent, binding.key) end
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Bind(string path, any action)
+        -- Connect a button once and keep the handler for OnEndPlay.
+        local entity = self:Ui(path)
+        if not isvalid(entity) then return end
+        table.insert(self._T.bindings, { entity = entity, key = entity:ConnectEvent(ButtonClickEvent, action) })
+    end
+
+    @ExecSpace("ClientOnly")
+    method boolean CanOpen()
+        -- The map belongs to the towns; the lobby screen drawn over a town hides it too.
+        local player = _UserService.LocalPlayer
+        return isvalid(player) and _FactionWar:IsTown(player.CurrentMapName) and not _FormationLobby:IsTownPanelOpen()
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnUpdate(number delta)
+        -- Show the entry button only in towns, close the map when the player leaves, and keep the "you are here" mark and the age line current.
+        local player = _UserService.LocalPlayer
+        local button = self:Ui("OpenButton")
+        local overlay = self:Ui("Overlay")
+        if not isvalid(player) or not isvalid(button) or not isvalid(overlay) then return end
+        if #self._T.bindings == 0 then
+            self:Bind("OpenButton", function() self:Open() end)
+            self:Bind("Overlay/Window/Close", function() self:Close() end)
+        end
+        local available = self:CanOpen()
+        if button.Enable ~= available then button:SetEnable(available) end
+        if self._T.open and not available then self:Close() end
+        if player.CurrentMapName ~= self._T.mapName then
+            self._T.mapName = player.CurrentMapName
+            if self._T.open then self:ShowHere() end
+        end
+        if self._T.open and self._T.board ~= nil then self:ShowAge() end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void HandleKey(KeyDownEvent event)
+        -- M opens the map in a town and closes it anywhere.
+        if event == nil or event.key ~= KeyboardKey.M then return end
+        if self._T.open then
+            self:Close()
+        elseif self:CanOpen() then
+            self:Open()
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Open()
+        -- Show the map at once with the last board (or neutral), then ask the server for the live one and to keep it coming.
+        local overlay = self:Ui("Overlay")
+        if self._T.open or not isvalid(overlay) or not self:CanOpen() then return end
+        self._T.open = true
+        overlay:SetEnable(true)
+        if self._T.board == nil then self:ShowNeutral() else self:Render() end
+        self:ShowHere()
+        self._T.unavailable = false
+        self._T.age = -1
+        self:SetStatus("正在讀取戰況…")
+        _FactionWarMap:RequestOpen()
+        log("[VRF][FactionWarMap] ui open town=" .. self._T.mapName)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Close()
+        -- Hide the map and stop the server pushing to this client.
+        if not self._T.open then return end
+        self._T.open = false
+        local overlay = self:Ui("Overlay")
+        if isvalid(overlay) then overlay:SetEnable(false) end
+        _FactionWarMap:RequestClose()
+        log("[VRF][FactionWarMap] ui close")
+    end
+
+    @ExecSpace("ClientOnly")
+    method Color OwnerColor(string owner)
+        -- Faction colour shared by the districts, crests and bars.
+        if owner == "RED" then return self.RedColor end
+        if owner == "BLUE" then return self.BlueColor end
+        return self.NeutralColor
+    end
+
+    @ExecSpace("ClientOnly")
+    method string OwnerName(string owner)
+        -- The faction as players read it.
+        if owner == "RED" then return "紅方" end
+        if owner == "BLUE" then return "藍方" end
+        return "未知"
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ShowNeutral()
+        -- Before the first board arrives every town is grey and every link hidden.
+        for _, id in ipairs(_FactionWar.TownOrder) do
+            self:ShowTown({ id = id, name = _FactionWar.TownNames[id], owner = "", strength = 0, capital = _FactionWarAttack:IsCapital(id) })
+        end
+        self:ShowLinks({})
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ShowBoard(table towns, table links)
+        -- Paint the board the server pushed: districts, crests, rows and links. A board that lands after the map closed is kept for next time.
+        self._T.board = towns
+        self._T.links = links
+        self._T.receivedAt = DateTime.UtcNow.Elapsed
+        self._T.age = -1
+        self._T.unavailable = false
+        if not self._T.open then return end
+        local summary = {}
+        for _, town in ipairs(towns) do table.insert(summary, town.id .. "=" .. town.owner .. "/" .. tostring(town.strength)) end
+        self:Render()
+        self:ShowAge()
+        -- The town HUD only rereads on entering a town; the pushed board keeps it in step while the map is open.
+        for _, town in ipairs(towns) do
+            if town.id == self._T.mapName then _FactionWarUI:ShowTownStatus(town.id, tostring(town.strength)) end
+        end
+        log("[VRF][FactionWarMap] ui board " .. table.concat(summary, " ") .. " links=" .. tostring(#links))
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Render()
+        -- Paint the last board received: districts, crests, rows, links and the "you are here" mark.
+        for _, town in ipairs(self._T.board) do self:ShowTown(town) end
+        self:ShowLinks(self._T.links)
+        self:ShowHere()
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ShowTown(table town)
+        -- One town on the map and in the side list.
+        local color = self:OwnerColor(town.owner)
+        local known = town.owner == "RED" or town.owner == "BLUE"
+        local district = self:Ui("Overlay/Window/Map/Districts/" .. town.id)
+        if isvalid(district) then district.SpriteGUIRendererComponent.Color = Color(color.r, color.g, color.b, known and self.DistrictAlpha or 0.25) end
+        local node = "Overlay/Window/Map/Towns/" .. town.id
+        local crest = self:Ui(node .. "/Crest")
+        if isvalid(crest) then crest.SpriteGUIRendererComponent.Color = color end
+        local strength = known and (tostring(town.strength) .. "/" .. tostring(self.FullStrength)) or "—"
+        local label = self:Ui(node .. "/Strength")
+        if isvalid(label) then label.TextGUIRendererComponent.Text = "兵力 " .. strength end
+        local capital = self:Ui(node .. "/Capital")
+        if isvalid(capital) then capital:SetEnable(town.capital == true) end
+        local row = "Overlay/Window/Side/Rows/" .. town.id
+        local owner = self:Ui(row .. "/Owner")
+        if isvalid(owner) then
+            owner.TextGUIRendererComponent.Text = known and (self:OwnerName(town.owner) .. (town.capital and "・主城" or "")) or "讀取中"
+            owner.TextGUIRendererComponent.FontColor = known and color or Color(0.85, 0.82, 0.76, 1)
+        end
+        local value = self:Ui(row .. "/Value")
+        if isvalid(value) then value.TextGUIRendererComponent.Text = strength end
+        local fill = self:Ui(row .. "/Bar/Fill")
+        if isvalid(fill) then
+            local ratio = known and math.max(0, math.min(1, town.strength / self.FullStrength)) or 0
+            fill:SetEnable(ratio > 0)
+            fill.UITransformComponent.RectSize = Vector2(self.BarWidth * ratio, fill.UITransformComponent.RectSize.y)
+            fill.SpriteGUIRendererComponent.Color = color
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ShowLinks(table links)
+        -- Draw each gate connection as a bar between the two crests; unused bars stay hidden.
+        for slot = 1, self.LinkSlots do
+            local bar = self:Ui("Overlay/Window/Map/Links/Link" .. tostring(slot))
+            local link = links[slot]
+            if isvalid(bar) then
+                local from = link ~= nil and self:Ui("Overlay/Window/Map/Towns/" .. link.a) or nil
+                local to = link ~= nil and self:Ui("Overlay/Window/Map/Towns/" .. link.b) or nil
+                if isvalid(from) and isvalid(to) then
+                    local a = from.UITransformComponent.anchoredPosition
+                    local b = to.UITransformComponent.anchoredPosition
+                    local dx = b.x - a.x
+                    local dy = b.y - a.y
+                    local transform = bar.UITransformComponent
+                    transform.anchoredPosition = Vector2((a.x + b.x) / 2, (a.y + b.y) / 2)
+                    transform.RectSize = Vector2(math.max(0, math.sqrt(dx * dx + dy * dy) - self.LinkInset * 2), self.LinkThickness)
+                    transform.ZRotation = math.deg(math.atan(dy, dx))
+                    bar:SetEnable(true)
+                else
+                    bar:SetEnable(false)
+                end
+            end
+        end
+        if #links > self.LinkSlots then log_warning("[VRF][FactionWarMap] more links than bars: " .. tostring(#links)) end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ShowHere()
+        -- Mark the town the local player stands in, on the map and in the list.
+        for _, id in ipairs(_FactionWar.TownOrder) do
+            local here = self:Ui("Overlay/Window/Map/Towns/" .. id .. "/Here")
+            if isvalid(here) then here:SetEnable(id == self._T.mapName) end
+            local mark = self:Ui("Overlay/Window/Side/Rows/" .. id .. "/Here")
+            if isvalid(mark) then mark:SetEnable(id == self._T.mapName) end
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ShowFaction(string faction)
+        -- The player's own faction at the top of the side panel.
+        local label = self:Ui("Overlay/Window/Side/Faction")
+        if not isvalid(label) then return end
+        local text = "尚未加入陣營"
+        if faction == "RED" or faction == "BLUE" then text = self:OwnerName(faction)
+        elseif faction == "UNREADABLE" then text = "讀取失敗" end
+        label.TextGUIRendererComponent.Text = text
+        label.TextGUIRendererComponent.FontColor = (faction == "RED" or faction == "BLUE") and self:OwnerColor(faction) or Color(0.93, 0.78, 0.56, 1)
+        log("[VRF][FactionWarMap] ui faction=" .. faction)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ShowUnavailable(string reason)
+        -- Keep the last board on screen and say the live one could not be read.
+        self._T.unavailable = true
+        self:SetStatus(reason == "NOT_IN_TOWN" and "只能在城鎮中查看大地圖" or "暫時無法讀取國戰資料，請稍後重新開啟")
+        log("[VRF][FactionWarMap] ui unavailable reason=" .. reason)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ShowAge()
+        -- "N seconds ago", rewritten only when the whole-second value changes.
+        if self._T.unavailable then return end
+        local age = math.max(0, math.floor((DateTime.UtcNow.Elapsed - self._T.receivedAt) / 1000))
+        if age == self._T.age then return end
+        self._T.age = age
+        self:SetStatus("戰況變動時自動更新・" .. (age < 1 and "剛剛同步" or (tostring(age) .. " 秒前同步")))
+    end
+
+    @ExecSpace("ClientOnly")
+    method void SetStatus(string text)
+        -- The status line under the legend.
+        local status = self:Ui("Overlay/Window/Side/Status")
+        if isvalid(status) then status.TextGUIRendererComponent.Text = text end
+    end
+end

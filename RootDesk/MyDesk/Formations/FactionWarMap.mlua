@@ -1,0 +1,204 @@
+@Logic
+script FactionWarMap extends Logic
+
+    property number ReadLeaseSeconds = 15
+
+    @ExecSpace("ServerOnly")
+    method void OnBeginPlay()
+        -- The players looking at the world map in this room, and the one board read that answers them.
+        self._T.viewers = {}
+        self._T.waiting = {}
+        self._T.reading = false
+        self._T.readStarted = 0
+        self._T.inflight = {}
+        self._T.again = false
+        self._T.signature = ""
+        self._T.links = nil
+        log("[VRF][FactionWarMap] ready")
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean Watching(string userId, any player)
+        -- A viewer counts only while the same entity is still here and standing in a town.
+        return isvalid(player) and _UserService:GetUserEntityByUserId(userId) == player and _FactionWar:IsTown(player.CurrentMapName)
+    end
+
+    @ExecSpace("Server")
+    method void RequestOpen()
+        -- Open the map for the sender: remember them as a viewer, send their faction and the board as it is now.
+        local userId = senderUserId
+        local player = _UserService:GetUserEntityByUserId(userId)
+        if not isvalid(player) or not isvalid(player.PlayerComponent) or not _FactionWar:IsTown(player.CurrentMapName) then
+            self:ReceiveUnavailable("NOT_IN_TOWN", userId)
+            return
+        end
+        self._T.viewers[userId] = player
+        log("[VRF][FactionWarMap] open user=" .. userId .. " town=" .. player.CurrentMapName)
+        _FactionWar:ReadFaction(player.PlayerComponent.ProfileCode, function(faction)
+            if self._T.viewers[userId] ~= player then return end
+            -- "" is no faction chosen yet; a failed read is told apart from it.
+            self:ReceiveFaction(faction == nil and "UNREADABLE" or faction, userId)
+        end)
+        self:Refresh(userId)
+    end
+
+    @ExecSpace("Server")
+    method void RequestClose()
+        -- The sender closed the map; later board changes are not pushed to them.
+        if self._T.viewers[senderUserId] == nil then return end
+        self._T.viewers[senderUserId] = nil
+        log("[VRF][FactionWarMap] close user=" .. senderUserId)
+    end
+
+    @ExecSpace("ServerOnly")
+    method table Links()
+        -- Pairs of towns joined by an authored gate in either direction; the gates never move, so this is worked out once.
+        if self._T.links ~= nil then return self._T.links end
+        local links = {}
+        local order = _FactionWar.TownOrder
+        for i = 1, #order do
+            for j = i + 1, #order do
+                if isvalid(_FactionWar:FindGate(order[i], order[j])) or isvalid(_FactionWar:FindGate(order[j], order[i])) then
+                    table.insert(links, { a = order[i], b = order[j] })
+                end
+            end
+        end
+        self._T.links = links
+        return links
+    end
+
+    @ExecSpace("ServerOnly")
+    method table Board(table towns)
+        -- What the map shows of the town document: owner and strength per town in map order, the links, and a signature to tell boards apart.
+        local list = {}
+        local parts = {}
+        for _, id in ipairs(_FactionWar.TownOrder) do
+            local town = towns[id]
+            table.insert(list, { id = id, name = _FactionWar.TownNames[id], owner = town.owner, strength = town.strength, capital = _FactionWarAttack:IsCapital(id) })
+            table.insert(parts, id .. ":" .. town.owner .. ":" .. tostring(town.strength))
+        end
+        return { towns = list, links = self:Links(), signature = table.concat(parts, "|") }
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Refresh(string forUserId)
+        -- One board read at a time. forUserId ("" for none) always gets an answer; everyone else only when the board changed.
+        -- Requests that arrive during a read are answered by one more read when it ends, so a change is never lost and reads never pile up.
+        -- A read whose answer never came stops blocking after ReadLeaseSeconds; its late answer is then ignored.
+        if forUserId ~= "" then self._T.waiting[forUserId] = true end
+        local now = DateTime.UtcNow.Elapsed
+        if self._T.reading and now - self._T.readStarted < self.ReadLeaseSeconds * 1000 then
+            self._T.again = true
+            return
+        end
+        if self._T.reading then
+            -- The people the lost read owed an answer are answered by this one.
+            for userId in pairs(self._T.inflight or {}) do self._T.waiting[userId] = true end
+            log("[VRF][FactionWarMap] read lease expired; reading again")
+        end
+        local started = now
+        self._T.reading = true
+        self._T.readStarted = started
+        self._T.again = false
+        local answering = self._T.waiting
+        self._T.inflight = answering
+        self._T.waiting = {}
+        _FactionWar:ReadTowns(function(towns)
+            if not self._T.reading or self._T.readStarted ~= started then return end
+            self._T.reading = false
+            local ok, failure = pcall(function() self:Deliver(towns, answering) end)
+            if not ok then log_error("[VRF][FactionWarMap] deliver failed " .. tostring(failure)) end
+            if self._T.again then self:Refresh("") end
+        end)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Deliver(any towns, table answering)
+        -- Push the board to every viewer when it changed, and to the ones who asked; drop viewers who left their town.
+        local board = towns ~= nil and self:Board(towns) or nil
+        local changed = board ~= nil and board.signature ~= self._T.signature
+        if board ~= nil then self._T.signature = board.signature end
+        local sent = 0
+        for userId, player in pairs(self._T.viewers) do
+            if not self:Watching(userId, player) then
+                self._T.viewers[userId] = nil
+            elseif board == nil then
+                if answering[userId] then self:ReceiveUnavailable("UNREADABLE", userId) end
+            elseif changed or answering[userId] then
+                self:ReceiveBoard(board.towns, board.links, userId)
+                sent = sent + 1
+            end
+        end
+        log("[VRF][FactionWarMap] board " .. (board ~= nil and board.signature or "unreadable") .. " changed=" .. tostring(changed) .. " sent=" .. tostring(sent))
+    end
+
+    @ExecSpace("ServerOnly")
+    method void AnnounceChange()
+        -- A settlement rewrote the town document. The static room of this world instance hears it directly, every other instance
+        -- through the world-instance event; each room with someone looking at the map then reads the board once.
+        local source = _WorldInstanceService.WorldInstanceId
+        if _RoomService:IsInstanceRoom() then
+            local roomEvent = TownBoardChangedEvent()
+            roomEvent.Source = source
+            _RoomService:RequestSendEventToRoomAsync(roomEvent, _RoomService.StaticRoomKey, function(code)
+                log("[VRF][FactionWarMap] change sent room=" .. tostring(code == SendEventRequestResultCode.OK))
+            end)
+        else
+            self:BoardChanged("here")
+        end
+        local event = TownBoardChangedEvent()
+        event.Source = source
+        _WorldInstanceService:RequestSendEventToAllWorldInstancesAsync(event, function(code)
+            log("[VRF][FactionWarMap] change sent instances=" .. tostring(code == SendEventRequestResultCode.OK))
+        end)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void BoardChanged(string via)
+        -- Nobody looking at the map here means nothing to read.
+        if next(self._T.viewers) == nil then return end
+        log("[VRF][FactionWarMap] change received via=" .. via)
+        self:Refresh("")
+    end
+
+    @ExecSpace("ServerOnly")
+    @EventSender("Service", "RoomService")
+    handler HandleRoomBoardChanged(TownBoardChangedEvent event)
+        -- From a match room of this world instance.
+        self:BoardChanged("room")
+    end
+
+    @ExecSpace("ServerOnly")
+    @EventSender("Service", "WorldInstanceService")
+    handler HandleInstanceBoardChanged(TownBoardChangedEvent event)
+        -- This instance's own change already arrived as a room event.
+        if event.Source == _WorldInstanceService.WorldInstanceId then return end
+        self:BoardChanged("instance")
+    end
+
+    @ExecSpace("Client")
+    method void ReceiveBoard(table towns, table links)
+        -- The board for this client's open map.
+        _FactionWarMapUI:ShowBoard(towns, links)
+    end
+
+    @ExecSpace("Client")
+    method void ReceiveFaction(string faction)
+        -- RED, BLUE, "" (none yet) or UNREADABLE.
+        _FactionWarMapUI:ShowFaction(faction)
+    end
+
+    @ExecSpace("Client")
+    method void ReceiveUnavailable(string reason)
+        -- NOT_IN_TOWN or UNREADABLE: the map stays open and says so.
+        _FactionWarMapUI:ShowUnavailable(reason)
+    end
+
+    @ExecSpace("ServerOnly")
+    @EventSender("Service", "UserService")
+    handler HandleUserLeaveEvent(UserLeaveEvent event)
+        -- Leaving the room (a match, a logout) ends the subscription.
+        self._T.viewers[event.UserId] = nil
+        self._T.waiting[event.UserId] = nil
+    end
+end
