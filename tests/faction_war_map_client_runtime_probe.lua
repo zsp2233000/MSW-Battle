@@ -45,12 +45,20 @@ local ok, reason = pcall(function()
     end
     -- The arrow is an animationclip set to loop: it keeps changing frames well past one pass of its four frames.
     local arrow = ui:Ui("Overlay/Window/Map/Towns/" .. here .. "/Arrow")
+    -- Its frames are one image moved by pivot, which a UI sprite ignores, so the client moves the arrow itself: it must bob.
     local frames = 0
+    local heights = {}
     local handler = arrow:ConnectEvent(SpriteGUIAnimPlayerChangeFrameEvent, function() frames = frames + 1 end)
-    wait(4)
+    for _ = 1, 40 do
+        heights[tostring(math.floor(arrow.UITransformComponent.anchoredPosition.y + 0.5))] = true
+        wait(0.1)
+    end
     arrow:DisconnectEvent(SpriteGUIAnimPlayerChangeFrameEvent, handler)
+    local distinct = 0
+    for _ in pairs(heights) do distinct = distinct + 1 end
     assert(frames > 4, "the arrow keeps animating past one pass: " .. tostring(frames) .. " frame changes in 4 s")
-    log("[VRF][MapProbe] arrow frames in 4 s=" .. tostring(frames))
+    assert(distinct >= 3, "the arrow bobs: " .. tostring(distinct) .. " heights seen")
+    log("[VRF][MapProbe] arrow frames in 4 s=" .. tostring(frames) .. " heights=" .. tostring(distinct))
     assert(await(function() return text("Overlay/Window/Side/Faction") ~= "讀取中…" end, 5), "faction answered")
     log("[VRF][MapProbe] CLIENT1 PASS here=" .. here .. " faction=" .. text("Overlay/Window/Side/Faction"))
 

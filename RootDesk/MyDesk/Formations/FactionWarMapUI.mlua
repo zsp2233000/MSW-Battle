@@ -10,6 +10,8 @@ script FactionWarMapUI extends Logic
     property integer LinkSlots = 3
     property number BarWidth = 280
     property integer FullStrength = 100
+    property number ArrowBaseY = 60
+    property table ArrowBob = { 9, 6, 3, 0 }
 
     @ExecSpace("ClientOnly")
     method Entity Ui(string path)
@@ -38,6 +40,26 @@ script FactionWarMapUI extends Logic
         for _, binding in ipairs(self._T.bindings or {}) do
             if isvalid(binding.entity) then binding.entity:DisconnectEvent(ButtonClickEvent, binding.key) end
         end
+        for _, binding in ipairs(self._T.frames or {}) do
+            if isvalid(binding.entity) then binding.entity:DisconnectEvent(SpriteGUIAnimPlayerChangeFrameEvent, binding.key) end
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void BindArrows()
+        -- The arrow clip's frames are one image whose pivot moves down 2 px a frame; a UI sprite ignores the pivot,
+        -- so the bob is replayed here by moving the arrow on every frame change (ArrowBob, in UI px, per frame).
+        self._T.frames = {}
+        for _, id in ipairs(_FactionWar.TownOrder) do
+            local arrow = self:Ui("Overlay/Window/Map/Towns/" .. id .. "/Arrow")
+            if isvalid(arrow) then
+                local key = arrow:ConnectEvent(SpriteGUIAnimPlayerChangeFrameEvent, function(event)
+                    local lift = self.ArrowBob[(event.FrameIndex % #self.ArrowBob) + 1] or 0
+                    arrow.UITransformComponent.anchoredPosition = Vector2(0, self.ArrowBaseY + lift)
+                end)
+                table.insert(self._T.frames, { entity = arrow, key = key })
+            end
+        end
     end
 
     @ExecSpace("ClientOnly")
@@ -65,6 +87,7 @@ script FactionWarMapUI extends Logic
         if #self._T.bindings == 0 then
             self:Bind("OpenButton", function() self:Open() end)
             self:Bind("Overlay/Window/Close", function() self:Close() end)
+            self:BindArrows()
         end
         local available = self:CanOpen()
         if button.Enable ~= available then button:SetEnable(available) end
