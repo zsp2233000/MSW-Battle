@@ -29,8 +29,8 @@ const NAMES = { nanzih: '楠梓', zuoying: '左營', gushan: '鼓山', yancheng:
 
 // Crest position per town: the district centre from layout.json, nudged where labels of neighbours would collide.
 const NODE_SHIFT = { nanzih: [0, 28], zuoying: [6, 18], gushan: [3, 57], yancheng: [0, 0] };
-// Yancheng is tiny and sits under Gushan, so its labels go to the right and its "you are here" chip to the left.
-const SIDE_LABELS = { yancheng: true };
+// The gate links run north to south through the crests, so every town keeps its labels to the east of its crest,
+// its capital tag above and its "you are here" chip to the west, clear of the links.
 
 function swap(b, entity, states) {
   b.patchComponent(entity, 'MOD.Core.ButtonComponent', {
@@ -86,25 +86,16 @@ for (const id of TOWNS) {
   const town = `${MAP}/Towns/${id}`;
   b.empty(town, { anchor: 'middle-center', pos: [node.x + sx, node.y + sy], rect_size: [64, 64] });
   b.sprite(`${town}/Crest`, { anchor: 'middle-center', rect_size: [60, 60], image_ruid: art.crest, color: NEUTRAL, sprite_type: 0 });
-  if (SIDE_LABELS[id]) {
-    b.text(`${town}/Name`, NAMES[id], { size: 26, color: '#FFFFFF', bold: true, ...OUTLINE, alignment: 3, anchor: 'middle-center', pos: [115, 14], rect_size: [150, 34] });
-    b.text(`${town}/Strength`, '兵力 —', { size: 21, color: '#FFF2C8', ...OUTLINE, alignment: 3, anchor: 'middle-center', pos: [125, -16], rect_size: [170, 28] });
-    b.text(`${town}/Capital`, '主城', { size: 21, color: '#FACA33', bold: true, ...OUTLINE, alignment: 3, anchor: 'middle-center', pos: [100, 44], rect_size: [120, 28] });
-    b.sprite(`${town}/Here`, { anchor: 'middle-center', pos: [-115, 0], rect_size: [140, 40], image_ruid: CHIP_BG, color: '#FFFFFF', sprite_type: 1,
-      text: '你在這裡', text_size: 21, text_color: '#FFFFFF', text_bold: true, enable: false });
-  } else {
-    b.text(`${town}/Name`, NAMES[id], { size: 26, color: '#FFFFFF', bold: true, ...OUTLINE, anchor: 'middle-center', pos: [0, -48], rect_size: [180, 34] });
-    b.text(`${town}/Strength`, '兵力 —', { size: 21, color: '#FFF2C8', ...OUTLINE, anchor: 'middle-center', pos: [0, -78], rect_size: [200, 28] });
-    b.text(`${town}/Capital`, '主城', { size: 21, color: '#FACA33', bold: true, ...OUTLINE, anchor: 'middle-center', pos: [0, 46], rect_size: [80, 28] });
-    b.sprite(`${town}/Here`, { anchor: 'middle-center', pos: [115, 0], rect_size: [140, 40], image_ruid: CHIP_BG, color: '#FFFFFF', sprite_type: 1,
-      text: '你在這裡', text_size: 21, text_color: '#FFFFFF', text_bold: true, enable: false });
-  }
-  b.patch(`${town}/Capital`, { enable: false });
+  b.text(`${town}/Name`, NAMES[id], { size: 26, color: '#FFFFFF', bold: true, ...OUTLINE, alignment: 3, anchor: 'middle-center', pos: [110, 14], rect_size: [140, 34] });
+  b.text(`${town}/Strength`, '兵力 —', { size: 21, color: '#FFF2C8', ...OUTLINE, alignment: 3, anchor: 'middle-center', pos: [110, -16], rect_size: [140, 28] });
+  b.text(`${town}/Capital`, '主城', { size: 21, color: '#FACA33', bold: true, ...OUTLINE, anchor: 'middle-center', pos: [0, 46], rect_size: [80, 28], enable: false });
+  b.sprite(`${town}/Here`, { anchor: 'middle-center', pos: [-115, 0], rect_size: [140, 40], image_ruid: CHIP_BG, color: '#FFFFFF', sprite_type: 1,
+    text: '你在這裡', text_size: 21, text_color: '#FFFFFF', text_bold: true, enable: false });
 }
 
 // --- side panel: own faction, strength list north to south, legend, status -------------------
 const SIDE = 'Overlay/Window/Side';
-b.sprite(SIDE, { anchor: 'middle-right', pos: [-44, -30], rect_size: [500, 810], color: { r: 0.12, g: 0.075, b: 0.04, a: 0.62 }, sprite_type: 1 });
+b.sprite(SIDE, { anchor: 'middle-right', pos: [-44, -30], rect_size: [500, 810], color: { r: 0.12, g: 0.075, b: 0.04, a: 0.88 }, sprite_type: 1 });
 b.text(`${SIDE}/FactionLabel`, '你的陣營', { size: 22, color: GOLD, ...OUTLINE, anchor: 'top-center', pos: [0, -24], rect_size: [460, 30] });
 b.text(`${SIDE}/Faction`, '讀取中…', { size: 34, color: GOLD, bold: true, ...OUTLINE, anchor: 'top-center', pos: [0, -58], rect_size: [460, 44] });
 b.sprite(`${SIDE}/Divider`, { anchor: 'top-center', pos: [0, -118], rect_size: [440, 2], color: { r: 0.93, g: 0.78, b: 0.56, a: 0.5 }, sprite_type: 1 });
