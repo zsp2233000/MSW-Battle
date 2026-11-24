@@ -19,7 +19,6 @@ const art = require('./ruids.json');
 const CARD_BUTTON = { normal: '9505617fb63c447c8ff9c15c18d88064', highlighted: '398dfdb46d534ea2a2373e4f5d29ae2a', pressed: '1016088c7aca43c78cdd06c01645ab1b' };
 const X_BUTTON = { normal: 'e01ef74a1ecf444bbb013c4313a8d0a9', highlighted: 'f24a6333e4df404795e922ec2966e997', pressed: '5952570d481245a9a4fbe562f3c030c5' };
 const PANEL_BG = 'd9b68fae16404c5c81228b6c45cf40a5';   // Panel_3 Background_1 (Sliced)
-const CHIP_BG = 'ffdc4b11ef384e2cb4996562d867dd80';    // Base_9 (Sliced), white text
 const GAUGE = 'f0911af597259044aa624a11332c0595';      // HP gauge slice (Sliced fill, width-driven)
 const HERE_ARROW = '96392b1df6724d43abab0ec1988aa7c4'; // animationclip 20x36, downward marker (plays directly as ImageRUID)
 const OUTLINE = { outline: true, outline_color: { r: 0, g: 0, b: 0, a: 0.7 }, outline_width: 0.2, face_dilate: 0.2 };
@@ -31,7 +30,7 @@ const NAMES = { nanzih: '楠梓', zuoying: '左營', gushan: '鼓山', yancheng:
 // Crest position per town: the district centre from layout.json, nudged where labels of neighbours would collide.
 const NODE_SHIFT = { nanzih: [0, 28], zuoying: [6, 18], gushan: [3, 57], yancheng: [0, 0] };
 // The gate links run north to south through the crests, so every town keeps its labels (and capital tag) to the east of
-// its crest, its "you are here" chip to the west and the "you are here" arrow straight above the crest, clear of the links.
+// its crest and the looping "you are here" arrow straight above the crest of the town the player stands in.
 
 function swap(b, entity, states) {
   b.patchComponent(entity, 'MOD.Core.ButtonComponent', {
@@ -91,8 +90,8 @@ for (const id of TOWNS) {
   b.text(`${town}/Strength`, '兵力 —', { size: 21, color: '#FFF2C8', ...OUTLINE, alignment: 3, anchor: 'middle-center', pos: [110, -16], rect_size: [140, 28] });
   b.text(`${town}/Capital`, '主城', { size: 21, color: '#FACA33', bold: true, ...OUTLINE, alignment: 3, anchor: 'middle-center', pos: [100, 44], rect_size: [120, 28], enable: false });
   b.sprite(`${town}/Arrow`, { anchor: 'middle-center', pos: [0, 60], rect_size: [30, 54], image_ruid: HERE_ARROW, color: '#FFFFFF', sprite_type: 0, enable: false });
-  b.sprite(`${town}/Here`, { anchor: 'middle-center', pos: [-115, 0], rect_size: [140, 40], image_ruid: CHIP_BG, color: '#FFFFFF', sprite_type: 1,
-    text: '你在這裡', text_size: 21, text_color: '#FFFFFF', text_bold: true, enable: false });
+  // The arrow is a 4-frame animationclip; the builder's default AnimClipPlayType is Onetime (0), which would freeze it after one pass.
+  b.patchComponent(`${town}/Arrow`, 'MOD.Core.SpriteGUIRendererComponent', { AnimClipPlayType: 1 });
 }
 
 // --- side panel: own faction, strength list north to south, legend, status -------------------

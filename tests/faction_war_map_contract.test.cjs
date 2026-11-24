@@ -38,7 +38,9 @@ test('the map uses the painted terrain, one tinted mask per district, three link
   for (const id of TOWNS) {
     assert.equal(ruidOf(`${MAP}/Districts/${id}`), art[`mask_${id}`], `${id} mask`);
     assert.equal(ruidOf(`${MAP}/Towns/${id}/Crest`), art.crest, `${id} crest`);
-    for (const part of ['Name', 'Strength', 'Capital', 'Here', 'Arrow']) assert.ok(ui.find(`${MAP}/Towns/${id}/${part}`), `${id} ${part}`);
+    for (const part of ['Name', 'Strength', 'Capital', 'Arrow']) assert.ok(ui.find(`${MAP}/Towns/${id}/${part}`), `${id} ${part}`);
+    assert.equal(ui.find(`${MAP}/Towns/${id}/Here`), null, `${id} the arrow replaced the map chip`);
+    assert.equal(ui.getComponent(`${MAP}/Towns/${id}/Arrow`, 'MOD.Core.SpriteGUIRendererComponent').AnimClipPlayType, 1, `${id} arrow loops`);
     assert.equal(ruidOf(`${MAP}/Towns/${id}/Arrow`), '96392b1df6724d43abab0ec1988aa7c4', `${id} here arrow`);
     assert.equal(ui.find(`${MAP}/Towns/${id}/Arrow`).jsonString.enable, false, `${id} arrow waits for the client`);
     for (const part of ['Name', 'Owner', 'Value', 'Here', 'Bar/Fill']) assert.ok(ui.find(`Overlay/Window/Side/Rows/${id}/${part}`), `${id} row ${part}`);

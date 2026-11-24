@@ -40,9 +40,17 @@ local ok, reason = pcall(function()
         assert(bar.Enable and bar.UITransformComponent.RectSize.x > 20, "link " .. slot .. " drawn")
     end
     for _, id in ipairs(_FactionWar.TownOrder) do
-        assert(ui:Ui("Overlay/Window/Map/Towns/" .. id .. "/Here").Enable == (id == here), "here mark on " .. id)
+        assert(ui:Ui("Overlay/Window/Side/Rows/" .. id .. "/Here").Enable == (id == here), "here line in the list on " .. id)
         assert(ui:Ui("Overlay/Window/Map/Towns/" .. id .. "/Arrow").Enable == (id == here), "here arrow on " .. id)
     end
+    -- The arrow is an animationclip set to loop: it keeps changing frames well past one pass of its four frames.
+    local arrow = ui:Ui("Overlay/Window/Map/Towns/" .. here .. "/Arrow")
+    local frames = 0
+    local handler = arrow:ConnectEvent(SpriteGUIAnimPlayerChangeFrameEvent, function() frames = frames + 1 end)
+    wait(4)
+    arrow:DisconnectEvent(SpriteGUIAnimPlayerChangeFrameEvent, handler)
+    assert(frames > 4, "the arrow keeps animating past one pass: " .. tostring(frames) .. " frame changes in 4 s")
+    log("[VRF][MapProbe] arrow frames in 4 s=" .. tostring(frames))
     assert(await(function() return text("Overlay/Window/Side/Faction") ~= "讀取中…" end, 5), "faction answered")
     log("[VRF][MapProbe] CLIENT1 PASS here=" .. here .. " faction=" .. text("Overlay/Window/Side/Faction"))
 
