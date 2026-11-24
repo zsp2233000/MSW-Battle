@@ -307,7 +307,7 @@ test('#60 the attack range preview is drawn with the monster preview, collider-f
   assert.deepEqual(model.components, ['MOD.Core.TransformComponent', 'MOD.Core.PixelRendererComponent'], 'the rectangle model cannot be a target or collide');
 });
 
-test('every map preserves the template formation terrain and coordinate system', () => {
+test('formation and battle maps preserve the template terrain and coordinate system', () => {
   const reference = MapBuilder.read('map/template.map');
   const terrain = map => {
     const component = map.component('RectTileMap', 'MOD.Core.RectTileMapComponent');
@@ -316,7 +316,7 @@ test('every map preserves the template formation terrain and coordinate system',
       tileMap: [...map.getTiles()].sort((a, b) => a.position.x - b.position.x || a.position.y - b.position.y),
     };
   };
-  for (const file of fs.readdirSync('map').filter(name => name.endsWith('.map'))) {
+  for (const file of ['template.map', 'formationlobby.map', 'formationsim.map', 'matchprobe.map']) {
     const map = MapBuilder.read(`map/${file}`);
     assert.equal(map.getTileMapMode(), reference.getTileMapMode(), file);
     assert.deepEqual(terrain(map), terrain(reference), `${file}: formation terrain differs from template`);

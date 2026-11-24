@@ -1,0 +1,11 @@
+@Component
+script FactionWarGate extends Component
+
+    @ExecSpace("ClientOnly")
+    @EventSender("Self")
+    handler HandleInteractionEvent(InteractionEvent event)
+        if event.InteractionEntity == _UserService.LocalPlayer then
+            _FactionWar:RequestGate(string.sub(self.Entity.Name, 6))
+        end
+    end
+end

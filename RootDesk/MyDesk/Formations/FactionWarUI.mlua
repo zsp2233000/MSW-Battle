@@ -1,0 +1,316 @@
+@Logic
+script FactionWarUI extends Logic
+
+    property number MillisecondsPerSecond = 1000
+    property integer AttackRows = 2
+
+    @ExecSpace("ClientOnly")
+    method Entity Ui(string path)
+        return _EntityService:GetEntityByPath("/ui/FactionWarGroup/" .. path)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnBeginPlay()
+        self._T.bindings = {}
+        self._T.mapName = ""
+        self._T.pending = false
+        self._T.options = {}
+        self._T.attackPending = false
+        self._T.queueState = "IDLE"
+        self._T.queueText = ""
+        self._T.queueAction = ""
+        self._T.queuePending = false
+        self._T.queueAttempt = ""
+        self._T.panelOpen = false
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnUpdate(number delta)
+        local player = _UserService.LocalPlayer
+        local entry = self:Ui("LobbyEntry")
+        local choice = self:Ui("FactionChoice")
+        local hud = self:Ui("TownHUD")
+        if not isvalid(player) or not isvalid(entry) or not isvalid(hud) or not isvalid(choice) then return end
+        if #self._T.bindings == 0 then
+            self:Bind("LobbyEntry", function() self:Open() end)
+            self:Bind("FactionChoice/Window/Red", function() self:Request("RED") end)
+            self:Bind("FactionChoice/Window/Blue", function() self:Request("BLUE") end)
+            self:Bind("FactionChoice/Window/Close", function() if not self._T.pending then choice:SetEnable(false) end end)
+            self:Bind("AttackPanel/Window/Close", function() self:CloseAttack() end)
+            self:Bind("AttackPanel/Window/Row1/Option", function() self:Attack(1) end)
+            self:Bind("AttackPanel/Window/Row2/Option", function() self:Attack(2) end)
+            self:Bind("QueueBar/Cancel", function() self:CancelQueue() end)
+            self:Bind("LobbyClose", function() _FormationLobby:CloseTownPanel() end)
+        end
+        local name = player.CurrentMapName
+        if name ~= self._T.mapName then self:EnterMap(name, entry, choice, hud) end
+        self:SyncTownPanel(name, hud)
+        self:RenderQueue(name)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void SyncTownPanel(string map, Entity hud)
+        -- While the lobby screen covers the town, hide the town HUD and dialogs and offer its close button.
+        local open = _FormationLobby:IsTownPanelOpen()
+        if open == self._T.panelOpen then return end
+        self._T.panelOpen = open
+        local close = self:Ui("LobbyClose")
+        if isvalid(close) then close:SetEnable(open) end
+        if open then self:CloseAttack() end
+        hud:SetEnable(_FactionWar:IsTown(map) and not open)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void EnterMap(string name, Entity entry, Entity choice, Entity hud)
+        -- Show the HUD and entry button that belong to the map the local player just entered.
+        self._T.mapName = name
+        local inLobby = name == "formationlobby"
+        entry:SetEnable(inLobby)
+        if not inLobby then
+            self._T.pending = false
+            choice:SetEnable(false)
+        end
+        local inTown = _FactionWar:IsTown(name)
+        hud:SetEnable(inTown)
+        self._T.options = {}
+        self._T.attackPending = false
+        self:CloseAttack()
+        if inTown then
+            self:ShowTownStatus(name, "讀取中")
+            self:ShowTownNotice(name, "")
+            -- A notice that arrived before this map change belongs to this town; anything else is stale.
+            local arrival = self._T.arrivalNotice
+            if arrival ~= nil and arrival.town == name then self:ShowTownNotice(name, arrival.message) end
+            self._T.arrivalNotice = nil
+            _FactionWar:RequestTownStatus()
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Bind(string path, any action)
+        local entity = self:Ui(path)
+        if not isvalid(entity) then return end
+        table.insert(self._T.bindings, { entity = entity, key = entity:ConnectEvent(ButtonClickEvent, action) })
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnEndPlay()
+        for _, binding in ipairs(self._T.bindings or {}) do
+            if isvalid(binding.entity) then binding.entity:DisconnectEvent(ButtonClickEvent, binding.key) end
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Open()
+        local player = _UserService.LocalPlayer
+        local choice = self:Ui("FactionChoice")
+        if not isvalid(player) or player.CurrentMapName ~= "formationlobby" or not isvalid(choice) or self._T.pending then return end
+        choice:SetEnable(true)
+        self._T.canChoose = false
+        self:Request("")
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Request(string faction)
+        if self._T.pending or (faction ~= "" and not self._T.canChoose) then return end
+        self._T.pending = true
+        self:ShowEntryControls(faction == "" and "正在讀取國戰資料…" or "正在加入陣營…", self._T.canChoose)
+        _FactionWar:RequestEntry(faction)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ShowEntryResult(string result)
+        local player = _UserService.LocalPlayer
+        if not isvalid(player) or player.CurrentMapName ~= "formationlobby" then return end
+        self._T.pending = false
+        self._T.canChoose = result == "CHOOSE" or result == "SAVE_FAILED"
+        if result == "ENTERED" then
+            self:Ui("FactionChoice"):SetEnable(false)
+        elseif result == "CHOOSE" then
+            self:ShowEntryControls("請選擇國戰陣營。", true)
+        elseif result == "SAVE_FAILED" then
+            self:ShowEntryControls("陣營儲存未確認，請再試一次。", true)
+        elseif result == "BLOCKED" then
+            self:ShowEntryControls("請先完成目前的配對或存檔操作。", false)
+        else
+            self:ShowEntryControls("暫時無法進入國戰，請關閉後重試。", false)
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ShowEntryControls(string message, boolean choosing)
+        self:Ui("FactionChoice/Window/Status").TextGUIRendererComponent.Text = message
+        for _, id in ipairs({ "Red", "Blue" }) do
+            local button = self:Ui("FactionChoice/Window/" .. id)
+            button:SetEnable(choosing)
+            button.ButtonComponent.Enable = not self._T.pending
+        end
+        self:Ui("FactionChoice/Window/Close").ButtonComponent.Enable = not self._T.pending
+    end
+
+    @ExecSpace("ClientOnly")
+    method boolean IsCurrentTown(string town)
+        local player = _UserService.LocalPlayer
+        return isvalid(player) and player.CurrentMapName == town and _FactionWar:IsTown(town)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ShowTownStatus(string town, string strength)
+        if not self:IsCurrentTown(town) then return end
+        local label = self:Ui("TownHUD/Strength")
+        if not isvalid(label) then return end
+        local capital = _FactionWarAttack:IsCapital(town)
+        label.TextGUIRendererComponent.Text = _FactionWar.TownNames[town] .. (capital and "（主城）" or "") .. "  ｜  兵力 " .. strength
+        log("[VRF][FactionWar] hud town=" .. town .. " strength=" .. strength)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ShowTownNotice(string town, string message)
+        -- The warning sits on its own bar under the strength line; hide that bar when there is nothing to say.
+        if not self:IsCurrentTown(town) then
+            -- A relocation notice can beat the client's own map change; keep it for the town the player is about to enter.
+            if message ~= "" then
+                self._T.arrivalNotice = { town = town, message = message }
+                log("[VRF][FactionWar] notice kept for arrival town=" .. town)
+            end
+            return
+        end
+        local notice = self:Ui("TownHUD/Notice")
+        if not isvalid(notice) then return end
+        notice.TextGUIRendererComponent.Text = message
+        notice:SetEnable(message ~= "")
+        log("[VRF][FactionWar] notice shown=" .. tostring(message ~= ""))
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ShowAttackOptions(string town, table options, string status)
+        -- Open the NPC dialog with exactly the answer the server derived from live ownership.
+        if not self:IsCurrentTown(town) then return end
+        local panel = self:Ui("AttackPanel")
+        if not isvalid(panel) then return end
+        self._T.options = options
+        self._T.attackPending = false
+        local message = "選擇要進攻的城鎮"
+        if status == "ENGAGED" then message = "已在配對中，請先取消目前的配對"
+        elseif status == "UNAVAILABLE" then message = "暫時無法讀取國戰資料，請再試一次"
+        elseif status == "NOT_OWNED" then message = "這座城已不屬於你的陣營"
+        elseif #options == 0 then message = "目前沒有可進攻的相鄰敵城" end
+        self:Ui("AttackPanel/Window/Status").TextGUIRendererComponent.Text = message
+        for index = 1, self.AttackRows do
+            local row = self:Ui("AttackPanel/Window/Row" .. tostring(index))
+            local option = options[index]
+            if isvalid(row) then row:SetEnable(option ~= nil and status == "READY") end
+            if option ~= nil then
+                self:Ui("AttackPanel/Window/Row" .. tostring(index) .. "/Option").TextGUIRendererComponent.Text = "進攻 " .. option.name
+                self:Ui("AttackPanel/Window/Row" .. tostring(index) .. "/Note").TextGUIRendererComponent.Text = option.capital and "敵方主城不會被攻下，勝利也不會扣除主城兵力" or ""
+            end
+        end
+        panel:SetEnable(true)
+        log("[VRF][FactionWarAttack] options town=" .. town .. " count=" .. tostring(#options) .. " status=" .. status)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void CloseAttack()
+        -- Hide the NPC dialog; the queue bar keeps showing any waiting match.
+        local panel = self:Ui("AttackPanel")
+        if isvalid(panel) then panel:SetEnable(false) end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Attack(integer index)
+        -- One click queues against that row's town; the panel waits for the server before accepting another.
+        local option = self._T.options[index]
+        if option == nil or self._T.attackPending then return end
+        self._T.attackPending = true
+        self:Ui("AttackPanel/Window/Status").TextGUIRendererComponent.Text = "正在加入配對…"
+        _FactionWarAttack:RequestAttack(option.town)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ShowAttackResult(string result)
+        -- QUEUING hands the rest of the presentation to the queue bar; every other answer keeps the dialog open.
+        self._T.attackPending = false
+        if result == "QUEUING" then
+            self:CloseAttack()
+        elseif result == "INVALID" then
+            -- Ownership moved while the dialog was open; list the towns again.
+            _FactionWarAttack:RequestOptions()
+        else
+            self:Ui("AttackPanel/Window/Status").TextGUIRendererComponent.Text = result == "ENGAGED" and "已在配對中，請先取消目前的配對" or "暫時無法配對，請再試一次"
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void CancelQueue()
+        -- Cancel in place; a committed match is aborted through the same return path as the battle room.
+        if self._T.queuePending or self._T.queueAction == "" then return end
+        self._T.queuePending = true
+        if self._T.queueAction == "RETURN" then
+            _MatchFlow:RequestReturn(self._T.queueAttempt)
+        else
+            _MatchFlow:RequestCancel(self._T.queueAttempt)
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method table QueueView(table snapshot)
+        -- Choose the status text and the single action a queued snapshot offers; no widget is touched here.
+        local waiting = { QUEUED = true, RENEWING = true, QUEUE_ERROR = true, SAVING = true }
+        local entering = { COMMITTING = true, TRANSFER = true, IN_ROOM = true, WAITING = true }
+        local name = _FactionWar.TownNames[snapshot.target] or snapshot.target
+        local text = "進攻 " .. name
+        local elapsed = snapshot.started > 0 and math.max(0, math.floor((DateTime.UtcNow.Elapsed - snapshot.started) / self.MillisecondsPerSecond)) or 0
+        -- The guard comes at the server's deadline; the countdown never shows a negative second.
+        local guardAt = snapshot.guardAt or 0
+        local remaining = math.max(0, math.ceil((guardAt - DateTime.UtcNow.Elapsed) / self.MillisecondsPerSecond))
+        if snapshot.state == "CANCELLING" or snapshot.state == "CANCELLED" then
+            return { text = text .. "\n正在取消配對…", action = "" }
+        elseif snapshot.state == "QUEUE_ERROR" then
+            return { text = text .. "\n配對已停止，請取消後重新配對", action = "CANCEL" }
+        elseif snapshot.guard == true and (waiting[snapshot.state] or entering[snapshot.state]) then
+            -- Matched against the guard: the state names are the human flow's, the words are not.
+            return { text = text .. "\n" .. name .. "守衛迎戰，正在進入戰場", action = waiting[snapshot.state] and "" or "RETURN" }
+        elseif waiting[snapshot.state] then
+            local wait = guardAt > 0 and ("守衛倒數 " .. tostring(remaining) .. " 秒") or ("已等候 " .. tostring(elapsed) .. " 秒")
+            return { text = text .. "\n正在尋找對手 · " .. wait, action = "CANCEL" }
+        elseif entering[snapshot.state] then
+            return { text = text .. "\n配對成功，正在進入戰場", action = "RETURN" }
+        end
+        return { text = text .. "\n" .. snapshot.state, action = "" }
+    end
+
+    @ExecSpace("ClientOnly")
+    method void RenderQueue(string map)
+        -- Mirror the one match snapshot into the town: target, wait clock and the in-place cancel button.
+        local bar = self:Ui("QueueBar")
+        if not isvalid(bar) then return end
+        local snapshot = _MatchFlowInput.Snapshot
+        local war = _FactionWar:IsTown(map) and snapshot.target ~= nil and snapshot.target ~= "" and snapshot.state ~= "IDLE"
+        if snapshot.state ~= self._T.queueState then
+            -- A settled queue returns the player to a town whose strength may have changed.
+            if snapshot.state == "IDLE" and _FactionWar:IsTown(map) then _FactionWar:RequestTownStatus() end
+            self._T.queueState = snapshot.state
+            self._T.queuePending = false
+        end
+        bar:SetEnable(war and not self._T.panelOpen)
+        if not war then
+            self._T.queueAction = ""
+            return
+        end
+        local view = self:QueueView(snapshot)
+        local pending = self._T.queuePending
+        local text = pending and (view.text .. "（處理中）") or view.text
+        self._T.queueAction = pending and "" or view.action
+        self._T.queueAttempt = snapshot.attempt
+        if text ~= self._T.queueText then
+            self._T.queueText = text
+            self:Ui("QueueBar/Status").TextGUIRendererComponent.Text = text
+        end
+        local cancel = self:Ui("QueueBar/Cancel")
+        if isvalid(cancel) then
+            cancel:SetEnable(view.action ~= "")
+            cancel.ButtonComponent.Enable = not pending
+            cancel.TextGUIRendererComponent.Text = view.action == "RETURN" and "取消入場" or "取消配對"
+        end
+    end
+end

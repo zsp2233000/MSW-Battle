@@ -31,8 +31,16 @@ script MatchedBattle extends Component
             local admission = _MatchFlow:RoomBattleAdmission()
             if admission ~= nil and battle.Phase == "WAITING" then
                 local homeUnits = _FormationHandoff:Roster(admission.homeTicket)
-                local awayUnits = _FormationHandoff:Roster(admission.awayTicket)
+                -- A guard match fields the defended town's roster; a human match reads the opponent's sealed capsule.
+                local awayUnits = admission.guard and _FactionWarGuard:Roster(admission.awayTown) or _FormationHandoff:Roster(admission.awayTicket)
                 self._T.started = homeUnits ~= nil and awayUnits ~= nil and battle:InitializeMatchedBattle(admission.key, admission.home, admission.away, homeUnits, awayUnits)
+                -- A war match carries the two towns it was queued for; a lobby match leaves them empty.
+                self._T.homeTown = admission.homeTown
+                self._T.awayTown = admission.awayTown
+                self._T.kind = admission.guard and "GUARD" or "HUMAN"
+                -- The stamp says how often each town had changed hands when this match was paired (nil: the match was not stamped).
+                self._T.epochs = admission.epochs
+                if admission.epochs ~= nil then log("[VRF][MatchedBattle] stamp home=" .. tostring(admission.epochs.home) .. " away=" .. tostring(admission.epochs.away)) end
                 if not self._T.started then self.AdmissionFailed = true end
             elseif battle.Phase == "CONFIG_ERROR" or self._T.elapsed >= self.AdmissionTimeoutSeconds then
                 self.AdmissionFailed = true
@@ -50,6 +58,10 @@ script MatchedBattle extends Component
                 if result ~= "" then _MatchFlow:PublishState(user.PlayerComponent.UserId, "RESULT_" .. result) end
             end
             log("[VRF][MatchedBattle] result published once match=" .. self._T.matchKey .. " home=" .. battle:ResultForProfile(battle.HomeProfile) .. " away=" .. battle:ResultForProfile(battle.AwayProfile))
+            -- The result is settled on the towns here, once per match; the match key makes a repeated delivery harmless.
+            if (self._T.homeTown or "") ~= "" then
+                _FactionWarAttack:Settle(self._T.matchKey, self._T.homeTown, self._T.awayTown, battle:ResultForProfile(battle.HomeProfile), self._T.kind or "HUMAN", nil, self._T.epochs)
+            end
         end
     end
 end

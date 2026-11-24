@@ -13,6 +13,8 @@ script FormationLobby extends Logic
         self._T.lastLobbyClick = 0
         self._T.editWhenSelected = 0
         self._T.showUnits = false
+        self._T.townPanel = false
+        self._T.controllerWas = true
         self._T.savingNoticeText = ""
         for _, path in ipairs({ "Lobby", "Editor", "EditorControls", "Editor/Catalog/Template", "SavingNotice" }) do
             self:SetEnabled(path, false)
@@ -47,11 +49,14 @@ script FormationLobby extends Logic
             self:Render()
             log("[VRF][FormationUI] matchLocked=" .. tostring(matchLocked))
         end
-        if player.CurrentMapName ~= "formationlobby" or _UtilLogic.ElapsedSeconds - self._T.lastLobbyClick > 5 then
+        if not self:OnLobbyScreen() or _UtilLogic.ElapsedSeconds - self._T.lastLobbyClick > 5 then
             self._T.editWhenSelected = 0
         end
         self:Run(_FormationEditSession:Tick(delta))
-        if player.CurrentMapName == "matchprobe" then
+        local inTown = _FactionWar:IsTown(player.CurrentMapName)
+        -- Leaving the town, even into the editor, ends the town panel and gives the player their controls back.
+        if self._T.townPanel and not inTown then self:CloseTownPanel() end
+        if player.CurrentMapName == "matchprobe" or (inTown and not self._T.townPanel) then
             self.root:SetEnable(false)
             return
         end
@@ -105,6 +110,47 @@ script FormationLobby extends Logic
     end
 
     @ExecSpace("ClientOnly")
+    method boolean OnLobbyScreen()
+        -- The lobby screen shows in the lobby map and, while a town NPC has opened it, over a town.
+        return self._T.mapName == "formationlobby" or self._T.townPanel == true
+    end
+
+    @ExecSpace("ClientOnly")
+    method boolean IsTownPanelOpen()
+        -- Other town UI hides itself while the full-screen lobby panel is up.
+        return self._T.townPanel == true
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OpenTownPanel()
+        -- The town NPC shows the lobby screen over the town; the player stops walking until it closes.
+        local player = _UserService.LocalPlayer
+        if not isvalid(player) or not _FactionWar:IsTown(player.CurrentMapName) or self._T.townPanel then return end
+        self._T.townPanel = true
+        local controller = player.PlayerControllerComponent
+        self._T.controllerWas = not isvalid(controller) or controller.Enable
+        if isvalid(controller) then controller.Enable = false end
+        local movement = player.MovementComponent
+        if isvalid(movement) then movement:Stop() end
+        -- Force the map-entry refresh so the panel starts from the confirmed saved teams.
+        self._T.mapName = ""
+        log("[VRF][TownLobby] opened in " .. player.CurrentMapName)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void CloseTownPanel()
+        -- Return the walking controls and hide the screen; the saved teams are untouched.
+        if not self._T.townPanel then return end
+        self._T.townPanel = false
+        local player = _UserService.LocalPlayer
+        local controller = isvalid(player) and player.PlayerControllerComponent or nil
+        if isvalid(controller) then controller.Enable = self._T.controllerWas end
+        self._T.mapName = ""
+        self:Render()
+        log("[VRF][TownLobby] closed")
+    end
+
+    @ExecSpace("ClientOnly")
     method void Travel(string destination)
         -- Let the server choose the traveller; the client never supplies another player's identity.
         if not _MatchFlowInput:AllowsFormationActions() or _FormationEditSession:Busy() or _FormationEditSession:Unconfirmed() or _FormationEditSession.ConfirmKind ~= "" then return end
@@ -116,7 +162,7 @@ script FormationLobby extends Logic
         -- Single clicks select; a second click on the same slot opens only after server selection acknowledgement.
         local state = _FormationEditSession.Snapshot
         if not _MatchFlowInput:AllowsFormationActions() or _FormationEditSession:Busy() or _FormationEditSession:Unconfirmed() or _FormationEditSession.ConfirmKind ~= "" then return end
-        if self._T.mapName ~= "formationlobby" or state.pending
+        if not self:OnLobbyScreen() or state.pending
             or not _FormationSchema:IsLoadConfirmed(state.loadState) then return end
         local now = _UtilLogic.ElapsedSeconds
         local doubleClick = self._T.lastLobbySlot == slotId and now - self._T.lastLobbyClick <= 0.35
@@ -134,7 +180,7 @@ script FormationLobby extends Logic
         _FormationCatalogCards:BuildOptions(snapshot.options or {})
         self:Run(commands)
         local player = _UserService.LocalPlayer
-        if _MatchFlowInput:AllowsFormationActions() and self._T.editWhenSelected == snapshot.editSlot and isvalid(player) and player.CurrentMapName == "formationlobby"
+        if _MatchFlowInput:AllowsFormationActions() and self._T.editWhenSelected == snapshot.editSlot and isvalid(player) and self:OnLobbyScreen()
             and _UtilLogic.ElapsedSeconds - self._T.lastLobbyClick <= 5
             and not snapshot.pending and _FormationSchema:IsLoadConfirmed(snapshot.loadState) then
             self._T.editWhenSelected = 0
@@ -251,7 +297,7 @@ script FormationLobby extends Logic
         if not isvalid(self.root) then return end
         local view = _FormationEditSession:View()
         local mapName = self._T.mapName
-        local inLobby = mapName == "formationlobby"
+        local inLobby = self:OnLobbyScreen()
         local inEditor = mapName == "formationsim"
         self:SetEnabled("ExitConfirm", view.confirmKind ~= "")
         self:RenderSavingNotice(view)

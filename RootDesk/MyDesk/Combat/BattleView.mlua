@@ -189,7 +189,7 @@ script BattleView extends Component
                 nameTag.OffsetY = sourceTag.OffsetY
                 record.styled = true
             end
-            local displayName = "玩家"
+            local displayName = _FactionWarGuard:IsGuardProfile(profile) and "守衛" or "玩家"
             if isvalid(participant) and isvalid(participant.PlayerComponent) then
                 displayName = participant.PlayerComponent.Nickname
                 if displayName == nil or displayName == "" then displayName = "玩家" end

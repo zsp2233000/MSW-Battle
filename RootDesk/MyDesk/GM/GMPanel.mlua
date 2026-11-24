@@ -73,7 +73,7 @@ script GMPanel extends Logic
         -- Query identity once per lobby entry; map travel, identity changes and matchmaking close the panel.
         self:EnsureBound()
         local player = _UserService.LocalPlayer
-        local inLobby = isvalid(player) and player.CurrentMapName == "formationlobby"
+        local inLobby = isvalid(player) and _FormationLobby:OnLobbyScreen()
         local userId = inLobby and player.PlayerComponent.UserId or ""
         if self._T.identityFor ~= userId then
             self._T.identityFor = userId
@@ -146,7 +146,7 @@ script GMPanel extends Logic
     method boolean CanOpen()
         -- Reuse the lobby's matchmaking lock; the server rechecks permission for every command.
         local player = _UserService.LocalPlayer
-        return self._T.authorized and isvalid(player) and player.CurrentMapName == "formationlobby"
+        return self._T.authorized and isvalid(player) and _FormationLobby:OnLobbyScreen()
             and _MatchFlowInput:AllowsFormationActions()
     end
 

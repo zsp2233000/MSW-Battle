@@ -24,7 +24,6 @@ script MonsterDex extends Logic
     property SpriteGUIRendererComponent projectileSprite = "c3097106-255b-4ae7-9386-34c6dea7b5c0"
     property SpriteGUIRendererComponent hitMarkerSprite = "cc1e563f-caef-4930-9146-0275a20a81dc"
 
-    property string LobbyMapName = "formationlobby"
     property number LoadTimeoutSeconds = 8
     property Color RowColor = Color(0.78, 0.7, 0.62, 1)
     property Color SelectedRowColor = Color(1, 1, 1, 1)
@@ -145,7 +144,7 @@ script MonsterDex extends Logic
         -- Maker Play, the lobby map and the lobby's own matchmaking lock must all allow the book.
         if not Environment:IsMakerPlay() then return false end
         local player = _UserService.LocalPlayer
-        if not isvalid(player) or player.CurrentMapName ~= self.LobbyMapName then return false end
+        if not isvalid(player) or not _FormationLobby:OnLobbyScreen() then return false end
         return _MatchFlowInput:AllowsFormationActions()
     end
 

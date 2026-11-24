@@ -582,7 +582,10 @@ script BattleSession extends Component
         for _, user in ipairs(_UserService.UserEntities.Values) do
             if isvalid(user) and user.CurrentMap == self:GetMapEntity() then present[user.PlayerComponent.ProfileCode] = true end
         end
-        if not present[homeProfile] or not present[awayProfile] then return false end
+        -- A town guard is the only participant that is allowed to be absent from the room.
+        local guardAway = _FactionWarGuard:IsGuardProfile(awayProfile)
+        if not present[homeProfile] or (not present[awayProfile] and not guardAway) then return false end
+        if _FactionWarGuard:IsGuardProfile(homeProfile) then return false end
         local home = self:PrepareMatchedRoster(homeUnits, false)
         local away = self:PrepareMatchedRoster(awayUnits, true)
         if home == nil or away == nil then return false end
@@ -677,6 +680,16 @@ script BattleSession extends Component
                     log("[VRF][ResultExperience] sent profile=" .. profile .. " status=" .. receipt.status .. " count=" .. tostring(#receipt.monsters))
                 end
             end
+        end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void RearmExperienceReceipt(string userId)
+        -- A player who reconnects starts with no receipt on the client, so the one already sent to this entity goes out again at the next update. Nothing is settled again.
+        local user = _UserService:GetUserEntityByUserId(userId)
+        if isvalid(user) and self._T.experienceSent ~= nil and self._T.experienceSent[user] ~= nil then
+            self._T.experienceSent[user] = nil
+            log("[VRF][BattleSession] experience receipt re-armed user=" .. userId)
         end
     end
 
@@ -1088,7 +1101,12 @@ script BattleSession extends Component
                 self.ResultDeaths = "{" .. table.concat(deaths, ",") .. "}"
                 if self.RequireMatchedFormations and self.MatchKey ~= "" and self.HomeProfile ~= "" and self.AwayProfile ~= "" then
                     self._T.settlements[self.HomeProfile] = _MonsterLevelStorage:Settle(self.HomeProfile, self.MatchKey, self._T.deaths.PLAYER)
-                    self._T.settlements[self.AwayProfile] = _MonsterLevelStorage:Settle(self.AwayProfile, self.MatchKey, self._T.deaths.ENEMY)
+                    -- A town guard owns no monster progress, so only a connected opponent earns experience.
+                    if not _FactionWarGuard:IsGuardProfile(self.AwayProfile) then
+                        self._T.settlements[self.AwayProfile] = _MonsterLevelStorage:Settle(self.AwayProfile, self.MatchKey, self._T.deaths.ENEMY)
+                    else
+                        log("[VRF][ResultExperience] guard profile skipped match=" .. self.MatchKey)
+                    end
                 end
                 self:EmitPresentation("RESULT", nil, nil, 0)
                 log("[M1][BattleSession] RESULT=" .. result)

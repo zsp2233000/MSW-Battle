@@ -1,11 +1,22 @@
 @Logic
 script FormationStorage extends Logic
 
+    property string GlobalPrefix = "global:"
+
     @ExecSpace("ServerOnly")
-    method string LockName(string profile, string key)
+    method any Storage(string owner)
+        -- A profile code names that player's storage; "global:<name>" names a world-wide table, which shares this boundary's compare-and-swap and guard.
+        if string.sub(owner, 1, #self.GlobalPrefix) == self.GlobalPrefix then
+            return _DataStorageService:GetGlobalDataStorage(string.sub(owner, #self.GlobalPrefix + 1))
+        end
+        return _DataStorageService:GetUserDataStorage(owner)
+    end
+
+    @ExecSpace("ServerOnly")
+    method string LockName(string owner, string key)
         -- Hex-encode identity without collisions or shared-memory naming punctuation.
         local parts = { "p" }
-        for index = 1, #profile do table.insert(parts, string.format("%02x", string.byte(profile, index))) end
+        for index = 1, #owner do table.insert(parts, string.format("%02x", string.byte(owner, index))) end
         return table.concat(parts) .. "_" .. key
     end
 
@@ -28,9 +39,9 @@ script FormationStorage extends Logic
     end
 
     @ExecSpace("ServerOnly")
-    method void RetryRelease(string profile, string key)
+    method void RetryRelease(string owner, string key)
         -- Recover a transient cleanup error without deleting or expiring a live writer's guard.
-        local lockName = self:LockName(profile, key)
+        local lockName = self:LockName(owner, key)
         local release = self._T.releases and self._T.releases[lockName] or nil
         if release ~= nil then self:ReleaseGuard(release.memory, lockName, release.etag) end
     end
@@ -71,6 +82,18 @@ script FormationStorage extends Logic
     end
 
     @ExecSpace("ServerOnly")
+    method table MakerWriteFault()
+        -- What the Maker fault injection holds for the next conditional write: a delay and whether it fails (consuming one failure). Nothing outside Maker.
+        local fault = { delay = 0, fail = false }
+        if Environment:IsMakerPlay() then
+            fault.delay = self._T.writeDelay or 0
+            fault.fail = (self._T.writeFailures or 0) > 0
+            if fault.fail then self._T.writeFailures = self._T.writeFailures - 1 end
+        end
+        return fault
+    end
+
+    @ExecSpace("ServerOnly")
     method void Schedule(any callback, number delaySeconds)
         -- Keep delayed boundary work owned by this room, including Maker fault acknowledgements.
         self._T.timers = self._T.timers or {}
@@ -83,17 +106,17 @@ script FormationStorage extends Logic
     end
 
     @ExecSpace("ServerOnly")
-    method void Read(string profile, string key, any complete)
-        -- Keep reads event driven and surface an explicit error rather than constructing empty data.
-        self:RetryRelease(profile, key)
+    method void Read(string owner, string key, any complete)
+        -- Keep reads event driven and surface an explicit error rather than constructing empty data. owner is a profile code or "global:<name>".
+        self:RetryRelease(owner, key)
         if Environment:IsMakerPlay() and (self._T.readFailures or 0) > 0 then
             self._T.readFailures = self._T.readFailures - 1
             complete(self._T.failureCode or 1000004, key, nil)
             return
         end
-        _DataStorageService:GetUserDataStorage(profile):GetAsync(key, function(code, loadedKey, raw)
+        self:Storage(owner):GetAsync(key, function(code, loadedKey, raw)
             -- A timed-out first creation is safe to release only after its exact bytes are observed.
-            local lockName = self:LockName(profile, key)
+            local lockName = self:LockName(owner, key)
             local uncertain = self._T.uncertain and self._T.uncertain[lockName] or nil
             local missing = code == 1000002 or (code == 0 and raw == nil)
             if uncertain ~= nil and uncertain.key == key
@@ -106,8 +129,8 @@ script FormationStorage extends Logic
     end
 
     @ExecSpace("ServerOnly")
-    method void Write(string profile, string key, string expected, string raw, any complete)
-        -- Use native callbacks; a profile's caller retains its write lock throughout any delay.
+    method void Write(string owner, string key, string expected, string raw, any complete)
+        -- Use native callbacks; an owner's caller retains its write lock throughout any delay.
         if Environment:IsMakerPlay() and key == _FormationService.StorageKey then
             local mode = self._T.saveResponse or ""
             if mode == "SILENT" then return end
@@ -120,17 +143,11 @@ script FormationStorage extends Logic
                 end
             end
         end
-        local delaySeconds = 0
-        local fail = false
-        if Environment:IsMakerPlay() then
-            delaySeconds = self._T.writeDelay or 0
-            fail = (self._T.writeFailures or 0) > 0
-            if fail then self._T.writeFailures = self._T.writeFailures - 1 end
-        end
+        local fault = self:MakerWriteFault()
         local perform = function()
-            if fail then complete(self._T.failureCode or 1000004) return end
+            if fault.fail then complete(self._T.failureCode or 1000004) return end
             -- Native delete has no compare-and-swap. Existing and first writers share its guard.
-            self:BeginExclusive(profile, key, function(code, guard)
+            self:BeginExclusive(owner, key, function(code, guard)
                 if code ~= 0 then complete(code) return end
                 self:StoreGuarded(guard, expected ~= "", expected, raw, function(writeCode, retainGuard)
                     if not retainGuard then self:EndExclusive(guard) end
@@ -138,7 +155,23 @@ script FormationStorage extends Logic
                 end)
             end)
         end
-        if delaySeconds > 0 then self:Schedule(perform, delaySeconds) else perform() end
+        if fault.delay > 0 then self:Schedule(perform, fault.delay) else perform() end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Swap(string owner, string key, string expected, string raw, any complete)
+        -- Compare-and-swap for a table nobody deletes or force-writes (the war town document): the native conditional update alone arbitrates an existing document,
+        -- so no guard can be left behind to block every later writer in the world; only the very first creation (expected "") shares Write's guard.
+        -- complete(2000000) means the stored bytes were not the expected ones.
+        if expected == "" then self:Write(owner, key, expected, raw, complete) return end
+        local fault = self:MakerWriteFault()
+        local perform = function()
+            if fault.fail then complete(self._T.failureCode or 1000004) return end
+            self:Storage(owner):UpdateAsync(key, expected, raw, function(code, savedKey, value)
+                complete(code == 1000002 and 2000000 or code)
+            end)
+        end
+        if fault.delay > 0 then self:Schedule(perform, fault.delay) else perform() end
     end
 
     @ExecSpace("ServerOnly")
@@ -186,7 +219,7 @@ script FormationStorage extends Logic
     @ExecSpace("ServerOnly")
     method void StoreGuarded(table guard, boolean exists, string expected, string raw, any complete)
         if exists then
-            local storage = _DataStorageService:GetUserDataStorage(guard.profile)
+            local storage = self:Storage(guard.profile)
             storage:UpdateAsync(guard.key, expected, raw, function(code, savedKey, value)
                 local retainGuard = code == 1000004
                 if retainGuard then self:KeepUncertain(guard, raw, false) end
@@ -200,7 +233,7 @@ script FormationStorage extends Logic
     @ExecSpace("ServerOnly")
     method void CreateGuarded(table guard, string raw, any complete)
         -- First creation has no native CAS, so recheck absence with the guard held.
-        local storage = _DataStorageService:GetUserDataStorage(guard.profile)
+        local storage = self:Storage(guard.profile)
         storage:GetAsync(guard.key, function(readCode, loadedKey, current)
             if not (readCode == 1000002 or (readCode == 0 and current == nil)) then
                 complete(readCode == 0 and 2000000 or readCode, false)
@@ -222,7 +255,7 @@ script FormationStorage extends Logic
             complete(self._T.failureCode or 1000004, false)
             return
         end
-        local storage = _DataStorageService:GetUserDataStorage(guard.profile)
+        local storage = self:Storage(guard.profile)
         storage:GetAsync(guard.key, function(code, loadedKey, current)
             if code == 1000002 or (code == 0 and current ~= expected) then complete(2000000, false) return end
             if code ~= 0 then complete(code, false) return end

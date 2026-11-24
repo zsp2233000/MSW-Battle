@@ -25,8 +25,16 @@ script MatchQueueNative extends Logic
     @ExecSpace("ServerOnly")
     method table Enqueue(table request, any deliver)
         -- Own one native registration until it completes; its callback may outlive this call and reports through deliver.
-        local extras = _HttpService:JSONEncode({ schema = 1, attempt = request.requestId, source = request.source })
-        local code = _MatchmakingService:RequestMatchingAndWait(request.leaderboardId, request.queueName, request.profile, extras, function(info)
+        local origin, target = request.origin or "", request.target or ""
+        local extras = _HttpService:JSONEncode({ schema = 1, attempt = request.requestId, source = request.source, origin = origin, target = target })
+        -- Native matching pairs only identical queue names, so a war queue is named for its unordered town pair.
+        local queueName = request.queueName
+        if origin ~= "" then
+            local first, second = origin, target
+            if second < first then first, second = second, first end
+            queueName = queueName .. ":war:" .. first .. ":" .. second
+        end
+        local code = _MatchmakingService:RequestMatchingAndWait(request.leaderboardId, queueName, request.profile, extras, function(info)
             local result = info ~= nil and tostring(info.ResultCode) or "MISSING"
             deliver(self:Classify(result), result)
         end)
@@ -59,7 +67,11 @@ script MatchQueueNative extends Logic
         if not ok or type(value) ~= "table" or value.schema ~= 1 then return nil end
         if type(value.attempt) ~= "string" or #value.attempt ~= 32 or not string.match(value.attempt, "^%x+$") then return nil end
         if type(value.source) ~= "string" or value.source == "" then return nil end
-        return value
+        -- Lobby tickets written before war queues have no towns; both fields must be strings when present.
+        local origin = value.origin == nil and "" or value.origin
+        local target = value.target == nil and "" or value.target
+        if type(origin) ~= "string" or type(target) ~= "string" then return nil end
+        return { schema = value.schema, attempt = value.attempt, source = value.source, origin = origin, target = target }
     end
 
     @ExecSpace("ServerOnly")
@@ -71,7 +83,10 @@ script MatchQueueNative extends Logic
         if home.ProfileCode == away.ProfileCode or (profile ~= home.ProfileCode and profile ~= away.ProfileCode) then return nil end
         local h, a = self:ParseExtras(home.Extras), self:ParseExtras(away.Extras)
         if h == nil or a == nil then return nil end
-        return { key = "m30-" .. h.attempt .. "-" .. a.attempt, home = home.ProfileCode, away = away.ProfileCode, homeAttempt = h.attempt, awayAttempt = a.attempt, homeSource = h.source, awaySource = a.source, differentSources = h.source ~= a.source }
+        -- Two players in the same town can share a native queue; only mutual targets form a war match.
+        if h.origin ~= "" and (h.origin == a.origin or h.target ~= a.origin or a.target ~= h.origin) then return nil end
+        return { key = "m30-" .. h.attempt .. "-" .. a.attempt, home = home.ProfileCode, away = away.ProfileCode, homeAttempt = h.attempt, awayAttempt = a.attempt, homeSource = h.source, awaySource = a.source, differentSources = h.source ~= a.source,
+            homeOrigin = h.origin, awayOrigin = a.origin }
     end
 
     @ExecSpace("ServerOnly")

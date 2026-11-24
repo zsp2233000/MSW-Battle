@@ -25,6 +25,7 @@ script MatchFaults extends Logic
         self._T.entryFailures = 0
         self._T.returnFailures = 0
         self._T.keepQueue = false
+        self._T.hideRooms = false
     end
 
     @ExecSpace("ServerOnly")
@@ -51,6 +52,14 @@ script MatchFaults extends Logic
         if not Environment:IsMakerPlay() then return end
         self:Install()
         self._T.keepQueue = keepQueue
+    end
+
+    @ExecSpace("ServerOnly")
+    method void ConfigureRooms(boolean hidden)
+        -- Make every match room look gone to the flow, as if the engine had reclaimed it; the rooms themselves are untouched.
+        if not Environment:IsMakerPlay() then return end
+        self:Install()
+        self._T.hideRooms = hidden
     end
 
     @ExecSpace("ServerOnly")
@@ -127,11 +136,28 @@ script MatchFaults extends Logic
     end
 
     @ExecSpace("ServerOnly")
+    method any FindRoom(string matchKey)
+        -- Forward the room lookup, unless a probe armed the room as gone.
+        if self._T.hideRooms then return nil end
+        return self._T.transfer:FindRoom(matchKey)
+    end
+
+    @ExecSpace("ServerOnly")
     method boolean MoveToLobby(string userId)
         if (self._T.returnFailures or 0) > 0 then
             self._T.returnFailures = self._T.returnFailures - 1
             return false
         end
         return self._T.transfer:MoveToLobby(userId)
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean MoveToTown(string userId, string town)
+        -- Fail like MoveToLobby while armed; otherwise forward the departure-town return.
+        if (self._T.returnFailures or 0) > 0 then
+            self._T.returnFailures = self._T.returnFailures - 1
+            return false
+        end
+        return self._T.transfer:MoveToTown(userId, town)
     end
 end
