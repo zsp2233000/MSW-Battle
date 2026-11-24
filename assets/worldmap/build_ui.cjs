@@ -21,6 +21,7 @@ const X_BUTTON = { normal: 'e01ef74a1ecf444bbb013c4313a8d0a9', highlighted: 'f24
 const PANEL_BG = 'd9b68fae16404c5c81228b6c45cf40a5';   // Panel_3 Background_1 (Sliced)
 const CHIP_BG = 'ffdc4b11ef384e2cb4996562d867dd80';    // Base_9 (Sliced), white text
 const GAUGE = 'f0911af597259044aa624a11332c0595';      // HP gauge slice (Sliced fill, width-driven)
+const HERE_ARROW = '96392b1df6724d43abab0ec1988aa7c4'; // animationclip 20x36, downward marker (plays directly as ImageRUID)
 const OUTLINE = { outline: true, outline_color: { r: 0, g: 0, b: 0, a: 0.7 }, outline_width: 0.2, face_dilate: 0.2 };
 const GOLD = '#EEC78F';
 const NEUTRAL = { r: 0.62, g: 0.6, b: 0.56, a: 1 };
@@ -29,8 +30,8 @@ const NAMES = { nanzih: '楠梓', zuoying: '左營', gushan: '鼓山', yancheng:
 
 // Crest position per town: the district centre from layout.json, nudged where labels of neighbours would collide.
 const NODE_SHIFT = { nanzih: [0, 28], zuoying: [6, 18], gushan: [3, 57], yancheng: [0, 0] };
-// The gate links run north to south through the crests, so every town keeps its labels to the east of its crest,
-// its capital tag above and its "you are here" chip to the west, clear of the links.
+// The gate links run north to south through the crests, so every town keeps its labels (and capital tag) to the east of
+// its crest, its "you are here" chip to the west and the "you are here" arrow straight above the crest, clear of the links.
 
 function swap(b, entity, states) {
   b.patchComponent(entity, 'MOD.Core.ButtonComponent', {
@@ -88,7 +89,8 @@ for (const id of TOWNS) {
   b.sprite(`${town}/Crest`, { anchor: 'middle-center', rect_size: [60, 60], image_ruid: art.crest, color: NEUTRAL, sprite_type: 0 });
   b.text(`${town}/Name`, NAMES[id], { size: 26, color: '#FFFFFF', bold: true, ...OUTLINE, alignment: 3, anchor: 'middle-center', pos: [110, 14], rect_size: [140, 34] });
   b.text(`${town}/Strength`, '兵力 —', { size: 21, color: '#FFF2C8', ...OUTLINE, alignment: 3, anchor: 'middle-center', pos: [110, -16], rect_size: [140, 28] });
-  b.text(`${town}/Capital`, '主城', { size: 21, color: '#FACA33', bold: true, ...OUTLINE, anchor: 'middle-center', pos: [0, 46], rect_size: [80, 28], enable: false });
+  b.text(`${town}/Capital`, '主城', { size: 21, color: '#FACA33', bold: true, ...OUTLINE, alignment: 3, anchor: 'middle-center', pos: [100, 44], rect_size: [120, 28], enable: false });
+  b.sprite(`${town}/Arrow`, { anchor: 'middle-center', pos: [0, 60], rect_size: [30, 54], image_ruid: HERE_ARROW, color: '#FFFFFF', sprite_type: 0, enable: false });
   b.sprite(`${town}/Here`, { anchor: 'middle-center', pos: [-115, 0], rect_size: [140, 40], image_ruid: CHIP_BG, color: '#FFFFFF', sprite_type: 1,
     text: '你在這裡', text_size: 21, text_color: '#FFFFFF', text_bold: true, enable: false });
 }

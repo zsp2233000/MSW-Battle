@@ -232,6 +232,8 @@ script FactionWarMapUI extends Logic
         for _, id in ipairs(_FactionWar.TownOrder) do
             local here = self:Ui("Overlay/Window/Map/Towns/" .. id .. "/Here")
             if isvalid(here) then here:SetEnable(id == self._T.mapName) end
+            local arrow = self:Ui("Overlay/Window/Map/Towns/" .. id .. "/Arrow")
+            if isvalid(arrow) then arrow:SetEnable(id == self._T.mapName) end
             local mark = self:Ui("Overlay/Window/Side/Rows/" .. id .. "/Here")
             if isvalid(mark) then mark:SetEnable(id == self._T.mapName) end
         end

@@ -41,6 +41,7 @@ local ok, reason = pcall(function()
     end
     for _, id in ipairs(_FactionWar.TownOrder) do
         assert(ui:Ui("Overlay/Window/Map/Towns/" .. id .. "/Here").Enable == (id == here), "here mark on " .. id)
+        assert(ui:Ui("Overlay/Window/Map/Towns/" .. id .. "/Arrow").Enable == (id == here), "here arrow on " .. id)
     end
     assert(await(function() return text("Overlay/Window/Side/Faction") ~= "讀取中…" end, 5), "faction answered")
     log("[VRF][MapProbe] CLIENT1 PASS here=" .. here .. " faction=" .. text("Overlay/Window/Side/Faction"))
