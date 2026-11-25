@@ -45,6 +45,40 @@ script FactionWarTownDocument extends Logic
         return self:CapitalOf(faction)
     end
 
+    method table Summarize(string origin, string target, string faction, any outcome, any towns)
+        -- Settlement supplies history; the current board is only for the return preview (ADR 0016).
+        local status = outcome and outcome.status or "PENDING"
+        local summary = { origin = origin, target = target, status = status, destination = "", conclusion = "未易主" }
+        if self:CapitalOf(faction) ~= "" and type(towns) == "table" and type(towns[origin]) == "table" then
+            summary.destination = self:Landing(faction, origin, towns)
+            summary.originLost = towns[origin].owner ~= faction
+        end
+
+        if status == "PENDING" then
+            summary.conclusion = "戰果結算中…"
+        elseif status == "FAILED" then
+            summary.conclusion = "戰果結算失敗，兵力未變動"
+        elseif status == "EXEMPT" then
+            summary.conclusion = "過期戰果：本場不計兵力"
+        elseif status == "NO_CHANGE" and outcome.reason == "CAPITAL" then
+            summary.conclusion = "主城：兵力不變"
+        elseif status == "SAVED" or status == "DUPLICATE" then
+            if outcome.winner == origin and outcome.loser == target then
+                summary.originBefore, summary.originAfter = outcome.winnerBefore, outcome.winnerAfter
+                summary.targetBefore, summary.targetAfter = outcome.loserBefore, outcome.loserAfter
+            elseif outcome.winner == target and outcome.loser == origin then
+                summary.originBefore, summary.originAfter = outcome.loserBefore, outcome.loserAfter
+                summary.targetBefore, summary.targetAfter = outcome.winnerBefore, outcome.winnerAfter
+            end
+            if outcome.flipped then
+                summary.capturedTown, summary.newOwner = outcome.loser, outcome.owner
+                local name = self.TownNames[outcome.loser] or outcome.loser
+                summary.conclusion = "奪城：" .. name .. " 改為 " .. (outcome.owner == "RED" and "紅方" or "藍方")
+            end
+        end
+        return summary
+    end
+
     method boolean CanPass(string faction, string origin, string destination, table towns)
         -- Gate adjacency is checked by the caller; this checks ownership of both endpoints.
         return towns[origin].owner == faction and towns[destination].owner == faction
@@ -146,7 +180,10 @@ script FactionWarTownDocument extends Logic
             effect.winner, effect.loser = effect.away, effect.home
         end
         if effect.winner ~= "" then effect.amount = self:Deduction(effect.loser, "WIN", battle.kind) end
-        if effect.amount == 0 then effect.status = "NO_CHANGE" end
+        if effect.amount == 0 then
+            effect.status = "NO_CHANGE"
+            if self:IsCapital(effect.loser) then effect.reason = "CAPITAL" end
+        end
         return effect
     end
 
@@ -156,6 +193,12 @@ script FactionWarTownDocument extends Logic
         return self:EpochOf(towns, home) ~= snapshot.home or self:EpochOf(towns, away) ~= snapshot.away
     end
 
+    method any RecordedStrength(any value)
+        -- History predating strength snapshots (or with malformed optional fields) is not a current-board reading.
+        if type(value) == "number" and value % 1 == 0 and value >= 1 and value <= self.FullStrength then return value end
+        return nil
+    end
+
     method any OutcomeFrom(any towns, string matchKey)
         -- Read what this match did, even in a different room; a legacy bare match key only proves it settled.
         if type(towns) ~= "table" or type(towns.settled) ~= "table" or matchKey == "" then return nil end
@@ -163,7 +206,9 @@ script FactionWarTownDocument extends Logic
             if (type(entry) == "table" and tostring(entry.k) or tostring(entry)) == matchKey then
                 if type(entry) ~= "table" then return { status = "DUPLICATE", winner = "", loser = "", strength = 0, owner = "", flipped = false } end
                 local owner = entry.o or ""
-                return { status = "DUPLICATE", winner = entry.w or "", loser = entry.l or "", strength = entry.s or 0, owner = owner, flipped = owner ~= "" }
+                return { status = "DUPLICATE", winner = entry.w or "", loser = entry.l or "", strength = entry.s or 0, owner = owner, flipped = owner ~= "",
+                    winnerBefore = self:RecordedStrength(entry.wb), winnerAfter = self:RecordedStrength(entry.wa),
+                    loserBefore = self:RecordedStrength(entry.lb), loserAfter = self:RecordedStrength(entry.s) }
             end
         end
         return nil
@@ -173,7 +218,9 @@ script FactionWarTownDocument extends Logic
         -- Use the submitted battle sides, and the committed record for strength and capture when present.
         return { status = status, winner = effect.winner, loser = effect.loser, amount = effect.amount,
             strength = record and record.strength or 0, flipped = record ~= nil and record.flipped == true,
-            owner = record and record.owner or "", conflicts = 0 }
+            owner = record and record.owner or "", conflicts = 0, reason = effect.reason,
+            winnerBefore = record and record.winnerBefore, winnerAfter = record and record.winnerAfter,
+            loserBefore = record and record.loserBefore, loserAfter = record and record.loserAfter }
     end
 
     method table Apply(any towns, table battle)
@@ -219,10 +266,13 @@ script FactionWarTownDocument extends Logic
             updated[effect.loser].owner = owner
             updated[effect.loser].e = self:EpochOf(towns, effect.loser) + 1
         end
-        table.insert(updated.settled, { k = effect.matchKey, w = effect.winner, l = effect.loser, s = strength, o = owner })
+        -- Snapshot the successful CAS input and its replacement, not pairing values or an intermediate zero.
+        table.insert(updated.settled, { k = effect.matchKey, w = effect.winner, l = effect.loser, s = strength, o = owner,
+            wb = winner.strength, wa = updated[effect.winner].strength, lb = loser.strength })
         while #updated.settled > self.SettledHistory do table.remove(updated.settled, 1) end
         return { document = updated, detail = strength,
-            outcome = self:Outcome(effect, "SAVED", { strength = strength, owner = owner, flipped = flipped }) }
+            outcome = self:Outcome(effect, "SAVED", { strength = strength, owner = owner, flipped = flipped,
+                winnerBefore = winner.strength, winnerAfter = updated[effect.winner].strength, loserBefore = loser.strength, loserAfter = strength }) }
     end
 
     @ExecSpace("ServerOnly")
