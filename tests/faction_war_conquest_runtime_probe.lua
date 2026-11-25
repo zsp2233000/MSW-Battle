@@ -118,7 +118,7 @@ local ok, reason = pcall(function()
     assert(status == "DUPLICATE" and outcome.flipped == true and outcome.owner == "RED" and outcome.strength == 100, "a repeat is DUPLICATE and still reports the capture")
     towns = read()
     assert(towns.gushan.strength == 100 and #towns.settled == 1, "the repeat wrote nothing new")
-    assert(attack._T.outcomes["c107-m1"].flipped == true, "the room remembers the outcome for the returning players")
+    assert(_FactionWarLanding._T.outcomes["c107-m1"].flipped == true, "the room remembers the outcome for the returning players")
 
     -- Winning from 40 leaves 20 and does not flip; the next win then does.
     seed({}, { gushan = 40 })
