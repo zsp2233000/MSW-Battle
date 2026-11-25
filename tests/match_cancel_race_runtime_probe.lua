@@ -61,7 +61,10 @@ local ok, detail = pcall(function()
         local snapshot = _MatchFlow:StateSnapshot(userId, 'PROBE')
         return snapshot.reasonCode == 'ROOM_MOVE_FAILED' and not snapshot.busy
     end
-    assert(await(function() return failed(firstId) and failed(peerId) end, 300), 'both failed to move after keeping the match')
+    assert(await(function() return failed(firstId) end, 300), 'first failed to move after keeping the match')
+    -- Both players share this instance and the local queue sends no readiness hint, so a peer without a client is advanced the way an arrival or a status request would.
+    _MatchFlow:Recover(peerId)
+    assert(await(function() return failed(peerId) end, 300), 'peer failed to move after keeping the match')
     local ticket = _FormationHandoff:Read(profile)
     assert(ticket ~= nil and ticket.data ~= nil and ticket.data.state == 'TRANSFER' and ticket.data.matchKey ~= '', 'failed movement kept the same paired handoff')
     assert(_MatchFlow:IsFormationLocked(firstId) and first.CurrentMapName == 'formationlobby' and peer.CurrentMapName == 'formationlobby', 'failed movement retains the lock in the lobby')
