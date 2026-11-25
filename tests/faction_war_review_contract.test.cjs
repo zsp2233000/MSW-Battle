@@ -183,5 +183,5 @@ test('every C item has a probe step in the Maker probes', () => {
   assert.match(e2e, /IsJudging/, 'C1: the second request while a check runs');
   assert.match(e2e, /EnforceLeaseSeconds/, 'C1: an old slot is taken over');
   assert.match(e2e, /Judge\([^]*retaken-town check finished/, 'C2: Judge on a board that was retaken');
-  assert.match(probe('faction_war_contest_e2e_runtime_probe.lua'), /snapshot/, 'C5: the tickets hold their first reading');
+  assert.match(probe('faction_war_contest_e2e_runtime_probe.lua'), /match.homeEpoch == 0 and match.awayEpoch == 0/, 'C5: each pairing carries the first reading of the board (the ticket drops its own snapshot once the match is committed)');
 });
