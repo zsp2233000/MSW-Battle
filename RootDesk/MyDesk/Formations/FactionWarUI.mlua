@@ -3,6 +3,14 @@ script FactionWarUI extends Logic
 
     property number MillisecondsPerSecond = 1000
     property integer AttackRows = 2
+    -- Cardgame cyan; use this same highlight for runtime town names on all war UI.
+    property string TownNameHighlightHex = "#4DFEE7"
+
+    @ExecSpace("ClientOnly")
+    method string HighlightedTownName(string town)
+        local name = _FactionWarTownDocument.TownNames[town] or ""
+        return "<color=" .. self.TownNameHighlightHex .. ">" .. name .. "</color>"
+    end
 
     @ExecSpace("ClientOnly")
     method Entity Ui(string path)

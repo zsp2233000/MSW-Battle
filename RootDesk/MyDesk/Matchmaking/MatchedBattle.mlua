@@ -3,6 +3,7 @@ script MatchedBattle extends Component
 
     @Sync property boolean AdmissionFailed = false
     property number AdmissionTimeoutSeconds = 30
+    property table WarResultReceipt = {}
 
     @ExecSpace("ServerOnly")
     method void OnBeginPlay()
@@ -60,8 +61,120 @@ script MatchedBattle extends Component
             log("[VRF][MatchedBattle] result published once match=" .. self._T.matchKey .. " home=" .. battle:ResultForProfile(battle.HomeProfile) .. " away=" .. battle:ResultForProfile(battle.AwayProfile))
             -- The result is settled on the towns here, once per match; the match key makes a repeated delivery harmless.
             if (self._T.homeTown or "") ~= "" then
-                _FactionWarAttack:Settle(self._T.matchKey, self._T.homeTown, self._T.awayTown, battle:ResultForProfile(battle.HomeProfile), self._T.kind or "HUMAN", nil, self._T.epochs)
+                local war = self:BeginWarResult(battle.HomeProfile, battle.AwayProfile)
+                _FactionWarAttack:Settle(self._T.matchKey, self._T.homeTown, self._T.awayTown, battle:ResultForProfile(battle.HomeProfile), self._T.kind or "HUMAN", function(status, detail, outcome)
+                    if self._T.war ~= war then return end
+                    war.outcome = outcome
+                    -- Do not show a pre-settlement return preview for a result that may have flipped a town.
+                    war.towns = nil
+                    self:RefreshWarResultBoard()
+                    self:PublishWarReceipts()
+                end, self._T.epochs)
+                if war.outcome == nil then self:RefreshWarResultBoard() end
             end
         end
+        self:PublishWarReceipts()
+    end
+
+    @ExecSpace("ServerOnly")
+    method table BeginWarResult(string home, string away)
+        local war = { matchId = self._T.matchKey, profiles = {}, revision = 0 }
+        war.profiles[home] = { origin = self._T.homeTown, target = self._T.awayTown }
+        if self._T.kind ~= "GUARD" then
+            war.profiles[away] = { origin = self._T.awayTown, target = self._T.homeTown }
+        end
+        self._T.war = war
+        -- Deliver pending independently of storage or the combat/XP displays.
+        self:PublishWarReceipts()
+        for profile, side in pairs(war.profiles) do
+            _FactionWar:ReadFaction(profile, function(faction)
+                if self._T.war == war then side.faction = faction end
+            end)
+        end
+        return war
+    end
+
+    @ExecSpace("ServerOnly")
+    method void PublishWarReceipts()
+        -- New entities and explicitly re-armed retained entities get the current snapshot; unchanged receipts are not sent again.
+        local war = self._T.war
+        if war == nil then return end
+        local map = self.Entity.CurrentMap
+        for _, user in ipairs(_UserService.UserEntities.Values) do
+            if isvalid(user) and user.CurrentMap == map and isvalid(user.PlayerComponent) then
+                local profile, userId = user.PlayerComponent.ProfileCode, user.PlayerComponent.UserId
+                local side = war.profiles[profile]
+                if side ~= nil and _MatchFlow:Player(userId) == user then
+                    local receipt = _FactionWarTownDocument:Summarize(side.origin, side.target, side.faction or "", war.outcome, war.towns)
+                    if side.entity ~= user or side.status ~= receipt.status or side.destination ~= receipt.destination or side.originLost ~= receipt.originLost then
+                        side.entity, side.status, side.destination, side.originLost = user, receipt.status, receipt.destination, receipt.originLost
+                        war.revision = war.revision + 1
+                        receipt.matchId, receipt.profile, receipt.revision = war.matchId, profile, war.revision
+                        self:ReceiveWarResultReceipt(receipt, userId)
+                        log("[VRF][WarResultReceipt] sent match=" .. war.matchId .. " profile=" .. profile .. " status=" .. receipt.status .. " revision=" .. tostring(receipt.revision) .. " destination=" .. receipt.destination)
+                    end
+                end
+            end
+        end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void RefreshWarResultBoard()
+        -- One read at a time; a notification received during a read requires a newer read, not its stale answer.
+        local war = self._T.war
+        if war == nil then return end
+        if war.reading then war.readAgain = true return end
+        war.reading = true
+        _FactionWarTownDocument:Read(function(towns)
+            if self._T.war ~= war then return end
+            war.reading = false
+            if war.readAgain then
+                war.readAgain = false
+                self:RefreshWarResultBoard()
+            elseif towns ~= nil then
+                war.towns = towns
+                self:PublishWarReceipts()
+            end
+        end)
+    end
+
+    @ExecSpace("ServerOnly")
+    @EventSender("Service", "RoomService")
+    handler HandleWarResultRoomBoardChanged(TownBoardChangedEvent event)
+        self:RefreshWarResultBoard()
+    end
+
+    @ExecSpace("ServerOnly")
+    @EventSender("Service", "WorldInstanceService")
+    handler HandleWarResultInstanceBoardChanged(TownBoardChangedEvent event)
+        self:RefreshWarResultBoard()
+    end
+
+    @ExecSpace("ServerOnly")
+    @EventSender("Service", "UserService")
+    handler HandleWarResultReconnect(UserReconnectEvent event)
+        local war = self._T.war
+        local user = _UserService:GetUserEntityByUserId(event.UserId)
+        if war == nil or not isvalid(user) or not isvalid(user.PlayerComponent) then return end
+        local side = war.profiles[user.PlayerComponent.ProfileCode]
+        if side ~= nil then side.entity = nil end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void OnEndPlay()
+        self._T.war = nil
+    end
+
+    @ExecSpace("Client")
+    method void ReceiveWarResultReceipt(table receipt)
+        -- Accept early delivery like experience, but never let another player's or an older receipt replace it.
+        local player = _UserService.LocalPlayer
+        if isvalid(player) and isvalid(player.PlayerComponent) and player.PlayerComponent.ProfileCode ~= "" and receipt.profile ~= player.PlayerComponent.ProfileCode then return end
+        local map = self.Entity.CurrentMap
+        local battle = isvalid(map) and map:GetComponent("script.BattleSession") or nil
+        if isvalid(battle) and battle.MatchKey ~= "" and receipt.matchId ~= battle.MatchKey then return end
+        local prior = self.WarResultReceipt
+        if prior.matchId == receipt.matchId and prior.profile == receipt.profile and prior.revision >= receipt.revision then return end
+        self.WarResultReceipt = receipt
     end
 end

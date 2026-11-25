@@ -15,6 +15,10 @@ script BattleUIController extends Logic
 	property Entity resultDraw = "36bfb65f-5d84-4014-b644-73c4ca3e8f2b"
 	property Entity resultPlayerCount = "506bb73b-00a6-4313-ba14-ba1d3189f3a9"
 	property Entity resultEnemyCount = "585aa74a-1ef0-4897-9885-4b996eb49840"
+	property Entity warResult = "fa11de2c-fefc-4d75-9ac0-991e130eabeb"
+	property Entity warOrigin = "357f4933-a5ed-4e74-884b-e9a0493c4b95"
+	property Entity warTarget = "6b515488-b110-4a14-b709-3f1e5dc42714"
+	property Entity warConclusion = "e8c5af8c-d443-48c0-a6e7-aecb9655f793"
 	property string OwnResult = ""
 	property number ResultDisplayDelaySeconds = 2
 	-- Result list layout: rows are 580x84 and centred 640 left/right of the screen, clear of the centre window.
@@ -133,6 +137,8 @@ script BattleUIController extends Logic
 		if result == "" then
 			self:ClearResultCards()
 			self:ClearExperienceCards()
+			self:SetEnabled(self.warResult, false)
+			self._T.warReceipt = nil
 			self._T.pendingResult = nil
 			self._T.resultDisplayAt = nil
 		else
@@ -453,6 +459,42 @@ script BattleUIController extends Logic
 	end
 
 	@ExecSpace("ClientOnly")
+	method string WarStrengthText(string town, any before, any after, boolean unchanged)
+		local strength = unchanged and "兵力不變"
+			or ("兵力 " .. (before == nil and "—" or string.format("%d", before)) .. " → " .. (after == nil and "—" or string.format("%d", after)))
+		return _FactionWarUI:HighlightedTownName(town) .. "　" .. strength
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RenderWarResult(BattleSession session, Entity map, string profile)
+		local matched = self.OwnResult ~= "" and session.RequireMatchedFormations and map:GetFirstChildComponentByTypeName("script.MatchedBattle", true) or nil
+		local receipt = isvalid(matched) and matched.WarResultReceipt or nil
+		if receipt == nil or profile == "" or session.MatchKey == "" or receipt.matchId ~= session.MatchKey or receipt.profile ~= profile then
+			self:SetEnabled(self.warResult, false)
+			self._T.warReceipt = nil
+			return
+		end
+		if self._T.warReceipt == receipt or not isvalid(self.warResult) then return end
+		local unchanged = (receipt.status == "NO_CHANGE" and receipt.conclusion == "未易主") or receipt.status == "SKIPPED"
+		local showRows = unchanged or receipt.status == "SAVED" or receipt.status == "DUPLICATE"
+		self:SetEnabled(self.warOrigin, showRows)
+		self:SetEnabled(self.warTarget, showRows)
+		if showRows then
+			self:SetText(self.warOrigin, self:WarStrengthText(receipt.origin, receipt.originBefore, receipt.originAfter, unchanged))
+			self:SetText(self.warTarget, self:WarStrengthText(receipt.target, receipt.targetBefore, receipt.targetAfter, unchanged))
+		end
+		local conclusion = receipt.conclusion
+		if receipt.capturedTown ~= nil then
+			local town = _FactionWarTownDocument.TownNames[receipt.capturedTown]
+			if town ~= nil then conclusion = string.gsub(conclusion, town, _FactionWarUI:HighlightedTownName(receipt.capturedTown), 1) end
+		end
+		self:SetText(self.warConclusion, conclusion)
+		self:SetEnabled(self.warResult, true)
+		self._T.warReceipt = receipt
+		log("[VRF][WarResultUI] displayed match=" .. receipt.matchId .. " status=" .. receipt.status .. " revision=" .. tostring(receipt.revision))
+	end
+
+	@ExecSpace("ClientOnly")
 	method void OnUpdate(number delta)
 		-- Follow current-map synchronization, map policy and the local player's battle side.
 		local player = _UserService.LocalPlayer
@@ -487,8 +529,8 @@ script BattleUIController extends Logic
 		local viewerResult = ""
 		local ownFaction = "PLAYER"
 		local ready = session.SessionGeneration > 0 and (phase == "DEPLOYMENT" or phase == "BATTLE" or phase == "RESULT")
+		local profile = isvalid(player.PlayerComponent) and player.PlayerComponent.ProfileCode or ""
 		if matched then
-			local profile = isvalid(player.PlayerComponent) and player.PlayerComponent.ProfileCode or ""
 			if profile ~= "" and session.AwayProfile == profile then
 				ownFaction = "ENEMY"
 				playerAlive, enemyAlive = enemyAlive, playerAlive
@@ -501,6 +543,7 @@ script BattleUIController extends Logic
 			viewerResult = session.Result
 		end
 		self:SetResult(viewerResult)
+		self:RenderWarResult(session, map, profile)
 		-- Experience first: once settled it absorbs the own survivor rows, so the order decides which list shows.
 		self:RenderExperienceResult(session, map, ownFaction)
 		self:RenderResultCards(map, ownFaction, self.OwnResult == "WIN" and playerAlive or enemyAlive)

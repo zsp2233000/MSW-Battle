@@ -43,7 +43,7 @@ test('a match is stamped with the board it was paired on, and the stamp travels 
   const admission = body(flow(), 'RoomBattleAdmission');
   assert.match(admission, /epochs = _FactionWarAttack:Combine\(/, 'the room reads the stamps of the tickets it holds');
   assert.match(body(battle(), 'OnUpdate'), /self\._T\.epochs = admission\.epochs/, 'the match room keeps them until the result');
-  assert.match(body(battle(), 'OnUpdate'), /_FactionWarAttack:Settle\([^]*"HUMAN", nil, self\._T\.epochs\)/, 'and hands them to the settlement as the last argument');
+  assert.match(body(battle(), 'OnUpdate'), /_FactionWarAttack:Settle\([^]*"HUMAN", function\(status, detail, outcome\)[^]*end, self\._T\.epochs\)/, 'and hands them to the settlement as the last argument, after the receipt callback');
 });
 
 test('settlement passes the pairing stamp into the document and announces only a confirmed flip', () => {

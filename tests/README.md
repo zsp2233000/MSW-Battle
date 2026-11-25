@@ -210,6 +210,31 @@ Live check in Maker on 2026-11-24, after the probes (real board, which was not s
 
 Not verified: a real click on the button and on the close button (`maker_mouse_input` cannot click engine UI buttons; the probe sends `ButtonClickEvent`), pressing M while the chat box has focus, and delivery across two published world instances.
 
+## War result receipts and result block (#115)
+
+Local (no Maker): `node --test tests/*.test.cjs` and `node .agents/skills/msw-ui-system/scripts/ui_lint.cjs ui/BattleGroup.ui --severity error`. `faction_war_result_block.test.cjs` pins the hidden-by-default Cardgame card, labels, UUID bindings, and geometry. The block sits above the existing result window without changing its controls or either card column. To edit it, use the worktree's `UIBuilder` and retain only the appended `BattleResultPanel/WarResult` subtree, not the builder's reserialization of unrelated entities.
+
+```bash
+set -o pipefail
+node tests/faction_war_landing_local.cjs | npm exec --yes --package=fengari-node-cli@0.1.0 -- fengari -
+node tests/faction_war_town_document_local.cjs | npm exec --yes --package=fengari-node-cli@0.1.0 -- fengari -
+```
+
+The town-document harness checks the pure `Summarize(origin, target, faction, outcome, towns)` status matrix, both viewer orientations, old records, the exact CAS snapshot/retry and capture refill, the 20-record size budget, and a mocked room/transport (pending → committed, targeted by match/profile, reconnect, board changes, lobby isolation). Saved strengths are not read from the live board; missing historical values render as `—`, and a non-capital no-change result shows `兵力不變` without making up values. `MatchedBattle:ReceiveWarResultReceipt(receipt)` is the targeted RPC; client consumers read `MatchedBattle.WarResultReceipt` after checking `matchId` and `profile`. It carries the summary fields and `revision`. A destination is a preview, empty if faction/board is unreadable or has not arrived; actual return is independent. The room listens for board notifications actually delivered to it, with no new room-wide fanout or storage polling. Use `_FactionWarUI.TownNameHighlightHex` (or `_FactionWarUI:HighlightedTownName(townId)` for rich text) in later war UI; do not copy the colour into another property.
+
+**Maker probe and screenshots: written, not run.** Run only after integrating into the workspace that Maker has loaded. Use a disposable Maker save and test accounts: the probe replaces/deletes `CountryWarV1`, seeds factions for unaligned accounts, and leaves the test profiles' isolated formation/XP/last-town data behind. Never run against meaningful saves. `stop` → `refresh` → check build/normal logs → fresh Play for each of `HUMAN`, `GUARD`, and the lobby control. Use `tests/faction_war_result_receipt_runtime_probe.lua`, setting `STEP` and `KIND` consistently within each war run:
+
+| Step | Context and check |
+| --- | --- |
+| `SETUP` then `QUEUE` | `server_main`. Set `RED_PROFILE` to the real test client. `HUMAN`: add a virtual BLUE (`add_virtual_player -profile_code wp2624 -nickname Blue115`, wait for join); pair both towns. `GUARD`: no BLUE; wait for guard claim. Route by `[VRF][MatchTransfer]` match key. |
+| `ARM` then `CLIENT` | `ARM` in `server_instance_<matchKey>` after admission starts, before battle ends; delays the real town write so Pending is visible. Dispatch `CLIENT` in the real client's new room before the natural result. Look for `PENDING PASS` and `CLIENT PASS`. Inspect `[VRF][WarResultReceipt]`: HUMAN sends to both profiles only, GUARD to RED only. HUMAN: 左營 100 → 100, 鼓山 20 → 100, `奪城：鼓山 改為 紅方`; GUARD: 左營 100 → 100, 鼓山 25 → 15, `未易主`. The fixture expects RED to win; if not, rerun with a stronger RED roster, do not record a false PASS. |
+| `RECONNECT` then `RECHECK` | Room then client. Synthetic retained-entity reconnect through the production event handlers (not proof of a real network drop). Compare `CLIENT` and `RECHECK` logs: same match/profile, one additional RED receipt with a higher revision and identical history; no second settlement. |
+| `BOARD` then `BOARD_CLIENT` | `server_main` with `MATCH_KEY`, then client. Simulates a later origin loss and sends `TownBoardChangedEvent` to that room. Confirm the receipt now previews 楠梓 (history unchanged). No new return-button wording/hint expected in #115. |
+| `RETURN`, `CLEANUP` | Dispatch in room, then `server_main` only after the players leave; remove the disposable town fixture. Do not use this probe to assert actual landing behavior. |
+| `LOBBY_CLIENT` | In a separate Play, use a regular lobby match (see `docs/Issue-51-Battle-HUD.md` setup); run on client in that room. Expect `LOBBY_CLIENT PASS`: no receipt or war block, normal results and return remain. |
+
+Capture `115-human-result.png`, `115-guard-result.png`, and `115-lobby-control.png` at the respective result screens; optionally capture `115-pending.png` during the delayed write. Check readable cyan town names (including the capture conclusion), brown translucent Cardgame frame, distinct strength rows, and no overlap with WIN/LOSE, experience rows or the existing return button. These screenshots still need to be taken by the Maker runner.
+
 ## Monster dex verification (#73 / #80)
 
 `node --test tests/*.test.cjs` covers the dex structure: `monster_dex_contract.test.cjs` (catalog rows, server guard), `monster_dex_ui_contract.test.cjs` (book, lobby entry, bindings), `monster_dex_details_contract.test.cjs`, `monster_dex_stage_contract.test.cjs`, and `monster_dex_integration_contract.test.cjs` (#80). The last one checks that every field a dex row copies is a `MonsterData` column or a documented load-time delay, that every row field the book reads is published by `GetDexRows`, that every entity property bound in `MonsterDex` exists in `ui/MonsterDexGroup.ui` or `ui/FormationGroup.ui`, and that the published world gets no entry and no served reply (the `Environment:IsMakerPlay()` guard is the first statement of `Open` and of `RequestRows`, the only `@ExecSpace("Server")` method of the service). These are source and `.ui` checks only; they cannot run a published world.
