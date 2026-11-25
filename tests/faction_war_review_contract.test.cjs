@@ -139,6 +139,27 @@ test('C5: the war board is read as soon as the pairing is known, before any wait
   assert.match(matched, /ticket\.data == nil or ticket\.data\.state ~= "SAVING" then return end[^]*matched response deferred/, 'the ticket is re-checked after the reading yields, before the cancellation check');
 });
 
+test('ADR 0016: glossary, supersession notes and shared battle landing agree on origin ownership', () => {
+  const glossary = source('CONTEXT.md');
+  assert.match(glossary, /\*\*奪城\*\*:\n[^\n]*不會因此進入新城[^\n]*回出發城[^\n]*不屬己方就回主城/);
+  for (const term of ['登入落點', '過期戰果']) {
+    assert.match(glossary, new RegExp(`\\*\\*${term}\\*\\*:\\n[^\\n]*出發城[^\\n]*回出發城[^\\n]*回己方主城`));
+  }
+  assert.match(adr('0016'), /每個人返回時都回出發城[^\n]*不屬己方，就回己方主城/);
+  assert.match(adr('0016'), /LandingWaitSeconds/);
+  for (const prefix of ['0010', '0012', '0013', '0014']) {
+    assert.match(adr(prefix), /由 ADR 0016 取代/, `ADR ${prefix} flags the superseded landing rule`);
+  }
+
+  const landing = source('RootDesk/MyDesk/Formations/FactionWarLanding.mlua');
+  const destination = body(landing, 'BattleDestination').replace(/--.*$/gm, '');
+  assert.match(destination, /IsSettling\(matchKey\)[^]*_FactionWarTownDocument:Landing\(faction, origin, board\)/);
+  assert.doesNotMatch(destination, /outcome\.(flipped|winner|loser)/, 'capture fields cannot pick where to land');
+  const rule = body(source('RootDesk/MyDesk/Formations/FactionWarTownDocument.mlua'), 'Landing');
+  assert.match(rule, /\.owner == faction then return[^]*return self:CapitalOf\(faction\)/);
+  assert.match(body(landing, 'PlaceAfterBattle'), /self:BattleDestination\([^]*if trigger\.kind == "RETURN" then return trigger\.move\(destination\)/);
+});
+
 test('C6: the return waits through the document conflict budget', () => {
   const doc = source('RootDesk/MyDesk/Formations/FactionWarTownDocument.mlua');
   const landing = source('RootDesk/MyDesk/Formations/FactionWarLanding.mlua');

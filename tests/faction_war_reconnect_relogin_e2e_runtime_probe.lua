@@ -6,7 +6,7 @@
 --         closes the stale ticket ("STALE_ROOM_RECOVERY"), finds no stored result and lands the player in the town they set out from, with the towns untouched
 -- STALE   the match was settled and the room is gone (the fault adapter hides every room, as if the engine had reclaimed it): the login closes the stale ticket
 --         ("STALE_ROOM_RECOVERY", "RETURN_COMPLETED"), the outcome is rebuilt from the stored record ("[VRF][FactionWarAttack] landing ... rebuilt=true",
---         the static room holds no outcome of its own) and the conqueror ends in Gushan with a town notice
+--         the static room holds no outcome of its own) for the capture notice; the capturer returns to Zuoying (ADR 0016 update written, not run)
 -- Writes the REAL town storage (Gushan starts at 10); the last step deletes it. Keep the real player in formationlobby.
 -- Steps are numbered; set MODE and STEP below, dispatch, wait for the line it announces. server_main unless it says room (the context is
 -- server_instance_<matchKey>; the key is in the "QUEUED match=" line).
@@ -19,8 +19,8 @@
 --   5 CHECK    server_main, after the new virtual player appeared.
 --              ABORTED: no room is left, the ticket is closed, the new entity stands in Zuoying (where it set out from), Gushan is still BLUE / 10 with no stored
 --                       result and the match is not in the experience history ("ABORTED PASS")
---              STALE:  the new entity is in Gushan, holds no ticket, the town document is untouched, the match is in the history once ("STALE PASS");
---                      read the log for "login placement left to the ticket" and the town notice path ("landing after restore ... to=gushan")
+--              STALE:  the new entity is in Zuoying, holds no ticket, the town document is untouched, the match is in the history once ("STALE PASS");
+--                      look for "rebuilt=true" on the landing and one "landing notice ... town=zuoying ... recorded=true" in server_main
 --   6, 7      not used (the numbers stay so that CLEANUP is STEP 8, as in the README)
 --   8 CLEANUP  puts the rooms back, deletes the war town storage
 -- Expected [VRF] lines (read with logs): see tests/README.md, "Disconnect and reconnect (#109)".
@@ -143,11 +143,11 @@ local ok, reason = pcall(function()
         else
             assert(await(function()
                 a = find()
-                return isvalid(a) and a.CurrentMapName == "gushan"
-            end, 250), "the new entity was put in Gushan by the stored result")
+                return isvalid(a) and a.CurrentMapName == "zuoying"
+            end, 250), "the restored capturer returned to Zuoying")
             userId = a.PlayerComponent.UserId
             assert(await(function() return _MatchFlow._T.records[userId] == nil and not _FactionWarAttack:IsEngaged(userId) end, 100), "the stale ticket is closed and nothing is locked")
-            assert(_FactionWarLanding._T.outcomes[key] == nil, "this room holds no outcome of its own: the landing came from the stored record")
+            assert(_FactionWarLanding._T.outcomes[key] == nil, "this room holds no outcome of its own: the notice must use the stored record")
             local towns = readTowns()
             assert(towns.gushan.owner == "RED" and towns.gushan.strength == 100 and recordsOf(towns, key) == 1 and #towns.settled == 1, "the town document was only read")
             assert(creditedOnce(key) == 1, "the match is in the history exactly once")

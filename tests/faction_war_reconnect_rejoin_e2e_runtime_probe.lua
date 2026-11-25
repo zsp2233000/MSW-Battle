@@ -14,8 +14,8 @@
 --   4 REJOIN   room, after the second add_virtual_player: the new blue entity is back in this room ("[VRF][MatchFlow] rejoin match=... moved=true"), the ticket is
 --              IN_ROOM for this room ("REJOIN PASS")
 --   5 RESULT   room: the battle reaches its result; one settlement is stored (Gushan red / 100, counted once); blue's lost tank is credited exactly once
---   6 RETURN   room: ReturnForUser for both (blue is a NEW entity). Red lands in Gushan, blue in Yancheng
---   7 LANDING  server_main: red in Gushan, blue in Yancheng, nobody locked, one settlement ("LANDING PASS")
+--   6 RETURN   room: ReturnForUser for both (blue is a NEW entity); ADR 0016 update written, not run
+--   7 LANDING  server_main: red (capturer) in Zuoying, blue (origin lost) in Yancheng, nobody locked, one settlement ("LANDING PASS")
 --   8 CLEANUP  deletes the war town storage and puts the guard clock back
 -- Expected [VRF] lines (read with logs): see tests/README.md, "Disconnect and reconnect (#109)".
 local STEP = 1
@@ -148,8 +148,8 @@ local ok, reason = pcall(function()
         assert(await(function()
             users = find()
             a, b = users[RED], users[BLUE]
-            return isvalid(a) and isvalid(b) and a.CurrentMapName == "gushan" and b.CurrentMapName == "yancheng"
-        end, 600), "the conqueror entered Gushan and the loser went to Yancheng")
+            return isvalid(a) and isvalid(b) and a.CurrentMapName == "zuoying" and b.CurrentMapName == "yancheng"
+        end, 600), "the capturer returned to Zuoying and the player who lost Gushan went to Yancheng")
         for _, user in ipairs({ a, b }) do assert(await(function() return not _FactionWarAttack:IsEngaged(id(user)) end), "unlocked") end
         local towns = readTowns()
         assert(towns.gushan.owner == "RED" and towns.gushan.strength == 100 and #towns.settled == 1, "one settlement is stored")

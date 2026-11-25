@@ -275,7 +275,7 @@ script FactionWarLanding extends Logic
 
     @ExecSpace("ServerOnly")
     method table BattleDestination(string userId, string profile, string origin, string matchKey)
-        -- A room-side return and a restored ticket read the same live board and use the same match outcome.
+        -- ADR 0016: wait for settlement, then judge the origin against live ownership. The outcome is for the notice only.
         self:WaitWhile(function() return _FactionWarTownDocument:IsSettling(matchKey) end, self.LandingWaitSeconds)
         local outcome = self._T.outcomes[matchKey]
         local faction, board = nil, nil
@@ -294,10 +294,8 @@ script FactionWarLanding extends Logic
             outcome = _FactionWarTownDocument:OutcomeFrom(board, matchKey)
             rebuilt = outcome ~= nil
         end
-        local preferred = origin
-        if outcome ~= nil and outcome.flipped and outcome.winner == origin then preferred = outcome.loser end
-        local destination = _FactionWarTownDocument:Landing(faction, preferred, board)
-        log("[VRF][FactionWarAttack] landing user=" .. userId .. " faction=" .. faction .. " origin=" .. origin .. " preferred=" .. preferred .. " destination=" .. destination .. " conqueror=" .. tostring(preferred ~= origin) .. " rebuilt=" .. tostring(rebuilt))
+        local destination = _FactionWarTownDocument:Landing(faction, origin, board)
+        log("[VRF][FactionWarAttack] landing user=" .. userId .. " faction=" .. faction .. " origin=" .. origin .. " destination=" .. destination .. " originLost=" .. tostring(destination ~= origin) .. " rebuilt=" .. tostring(rebuilt))
         return { destination = destination, outcome = outcome, reliable = true }
     end
 
@@ -314,18 +312,28 @@ script FactionWarLanding extends Logic
             log("[VRF][MatchFlow] landing after restore left in place user=" .. userId .. " town=" .. here .. "; the landing could not be read")
             return false
         end
+        -- The closed ticket delivers one arrival notice. Put live origin loss first without dropping the historical result.
+        local message = self:NoticeText(result.outcome, origin)
+        local originLost = destination ~= origin
+        if originLost then message = self:FallenNotice(origin) .. message end
+        local moved = false
         if here == destination then
             log("[VRF][MatchFlow] landing in place user=" .. userId .. " town=" .. destination)
-            return false
+            -- A failed admission can also restore a war ticket here without any past battle to report.
+            if not originLost and result.outcome == nil then return false end
+            _FactionWar:ReceiveTownNotice(destination, message, userId)
+        else
+            moved = self:MoveAndNotify(userId, player, destination, message)
+            log("[VRF][MatchFlow] landing after restore user=" .. userId .. " from=" .. here .. " to=" .. destination .. " moved=" .. tostring(moved))
         end
-        local moved = self:MoveAndNotify(userId, player, destination, self:NoticeText(result.outcome, origin))
-        log("[VRF][MatchFlow] landing after restore user=" .. userId .. " from=" .. here .. " to=" .. destination .. " moved=" .. tostring(moved))
-        if moved then log("[VRF][MatchFlow] landing notice user=" .. userId .. " recorded=" .. tostring(result.outcome ~= nil)) end
+        if moved or here == destination then
+            log("[VRF][MatchFlow] landing notice user=" .. userId .. " town=" .. destination .. " originLost=" .. tostring(originLost) .. " recorded=" .. tostring(result.outcome ~= nil))
+        end
         return moved
     end
 
     method string NoticeText(any outcome, string origin)
-        -- Report the town effect, not a player's win or loss; the persisted record knows only the towns.
+        -- Report the historical town effect, not current ownership, the landing town, or a player's win/loss.
         local names = _FactionWarTownDocument.TownNames
         if outcome == nil or outcome.loser == nil or names[outcome.loser] == nil then return "上一場對戰已結束。" end
         local town = names[outcome.loser]

@@ -166,9 +166,9 @@ script FactionWarUI extends Logic
 
     @ExecSpace("ClientOnly")
     method void ShowTownNotice(string town, string message)
-        -- The warning sits on its own bar under the strength line; hide that bar when there is nothing to say.
-        if not self:IsCurrentTown(town) then
-            -- A relocation notice can beat the client's own map change; keep it for the town the player is about to enter.
+        -- Wait for both map sync and EnterMap; the latter clears the old town's notice before replaying a pending one.
+        if self._T.mapName ~= town or not self:IsCurrentTown(town) then
+            -- A relocation notice can beat either part of arrival; keep it until the town HUD has entered the map.
             if message ~= "" then
                 self._T.arrivalNotice = { town = town, message = message }
                 log("[VRF][FactionWar] notice kept for arrival town=" .. town)

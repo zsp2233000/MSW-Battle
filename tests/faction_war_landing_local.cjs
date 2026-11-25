@@ -22,14 +22,14 @@ wait = function(seconds) coroutine.yield(seconds) end
 local landing, doc = _FactionWarLanding, _FactionWarTownDocument
 local user = "test"
 local player, faction, home, board, offline, instance, owned, vacate
-local moves, notices, reads, cancels, remembered, factionReplies, holdFaction, settling
+local moves, notices, reads, cancels, remembered, factionReplies, holdFaction, settling, moveFailed
 local function reset(here, side, preferred)
     landing:OnBeginPlay()
     player = { CurrentMapName = here, PlayerComponent = { ProfileCode = "profile" } }
     faction, home, board = side or "BLUE", preferred or "gushan", doc:InitialTowns()
     offline, instance, owned, vacate = false, false, false, function() return true end
     moves, notices, factionReplies = {}, {}, {}
-    reads, cancels, remembered, holdFaction, settling = 0, 0, 0, false, false
+    reads, cancels, remembered, holdFaction, settling, moveFailed = 0, 0, 0, false, false, false
 end
 _UserService = { GetUserEntityByUserId = function(_, id) if id == user then return player end end }
 _RoomService = { IsInstanceRoom = function() return instance end }
@@ -45,6 +45,7 @@ _FactionWar = {
     ReadTown = function(_, _, done) done(home) end,
     Move = function(_, target, town)
         assert(not instance and target == player)
+        if moveFailed then return false end
         table.insert(moves, town)
         player.CurrentMapName = town
         return true
@@ -66,8 +67,8 @@ end
 local function login(cause, held)
     return landing:Judge(user, { kind = "LOGIN", cause = cause or "enter", owned = held == true })
 end
-local function battle(kind, move)
-    return landing:Judge(user, { kind = kind, origin = "zuoying", matchKey = "capture", move = move })
+local function battle(kind, move, origin, matchKey)
+    return landing:Judge(user, { kind = kind, origin = origin or "zuoying", matchKey = matchKey or "capture", move = move })
 end
 local function captured()
     board.gushan.owner, board.gushan.e = "RED", 1
@@ -145,19 +146,22 @@ reply()
 assert(advance(loginThread) == true and not landing:IsJudging(user) and #moves == 1)
 
 reset("formationlobby", "RED"); captured()
-assert(battle("RESTORE") and moves[1] == "gushan" and reads == 1)
-assert(notices[1]:find("奪下", 1, true) and not notices[1]:find("勝利", 1, true))
-assert(not battle("RESTORE") and #moves == 1 and #notices == 1, "already in place")
+assert(battle("RESTORE") and moves[1] == "zuoying" and reads == 1, "a capturer restored from the lobby returns to origin")
+assert(notices[1] == "上一場戰果：奪下鼓山。")
+assert(not login() and #moves == 1 and #notices == 1, "login following restore does not replay the battle notice")
 board = nil
-assert(not battle("RESTORE") and #moves == 1 and reads == 4, "unreadable restore leaves the player in place after two attempts")
+local priorReads = reads
+assert(not battle("RESTORE") and #moves == 1 and #notices == 1 and reads == priorReads + 2,
+    "unreadable restore leaves the player in place after two attempts, without a notice")
 
-reset("gushan", "RED"); captured()
+reset("zuoying", "RED"); captured()
 holdFaction = true
-check(board)
+landing:Judge(user, { kind = "CHECK", town = "zuoying", board = board })
 local restore = coroutine.create(function() return battle("RESTORE") end)
 assert(advance(restore) == 0.1, "restore waits for the sweep")
 holdFaction = false; reply()
 assert(advance(restore) == false and not landing:IsJudging(user) and #moves == 0)
+assert(#notices == 1 and notices[1] == "上一場戰果：奪下鼓山。", "already at origin: notify once without moving")
 
 reset("matchprobe", "RED"); captured()
 instance, settling = true, true
@@ -171,12 +175,47 @@ local returning = coroutine.create(function() return battle("RETURN", transfer) 
 assert(advance(returning) == 0.1 and transferred == nil and reads == 0)
 assert(not battle("RETURN", transfer) and transferCount == 0)
 settling = false
-assert(advance(returning) == true and transferred == "gushan" and #moves == 0 and #notices == 0)
+assert(advance(returning) == true and transferred == "zuoying" and #moves == 0 and #notices == 0)
 board.gushan.owner = "BLUE"
-assert(battle("RETURN", transfer) and transferred == "nanzih", "if the preferred captured town was lost, the retry uses the capital")
+assert(battle("RETURN", transfer) and transferred == "zuoying", "losing the captured town does not change the landing")
+board.zuoying.owner = "BLUE"
+assert(battle("RETURN", transfer) and transferred == "nanzih", "ownership of the origin is checked anew on return")
 board = nil
 assert(battle("RETURN", transfer) and transferred == "zuoying", "unreadable cross-room return uses its departure town")
 assert(not battle("RESTORE") and not login() and #moves == 0)
+
+-- The defender lost its origin in this very match; ordinary return is already at the capital when restore runs.
+reset("matchprobe", "BLUE"); captured()
+instance = true
+assert(battle("RETURN", transfer, "gushan") and transferred == "yancheng" and #notices == 0)
+instance = false
+player.CurrentMapName = transferred
+assert(not battle("RESTORE", nil, "gushan") and #moves == 0)
+assert(#notices == 1 and notices[1]:find("鼓山已失守，已撤回主城。", 1, true))
+assert(not login("reconnect") and #notices == 1)
+
+-- A failed admission can restore a ticket in its still-friendly origin with no recorded battle.
+reset("zuoying", "RED")
+assert(not battle("RESTORE", nil, "zuoying", "unplayed") and #moves == 0 and #notices == 0,
+    "an in-place restore without a record or a lost origin does not announce a battle")
+
+-- The capture history and a later loss of the origin can both be true; recovering a stale ticket reports both.
+reset("formationlobby", "RED"); captured()
+board.zuoying.owner = "BLUE"
+moveFailed = true
+assert(not battle("RESTORE") and #notices == 0, "do not send a notice for a failed move")
+moveFailed = false
+assert(battle("RESTORE") and moves[1] == "nanzih")
+assert(#notices == 1 and notices[1] == "左營已失守，已撤回主城。上一場戰果：奪下鼓山。")
+
+-- The stale match was EXEMPT and has no stored outcome; the other match's capture does not determine this landing or notice.
+reset("matchprobe", "BLUE"); captured()
+instance = true
+assert(battle("RETURN", transfer, "gushan", "exempt") and transferred == "yancheng")
+instance = false
+player.CurrentMapName = "formationlobby"
+assert(battle("RESTORE", nil, "gushan", "exempt") and moves[1] == "yancheng")
+assert(#notices == 1 and notices[1] == "鼓山已失守，已撤回主城。上一場對戰已結束。")
 
 reset("matchprobe", "RED"); captured()
 instance, settling = true, true

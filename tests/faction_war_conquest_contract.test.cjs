@@ -2,9 +2,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const test = require('node:test');
 
-// Structural contract for #107 (a captured town changes flag, the conqueror walks in, the losers go home).
-// The behaviour itself is proven by tests/faction_war_conquest_runtime_probe.lua and
-// tests/faction_war_conquest_e2e_runtime_probe.lua in Maker; these tests pin the seams those probes drive.
+// Structural contract for #107 capture and eviction, with ADR 0016 landing back at the origin or capital.
+// The Maker conquest probes exercise the seams pinned here; see tests/README.md for run status.
 const source = path => fs.readFileSync(path, 'utf8').replace(/\r\n/g, '\n');
 const methods = text => [...text.matchAll(/^    method \w+ (\w+)\(/gm)].map(m => m[1]);
 const body = (text, name) => text.match(new RegExp(`method \\w+ ${name}\\([^]*?(?=\\n    @|\\n    method|\\n    handler|\\nend)`))?.[0] || '';
@@ -25,7 +24,7 @@ test('a settlement reports a structured outcome and remembers it per match so a 
   const finish = body(text, 'Finish');
   assert.match(finish, /complete\(status, detail, outcome\)/, 'the caller gets the document outcome as a third value');
   assert.match(finish, /_FactionWar:AnnounceFall\(/, 'a final flip is announced to the people standing in that town');
-  assert.match(finish, /_FactionWarLanding:RememberOutcome\(matchKey, outcome\)/, 'the room remembers the outcome for players who return');
+  assert.match(finish, /_FactionWarLanding:RememberOutcome\(matchKey, outcome\)/, 'the room remembers the outcome for battle notices');
 });
 
 test('return dispatches war landings through the transfer adapter, and keeps lobby returns separate', () => {
@@ -60,6 +59,6 @@ test('a player who missed the announcement is moved the next time they act in a 
 
 test('the town HUD keeps a relocation notice until the player has arrived', () => {
   const text = ui();
-  assert.match(body(text, 'ShowTownNotice'), /arrivalNotice/, 'a notice that beats the map change is kept');
-  assert.match(body(text, 'EnterMap'), /arrivalNotice/, 'the destination town shows it on arrival');
+  assert.match(body(text, 'ShowTownNotice'), /self\._T\.mapName ~= town or not self:IsCurrentTown\(town\)[^]*arrivalNotice/, 'a notice before map sync or before the HUD enters the town is kept');
+  assert.match(body(text, 'EnterMap'), /self\._T\.mapName = name[^]*arrival\.town == name then self:ShowTownNotice\(name, arrival\.message\)[^]*self\._T\.arrivalNotice = nil/, 'the destination town shows it once on arrival');
 });

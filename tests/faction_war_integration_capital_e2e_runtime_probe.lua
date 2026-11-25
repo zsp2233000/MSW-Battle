@@ -5,7 +5,7 @@
 --   LOSS     the only BLUE player, in Yancheng, attacks Gushan (RED, 10: one guard win would take it) and LOSES the guard fight: both towns are unchanged, no record,
 --            the player is back in Yancheng; the match is credited to him once (what his three force-killed tanks earned is logged, not asserted)
 --   COUNTER  the same BLUE player attacks Gushan again and wins: "only the capital is left" counterattack. Gushan flips to BLUE and refills to 100 (counted twice),
---            the player lands in Gushan, the idle RED player in Gushan is sent to Nanzih, nothing else moves
+--            the capturer returns to Yancheng, the idle RED player in Gushan is sent to Nanzih, nothing else moves
 -- THE FIGHTS ARE NOT PLAYED. Each ROOM step ends its fight by killing one side's units (ApplyResolvedDamage 99999 on every living unit of that side, in the room):
 -- the result (WIN or LOSE) is forced, the settlement, the fall announcement, the sweep, the experience and the landing that follow are the normal production path.
 -- A guard fight that the player wins or loses by playing, and a draw, are not covered here.
@@ -27,7 +27,7 @@
 --   8 CHECK2    server_main: Q in Yancheng, nothing settled, Gushan still RED/10, the match credited to Q once, the experience of his three killed tanks logged ("LOSS PASS")
 --   9 QUEUE3    server_main: Q -> Gushan again
 --   10 ROOM3    room: forces a WIN, waits until the capture is stored, returns Q
---   11 CHECK3   server_main: Gushan BLUE/100 counted twice, one record, Q in Gushan, P in Nanzih ("COUNTER PASS", then "E2E PASS")
+--   11 CHECK3   server_main: Gushan BLUE/100 counted twice, one record, Q in Yancheng, P in Nanzih ("COUNTER PASS", then "E2E PASS"; ADR 0016 update written, not run)
 --   12 CLEANUP  puts the guard clock back, deletes the war town storage and the two profiles' keys
 -- Expected [VRF] lines (read with logs): see tests/README.md, "War integration (#110)".
 local STEP = 1
@@ -259,8 +259,8 @@ local ok, reason = pcall(function()
         assert(await(function()
             users = find()
             p, q = users[P_PROFILE], users[Q_PROFILE]
-            return isvalid(p) and isvalid(q) and q.CurrentMapName == "gushan" and p.CurrentMapName == "nanzih"
-        end, 600), "Q (the conqueror) is in Gushan and the idle RED player was sent to Nanzih")
+            return isvalid(p) and isvalid(q) and q.CurrentMapName == "yancheng" and p.CurrentMapName == "nanzih"
+        end, 600), "Q (the capturer) returned to Yancheng and the idle RED player was sent to Nanzih")
         for _, user in ipairs({ p, q }) do assert(await(function() return not _FactionWarAttack:IsEngaged(id(user)) end, 100), "unlocked") end
         local towns = readTowns()
         assert(towns.gushan.owner == "BLUE" and towns.gushan.strength == 100 and _FactionWarTownDocument:EpochOf(towns, "gushan") == 2, "Gushan flipped to BLUE, refilled to 100 and counted twice, found " .. board(towns))

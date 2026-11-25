@@ -29,7 +29,8 @@
 --   7 QUEUE     server_main: R1 -> Gushan, B1 -> Zuoying (the pair forms), then B2 -> Zuoying (waits), then B4 is kicked. Wait for [VRF][MatchedBattle] result published once
 --   8 CAPTURE   server_main, after the result: Gushan is RED and 100, counted once, one record; B2's ticket was cancelled; B2 and B3 stand in Yancheng ("CAPTURE PASS")
 --   9 RETURN    server_instance_<matchKey>: ReturnForUser for everyone in the room (logs the result and the deaths per side)
---   10 LANDING  server_main: R1 in Gushan (conqueror), B1 in Yancheng (loser), nobody locked, the NPC options follow the new owner, the experience of both sides is
+--   10 LANDING  server_main (ADR 0016 update: written, not run): R1 in Zuoying (capturer), B1 in Yancheng (origin lost), nobody locked. R1 then uses
+--               the gate to Gushan; NPC options follow the new owner. The experience of both sides is
 --               credited once ("LANDING PASS"). Then add_virtual_player -profile_code wp2635 again and wait 14 s
 --   11 RELOGIN  server_main: B4 has a NEW user id and was put in Yancheng by the live owner of Gushan; the login changed no town ("RELOGIN PASS", the table, "JOURNEY PASS")
 --   12 CLEANUP  puts the guard clock back, deletes the war town storage and the five profiles' keys
@@ -324,15 +325,18 @@ local ok, reason = pcall(function()
         assert(await(function()
             users = find()
             r1, b1 = users.R1, users.B1
-            return isvalid(r1) and isvalid(b1) and r1.CurrentMapName == "gushan" and b1.CurrentMapName == "yancheng"
-        end, 400), "the conqueror entered Gushan and the loser went to Yancheng")
+            return isvalid(r1) and isvalid(b1) and r1.CurrentMapName == "zuoying" and b1.CurrentMapName == "yancheng"
+        end, 400), "R1 returned to Zuoying and B1 went to Yancheng after losing Gushan"
+        local redLanding = r1.CurrentMapName
+        log("[VRF][Journey] return destinations R1=" .. redLanding .. " B1=" .. b1.CurrentMapName))
         for _, alias in ipairs({ "R1", "B1", "B2", "B3" }) do assert(await(function() return not _FactionWarAttack:IsEngaged(id(users[alias])) end), alias .. " is unlocked") end
         local towns = readTowns()
         assert(towns.gushan.owner == "RED" and towns.gushan.strength == 100 and #towns.settled == 1, "one settlement is stored, found " .. board(towns))
         local record = towns.settled[1]
         assert(record.w == "zuoying" and record.l == "gushan" and record.o == "RED" and record.s == 100, "the record says RED took Gushan from Zuoying and refilled it")
         assert(_FactionWar:FindFrontline("RED", towns) == "gushan" and _FactionWar:FindFrontline("BLUE", towns) == "yancheng", "new players land on the new front")
-        -- The NPC follows the new owner: red in Gushan faces the blue capital, blue in Yancheng faces Gushan.
+        -- Only a separate gate trip takes R1 to the new town. There the NPC faces the blue capital.
+        assert(gate(r1, "gushan") == "PASSED", "R1 can now use the gate from Zuoying to Gushan")
         local redStatus, red = options(r1)
         local blueStatus, blue = options(b1)
         assert(redStatus == "READY" and #red == 1 and red[1].town == "yancheng" and red[1].capital == true, "R1 is offered the blue capital, found " .. names(red))
@@ -346,7 +350,7 @@ local ok, reason = pcall(function()
         assert(loser.monsters.monster_tank ~= nil, "B1's only tank died and earned experience")
         local tank = _HttpService:JSONEncode(loser.monsters.monster_tank)
         local redTank = winner.monsters.monster_tank ~= nil and _HttpService:JSONEncode(winner.monsters.monster_tank) or "no tank died"
-        row("LANDING", "R1", names(red), "B1 (human, lost)", "gushan=100", "RED (took it)", "gushan", "key once; " .. redTank)
+        row("LANDING", "R1", "after gate to Gushan: " .. names(red), "B1 (human, lost)", "gushan=100", "RED (took it)", redLanding, "key once; " .. redTank)
         row("LANDING", "B1", names(blue), "R1 (human, won)", "gushan=100", "RED (lost it)", "yancheng", "key once; monster_tank " .. tank)
         row("LANDING", "B2, B3", "attack gushan (the town they lost)", "-", "gushan=100", "RED", "yancheng", "-")
         log("[VRF][Journey] LANDING PASS " .. board(towns) .. "; now add_virtual_player -profile_code wp2635 -nickname JourneyB4 again, wait 14 s, then STEP 11")

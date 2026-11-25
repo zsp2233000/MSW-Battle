@@ -3,15 +3,15 @@
 --   add_virtual_player -profile_code wp2602 -nickname Loser       (BLUE, Gushan,   1 tank, fights A)
 --   add_virtual_player -profile_code wp2603 -nickname Queued      (BLUE, Gushan,   queues AFTER the pair formed, must be cancelled)
 --   add_virtual_player -profile_code wp2604 -nickname Idle        (BLUE, Gushan,   stands still, must be sent home)
--- Writes the REAL town storage (Gushan starts at 20); STEP 8 deletes it. Keep the real player in formationlobby.
+-- ADR 0016 updates: written, not run. Uses REAL local town storage (Gushan starts at 20); STEP 9 deletes it. Keep the real player in formationlobby.
 -- Steps are numbered; set STEP below, dispatch, wait for the line it announces.
 --   1 SETUP      server_main, ~60 s, wait "SETUP PASS"
 --   2 QUEUE1     server_main: A -> Gushan, B -> Zuoying (the pair forms), then C -> Zuoying (waits, cannot match)
 --   3 CAPTURE    server_main, after the match room logged "[VRF][MatchedBattle] result published once": the town flipped,
 --                the announcement reached the static room, C was cancelled and C + D stand in Yancheng
 --   4 RETURN     server_instance_<matchKey> (each match): ReturnForUser for every user in the room
---   5 LANDING1   server_main: A is in Gushan (the conqueror), B in Yancheng (the loser), nobody is locked
---   6 QUEUE2     server_main: A (red, Gushan) -> Yancheng, B (blue, Yancheng) -> Gushan  (red wins a capital: nothing changes)
+--   5 LANDING1   server_main: A (the capturer) is in Zuoying; B (lost Gushan) is in Yancheng; nobody is locked
+--   6 QUEUE2     server_main: A travels from Zuoying to Gushan first, then attacks Yancheng; B (Yancheng) attacks Gushan (capital win: nothing changes)
 --   7 LANDING2   server_main, after STEP 4 again: Yancheng is still BLUE/100, Gushan RED/100, A in Gushan, B in Yancheng
 --   8 EVICTRACE server_main (review fixes C1 + C2), run after STEP 7: D (blue, idle) is put into Gushan, which is red, and
 --                (a) a check that holds the board from before the flip is still running when the sweep's request arrives: the request is queued,
@@ -100,8 +100,8 @@ local ok, reason = pcall(function()
         assert(await(function()
             users = find()
             a, b = users.wp2601, users.wp2602
-            return isvalid(a) and isvalid(b) and a.CurrentMapName == "gushan" and b.CurrentMapName == "yancheng"
-        end, 400), "the conqueror entered Gushan and the loser went to Yancheng")
+            return isvalid(a) and isvalid(b) and a.CurrentMapName == "zuoying" and b.CurrentMapName == "yancheng"
+        end, 400), "the capturer is back in Zuoying and the player who lost Gushan went to Yancheng")
         for _, user in ipairs({ a, b, c, d }) do assert(await(function() return not _FactionWarAttack:IsEngaged(id(user)) end), "unlocked") end
         local towns = readTowns()
         assert(_FactionWar:FindFrontline("RED", towns) == "gushan" and _FactionWar:FindFrontline("BLUE", towns) == "yancheng", "new players land on the new front")
@@ -111,6 +111,10 @@ local ok, reason = pcall(function()
         assert(#red == 1 and red[1].town == "yancheng" and red[1].capital == true and #blue == 1 and blue[1].town == "gushan", "the NPC options follow the new owner")
         log("[VRF][ConquestE2E] LANDING1 PASS")
     elseif STEP == 6 then
+        -- The return did not move A to Gushan. Travel there explicitly to preserve the capital battle.
+        assert(isvalid(a) and a.CurrentMapName == "zuoying", "A is still at the first landing")
+        assert(isvalid(_FactionWar:FindGate("zuoying", "gushan")) and _FactionWarTownDocument:CanPass("RED", "zuoying", "gushan", readTowns()), "RED can take the gate to Gushan")
+        assert(_FactionWar:Move(a, "gushan") and await(function() return a.CurrentMapName == "gushan" end), "A traveled to Gushan")
         _FactionWarAttack:AttackFor(id(a), "yancheng")
         assert(await(function() return _FactionWarAttack:IsEngaged(id(a)) end, 100), "A engaged")
         _FactionWarAttack:AttackFor(id(b), "gushan")
