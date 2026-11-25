@@ -14,9 +14,17 @@ local ok, detail = pcall(function()
         assert(m.Snapshot.state == 'TRANSFER' and string.find(m.status.TextGUIRendererComponent.Text, '入場失敗', 1, true), 'entry failure reason visible')
         assert(m.action.Enable and m.action.ButtonComponent.Enable and m.action.TextGUIRendererComponent.Text == '停止入場'
             and not m:AllowsFormationActions(), 'Stop Entry usable; editing locked')
-        m.action:SendEvent(ButtonClickEvent())
+        -- A recovery that is running when the button is pressed answers with a status refresh, which re-enables the button; the player presses again.
+        local clicks = 0
+        for _ = 1, 5 do
+            if m.action.Enable and m.action.ButtonComponent.Enable then
+                clicks = clicks + 1
+                m.action:SendEvent(ButtonClickEvent())
+            end
+            if await(function() return m:AllowsFormationActions() end, 40) then break end
+        end
         assert(await(function() return m:AllowsFormationActions() end), 'visible abort restores confirmed lobby')
-        log('[VRF][Cancel52Entry] PASS movement failure reason; visible abort; confirmed lobby restore')
+        log('[VRF][Cancel52Entry] PASS movement failure reason; visible abort; confirmed lobby restore clicks=' .. tostring(clicks))
         return
     elseif MODE == 'PROGRESS' then
         assert(await(function() return m.Snapshot.state == 'COMMITTING' end, 300), 'observed resumed commit')
