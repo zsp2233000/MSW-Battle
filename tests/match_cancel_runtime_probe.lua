@@ -27,7 +27,8 @@ local ok, detail = pcall(function()
         log('[VRF][Cancel52Entry] PASS movement failure reason; visible abort; confirmed lobby restore clicks=' .. tostring(clicks))
         return
     elseif MODE == 'PROGRESS' then
-        assert(await(function() return m.Snapshot.state == 'COMMITTING' end, 300), 'observed resumed commit')
+        -- The commit is published as reason COMMITTING on the still-SAVING ticket; either spelling is the post-pairing commit.
+        assert(await(function() return m.Snapshot.state == 'COMMITTING' or m.Snapshot.reasonCode == 'COMMITTING' end, 300), 'observed resumed commit')
         assert(m.Snapshot.reasonCode ~= 'CANCEL_FAILED' and not m.action.Enable, 'commit has no cancel action')
         log('[VRF][Cancel52Progress] PASS post-pairing commit hides cancellation')
         return
