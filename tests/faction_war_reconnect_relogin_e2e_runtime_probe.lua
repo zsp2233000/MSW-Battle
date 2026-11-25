@@ -103,7 +103,8 @@ local ok, reason = pcall(function()
             key = matchKey()
             return key ~= ""
         end, 300), "the pairing is sealed")
-        assert(await(function() return _MatchFlow:StateForUser(userId) == "IN_ROOM" end, 300), "the ticket is IN_ROOM")
+        -- The static room forgets the ticket as soon as the player is moved into the match room (about a second after SEALED), so IN_ROOM is only a short transient here.
+        assert(await(function() local state = _MatchFlow:StateForUser(userId); return state == "IN_ROOM" or state == "IDLE" end, 300), "the ticket is IN_ROOM or already handed to the room")
         log("[VRF][ReconnectRelogin] QUEUED match=" .. key .. " " .. MODE .. "; wait for [VRF][MatchedBattle] admission started=true, then STEP 3 in the room")
     elseif STEP == 3 then
         local user = find()
