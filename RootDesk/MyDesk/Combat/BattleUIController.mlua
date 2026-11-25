@@ -486,7 +486,7 @@ script BattleUIController extends Logic
 		local conclusion = receipt.conclusion
 		if receipt.capturedTown ~= nil then
 			local town = _FactionWarTownDocument.TownNames[receipt.capturedTown]
-			if town ~= nil then conclusion = string.gsub(conclusion, town, _FactionWarUI:HighlightedTownName(receipt.capturedTown), 1) end
+			if town ~= nil then local replaced, replacedCount = string.gsub(conclusion, town, _FactionWarUI:HighlightedTownName(receipt.capturedTown), 1) conclusion = replaced end
 		end
 		self:SetText(self.warConclusion, conclusion)
 		self:SetEnabled(self.warResult, true)
