@@ -29,8 +29,12 @@ local ok, reason = pcall(function()
         assert(await(function() return not record.pending and #record.saved.slots[tostring(slotId)].units == #units end), "save confirmed")
         _FormationService:ActivateForUser(userId, slotId, record.saved.slots[tostring(slotId)].revision)
         assert(await(function() return not record.pending and record.saved.activeSlot == slotId end), "activate confirmed")
-        local saved = false
-        _FormationStorage:Write(a.PlayerComponent.ProfileCode, _FactionWar.FactionKey, "", "RED", function(code) saved = code == 0 end)
+        -- A rerun finds the faction an earlier run stored: the guarded write must expect it, not an empty value.
+        local saved, current = false, nil
+        _FactionWar:ReadFaction(a.PlayerComponent.ProfileCode, function(faction) current = faction end)
+        assert(await(function() return current ~= nil end, 100), "faction read")
+        if current == "RED" then saved = true
+        else _FormationStorage:Write(a.PlayerComponent.ProfileCode, _FactionWar.FactionKey, current, "RED", function(code) saved = code == 0 end) end
         assert(await(function() return saved end, 100), "faction saved")
         assert(_FactionWar:Move(a, "zuoying"), "move dispatched")
         assert(await(function() return a.CurrentMapName == "zuoying" end), "in Zuoying")
