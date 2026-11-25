@@ -83,7 +83,7 @@ script MatchFaults extends Logic
     end
 
     @ExecSpace("ServerOnly")
-    method boolean Cancel(string profile)
+    method any Cancel(string profile)
         -- Answer like a failing queue service while armed; the delay applies to every armed cancellation.
         local fail = (self._T.cancelFailures or 0) > 0
         if fail then self._T.cancelFailures = self._T.cancelFailures - 1 end

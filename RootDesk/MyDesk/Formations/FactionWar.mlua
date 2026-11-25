@@ -221,7 +221,7 @@ script FactionWar extends Logic
         local gate = self:FindGate(origin, destination)
         if not self:NearGate(player, gate) then return end
         if _FactionWarAttack:IsEngaged(userId) then
-            self:ReceiveTownNotice(origin, "配對中請先取消配對再離開城鎮。", userId)
+            self:ReceiveTownNotice(origin, "請先完成目前的對局或配對操作，再離開城鎮。", userId)
             return
         end
         self._T.pending[userId] = player

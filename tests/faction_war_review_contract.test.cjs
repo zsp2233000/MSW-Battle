@@ -119,9 +119,10 @@ test('C4: Vacate cancels only a ticket still waiting for an opponent; a matched 
   for (const state of ['SAVING', 'COMMITTING', 'TRANSFER', 'IN_ROOM']) assert.doesNotMatch(waiting, new RegExp(state), `${state} is a match`);
   const vacate = body(text, 'Vacate').replace(/--.*$/gm, '');
   assert.match(vacate, /not self:IsWaiting\(ticket\)[^]*vacate held[^]*return false/, 'a matched ticket is refused without a cancellation');
-  assert.doesNotMatch(vacate, /CanCancel/, 'CanCancel also allows SAVING (the player\'s own button), so it does not decide here');
-  // The player's own cancel button keeps its reach (ADR 0011's accepted gap).
-  assert.match(body(source('RootDesk/MyDesk/Formations/FormationHandoff.mlua'), 'CanCancel'), /state == "SAVING"/);
+  assert.doesNotMatch(vacate, /CanCancel/, 'storage transition eligibility does not decide if a matchup exists');
+  const cancel = body(text, 'CancelForUser');
+  assert.match(cancel, /self:OpponentFound\(ticket\)[^]*CANCEL_MATCH_FOUND[^]*return end[^]*self:CancelMatching/, 'player cancellation uses the same recognized pairing boundary');
+  assert.match(body(text, 'OpponentFound'), /ticket\.guardPairing[^]*_MatchFlowState:IsEntering/, 'covers a guard claim and SAVING onward');
 });
 
 test('C5: the war board is read as soon as the pairing is known, before any wait that precedes the seal', () => {

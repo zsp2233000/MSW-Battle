@@ -1,7 +1,6 @@
 @Logic
 script FactionWarUI extends Logic
 
-    property number MillisecondsPerSecond = 1000
     property integer AttackRows = 2
 
     @ExecSpace("ClientOnly")
@@ -18,9 +17,10 @@ script FactionWarUI extends Logic
         self._T.attackPending = false
         self._T.queueState = "IDLE"
         self._T.queueText = ""
-        self._T.queueAction = ""
-        self._T.queuePending = false
-        self._T.queueAttempt = ""
+        self._T.queueSequenceKey = ""
+        self._T.queueSequence = 0
+        self._T.queuePendingAction = ""
+        log("[VRF][WarUI] match queue bar ready")
         self._T.panelOpen = false
     end
 
@@ -242,75 +242,61 @@ script FactionWarUI extends Logic
 
     @ExecSpace("ClientOnly")
     method void CancelQueue()
-        -- Cancel in place; a committed match is aborted through the same return path as the battle room.
-        if self._T.queuePending or self._T.queueAction == "" then return end
-        self._T.queuePending = true
-        if self._T.queueAction == "RETURN" then
-            _MatchFlow:RequestReturn(self._T.queueAttempt)
-        else
-            _MatchFlow:RequestCancel(self._T.queueAttempt)
+        -- Re-project at click time so an expired countdown or an accepted new snapshot cannot send a stale action.
+        local player = _UserService.LocalPlayer
+        local snapshot = _MatchFlowInput.Snapshot
+        if not isvalid(player) or not _FactionWar:IsTown(player.CurrentMapName) or self._T.panelOpen
+            or (snapshot.target or "") == "" or snapshot.state == "IDLE" then return end
+        local view = self:QueueView(snapshot)
+        if not view.enabled or view.action == "" then return end
+        self._T.queueSequenceKey = snapshot.sequenceKey
+        self._T.queueSequence = snapshot.sequence
+        self._T.queuePendingAction = view.action
+        if view.action == "RETURN" then
+            _MatchFlow:RequestReturn(snapshot.attempt)
+        elseif view.action == "CANCEL" then
+            _MatchFlow:RequestCancel(snapshot.attempt)
         end
     end
 
     @ExecSpace("ClientOnly")
     method table QueueView(table snapshot)
-        -- Choose the status text and the single action a queued snapshot offers; no widget is touched here.
-        local waiting = { QUEUED = true, RENEWING = true, QUEUE_ERROR = true, SAVING = true }
-        local entering = { COMMITTING = true, TRANSFER = true, IN_ROOM = true, WAITING = true }
+        -- Decorate the same pre-battle result shown by the lobby; keep the current queue bar.
+        local sameObservation = self._T.queueSequenceKey == snapshot.sequenceKey and self._T.queueSequence == snapshot.sequence
+        local pendingAction = sameObservation and self._T.queuePendingAction or ""
+        local view = _MatchFlowState:PresentMatch(snapshot, { now = DateTime.UtcNow.Elapsed,
+            pending = pendingAction ~= "", pendingAction = pendingAction })
         local name = _FactionWarTownDocument.TownNames[snapshot.target] or snapshot.target
-        local text = "進攻 " .. name
-        local elapsed = snapshot.started > 0 and math.max(0, math.floor((DateTime.UtcNow.Elapsed - snapshot.started) / self.MillisecondsPerSecond)) or 0
-        -- The guard comes at the server's deadline; the countdown never shows a negative second.
-        local guardAt = snapshot.guardAt or 0
-        local remaining = math.max(0, math.ceil((guardAt - DateTime.UtcNow.Elapsed) / self.MillisecondsPerSecond))
-        if snapshot.state == "CANCELLING" or snapshot.state == "CANCELLED" then
-            return { text = text .. "\n正在取消配對…", action = "" }
-        elseif snapshot.state == "QUEUE_ERROR" then
-            return { text = text .. "\n配對已停止，請取消後重新配對", action = "CANCEL" }
-        elseif snapshot.guard == true and (waiting[snapshot.state] or entering[snapshot.state]) then
-            -- Matched against the guard: the state names are the human flow's, the words are not.
-            return { text = text .. "\n" .. name .. "守衛迎戰，正在進入戰場", action = waiting[snapshot.state] and "" or "RETURN" }
-        elseif waiting[snapshot.state] then
-            local wait = guardAt > 0 and ("守衛倒數 " .. tostring(remaining) .. " 秒") or ("已等候 " .. tostring(elapsed) .. " 秒")
-            return { text = text .. "\n正在尋找對手 · " .. wait, action = "CANCEL" }
-        elseif entering[snapshot.state] then
-            return { text = text .. "\n配對成功，正在進入戰場", action = "RETURN" }
-        end
-        return { text = text .. "\n" .. snapshot.state, action = "" }
+        view.text = "進攻 " .. name .. "\n" .. view.text
+        return view
     end
 
     @ExecSpace("ClientOnly")
     method void RenderQueue(string map)
-        -- Mirror the one match snapshot into the town: target, wait clock and the in-place cancel button.
+        -- An accepted sequence can answer a command without changing its phase (e.g. a refused cancel).
         local bar = self:Ui("QueueBar")
         if not isvalid(bar) then return end
         local snapshot = _MatchFlowInput.Snapshot
-        local war = _FactionWar:IsTown(map) and snapshot.target ~= nil and snapshot.target ~= "" and snapshot.state ~= "IDLE"
+        local war = _FactionWar:IsTown(map) and (snapshot.target or "") ~= "" and snapshot.state ~= "IDLE"
+        if self._T.queueSequenceKey ~= snapshot.sequenceKey or self._T.queueSequence ~= snapshot.sequence then
+            self._T.queuePendingAction = ""
+        end
         if snapshot.state ~= self._T.queueState then
-            -- A settled queue returns the player to a town whose strength may have changed.
             if snapshot.state == "IDLE" and _FactionWar:IsTown(map) then _FactionWar:RequestTownStatus() end
             self._T.queueState = snapshot.state
-            self._T.queuePending = false
         end
         bar:SetEnable(war and not self._T.panelOpen)
-        if not war then
-            self._T.queueAction = ""
-            return
-        end
+        if not war then return end
         local view = self:QueueView(snapshot)
-        local pending = self._T.queuePending
-        local text = pending and (view.text .. "（處理中）") or view.text
-        self._T.queueAction = pending and "" or view.action
-        self._T.queueAttempt = snapshot.attempt
-        if text ~= self._T.queueText then
-            self._T.queueText = text
-            self:Ui("QueueBar/Status").TextGUIRendererComponent.Text = text
+        if view.text ~= self._T.queueText then
+            self._T.queueText = view.text
+            self:Ui("QueueBar/Status").TextGUIRendererComponent.Text = view.text
         end
         local cancel = self:Ui("QueueBar/Cancel")
         if isvalid(cancel) then
             cancel:SetEnable(view.action ~= "")
-            cancel.ButtonComponent.Enable = not pending
-            cancel.TextGUIRendererComponent.Text = view.action == "RETURN" and "取消入場" or "取消配對"
+            cancel.ButtonComponent.Enable = view.enabled
+            cancel.TextGUIRendererComponent.Text = view.label
         end
     end
 end

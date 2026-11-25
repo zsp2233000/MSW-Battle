@@ -82,7 +82,7 @@ test('the match room\'s battle session is looked up in one place', () => {
   assert.ok(methods(text).includes('Battle') && methods(text).includes('MatchMap'), 'one lookup of the match map and one of its battle');
   assert.equal((text.match(/"\/maps\/matchprobe"/g) || []).length, 1, 'the path is written once');
   assert.equal((text.match(/script\.BattleSession/g) || []).length, 1, 'and so is the component');
-  for (const name of ['PublishState', 'RearmExperience', 'ReturnForUser']) assert.match(body(text, name), /self:Battle\(\)/, `${name} asks Battle()`);
+  for (const name of ['StateSnapshot', 'RearmExperience', 'ReturnForUser']) assert.match(body(text, name), /self:Battle\(\)/, `${name} asks Battle()`);
   assert.match(body(text, 'RearmExperience'), /isvalid\(battle\)[^]*RearmExperienceReceipt\(userId\)/, 'a room without a battle is still logged and skipped');
 });
 

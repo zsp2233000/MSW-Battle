@@ -13,7 +13,6 @@ script MatchFlowState extends Logic
     method table Resolve(table facts)
         -- Project observed room and battle facts without calling services or changing tickets.
         local state = facts.state
-        if state == "IN_ROOM" and not facts.inMatchRoom then state = "ROOM_MISMATCH" end
         if facts.instanceRoom and not facts.inMatchRoom and state ~= "RETURNING" then state = "ENTRY_FAILED" end
         if facts.inMatchRoom then
             if facts.admissionFailed then state = "ENTRY_FAILED"
@@ -31,110 +30,109 @@ script MatchFlowState extends Logic
         return snapshot
     end
 
+    method boolean IsEntering(string state)
+        -- These phases all own a pairing, even before the sealed handoff is saved.
+        return state == "SAVING" or state == "COMMITTING" or state == "TRANSFER" or state == "IN_ROOM" or state == "WAITING"
+    end
+
+    method boolean EntryFailed(table snapshot, number now)
+        -- Readiness/diagnostic errors alone do not end an otherwise live admission.
+        if snapshot.entryFailed or snapshot.state == "ENTRY_FAILED" or snapshot.state == "ABORTED" or snapshot.state == "ROOM_MISMATCH" then return true end
+        if not snapshot.opponentFound and not self:IsEntering(snapshot.state) then return false end
+        local reason = snapshot.reasonCode
+        if reason == "HANDOFF_SAVE_FAILED" or reason == "HANDOFF_SEAL_FAILED" or reason == "ROOM_CREATE_FAILED"
+            or reason == "ADMISSION_SAVE_FAILED" or reason == "ROOM_MOVE_FAILED" then return true end
+        return (snapshot.entryDeadline or 0) > 0 and now >= snapshot.entryDeadline
+    end
+
+    method table PresentMatch(table snapshot, table context)
+        -- Shared pre-battle projection. Empty action means no button; clocks are injected in ms.
+        local state = snapshot.state
+        local enabled = not snapshot.busy and not context.pending
+        if state == "RETURNING" then
+            return { text = "正在返回…", label = enabled and "重試返回" or "返回中…", action = "RETURN", enabled = enabled }
+        end
+        if self:EntryFailed(snapshot, context.now) then
+            local label = "停止入場"
+            if context.inMatchRoom then
+                label = (context.originName or "") ~= "" and ("返回 " .. context.originName) or "返回大廳"
+            end
+            return { text = "入場失敗", label = label, action = "RETURN", enabled = enabled }
+        end
+        if snapshot.opponentFound or self:IsEntering(state) then
+            return { text = "配對成功，正在進入戰場", label = "", action = "", enabled = false }
+        end
+        local reason = snapshot.reasonCode
+        local queueError = reason == "CANCEL_FAILED" or reason == "CANCEL_SAVE_FAILED" or reason == "QUEUE_SERVICE_FAILED"
+            or reason == "RESERVATION_SAVE_FAILED" or reason == "QUEUE_RENEW_SAVE_FAILED" or reason == "STALE_QUEUE_CLEANUP_FAILED"
+        if state == "CANCELLING" or (state == "CANCELLED" and snapshot.busy) or (context.pending and context.pendingAction == "CANCEL") then
+            return { text = "正在取消配對…", label = "", action = "", enabled = false }
+        end
+        if state == "QUEUE_ERROR" or state == "CANCELLED" or queueError then
+            return { text = "配對已停止，請取消後重新配對", label = "取消配對", action = "CANCEL", enabled = enabled }
+        end
+        if state == "QUEUED" or state == "RENEWING" then
+            local deadline = snapshot.guardAt or 0
+            if deadline > 0 and context.now >= deadline then
+                return { text = "即將開戰…", label = "", action = "", enabled = false }
+            end
+            local started = snapshot.started or 0
+            local elapsed = started > 0 and math.max(0, math.floor((context.now - started) / 1000)) or 0
+            local clock = deadline > 0 and ("倒數 " .. tostring(math.ceil((deadline - context.now) / 1000))) or ("已等候 " .. tostring(elapsed))
+            return { text = "配對中 · " .. clock .. " 秒", label = "取消配對", action = "CANCEL", enabled = enabled }
+        end
+        return { text = "", label = "", action = "", enabled = false }
+    end
+
     method table Present(table snapshot, table context)
-        -- A single decision supplies both the visible control and its dispatched action.
-        local elapsed = snapshot.started > 0 and math.max(0, math.floor((context.now - snapshot.started) / 1000)) or 0
-        local text = "選好已儲存的出戰隊伍後，即可開始配對"
-        local label = "開始配對"
-        local formation = context.formation
-        local idleBlocked = false
-        local cancelStates = { QUEUED = true, RENEWING = true, CANCELLING = true, CANCELLED = true, QUEUE_ERROR = true, SAVING = true }
-        local canCancel = cancelStates[snapshot.state] == true
-        if snapshot.state == "QUEUED" then
-            text = "正在尋找對手 · 已等候 " .. tostring(elapsed) .. " 秒"
-            label = "取消配對"
-        elseif snapshot.state == "RENEWING" then
-            text = "正在尋找對手 · 已等候 " .. tostring(elapsed) .. " 秒"
-            label = "取消配對"
-        elseif snapshot.state == "QUEUE_ERROR" then
-            text = "配對已停止，請取消後重新配對。"
-            label = "取消配對"
-        elseif snapshot.state == "CANCELLING" or snapshot.state == "CANCELLED" then
-            text = "正在取消配對，請稍候。"
-            label = "重試取消"
-        elseif snapshot.state == "SAVING" then
-            text = "已找到對手，正在確認入場資料"
-            label = "取消配對"
-        elseif snapshot.state == "COMMITTING" or snapshot.state == "TRANSFER" then
-            text = "配對成功，正在進入對局房間"
-            label = "取消入場"
-        elseif snapshot.state == "IN_ROOM" then
-            text = "已進入對局房間 · 玩家 " .. tostring(snapshot.players) .. " / 2"
-            label = "返回大廳"
-        elseif snapshot.state == "WAITING" then
-            text = "正在確認雙方入場與本局隊伍 · 玩家 " .. tostring(snapshot.players) .. " / 2"
-            label = "取消入場"
-        elseif snapshot.state == "BATTLE" then
+        -- The lobby owns idle and result/return controls; pre-battle states share the town's rule.
+        local state = snapshot.state
+        local blocked = snapshot.busy or context.pending or context.editBusy or context.unconfirmed or context.confirming
+        local text, label, action = "", "", ""
+        if state == "BATTLE" then
             text = "自動戰鬥中，戰鬥結束後可返回大廳"
-            label = "戰鬥進行中…"
-        elseif snapshot.state == "RESULT_WIN" or snapshot.state == "RESULT_LOSE" or snapshot.state == "RESULT_DRAW" then
-            text = "可返回大廳繼續整備或再次配對"
-            label = "返回大廳"
-        elseif snapshot.state == "ENTRY_FAILED" then
-            text = "對局入場未完成，請返回大廳重新配對"
-            label = "返回大廳"
-        elseif snapshot.state == "ABORTED" then
-            text = "本場對局已中止，請返回大廳重新配對"
-            label = "返回大廳"
-        elseif snapshot.state == "ROOM_MISMATCH" then
-            text = "對局狀態需要恢復，請返回大廳重試"
-            label = "返回大廳"
-        elseif snapshot.state == "RETURNING" then
-            text = "正在返回大廳並還原已儲存隊伍"
-            label = snapshot.busy and "返回中…" or "重試返回"
-        end
-        if snapshot.reasonCode == "NEED_LOADED_VALID_ACTIVE_FORMATION_AND_NO_PENDING_SAVE" then text = "請先儲存隊伍並設為出戰，儲存完成後再試。" end
-        if snapshot.reasonCode == "MONSTER_LEVELS_READ_FAILED" then text = "讀取怪物等級失敗，請稍後重新配對。" end
-        if snapshot.reasonCode == "MATCHMAKING_NOT_CONFIGURED" then text = "目前無法配對，請稍後再試。" end
-        if snapshot.reasonCode == "DISABLED_OR_NOT_PUBLISHED" then text = "配對尚未開放，或此帳號未獲授權" end
-        if snapshot.reasonCode == "DUPLICATE_PROFILE" then text = "同一帳號無法互相配對，請使用不同模擬玩家" end
-        if snapshot.reasonCode == "HANDOFF_SAVE_FAILED" or snapshot.reasonCode == "HANDOFF_SEAL_FAILED" then text = "入場資料儲存失敗，可取消入場後重試" end
-        if snapshot.reasonCode == "READINESS_FAILED" then text = "尚未完成入場，請按「重試入場」。" label = "重試入場" end
-        if snapshot.reasonCode == "RESTORE_RETRY_REQUIRED" then text = "隊伍尚未完成還原，請重試返回" end
-        if snapshot.reasonCode == "RETURN_MOVE_FAILED" or snapshot.reasonCode == "RETURN_RETRY_MOVE_FAILED" or snapshot.reasonCode == "ROOM_MISMATCH_RETURN_FAILED" then text = "返回大廳失敗，已儲存隊伍仍保留；請重試返回" label = "重試返回" end
-        if snapshot.reasonCode == "RETURN_SAVE_FAILED" or snapshot.reasonCode == "ROOM_MISMATCH_SAVE_FAILED" then text = "返回資料儲存失敗，請重試返回" label = "重試返回" end
-        if snapshot.reasonCode == "ROOM_MOVE_FAILED" then text = "進入戰場失敗，可取消入場後重新配對" end
-        if snapshot.reasonCode == "ROOM_CREATE_FAILED" or snapshot.reasonCode == "ADMISSION_SAVE_FAILED" then text = "戰場建立或入場資料儲存失敗，可取消入場後重試" end
-        if snapshot.reasonCode == "RESERVATION_SAVE_FAILED" then text = "配對資料儲存未完成，請取消後重新配對" end
-        if snapshot.reasonCode == "CANCEL_FAILED" then text = "取消失敗，請重試取消；完成前暫停整備" label = "重試取消" end
-        if snapshot.reasonCode == "CANCEL_SAVE_FAILED" then text = "取消尚未完成，請重試取消；完成前暫停整備" label = "重試取消" end
-        if snapshot.reasonCode == "LOBBY_ONLY" then text = "請先完成編輯並返回大廳，再開始配對" end
-        if snapshot.reasonCode == "TRANSFER_EXPIRED" then text = "入場已逾時，正在還原已儲存的隊伍" end
-        -- A sent return outranks the previous failure until the server answers.
-        if context.pending and (snapshot.state == "RETURNING" or string.sub(snapshot.state, 1, 7) == "RESULT_") then
-            text = "正在返回大廳…"
-            label = "返回中…"
-        end
-        if context.pending and snapshot.state == "IDLE" then text = "正在確認配對狀態…" label = "處理中…" end
-        if context.pending and canCancel then
-            text = "正在確認取消結果，完成前暫停整備…" label = "取消中…"
-        end
-        if snapshot.state == "IDLE" and (snapshot.reasonCode == "RETURNED" or snapshot.reasonCode == "CANCELLED") then text = "已返回或取消，可以重新開始配對" end
-        if snapshot.state == "IDLE" then
-            local ready = context.ready
-            idleBlocked = not ready or formation.pending == true
-            if not ready then
-                text = "正在載入隊伍；若持續沒有回應，請按「重新讀取」。"
-                label = "等待讀取"
-            elseif formation.pending then
-                text = "正在儲存或設定出戰，請稍候。"
-                label = "處理中…"
+        elseif state == "RETURNING" or string.sub(state, 1, 7) == "RESULT_" then
+            text = state == "RETURNING" and "正在返回大廳並還原已儲存隊伍" or "可返回大廳繼續整備或再次配對"
+            label = state == "RETURNING" and (snapshot.busy and "返回中…" or "重試返回") or "返回大廳"
+            action = "RETURN"
+            local reason = snapshot.reasonCode
+            if reason == "RESTORE_RETRY_REQUIRED" then text = "隊伍尚未完成還原，請重試返回" end
+            if reason == "RETURN_MOVE_FAILED" or reason == "RETURN_RETRY_MOVE_FAILED" or reason == "ROOM_MISMATCH_RETURN_FAILED" then
+                text, label = "返回大廳失敗，已儲存隊伍仍保留；請重試返回", "重試返回"
+            end
+            if reason == "RETURN_SAVE_FAILED" or reason == "ROOM_MISMATCH_SAVE_FAILED" then
+                text, label = "返回資料儲存失敗，請重試返回", "重試返回"
+            end
+            if context.pending then text, label = "正在返回大廳…", "返回中…" end
+        elseif state == "IDLE" then
+            text, label, action = "選好已儲存的出戰隊伍後，即可開始配對", "開始配對", "QUEUE"
+            local reason = snapshot.reasonCode
+            if reason == "NEED_LOADED_VALID_ACTIVE_FORMATION_AND_NO_PENDING_SAVE" then text = "請先儲存隊伍並設為出戰，儲存完成後再試。" end
+            if reason == "MONSTER_LEVELS_READ_FAILED" then text = "讀取怪物等級失敗，請稍後重新配對。" end
+            if reason == "MATCHMAKING_NOT_CONFIGURED" then text = "目前無法配對，請稍後再試。" end
+            if reason == "DISABLED_OR_NOT_PUBLISHED" then text = "配對尚未開放，或此帳號未獲授權" end
+            if reason == "DUPLICATE_PROFILE" then text = "同一帳號無法互相配對，請使用不同模擬玩家" end
+            if reason == "RESERVATION_SAVE_FAILED" then text = "配對資料儲存未完成，請稍後再試" end
+            if reason == "LOBBY_ONLY" then text = "請先完成編輯並返回大廳，再開始配對" end
+            if reason == "RETURN_COMPLETED" or reason == "RETURNED" or reason == "CANCELLED" then text = "已返回或取消，可以重新開始配對" end
+            if context.pending then text, label = "正在確認配對狀態…", "處理中…" end
+            if not context.ready then
+                text, label, blocked = "正在載入隊伍；若持續沒有回應，請按「重新讀取」。", "等待讀取", true
+            elseif context.formation.pending then
+                text, label, blocked = "正在儲存或設定出戰，請稍候。", "處理中…", true
             elseif not context.hasActive then
                 text = "請先放置 1～6 個單位，儲存後設為出戰。"
-                local inLobby = context.inLobby
-                label = inLobby and "前往整備" or "請先儲存並設為出戰"
-                idleBlocked = idleBlocked or not inLobby
+                label = context.inLobby and "前往整備" or "請先儲存並設為出戰"
+                action = "PREPARE"
+                blocked = blocked or not context.inLobby
             end
+        else
+            local view = self:PresentMatch(snapshot, context)
+            view.enabled = view.enabled and not blocked
+            view.allowsFormationActions = false
+            return view
         end
-        local known = { IDLE = true, QUEUED = true, RENEWING = true, QUEUE_ERROR = true, CANCELLING = true, CANCELLED = true, SAVING = true, COMMITTING = true, TRANSFER = true, IN_ROOM = true, WAITING = true, ENTRY_FAILED = true, ABORTED = true, ROOM_MISMATCH = true, RETURNING = true, BATTLE = true, RESULT_WIN = true, RESULT_LOSE = true, RESULT_DRAW = true }
-        local action = "QUEUE"
-        if snapshot.reasonCode == "READINESS_FAILED" then action = "STATUS"
-        elseif canCancel then action = "CANCEL"
-        elseif snapshot.state == "IDLE" and not context.hasActive then action = "PREPARE"
-        elseif snapshot.state ~= "IDLE" then action = "RETURN" end
-        local enabled = known[snapshot.state] == true and snapshot.state ~= "BATTLE" and not snapshot.busy and not context.pending and not idleBlocked
-            and not context.editBusy and not context.unconfirmed and not context.confirming
-        return { text = text, label = label, action = action, enabled = enabled,
-            allowsFormationActions = snapshot.state == "IDLE" and not snapshot.busy and not context.pending }
+        return { text = text, label = label, action = action, enabled = action ~= "" and not blocked,
+            allowsFormationActions = state == "IDLE" and not snapshot.busy and not context.pending }
     end
 end
