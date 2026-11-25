@@ -46,14 +46,14 @@ test('the attack panel and queue controls are authored in the faction war UI', (
 
 test('FactionWarAttack owns options, queueing, settlement and answers only authenticated callers', () => {
   const attack = source('RootDesk/MyDesk/Formations/FactionWarAttack.mlua');
-  for (const name of ['IsCapital', 'Targets', 'Deduction', 'Settle', 'RequestOptions', 'RequestAttack', 'IsEngaged']) {
+  for (const name of ['Targets', 'Settle', 'RequestOptions', 'RequestAttack', 'IsEngaged']) {
     assert.ok(methods(attack).includes(name), `${name} exists`);
   }
   for (const name of ['RequestOptions', 'RequestAttack']) {
     assert.match(attack, new RegExp(`@ExecSpace\\("Server"\\)\\n    method void ${name}\\(`), `${name} is the Server RPC`);
     assert.match(body(attack, name), /senderUserId/, `${name} identifies the caller on the server`);
   }
-  assert.match(body(attack, 'Attempt'), /towns\.settled/, 'settlement is deduplicated by match key');
+  assert.match(body(attack, 'Settle'), /_FactionWarTownDocument:Settle\(/, 'town effects are committed by the document');
 });
 
 test('queue tickets carry the origin and target town through every layer', () => {

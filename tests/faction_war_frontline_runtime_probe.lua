@@ -1,6 +1,6 @@
 -- Run in Maker's server_main after refresh and Play. Uses no player or world save data.
 local war = _FactionWar
-local towns = war:InitialTowns()
+local towns = _FactionWarTownDocument:InitialTowns()
 
 assert(towns.nanzih.owner == "RED" and towns.yancheng.owner == "BLUE", "capital owners")
 assert(towns.zuoying.strength == 100 and towns.gushan.strength == 100, "initial town strength")
@@ -13,7 +13,7 @@ towns.gushan.owner = "RED"
 assert(war:FindFrontline("RED", towns) == "gushan", "red must follow the changed front")
 assert(war:FindFrontline("BLUE", towns) == "yancheng", "blue can start from its capital")
 
-towns = war:InitialTowns()
+towns = _FactionWarTownDocument:InitialTowns()
 towns.zuoying.owner = "BLUE"
 assert(war:FindFrontline("RED", towns) == "nanzih", "red can start from its capital")
 assert(war:FindFrontline("BLUE", towns) == "zuoying", "blue must follow the changed front")

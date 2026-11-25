@@ -11,7 +11,6 @@ script FactionWarMapUI extends Logic
     property string ViewPath = "Overlay/Window/Map"
     property integer LinkSlots = 3
     property number BarWidth = 280
-    property integer FullStrength = 100
     property number ArrowBaseY = 60
     property table ArrowBob = { 9, 6, 3, 0 }
 
@@ -61,7 +60,7 @@ script FactionWarMapUI extends Logic
         -- The arrow clip's frames are one image whose pivot moves down 2 px a frame; a UI sprite ignores the pivot,
         -- so the bob is replayed here by moving the arrow on every frame change (ArrowBob, in UI px, per frame).
         self._T.frames = {}
-        for _, id in ipairs(_FactionWar.TownOrder) do
+        for _, id in ipairs(_FactionWarTownDocument.TownOrder) do
             local arrow = self:Ui(self.ViewPath .. "/Content/Towns/" .. id .. "/Arrow")
             if isvalid(arrow) then
                 local key = arrow:ConnectEvent(SpriteGUIAnimPlayerChangeFrameEvent, function(event)
@@ -185,7 +184,7 @@ script FactionWarMapUI extends Logic
         local iconScale = math.min(1, 0.12 + 0.13 * zoom)
         local detail = zoom >= 4
         local boxes = {}
-        for _, id in ipairs(_FactionWar.TownOrder) do
+        for _, id in ipairs(_FactionWarTownDocument.TownOrder) do
             local path = content .. "/Towns/" .. id
             local node = self:Ui(path)
             if isvalid(node) then
@@ -319,8 +318,8 @@ script FactionWarMapUI extends Logic
     @ExecSpace("ClientOnly")
     method void ShowNeutral()
         -- Before the first board arrives every town is grey and every link hidden.
-        for _, id in ipairs(_FactionWar.TownOrder) do
-            self:ShowTown({ id = id, name = _FactionWar.TownNames[id], owner = "", strength = 0, capital = _FactionWarAttack:IsCapital(id) })
+        for _, id in ipairs(_FactionWarTownDocument.TownOrder) do
+            self:ShowTown({ id = id, name = _FactionWarTownDocument.TownNames[id], owner = "", strength = 0, capital = _FactionWarTownDocument:IsCapital(id) })
         end
         self:ShowLinks({})
     end
@@ -363,7 +362,8 @@ script FactionWarMapUI extends Logic
         local node = self.ViewPath .. "/Content/Towns/" .. town.id
         local crest = self:Ui(node .. "/Crest")
         if isvalid(crest) then crest.SpriteGUIRendererComponent.Color = color end
-        local strength = known and (tostring(town.strength) .. "/" .. tostring(self.FullStrength)) or "—"
+        local fullStrength = _FactionWarTownDocument.FullStrength
+        local strength = known and (tostring(town.strength) .. "/" .. tostring(fullStrength)) or "—"
         local label = self:Ui(node .. "/Strength")
         if isvalid(label) then label.TextGUIRendererComponent.Text = "兵力 " .. strength end
         local capital = self:Ui(node .. "/Capital")
@@ -378,7 +378,7 @@ script FactionWarMapUI extends Logic
         if isvalid(value) then value.TextGUIRendererComponent.Text = strength end
         local fill = self:Ui(row .. "/Bar/Fill")
         if isvalid(fill) then
-            local ratio = known and math.max(0, math.min(1, town.strength / self.FullStrength)) or 0
+            local ratio = known and math.max(0, math.min(1, town.strength / fullStrength)) or 0
             fill:SetEnable(ratio > 0)
             fill.UITransformComponent.RectSize = Vector2(self.BarWidth * ratio, fill.UITransformComponent.RectSize.y)
             fill.SpriteGUIRendererComponent.Color = color
@@ -415,7 +415,7 @@ script FactionWarMapUI extends Logic
     @ExecSpace("ClientOnly")
     method void ShowHere()
         -- Mark the town the local player stands in: the arrow on the map, the line in the list.
-        for _, id in ipairs(_FactionWar.TownOrder) do
+        for _, id in ipairs(_FactionWarTownDocument.TownOrder) do
             local arrow = self:Ui(self.ViewPath .. "/Content/Towns/" .. id .. "/Arrow")
             if isvalid(arrow) then arrow:SetEnable(id == self._T.mapName) end
             local mark = self:Ui("Overlay/Window/Side/Rows/" .. id .. "/Here")

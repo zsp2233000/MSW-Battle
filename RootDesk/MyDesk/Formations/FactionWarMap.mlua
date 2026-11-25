@@ -55,7 +55,7 @@ script FactionWarMap extends Logic
         -- Pairs of towns joined by an authored gate in either direction; the gates never move, so this is worked out once.
         if self._T.links ~= nil then return self._T.links end
         local links = {}
-        local order = _FactionWar.TownOrder
+        local order = _FactionWarTownDocument.TownOrder
         for i = 1, #order do
             for j = i + 1, #order do
                 if isvalid(_FactionWar:FindGate(order[i], order[j])) or isvalid(_FactionWar:FindGate(order[j], order[i])) then
@@ -72,9 +72,9 @@ script FactionWarMap extends Logic
         -- What the map shows of the town document: owner and strength per town in map order, the links, and a signature to tell boards apart.
         local list = {}
         local parts = {}
-        for _, id in ipairs(_FactionWar.TownOrder) do
+        for _, id in ipairs(_FactionWarTownDocument.TownOrder) do
             local town = towns[id]
-            table.insert(list, { id = id, name = _FactionWar.TownNames[id], owner = town.owner, strength = town.strength, capital = _FactionWarAttack:IsCapital(id) })
+            table.insert(list, { id = id, name = _FactionWarTownDocument.TownNames[id], owner = town.owner, strength = town.strength, capital = _FactionWarTownDocument:IsCapital(id) })
             table.insert(parts, id .. ":" .. town.owner .. ":" .. tostring(town.strength))
         end
         return { towns = list, links = self:Links(), signature = table.concat(parts, "|") }
@@ -103,7 +103,7 @@ script FactionWarMap extends Logic
         local answering = self._T.waiting
         self._T.inflight = answering
         self._T.waiting = {}
-        _FactionWar:ReadTowns(function(towns)
+        _FactionWarTownDocument:Read(function(towns)
             if not self._T.reading or self._T.readStarted ~= started then return end
             self._T.reading = false
             local ok, failure = pcall(function() self:Deliver(towns, answering) end)

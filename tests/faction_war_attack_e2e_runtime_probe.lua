@@ -61,13 +61,13 @@ local ok, reason = pcall(function()
             assert(await(function() return not _FactionWarAttack:IsEngaged(user.PlayerComponent.UserId) end), "unlocked")
         end
         local towns, done = nil, false
-        _FactionWar:ReadTowns(function(result) towns, done = result, true end)
+        _FactionWarTownDocument:Read(function(result) towns, done = result, true end)
         assert(await(function() return done end), "towns read")
         assert(towns.gushan.strength == 80 and towns.zuoying.strength == 100 and towns.gushan.owner == "BLUE", "Gushan 100 -> 80 only")
         assert(towns.nanzih.strength == 100 and towns.yancheng.strength == 100, "capitals untouched")
         log("[VRF][WarE2E] E2E PASS")
     elseif STEP == 5 then
-        local code = _DataStorageService:DeleteGlobalDataStorageAndWait(_FactionWar.TownStorageName)
+        local code = _DataStorageService:DeleteGlobalDataStorageAndWait(_FactionWarTownDocument.TownStorageName)
         log("[VRF][WarE2E] CLEANUP town storage deleted code=" .. tostring(code))
     end
 end)

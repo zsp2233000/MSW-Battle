@@ -67,14 +67,14 @@ local ok, reason = pcall(function()
         end), "returned to the departure town")
         assert(await(function() return not _FactionWarAttack:IsEngaged(userId) end), "unlocked")
         local towns, done = nil, false
-        _FactionWar:ReadTowns(function(result) towns, done = result, true end)
+        _FactionWarTownDocument:Read(function(result) towns, done = result, true end)
         assert(await(function() return done end), "towns read")
         log("[VRF][GuardE2E] Gushan=" .. tostring(towns.gushan.strength) .. " Zuoying=" .. tostring(towns.zuoying.strength))
         assert(towns.zuoying.strength == 100 and towns.nanzih.strength == 100 and towns.yancheng.strength == 100, "only the guarded town may change")
         assert(towns.gushan.strength == 90 or towns.gushan.strength == 100, "a guard win takes exactly 10, anything else takes nothing")
         log("[VRF][GuardE2E] E2E PASS")
     elseif STEP == 6 then
-        local code = _DataStorageService:DeleteGlobalDataStorageAndWait(_FactionWar.TownStorageName)
+        local code = _DataStorageService:DeleteGlobalDataStorageAndWait(_FactionWarTownDocument.TownStorageName)
         log("[VRF][GuardE2E] CLEANUP town storage deleted code=" .. tostring(code))
     end
 end)

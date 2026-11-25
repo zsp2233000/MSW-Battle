@@ -46,7 +46,7 @@ local function id(user)
 end
 local function readTowns()
     local towns, done = nil, false
-    _FactionWar:ReadTowns(function(result) towns, done = result, true end)
+    _FactionWarTownDocument:Read(function(result) towns, done = result, true end)
     assert(await(function() return done end, 100), "towns read")
     return towns
 end
@@ -88,10 +88,10 @@ local ok, reason = pcall(function()
             await(function() return saved end, 100)
         end
         -- Gushan one win from falling; the guard must not claim a queued player before the two human matches are made.
-        local towns = _FactionWar:InitialTowns()
+        local towns = _FactionWarTownDocument:InitialTowns()
         towns.gushan.strength = 20
         local written = false
-        _FactionWar:WriteTowns(towns, function(saved) written = saved end)
+        _FactionWarTownDocument:WriteTowns(towns, function(saved) written = saved end)
         assert(await(function() return written end, 100), "Gushan seeded at 20")
         _FactionWarGuard.WaitSeconds = 600
         assert(_FactionWar:Move(r1, "zuoying") and _FactionWar:Move(r2, "zuoying") and _FactionWar:Move(b1, "gushan") and _FactionWar:Move(b2, "gushan") and _FactionWar:Move(idle, "gushan"), "moves dispatched")
@@ -129,7 +129,7 @@ local ok, reason = pcall(function()
         end, 2000), "Gushan changed flag within 200 s")
         wait(5)
         towns = readTowns()
-        assert(towns.gushan.strength == 100 and _FactionWar:EpochOf(towns, "gushan") == 1, "refilled to 100 and counted once, got " .. tostring(towns.gushan.strength) .. "/" .. tostring(_FactionWar:EpochOf(towns, "gushan")))
+        assert(towns.gushan.strength == 100 and _FactionWarTownDocument:EpochOf(towns, "gushan") == 1, "refilled to 100 and counted once, got " .. tostring(towns.gushan.strength) .. "/" .. tostring(_FactionWarTownDocument:EpochOf(towns, "gushan")))
         assert(#towns.settled == 1, "only one match left a record, got " .. tostring(#towns.settled))
         assert(towns.zuoying.strength == 100 and towns.zuoying.owner == "RED" and towns.nanzih.strength == 100 and towns.yancheng.strength == 100 and towns.yancheng.owner == "BLUE", "no other town moved")
         assert(await(function() return idle.CurrentMapName == "yancheng" end, 300), "the idle blue player was sent to Yancheng")
@@ -189,10 +189,10 @@ local ok, reason = pcall(function()
         r1, b1, r2, b2 = users.wp2611, users.wp2612, users.wp2613, users.wp2614
         local red = r1.CurrentMapName == "zuoying" and r1 or r2
         local blue = b1
-        local seeded = _FactionWar:InitialTowns()
+        local seeded = _FactionWarTownDocument:InitialTowns()
         seeded.gushan.strength = 60
         local written = false
-        _FactionWar:WriteTowns(seeded, function(saved) written = saved end)
+        _FactionWarTownDocument:WriteTowns(seeded, function(saved) written = saved end)
         assert(await(function() return written end, 100), "Gushan reset to blue/60")
         assert(_FactionWar:Move(blue, "gushan") and await(function() return blue.CurrentMapName == "gushan" end), "the blue player went to Gushan")
         _FactionWarAttack:AttackFor(id(red), "gushan")
@@ -203,11 +203,11 @@ local ok, reason = pcall(function()
         assert(await(function() return ticketData(red) ~= nil and ticketData(red).match ~= nil end, 300), "the red ticket holds its pairing")
         assert(ticketData(red).match.awayEpoch == 0, "the pairing was stamped with Gushan at count zero")
         -- While the match is on, Gushan is taken and taken back: blue again, strength 60, counted twice.
-        local retaken = _FactionWar:InitialTowns()
+        local retaken = _FactionWarTownDocument:InitialTowns()
         retaken.gushan.strength = 60
         retaken.gushan.e = 2
         written = false
-        _FactionWar:WriteTowns(retaken, function(saved) written = saved end)
+        _FactionWarTownDocument:WriteTowns(retaken, function(saved) written = saved end)
         assert(await(function() return written end, 100), "Gushan rewritten as taken and taken back")
         log("[VRF][ContestE2E] ROUND 2 QUEUED red=" .. red.PlayerComponent.ProfileCode .. " blue=" .. blue.PlayerComponent.ProfileCode .. "; wait for the result, run STEP 4 inside the new match room, then STEP 8")
     elseif STEP == 8 then
@@ -218,12 +218,12 @@ local ok, reason = pcall(function()
             return isvalid(b1) and b1.CurrentMapName == "gushan" and red ~= nil and isvalid(red)
         end, 1500), "the red player stayed in Zuoying and the blue player stayed in Gushan (its own town again)")
         local towns = readTowns()
-        assert(towns.gushan.owner == "BLUE" and towns.gushan.strength == 60 and _FactionWar:EpochOf(towns, "gushan") == 2, "no strength was deducted: Gushan is still blue, 60, counted twice")
+        assert(towns.gushan.owner == "BLUE" and towns.gushan.strength == 60 and _FactionWarTownDocument:EpochOf(towns, "gushan") == 2, "no strength was deducted: Gushan is still blue, 60, counted twice")
         assert(towns.zuoying.strength == 100 and towns.nanzih.strength == 100 and towns.yancheng.strength == 100, "no town lost strength")
         log("[VRF][ContestE2E] LANDING2 PASS")
     elseif STEP == 9 then
         _FactionWarGuard.WaitSeconds = 10
-        local code = _DataStorageService:DeleteGlobalDataStorageAndWait(_FactionWar.TownStorageName)
+        local code = _DataStorageService:DeleteGlobalDataStorageAndWait(_FactionWarTownDocument.TownStorageName)
         log("[VRF][ContestE2E] CLEANUP town storage deleted code=" .. tostring(code))
     end
 end)

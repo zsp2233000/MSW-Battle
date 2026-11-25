@@ -159,8 +159,8 @@ script FactionWarUI extends Logic
         if not self:IsCurrentTown(town) then return end
         local label = self:Ui("TownHUD/Strength")
         if not isvalid(label) then return end
-        local capital = _FactionWarAttack:IsCapital(town)
-        label.TextGUIRendererComponent.Text = _FactionWar.TownNames[town] .. (capital and "（主城）" or "") .. "  ｜  兵力 " .. strength
+        local capital = _FactionWarTownDocument:IsCapital(town)
+        label.TextGUIRendererComponent.Text = _FactionWarTownDocument.TownNames[town] .. (capital and "（主城）" or "") .. "  ｜  兵力 " .. strength
         log("[VRF][FactionWar] hud town=" .. town .. " strength=" .. strength)
     end
 
@@ -257,7 +257,7 @@ script FactionWarUI extends Logic
         -- Choose the status text and the single action a queued snapshot offers; no widget is touched here.
         local waiting = { QUEUED = true, RENEWING = true, QUEUE_ERROR = true, SAVING = true }
         local entering = { COMMITTING = true, TRANSFER = true, IN_ROOM = true, WAITING = true }
-        local name = _FactionWar.TownNames[snapshot.target] or snapshot.target
+        local name = _FactionWarTownDocument.TownNames[snapshot.target] or snapshot.target
         local text = "進攻 " .. name
         local elapsed = snapshot.started > 0 and math.max(0, math.floor((DateTime.UtcNow.Elapsed - snapshot.started) / self.MillisecondsPerSecond)) or 0
         -- The guard comes at the server's deadline; the countdown never shows a negative second.

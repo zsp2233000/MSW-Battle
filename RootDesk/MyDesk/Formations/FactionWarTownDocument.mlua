@@ -1,0 +1,328 @@
+@Logic
+script FactionWarTownDocument extends Logic
+
+    property string TownStorageName = "CountryWarV1"
+    property string TownStorageKey = "Towns"
+    property table TownOrder = { "nanzih", "zuoying", "gushan", "yancheng" }
+    property table TownNames = { nanzih = "楠梓", zuoying = "左營", gushan = "鼓山", yancheng = "鹽埕" }
+    property table CapitalByFaction = { RED = "nanzih", BLUE = "yancheng" }
+    property integer FullStrength = 100
+    property integer HumanDeduction = 20
+    property integer GuardDeduction = 10
+    property integer SettledHistory = 20
+    property integer SettleAttempts = 4
+    property number SettleRetrySeconds = 1
+    property number ConflictRetrySeconds = 0.3
+    property number ConflictBackoffCap = 2
+    property number ConflictBudgetSeconds = 20
+
+    @ExecSpace("ServerOnly")
+    method void OnBeginPlay()
+        -- In-flight settlements and retry timers belong to the room that received the battle result.
+        self._T.settling = {}
+        self._T.timers = {}
+        log("[VRF][FactionWarTownDocument] ready")
+    end
+
+    method boolean IsTown(string town)
+        -- Identify the four towns on both the server and the client.
+        return self.TownNames[town] ~= nil
+    end
+
+    method string CapitalOf(string faction)
+        -- An unknown faction has no capital.
+        return self.CapitalByFaction[faction] or ""
+    end
+
+    method boolean IsCapital(string town)
+        -- A capital can be targeted but never falls or loses strength.
+        return town == self:CapitalOf("RED") or town == self:CapitalOf("BLUE")
+    end
+
+    method string Landing(string faction, string preferred, any towns)
+        -- Keep the preferred town only while the faction owns it; otherwise go to its capital.
+        if type(towns) == "table" and type(towns[preferred]) == "table" and towns[preferred].owner == faction then return preferred end
+        return self:CapitalOf(faction)
+    end
+
+    method boolean CanPass(string faction, string origin, string destination, table towns)
+        -- Gate adjacency is checked by the caller; this checks ownership of both endpoints.
+        return towns[origin].owner == faction and towns[destination].owner == faction
+    end
+
+    method number EpochOf(any towns, string id)
+        -- Older documents omit the change count and read as zero.
+        if type(towns) ~= "table" or type(towns[id]) ~= "table" then return 0 end
+        return towns[id].e or 0
+    end
+
+    method table InitialTowns()
+        -- Build a fresh document for a world with no town save yet.
+        return {
+            [self:CapitalOf("RED")] = { owner = "RED", strength = self.FullStrength },
+            zuoying = { owner = "RED", strength = self.FullStrength },
+            gushan = { owner = "BLUE", strength = self.FullStrength },
+            [self:CapitalOf("BLUE")] = { owner = "BLUE", strength = self.FullStrength }
+        }
+    end
+
+    @ExecSpace("ServerOnly")
+    method table DecodeTowns(string raw)
+        -- Reject unreadable town data rather than silently treating it as a fresh world.
+        local ok, towns = pcall(function() return _HttpService:JSONDecode(raw) end)
+        if not ok or type(towns) ~= "table" then return nil end
+        for _, id in ipairs(self.TownOrder) do
+            local town = towns[id]
+            if type(town) ~= "table" or (town.owner ~= "RED" and town.owner ~= "BLUE")
+                or type(town.strength) ~= "number" or town.strength % 1 ~= 0
+                or town.strength < 1 or town.strength > self.FullStrength
+                or (town.e ~= nil and (type(town.e) ~= "number" or town.e % 1 ~= 0 or town.e < 0)) then return nil end
+        end
+        for faction, id in pairs(self.CapitalByFaction) do
+            if towns[id].owner ~= faction or towns[id].strength ~= self.FullStrength then return nil end
+        end
+        return towns
+    end
+
+    method string StorageOwner()
+        -- Address the world-wide document through the shared storage seam.
+        return _FormationStorage.GlobalPrefix .. self.TownStorageName
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Read(any complete)
+        -- Deliver a town document or nil on failure. Stored bytes stay inside the settlement path.
+        self:ReadTownsRaw(function(towns, raw) complete(towns) end)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void ReadTownsRaw(any complete)
+        -- Keep the exact bytes for a subsequent CAS; nil bytes on a valid board mean the key is absent.
+        _FormationStorage:Read(self:StorageOwner(), self.TownStorageKey, function(code, key, raw)
+            if code == 1000002 or (code == 0 and raw == nil) then
+                complete(self:InitialTowns(), nil)
+            elseif code == 0 then
+                local towns = self:DecodeTowns(raw)
+                complete(towns, towns ~= nil and raw or nil)
+            else
+                complete(nil, nil)
+            end
+        end)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void SwapTowns(any expected, table towns, any complete)
+        -- Match the exact bytes read; the shared seam guards only creation of an absent document.
+        _FormationStorage:Swap(self:StorageOwner(), self.TownStorageKey, expected or "", _HttpService:JSONEncode(towns), function(code)
+            local result = code == 0 and "OK" or ((code == 2000000 or code == 1000007) and "CONFLICT" or "FAILED")
+            log("[VRF][FactionWar] swap code=" .. tostring(code) .. " result=" .. result)
+            complete(result)
+        end)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void WriteTowns(table towns, any complete)
+        -- Fixture setup only. Actual battle results never replace a document without a comparison.
+        _FormationStorage:WriteMakerGlobalFixture(self:StorageOwner(), self.TownStorageKey, _HttpService:JSONEncode(towns), complete)
+    end
+
+    method integer Deduction(string target, string result, any kind)
+        -- Only a win against a non-capital costs strength; guard and human wins cost different amounts.
+        if result ~= "WIN" or self:IsCapital(target) then return 0 end
+        return kind == "GUARD" and self.GuardDeduction or self.HumanDeduction
+    end
+
+    method table BattleEffect(table battle)
+        -- Normalize the battle once, including cases that need no storage read at all.
+        local effect = { matchKey = battle.matchKey, home = battle.home, away = battle.away, snapshot = battle.snapshot,
+            winner = "", loser = "", amount = 0 }
+        if effect.matchKey == "" or not self:IsTown(effect.home) or not self:IsTown(effect.away) or effect.home == effect.away then
+            effect.status = "SKIPPED"
+            return effect
+        end
+        if battle.result == "WIN" then
+            effect.winner, effect.loser = effect.home, effect.away
+        elseif battle.result == "LOSE" and battle.kind ~= "GUARD" then
+            effect.winner, effect.loser = effect.away, effect.home
+        end
+        if effect.winner ~= "" then effect.amount = self:Deduction(effect.loser, "WIN", battle.kind) end
+        if effect.amount == 0 then effect.status = "NO_CHANGE" end
+        return effect
+    end
+
+    method boolean ChangedSince(any snapshot, string home, string away, table towns)
+        -- Even a recaptured town has a different count; unstamped battles keep the old same-owner check.
+        if type(snapshot) ~= "table" or type(snapshot.home) ~= "number" or type(snapshot.away) ~= "number" then return false end
+        return self:EpochOf(towns, home) ~= snapshot.home or self:EpochOf(towns, away) ~= snapshot.away
+    end
+
+    method any OutcomeFrom(any towns, string matchKey)
+        -- Read what this match did, even in a different room; a legacy bare match key only proves it settled.
+        if type(towns) ~= "table" or type(towns.settled) ~= "table" or matchKey == "" then return nil end
+        for _, entry in ipairs(towns.settled) do
+            if (type(entry) == "table" and tostring(entry.k) or tostring(entry)) == matchKey then
+                if type(entry) ~= "table" then return { status = "DUPLICATE", winner = "", loser = "", strength = 0, owner = "", flipped = false } end
+                local owner = entry.o or ""
+                return { status = "DUPLICATE", winner = entry.w or "", loser = entry.l or "", strength = entry.s or 0, owner = owner, flipped = owner ~= "" }
+            end
+        end
+        return nil
+    end
+
+    method table Outcome(table effect, string status, any record)
+        -- Use the submitted battle sides, and the committed record for strength and capture when present.
+        return { status = status, winner = effect.winner, loser = effect.loser, amount = effect.amount,
+            strength = record and record.strength or 0, flipped = record ~= nil and record.flipped == true,
+            owner = record and record.owner or "", conflicts = 0 }
+    end
+
+    method table Apply(any towns, table battle)
+        -- Pure settlement: input is never changed. A non-nil decision.document is the proposed single replacement.
+        -- battle = { matchKey, home, away, result, kind, snapshot? }; decision = { document?, outcome, detail? }.
+        return self:ApplyEffect(towns, self:BattleEffect(battle))
+    end
+
+    method table ApplyEffect(any towns, table effect)
+        -- Decide on one decoded document. Duplicates precede the stamp check because a capture changes its own stamp.
+        if effect.status ~= nil then return { outcome = self:Outcome(effect, effect.status, nil) } end
+        if type(towns) ~= "table" or (towns.settled ~= nil and type(towns.settled) ~= "table") then
+            return { outcome = self:Outcome(effect, "FAILED", nil) }
+        end
+        local prior = self:OutcomeFrom(towns, effect.matchKey)
+        if prior ~= nil then return { outcome = self:Outcome(effect, "DUPLICATE", prior) } end
+        local winner, loser = towns[effect.winner], towns[effect.loser]
+        if self:ChangedSince(effect.snapshot, effect.home, effect.away, towns) then
+            return { outcome = self:Outcome(effect, "EXEMPT", { strength = loser.strength }) }
+        end
+        if winner.owner == loser.owner then return { outcome = self:Outcome(effect, "SKIPPED", nil) } end
+
+        local updated = { settled = {} }
+        for _, id in ipairs(self.TownOrder) do
+            local town = towns[id]
+            updated[id] = { owner = town.owner, strength = town.strength, e = town.e }
+        end
+        for _, entry in ipairs(towns.settled or {}) do
+            if type(entry) == "table" then
+                local copy = {}
+                for key, value in pairs(entry) do copy[key] = value end
+                table.insert(updated.settled, copy)
+            else
+                table.insert(updated.settled, entry)
+            end
+        end
+        local remaining = loser.strength - effect.amount
+        local flipped = remaining <= 0
+        local owner = flipped and winner.owner or ""
+        local strength = flipped and self.FullStrength or remaining
+        updated[effect.loser].strength = strength
+        if flipped then
+            updated[effect.loser].owner = owner
+            updated[effect.loser].e = self:EpochOf(towns, effect.loser) + 1
+        end
+        table.insert(updated.settled, { k = effect.matchKey, w = effect.winner, l = effect.loser, s = strength, o = owner })
+        while #updated.settled > self.SettledHistory do table.remove(updated.settled, 1) end
+        return { document = updated, detail = strength,
+            outcome = self:Outcome(effect, "SAVED", { strength = strength, owner = owner, flipped = flipped }) }
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean IsSettling(string matchKey)
+        -- Landing can wait for this room's in-flight result without knowing how it retries.
+        return self._T.settling[matchKey] ~= nil
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Settle(table battle, any complete)
+        -- Commit one battle through the storage seam. complete(status, detail, outcome) runs once unless it is already in flight.
+        local operation = self:BattleEffect(battle)
+        if operation.status ~= nil then
+            complete(operation.status, nil, self:Outcome(operation, operation.status, nil))
+            return
+        end
+        if self:IsSettling(operation.matchKey) then return end
+        operation.started = DateTime.UtcNow.Elapsed
+        operation.conflicts = 0
+        operation.failures = 0
+        operation.complete = complete
+        self._T.settling[operation.matchKey] = operation
+        self:Attempt(operation)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Finish(table operation, table decision)
+        -- Clear the in-flight slot before publishing the final decision; ignore late callbacks after shutdown.
+        if self._T.settling[operation.matchKey] ~= operation then return end
+        self._T.settling[operation.matchKey] = nil
+        local outcome = decision.outcome
+        outcome.conflicts = operation.conflicts
+        operation.complete(outcome.status, decision.detail, outcome)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Attempt(table operation)
+        -- Recompute from the latest bytes after every lost race or uncertain failure.
+        if self._T.settling[operation.matchKey] ~= operation then return end
+        self:ReadTownsRaw(function(towns, raw)
+            if self._T.settling[operation.matchKey] ~= operation then return end
+            local decision = self:ApplyEffect(towns, operation)
+            if decision.outcome.status == "FAILED" then
+                self:Retry(operation, false)
+            elseif decision.document ~= nil then
+                self:SwapTowns(raw, decision.document, function(result)
+                    if result == "OK" then self:Finish(operation, decision)
+                    else self:Retry(operation, result == "CONFLICT") end
+                end)
+            else
+                if decision.outcome.status == "EXEMPT" then
+                    log("[VRF][FactionWarAttack] exempt match=" .. operation.matchKey .. " " .. operation.home .. "=" .. tostring(self:EpochOf(towns, operation.home)) .. "/" .. tostring(operation.snapshot.home) .. " " .. operation.away .. "=" .. tostring(self:EpochOf(towns, operation.away)) .. "/" .. tostring(operation.snapshot.away))
+                end
+                self:Finish(operation, decision)
+            end
+        end)
+    end
+
+    method number ConflictDelay(integer conflicts, number roll)
+        -- Double up to the cap, then use the upper half of the interval to desynchronize competing rooms.
+        local ceiling = math.min(self.ConflictBackoffCap, self.ConflictRetrySeconds * 2 ^ (conflicts - 1))
+        return ceiling * (0.5 + 0.5 * roll)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Retry(table operation, boolean conflict)
+        -- Conflicts consume elapsed time; other failures consume attempts. Neither can overwrite newer bytes.
+        if self._T.settling[operation.matchKey] ~= operation then return end
+        local delay = self.SettleRetrySeconds
+        if conflict then
+            operation.conflicts = operation.conflicts + 1
+            log("[VRF][FactionWarAttack] settle conflict match=" .. operation.matchKey .. " conflicts=" .. tostring(operation.conflicts))
+            local waited = (DateTime.UtcNow.Elapsed - operation.started) / 1000
+            if waited >= self.ConflictBudgetSeconds then
+                log("[VRF][FactionWarAttack] settle gave up match=" .. operation.matchKey .. " conflicts=" .. tostring(operation.conflicts) .. " waited=" .. tostring(math.floor(waited)) .. "s")
+                self:Finish(operation, { outcome = self:Outcome(operation, "FAILED", nil) })
+                return
+            end
+            delay = self:ConflictDelay(operation.conflicts, _UtilLogic:RandomDouble())
+        else
+            operation.failures = operation.failures + 1
+            if operation.failures >= self.SettleAttempts then
+                self:Finish(operation, { outcome = self:Outcome(operation, "FAILED", nil) })
+                return
+            end
+        end
+        log("[VRF][FactionWarAttack] settle retry match=" .. operation.matchKey .. " conflict=" .. tostring(conflict) .. " conflicts=" .. tostring(operation.conflicts) .. " failures=" .. tostring(operation.failures) .. " delay=" .. string.format("%.2f", delay))
+        local timer = 0
+        timer = _TimerService:SetTimerOnce(function()
+            self._T.timers[timer] = nil
+            self:Attempt(operation)
+        end, delay)
+        self._T.timers[timer] = true
+    end
+
+    @ExecSpace("ServerOnly")
+    method void OnEndPlay()
+        -- Drop outstanding decisions and cancel retries without issuing any shutdown writes.
+        self._T.settling = {}
+        for timer, _ in pairs(self._T.timers or {}) do _TimerService:ClearTimer(timer) end
+        self._T.timers = {}
+    end
+end

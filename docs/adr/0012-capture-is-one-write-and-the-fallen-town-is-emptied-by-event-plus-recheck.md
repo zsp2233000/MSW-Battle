@@ -1,5 +1,7 @@
 # 奪城是一次文件寫入；失守城鎮用靜態房事件加動作時複查來清空
 
+> 後續重構只調整程式分工：`FactionWarTownDocument` 管城鎮文件；`FactionWarLanding:Judge` 的 `CHECK` 接手下文的 `Enforce`、`Recheck` 與 `Evict`。失城事件仍由 `FactionWar` 掃描，取消等待票券後仍重讀城鎮文件再決定是否撤離。落點檢查槽與登入共用，見 ADR 0014。
+
 兵力降到零的那場戰果，與「該城換旗並回滿 100」是同一次寫入。`FactionWarAttack.Settle` 在 `Attempt` 裡算出 `remaining = 兵力 - 扣除量`，`<= 0` 時把該城寫成 `{ owner = 勝方城鎮目前的歸屬, strength = FullStrength(100) }`，其餘城鎮原樣複製，整份城鎮文件只寫一次（#107 當時是 `WriteTowns`；#108 起改為比較並寫入的 `SwapTowns`，見 ADR 0013）。儲存的兵力仍不可能是 0：`FactionWar.DecodeTowns` 依舊拒收 `< 1` 或 `> 100`，也依舊把兩座主城強制讀成 `RED/100`、`BLUE/100`，所以主城即使被誤寫也不會讀回易主。主城的「永不扣兵、永不易主」仍由 `Deduction` 回傳 0、`Settle` 以 `NO_CHANGE` 結束而不碰儲存來保證。
 
 ## 戰果要能被重複取得

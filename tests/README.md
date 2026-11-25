@@ -49,9 +49,19 @@ Verified in Maker on 2026-11-20 (build 0 Error): the rules probe passed (ran inl
 
 Not verified: a real player watching the countdown in the town (the queue bar text is checked by the contract test only), two real accounts racing a human match against the guard on the native service (`MatchQueueNative.Cancel` also confirms `AlreadyMatched`, so a human result that lands in the same instant can leave the partner waiting; see ADR 0011), a guard loss and a guard draw in a live room, and a capital guard fight in a live room.
 
+## Town document refactor (ADR 0012 / 0013)
+
+`FactionWarTownDocument` owns the board format and rules, `Apply` (no I/O), and `Settle` (exact-byte CAS with retry over `FormationStorage`). The room still publishes map updates and evictions through `FactionWarAttack`; `CountryWarV1` / `Towns` and the pairing stamp are unchanged. Run the rules and storage stand-in tests from the repository root:
+
+```sh
+node tests/faction_war_town_document_local.cjs | npm exec --yes --package=fengari-node-cli@0.1.0 -- fengari -
+```
+
+Require both `pure rules PASS` and `local storage seam PASS`. This runs the production Lua bodies with an in-memory storage stand-in and a fake clock, not Maker's native storage. In a refreshed Maker Play session, run `faction_war_town_document_rules.lua`, then the isolated conquest and contest probes below in `server_main`. The rules probe makes no storage writes; the other two exercise the actual Maker storage seam.
+
 ## Capture, landing and eviction (#107)
 
-`faction_war_conquest_contract.test.cjs` pins the seams (`node --test tests/faction_war_conquest_contract.test.cjs`, no Maker): the capital/landing/passage rules in `FactionWar`, zero strength becoming owner + 100 in one document write, the structured `Settle` outcome and the per-match record in `towns.settled`, the landing by outcome and live ownership (`FactionWarAttack:LandingFor` through `MatchFlow:MoveHome`), the sweep of a fallen town in the static room (`TownFellEvent`, `AnnounceFall`, `SweepFallen`, `Evict`, `MatchFlow:Vacate`), the lazy re-check on town entry / gate / NPC, and the HUD keeping the relocation notice. Runtime probes, each in a fresh Play (`stop` → `refresh` → `play`):
+`faction_war_conquest_contract.test.cjs` pins the caller wiring: gate passage, the `Settle` callback, return via `MatchFlow:MoveHome`, the fallen-town sweep and recheck, and the HUD notice. Capture and the persisted outcome are verified by the local and Maker probes. Runtime probes, each in a fresh Play (`stop` → `refresh` → `play`):
 
 | Probe | Context | Final line |
 | --- | --- | --- |
@@ -62,7 +72,7 @@ Verified in Maker (on the main checkout, before the review fixes recorded below)
 
 ## Two matches contest one town (#108)
 
-`faction_war_contest_contract.test.cjs` pins the seams (`node --test tests/faction_war_contest_contract.test.cjs`, no Maker): the per-town change count `e` in the town document and its decoder, the byte compare-and-swap (`FactionWar:ReadTownsRaw` / `SwapTowns` over `FormationStorage:Swap`, the `global:` owner), the stamp a pairing carries (`FactionWarAttack:Snapshot` / `Stamped` / `Combine`, `MatchFlow:Matched`, `RoomBattleAdmission`, `MatchedBattle`), the exempt rule (`ChangedSince`, `EXEMPT`, decided after `DUPLICATE` and before any write), lost races read again (`Retry(operation, true)`), the landing reading the live board again, and that experience and the match result never wait for the settlement. Design: [ADR 0013](../docs/adr/0013-contested-town-is-decided-by-a-byte-compare-swap-and-the-pairing-time-change-count.md). Runtime probes, each in a fresh Play (`stop` → `refresh` → `play`):
+`faction_war_contest_contract.test.cjs` pins the native CAS adapter, how the pairing stamp reaches settlement, the live-board return, and that experience and battle results never wait for settlement. The local and Maker probes verify document validation, duplicate-before-exempt ordering and re-evaluation after conflicts. Design: [ADR 0013](../docs/adr/0013-contested-town-is-decided-by-a-byte-compare-swap-and-the-pairing-time-change-count.md). Runtime probes, each in a fresh Play (`stop` → `refresh` → `play`):
 
 | Probe | Context | Final line |
 | --- | --- | --- |
@@ -90,9 +100,19 @@ Also re-run, because the review touched them: `faction_war_attack_runtime_probe.
 
 Status: verified in Maker on 2026-11-22 (main checkout, build 0 Error); the record is in [Disconnect and reconnect (#109)](#disconnect-and-reconnect-109) ("This also records the #107/#108 review-fix probes (C1 to C6) as run on this branch"): C1 to C6 through the conquest and contest rules probes and e2e probes, plus `faction_war_attack_runtime_probe.lua` and `match_cancel_race_runtime_probe.lua`. Of the "also re-run" list above, the #105 and #106 e2e probes, `faction_war_attack_client_runtime_probe.lua`, `match_cancel_runtime_probe.lua` and the storage probes are not in that record.
 
+## Shared town landing (ADR 0012 / 0014)
+
+`FactionWarLanding:Judge` handles fall checks, login, match return and post-restore placement. Run its behavior tests without Maker:
+
+```sh
+node tests/faction_war_landing_local.cjs | npm exec --yes --package=fengari-node-cli@0.1.0 -- fengari -
+```
+
+Require `[VRF][FactionWarLanding] local placement scenarios PASS`. The suite executes the production Lua against simulated reads and transfers, including rechecks after cancellation, expired slots, duplicate login events, and the different unreadable-board behavior for static restore versus room return. In Maker, verify the updated #107 conquest probe STEP 8 (`EVICTRACE`) and #109 probes P1, P5 and P6 `STALE` below. The earlier Maker results in this file predate the shared landing module.
+
 ## Disconnect and reconnect (#109)
 
-`faction_war_reconnect_contract.test.cjs` pins the seams (`node --test tests/faction_war_reconnect_contract.test.cjs`, no Maker): the one pure reader of the stored result (`FactionWarAttack:OutcomeFrom`, shared by the repeat answer of `Attempt` and `LandingFor`) and the notice built from it, the last-town key (`CountryWarTownV1`, `FactionWar:Remember` through `FormationStorage:Write`), the offline skip of the fall sweep (`MatchFlow:IsOffline`), the once-per-login placement (`FactionWar:PlaceAtLogin`, handed over by `MatchFlow:PlaceAtLogin` after `Recover`), the ticket hint that keeps a lobby match return in the lobby, the war ticket whose leave cleanup failed (`departFailed`, cancelled again on reconnect), the reconnect inside the match room (`Recover` plus `BattleSession:RearmExperienceReceipt`, never a re-admission), the rejoin of a live room and the landing after a restore in the static room (`Rejoin`, `LandAfterRestore`, `FindRoom` behind the transfer adapter and its Maker fault switch), and that ADR 0014, the glossary term 登入落點 and the amended ADRs 0011 / 0012 agree with the code. Design: [ADR 0014](../docs/adr/0014-login-placement-is-judged-once-from-the-last-town-and-the-settled-record.md). Runtime probes, each in a fresh Play (`stop` → `refresh` → `play`), virtual players added in Play with `add_virtual_player -profile_code wpNNNN` before the step that needs them (the header of each probe lists its steps and the expected lines):
+`faction_war_reconnect_contract.test.cjs` pins the seams (`node --test tests/faction_war_reconnect_contract.test.cjs`, no Maker): the use of `FactionWarTownDocument:OutcomeFrom` to rebuild results for landing in another room and the notice built from it, the last-town key (`CountryWarTownV1`, `FactionWar:Remember` through `FormationStorage:Write`), the offline skip of the fall sweep (`MatchFlow:IsOffline`), the once-per-login placement (`FactionWar:PlaceAtLogin`, handed over by `MatchFlow:PlaceAtLogin` after `Recover`), the ticket hint that keeps a lobby match return in the lobby, the war ticket whose leave cleanup failed (`departFailed`, cancelled again on reconnect), the reconnect inside the match room (`Recover` plus `BattleSession:RearmExperienceReceipt`, never a re-admission), the rejoin of a live room and the landing after a restore in the static room (`Rejoin`, `LandAfterRestore`, `FindRoom` behind the transfer adapter and its Maker fault switch), and that ADR 0014, the glossary term 登入落點 and the amended ADRs 0011 / 0012 agree with the code. Design: [ADR 0014](../docs/adr/0014-login-placement-is-judged-once-from-the-last-town-and-the-settled-record.md). Runtime probes, each in a fresh Play (`stop` → `refresh` → `play`), virtual players added in Play with `add_virtual_player -profile_code wpNNNN` before the step that needs them (the header of each probe lists its steps and the expected lines):
 
 | Probe | Context | Final line |
 | --- | --- | --- |

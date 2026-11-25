@@ -72,7 +72,7 @@ end
 local function id(user) return user.PlayerComponent.UserId end
 local function readTowns()
     local towns, done = nil, false
-    _FactionWar:ReadTowns(function(result) towns, done = result, true end)
+    _FactionWarTownDocument:Read(function(result) towns, done = result, true end)
     assert(await(function() return done end, 100), "towns read")
     assert(towns ~= nil, "the town document is readable")
     return towns
@@ -104,8 +104,8 @@ local function wipe(profile)
 end
 local function board(towns)
     local parts = {}
-    for _, town in ipairs(_FactionWar.TownOrder) do
-        table.insert(parts, town .. "=" .. towns[town].owner .. "/" .. tostring(towns[town].strength) .. "/e" .. tostring(_FactionWar:EpochOf(towns, town)))
+    for _, town in ipairs(_FactionWarTownDocument.TownOrder) do
+        table.insert(parts, town .. "=" .. towns[town].owner .. "/" .. tostring(towns[town].strength) .. "/e" .. tostring(_FactionWarTownDocument:EpochOf(towns, town)))
     end
     return table.concat(parts, " ")
 end
@@ -152,9 +152,9 @@ local ok, reason = pcall(function()
             _FormationStorage:Write(profile, _FactionWar.FactionKey, "", faction, function(code) saved = code == 0 end)
             assert(await(function() return saved end, 100), "faction written for " .. profile)
         end
-        local towns = _FactionWar:InitialTowns()
+        local towns = _FactionWarTownDocument:InitialTowns()
         local written = false
-        _FactionWar:WriteTowns(towns, function(saved) written = saved end)
+        _FactionWarTownDocument:WriteTowns(towns, function(saved) written = saved end)
         assert(await(function() return written end, 100), "the board is seeded")
         _FactionWar._T.raceRows = {}
         log("[VRF][Interleave] SEED " .. board(towns) .. "; now add the two virtual players (see the header), wait 14 s, then STEP 2")
@@ -351,7 +351,7 @@ local ok, reason = pcall(function()
         assert(records <= 1, "the result is settled once, found " .. tostring(records) .. " records")
         local amount = race.kind == "GUARD" and 10 or 20
         local changed = 0
-        for _, town in ipairs(_FactionWar.TownOrder) do
+        for _, town in ipairs(_FactionWarTownDocument.TownOrder) do
             if towns[town].strength ~= race.before[town].strength or towns[town].owner ~= race.before[town].owner then changed = changed + 1 end
         end
         if records == 1 then
@@ -387,7 +387,7 @@ local ok, reason = pcall(function()
         _FactionWar._T.race = nil
         _FactionWar._T.raceRows = nil
         _FactionWar._T.raceLatency = nil
-        local code = _DataStorageService:DeleteGlobalDataStorageAndWait(_FactionWar.TownStorageName)
+        local code = _DataStorageService:DeleteGlobalDataStorageAndWait(_FactionWarTownDocument.TownStorageName)
         log("[VRF][Interleave] CLEANUP town storage deleted code=" .. tostring(code) .. ", the two profiles' keys wiped, guard clock and adapters back")
     end
 end)

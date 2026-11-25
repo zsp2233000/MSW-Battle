@@ -3,7 +3,7 @@
 -- Works on the isolated board CountryWarProbeMapV1 (deleted at the end); never writes the player's faction or last town.
 -- Final line: [VRF][MapProbe] SERVER PASS (the client prints CLIENT PASS).
 local STORAGE = "CountryWarProbeMapV1"
-local original = _FactionWar.TownStorageName
+local original = _FactionWarTownDocument.TownStorageName
 local function await(predicate, seconds)
     for _ = 1, math.floor((seconds or 10) * 10) do
         if predicate() then return true end
@@ -30,8 +30,8 @@ local ok, reason = pcall(function()
     local player = nil
     for _, user in ipairs(_UserService.UserEntities.Values) do player = user end
     assert(isvalid(player), "the real player is in the room")
-    _FactionWar.TownStorageName = STORAGE
-    assert(call(function(done) _FactionWar:WriteTowns(board(70), done) end) == true, "isolated board written")
+    _FactionWarTownDocument.TownStorageName = STORAGE
+    assert(call(function(done) _FactionWarTownDocument:WriteTowns(board(70), done) end) == true, "isolated board written")
 
     -- Gate links come from the authored gates: the chain north to south and nothing else.
     local links = _FactionWarMap:Links()
@@ -52,7 +52,7 @@ local ok, reason = pcall(function()
     wait(2)
 
     -- 2. A settlement-like change is pushed without the client asking.
-    assert(call(function(done) _FactionWar:WriteTowns(board(50), done) end) == true, "board changed")
+    assert(call(function(done) _FactionWarTownDocument:WriteTowns(board(50), done) end) == true, "board changed")
     _FactionWarMap:AnnounceChange()
     log("[VRF][MapProbe] PUSH announced gushan=50")
     -- Observation, not an assertion: whether the all-instances event also reaches the sender's own instance in Maker.
@@ -66,7 +66,7 @@ local ok, reason = pcall(function()
 
     -- 3. Once the client closed the map, a change reads nothing and sends nothing.
     assert(await(function() return viewers() == 0 end, 25), "client closed the map")
-    assert(call(function(done) _FactionWar:WriteTowns(board(40), done) end) == true, "board changed while closed")
+    assert(call(function(done) _FactionWarTownDocument:WriteTowns(board(40), done) end) == true, "board changed while closed")
     _FactionWarMap:AnnounceChange()
     wait(1)
     assert(not _FactionWarMap._T.reading, "no board read for a room with no viewer")
@@ -79,6 +79,6 @@ local ok, reason = pcall(function()
     assert(await(function() return viewers() == 0 end, 25), "leaving the town ends the subscription")
     log("[VRF][MapProbe] SERVER PASS")
 end)
-_FactionWar.TownStorageName = original
+_FactionWarTownDocument.TownStorageName = original
 _DataStorageService:DeleteGlobalDataStorageAndWait(STORAGE)
 if not ok then log_error("[VRF][MapProbe] SERVER FAIL " .. tostring(reason)) end

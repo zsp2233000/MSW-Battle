@@ -45,7 +45,7 @@ end
 local function id(user) return user.PlayerComponent.UserId end
 local function readTowns()
     local towns, done = nil, false
-    _FactionWar:ReadTowns(function(result) towns, done = result, true end)
+    _FactionWarTownDocument:Read(function(result) towns, done = result, true end)
     assert(await(function() return done end, 100), "towns read")
     assert(towns ~= nil, "the town document is readable")
     return towns
@@ -83,8 +83,8 @@ local function wipe(profile)
 end
 local function board(towns)
     local parts = {}
-    for _, town in ipairs(_FactionWar.TownOrder) do
-        table.insert(parts, town .. "=" .. towns[town].owner .. "/" .. tostring(towns[town].strength) .. "/e" .. tostring(_FactionWar:EpochOf(towns, town)))
+    for _, town in ipairs(_FactionWarTownDocument.TownOrder) do
+        table.insert(parts, town .. "=" .. towns[town].owner .. "/" .. tostring(towns[town].strength) .. "/e" .. tostring(_FactionWarTownDocument:EpochOf(towns, town)))
     end
     return table.concat(parts, " ")
 end
@@ -131,12 +131,12 @@ local ok, reason = pcall(function()
             assert(await(function() return saved end, 100), "faction written for " .. profile)
         end
         -- BLUE owns only its capital; Gushan is RED at 10 (taken once), so one guard win takes it back.
-        local towns = _FactionWar:InitialTowns()
+        local towns = _FactionWarTownDocument:InitialTowns()
         towns.gushan.owner = "RED"
         towns.gushan.strength = 10
         towns.gushan.e = 1
         local written = false
-        _FactionWar:WriteTowns(towns, function(saved) written = saved end)
+        _FactionWarTownDocument:WriteTowns(towns, function(saved) written = saved end)
         assert(await(function() return written end, 100), "the board is seeded")
         _FactionWarGuard.WaitSeconds = 10
         log("[VRF][Capital] SEED " .. board(towns) .. "; now add the two virtual players (see the header), wait 14 s, then STEP 2")
@@ -160,7 +160,7 @@ local ok, reason = pcall(function()
         assert(_FactionWar:Move(p, "gushan") and _FactionWar:Move(q, "yancheng"), "moves dispatched")
         assert(await(function() return p.CurrentMapName == "gushan" and q.CurrentMapName == "yancheng" end), "players in their towns")
         local towns = readTowns()
-        assert(towns.gushan.owner == "RED" and towns.gushan.strength == 10 and _FactionWar:EpochOf(towns, "gushan") == 1, "Gushan is RED at 10, found " .. board(towns))
+        assert(towns.gushan.owner == "RED" and towns.gushan.strength == 10 and _FactionWarTownDocument:EpochOf(towns, "gushan") == 1, "Gushan is RED at 10, found " .. board(towns))
         assert(towns.yancheng.owner == "BLUE" and towns.nanzih.owner == "RED" and towns.zuoying.owner == "RED", "BLUE owns only its capital, found " .. board(towns))
         -- The NPC of the seeded board: the RED player faces the enemy capital, the BLUE player faces Gushan.
         local red = _FactionWarAttack:Targets("gushan", "RED", towns)
@@ -227,8 +227,8 @@ local ok, reason = pcall(function()
         end, 400), "P is back in Gushan, where he set out")
         assert(await(function() return not _FactionWarAttack:IsEngaged(id(p)) end, 100), "P is unlocked")
         local towns = readTowns()
-        assert(towns.yancheng.owner == "BLUE" and towns.yancheng.strength == 100 and _FactionWar:EpochOf(towns, "yancheng") == 0, "the enemy capital keeps its owner and its full strength, found " .. board(towns))
-        assert(towns.gushan.owner == "RED" and towns.gushan.strength == 10 and _FactionWar:EpochOf(towns, "gushan") == 1, "Gushan is untouched, found " .. board(towns))
+        assert(towns.yancheng.owner == "BLUE" and towns.yancheng.strength == 100 and _FactionWarTownDocument:EpochOf(towns, "yancheng") == 0, "the enemy capital keeps its owner and its full strength, found " .. board(towns))
+        assert(towns.gushan.owner == "RED" and towns.gushan.strength == 10 and _FactionWarTownDocument:EpochOf(towns, "gushan") == 1, "Gushan is untouched, found " .. board(towns))
         assert(#(towns.settled or {}) == 0, "a win over a capital leaves no settlement record")
         local key = matchKeyOf(P_PROFILE, id(p))
         assert(key ~= "", "the closed ticket remembers the match")
@@ -241,7 +241,7 @@ local ok, reason = pcall(function()
         end, 400), "Q is back in Yancheng, where he set out")
         assert(await(function() return not _FactionWarAttack:IsEngaged(id(q)) end, 100), "Q is unlocked")
         local towns = readTowns()
-        assert(towns.gushan.owner == "RED" and towns.gushan.strength == 10 and _FactionWar:EpochOf(towns, "gushan") == 1, "a lost guard fight changes nothing: Gushan, found " .. board(towns))
+        assert(towns.gushan.owner == "RED" and towns.gushan.strength == 10 and _FactionWarTownDocument:EpochOf(towns, "gushan") == 1, "a lost guard fight changes nothing: Gushan, found " .. board(towns))
         assert(towns.yancheng.owner == "BLUE" and towns.yancheng.strength == 100, "and nothing at Yancheng, found " .. board(towns))
         assert(#(towns.settled or {}) == 0, "no settlement record")
         assert(find()[P_PROFILE].CurrentMapName == "gushan", "P was not moved: nothing fell")
@@ -263,7 +263,7 @@ local ok, reason = pcall(function()
         end, 600), "Q (the conqueror) is in Gushan and the idle RED player was sent to Nanzih")
         for _, user in ipairs({ p, q }) do assert(await(function() return not _FactionWarAttack:IsEngaged(id(user)) end, 100), "unlocked") end
         local towns = readTowns()
-        assert(towns.gushan.owner == "BLUE" and towns.gushan.strength == 100 and _FactionWar:EpochOf(towns, "gushan") == 2, "Gushan flipped to BLUE, refilled to 100 and counted twice, found " .. board(towns))
+        assert(towns.gushan.owner == "BLUE" and towns.gushan.strength == 100 and _FactionWarTownDocument:EpochOf(towns, "gushan") == 2, "Gushan flipped to BLUE, refilled to 100 and counted twice, found " .. board(towns))
         assert(towns.yancheng.owner == "BLUE" and towns.yancheng.strength == 100 and towns.nanzih.owner == "RED" and towns.nanzih.strength == 100 and towns.zuoying.owner == "RED" and towns.zuoying.strength == 100, "no other town moved, found " .. board(towns))
         assert(#towns.settled == 1, "one settlement record, found " .. tostring(#towns.settled))
         local record = towns.settled[1]
@@ -280,7 +280,7 @@ local ok, reason = pcall(function()
         -- A remember-write may still be in flight for a player who just moved.
         wait(2)
         for _, profile in ipairs({ P_PROFILE, Q_PROFILE }) do wipe(profile) end
-        local code = _DataStorageService:DeleteGlobalDataStorageAndWait(_FactionWar.TownStorageName)
+        local code = _DataStorageService:DeleteGlobalDataStorageAndWait(_FactionWarTownDocument.TownStorageName)
         log("[VRF][Capital] CLEANUP town storage deleted code=" .. tostring(code) .. ", the two profiles' keys wiped, guard clock back to 10 s")
     end
 end)

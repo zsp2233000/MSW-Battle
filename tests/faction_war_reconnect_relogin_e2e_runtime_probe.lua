@@ -36,7 +36,7 @@ local function find()
 end
 local function readTowns()
     local towns, done = nil, false
-    _FactionWar:ReadTowns(function(result) towns, done = result, true end)
+    _FactionWarTownDocument:Read(function(result) towns, done = result, true end)
     assert(await(function() return done end, 100), "towns read")
     return towns
 end
@@ -82,10 +82,10 @@ local ok, reason = pcall(function()
         local saved = false
         _FormationStorage:Write(PROFILE, _FactionWar.FactionKey, "", "RED", function(code) saved = code == 0 end)
         await(function() return saved end, 100)
-        local towns = _FactionWar:InitialTowns()
+        local towns = _FactionWarTownDocument:InitialTowns()
         towns.gushan.strength = 10
         local written = false
-        _FactionWar:WriteTowns(towns, function(ok) written = ok end)
+        _FactionWarTownDocument:WriteTowns(towns, function(ok) written = ok end)
         assert(await(function() return written end, 100), "Gushan seeded at 10")
         _FactionWarGuard.WaitSeconds = 10
         assert(_FactionWar:Move(a, "zuoying"), "move dispatched")
@@ -147,7 +147,7 @@ local ok, reason = pcall(function()
             end, 250), "the new entity was put in Gushan by the stored result")
             userId = a.PlayerComponent.UserId
             assert(await(function() return _MatchFlow._T.records[userId] == nil and not _FactionWarAttack:IsEngaged(userId) end, 100), "the stale ticket is closed and nothing is locked")
-            assert(_FactionWarAttack._T.outcomes[key] == nil, "this room holds no outcome of its own: the landing came from the stored record")
+            assert(_FactionWarLanding._T.outcomes[key] == nil, "this room holds no outcome of its own: the landing came from the stored record")
             local towns = readTowns()
             assert(towns.gushan.owner == "RED" and towns.gushan.strength == 100 and recordsOf(towns, key) == 1 and #towns.settled == 1, "the town document was only read")
             assert(creditedOnce(key) == 1, "the match is in the history exactly once")
@@ -156,7 +156,7 @@ local ok, reason = pcall(function()
     elseif STEP == 8 then
         _FactionWarGuard.WaitSeconds = 10
         _MatchFaults:Remove()
-        local code = _DataStorageService:DeleteGlobalDataStorageAndWait(_FactionWar.TownStorageName)
+        local code = _DataStorageService:DeleteGlobalDataStorageAndWait(_FactionWarTownDocument.TownStorageName)
         log("[VRF][ReconnectRelogin] CLEANUP town storage deleted code=" .. tostring(code))
     end
 end)

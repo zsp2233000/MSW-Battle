@@ -51,7 +51,7 @@ end
 local function id(user) return user.PlayerComponent.UserId end
 local function readTowns()
     local towns, done = nil, false
-    _FactionWar:ReadTowns(function(result) towns, done = result, true end)
+    _FactionWarTownDocument:Read(function(result) towns, done = result, true end)
     assert(await(function() return done end, 100), "towns read")
     assert(towns ~= nil, "the town document is readable")
     return towns
@@ -97,8 +97,8 @@ local function row(step, who, can, opponent, strength, owner, landing, xp)
 end
 local function board(towns)
     local parts = {}
-    for _, town in ipairs(_FactionWar.TownOrder) do
-        table.insert(parts, town .. "=" .. towns[town].owner .. "/" .. tostring(towns[town].strength) .. "/e" .. tostring(_FactionWar:EpochOf(towns, town)))
+    for _, town in ipairs(_FactionWarTownDocument.TownOrder) do
+        table.insert(parts, town .. "=" .. towns[town].owner .. "/" .. tostring(towns[town].strength) .. "/e" .. tostring(_FactionWarTownDocument:EpochOf(towns, town)))
     end
     return table.concat(parts, " ")
 end
@@ -136,8 +136,8 @@ local function gate(user, destination)
     local faction = readFaction(user.PlayerComponent.ProfileCode)
     local towns = readTowns()
     if faction == nil or faction == "" then return "UNREADABLE" end
-    if not _FactionWar:CanPass(faction, origin, destination, towns) then
-        _FactionWar:Enforce(userId, origin, towns)
+    if not _FactionWarTownDocument:CanPass(faction, origin, destination, towns) then
+        _FactionWarLanding:Judge(userId, { kind = "CHECK", town = origin, board = towns })
         return "DENIED"
     end
     assert(_FactionWar:Move(user, destination), "the move was dispatched")
@@ -165,10 +165,10 @@ local ok, reason = pcall(function()
         for _, alias in ipairs(ALIASES) do wipe(PROFILES[alias]) end
         _FactionWar._T.journeyRows = {}
         -- Gushan one human win from falling; the guard must not claim the queued player before the capture.
-        local towns = _FactionWar:InitialTowns()
+        local towns = _FactionWarTownDocument:InitialTowns()
         towns.gushan.strength = 20
         local written = false
-        _FactionWar:WriteTowns(towns, function(saved) written = saved end)
+        _FactionWarTownDocument:WriteTowns(towns, function(saved) written = saved end)
         assert(await(function() return written end, 100), "Gushan seeded at 20")
         _FactionWarGuard.WaitSeconds = 600
         log("[VRF][Journey] SEED the five profiles are wiped, Gushan is BLUE at 20; now add the five virtual players (see the header), wait 14 s, then STEP 2")
@@ -300,7 +300,7 @@ local ok, reason = pcall(function()
             towns = readTowns()
             return towns.gushan.owner == "RED"
         end, 1500), "Gushan changed flag within 150 s (a RED loss does not capture it: run the journey again)")
-        assert(towns.gushan.strength == 100 and _FactionWar:EpochOf(towns, "gushan") == 1, "refilled to 100 and counted once, found " .. board(towns))
+        assert(towns.gushan.strength == 100 and _FactionWarTownDocument:EpochOf(towns, "gushan") == 1, "refilled to 100 and counted once, found " .. board(towns))
         assert(#(towns.settled or {}) == 1, "one record, found " .. tostring(#(towns.settled or {})))
         assert(towns.nanzih.owner == "RED" and towns.nanzih.strength == 100 and towns.yancheng.owner == "BLUE" and towns.yancheng.strength == 100 and towns.zuoying.strength == 100, "no other town moved")
         assert(await(function() return users.B2.CurrentMapName == "yancheng" and users.B3.CurrentMapName == "yancheng" end, 300), "the queued and the idle blue player were sent to Yancheng")
@@ -358,7 +358,7 @@ local ok, reason = pcall(function()
         -- Gushan fell while B4 was away: its last town is Gushan, so the live board sends it to its own capital, once.
         assert(await(function() return b4.CurrentMapName == "yancheng" end, 200), "the login was placed in Yancheng, found " .. b4.CurrentMapName)
         assert(await(function() return readTown(PROFILES.B4) == "yancheng" end, 80), "the last town is now Yancheng")
-        assert(await(function() return _FactionWar._T.placing[userId] == nil end, 100), "the placement slot is free")
+        assert(await(function() return not _FactionWarLanding:IsJudging(userId) end, 100), "the placement slot is free")
         assert(not _FactionWarAttack:IsEngaged(userId), "no ticket holds the player")
         local towns = readTowns()
         assert(towns.gushan.owner == "RED" and towns.gushan.strength == 100 and #towns.settled == 1, "the login changed no town, found " .. board(towns))
@@ -378,7 +378,7 @@ local ok, reason = pcall(function()
         for _, alias in ipairs(ALIASES) do wipe(PROFILES[alias]) end
         _FactionWar._T.journeyRows = nil
         _FactionWar._T.journeyKicked = nil
-        local code = _DataStorageService:DeleteGlobalDataStorageAndWait(_FactionWar.TownStorageName)
+        local code = _DataStorageService:DeleteGlobalDataStorageAndWait(_FactionWarTownDocument.TownStorageName)
         log("[VRF][Journey] CLEANUP town storage deleted code=" .. tostring(code) .. ", the five profiles' keys wiped, guard clock back to 10 s")
     end
 end)

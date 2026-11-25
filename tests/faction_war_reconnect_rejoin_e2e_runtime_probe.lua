@@ -31,7 +31,7 @@ end
 local function id(user) return user.PlayerComponent.UserId end
 local function readTowns()
     local towns, done = nil, false
-    _FactionWar:ReadTowns(function(result) towns, done = result, true end)
+    _FactionWarTownDocument:Read(function(result) towns, done = result, true end)
     assert(await(function() return done end, 100), "towns read")
     return towns
 end
@@ -83,10 +83,10 @@ local ok, reason = pcall(function()
             _FormationStorage:Write(user.PlayerComponent.ProfileCode, _FactionWar.FactionKey, "", value, function(code) saved = code == 0 end)
             await(function() return saved end, 100)
         end
-        local towns = _FactionWar:InitialTowns()
+        local towns = _FactionWarTownDocument:InitialTowns()
         towns.gushan.strength = 20
         local written = false
-        _FactionWar:WriteTowns(towns, function(saved) written = saved end)
+        _FactionWarTownDocument:WriteTowns(towns, function(saved) written = saved end)
         assert(await(function() return written end, 100), "Gushan seeded at 20")
         _FactionWarGuard.WaitSeconds = 600
         assert(_FactionWar:Move(a, "zuoying") and _FactionWar:Move(b, "gushan"), "moves dispatched")
@@ -135,7 +135,7 @@ local ok, reason = pcall(function()
                 towns = readTowns()
                 return towns ~= nil and recordsOf(towns, key) == 1
             end, 300), "one settlement was stored")
-            assert(towns.gushan.owner == "RED" and towns.gushan.strength == 100 and _FactionWar:EpochOf(towns, "gushan") == 1, "Gushan was captured and counted once")
+            assert(towns.gushan.owner == "RED" and towns.gushan.strength == 100 and _FactionWarTownDocument:EpochOf(towns, "gushan") == 1, "Gushan was captured and counted once")
         else
             log("[VRF][ReconnectRejoin] red did not win (" .. red .. "); the capture checks of this probe do not apply, run it again")
         end
@@ -157,7 +157,7 @@ local ok, reason = pcall(function()
         log("[VRF][ReconnectRejoin] LANDING PASS")
     elseif STEP == 8 then
         _FactionWarGuard.WaitSeconds = 10
-        local code = _DataStorageService:DeleteGlobalDataStorageAndWait(_FactionWar.TownStorageName)
+        local code = _DataStorageService:DeleteGlobalDataStorageAndWait(_FactionWarTownDocument.TownStorageName)
         log("[VRF][ReconnectRejoin] CLEANUP town storage deleted code=" .. tostring(code))
     end
 end)

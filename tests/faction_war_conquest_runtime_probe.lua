@@ -7,7 +7,7 @@
 -- Review fixes covered here without a player: Vacate keeps a matched ticket (C4) and retries the passing ticket states a bounded number
 -- of times (C3), on tickets planted under made-up user ids; the full strength is one constant (S7).
 local STORAGE = "CountryWarProbe107V1"
-local original = _FactionWar.TownStorageName
+local original = _FactionWarTownDocument.TownStorageName
 local vacatePause = _MatchFlow.VacateRetrySeconds
 local plantedTickets = { "probe-vacate-SAVING", "probe-vacate-COMMITTING", "probe-vacate-TRANSFER", "probe-vacate-IN_ROOM", "probe-vacate-early", "probe-vacate-stuck", "probe-vacate-cancelling", "probe-vacate-none" }
 local function await(predicate, tries)
@@ -16,17 +16,17 @@ local function await(predicate, tries)
 end
 local function read()
     local result, done = nil, false
-    _FactionWar:ReadTowns(function(towns) result, done = towns, true end)
+    _FactionWarTownDocument:Read(function(towns) result, done = towns, true end)
     assert(await(function() return done end), "town read answered")
     return result
 end
 local function write(towns)
     local saved = false
-    _FactionWar:WriteTowns(towns, function(ok) saved = ok end)
+    _FactionWarTownDocument:WriteTowns(towns, function(ok) saved = ok end)
     assert(await(function() return saved end), "town write confirmed")
 end
 local function seed(owners, strengths, settled)
-    local towns = _FactionWar:InitialTowns()
+    local towns = _FactionWarTownDocument:InitialTowns()
     for id, owner in pairs(owners or {}) do towns[id].owner = owner end
     for id, strength in pairs(strengths or {}) do towns[id].strength = strength end
     -- The engine's JSONEncode rejects an empty table, so an empty history is stored as no field at all.
@@ -45,14 +45,14 @@ local ok, reason = pcall(function()
     local war, attack = _FactionWar, _FactionWarAttack
 
     -- Pure rules: capital, landing, passage.
-    assert(war:CapitalOf("RED") == "nanzih" and war:CapitalOf("BLUE") == "yancheng" and war:CapitalOf("") == "", "capital of each faction")
-    local board = war:InitialTowns()
+    assert(_FactionWarTownDocument:CapitalOf("RED") == "nanzih" and _FactionWarTownDocument:CapitalOf("BLUE") == "yancheng" and _FactionWarTownDocument:CapitalOf("") == "", "capital of each faction")
+    local board = _FactionWarTownDocument:InitialTowns()
     board.gushan.owner = "RED"
-    assert(war:Landing("RED", "gushan", board) == "gushan", "a faction lands in a town it owns")
-    assert(war:Landing("BLUE", "gushan", board) == "yancheng", "a faction that lost the town lands in its capital")
-    assert(war:Landing("RED", "yancheng", board) == "nanzih", "an enemy capital is never a landing")
-    assert(war:Landing("BLUE", "nowhere", board) == "yancheng" and war:Landing("BLUE", "gushan", nil) == "yancheng", "unknown town or no table falls back to the capital")
-    assert(war:CanPass("RED", "zuoying", "gushan", board) and not war:CanPass("BLUE", "gushan", "zuoying", board), "a gate needs both towns to be the traveller's")
+    assert(_FactionWarTownDocument:Landing("RED", "gushan", board) == "gushan", "a faction lands in a town it owns")
+    assert(_FactionWarTownDocument:Landing("BLUE", "gushan", board) == "yancheng", "a faction that lost the town lands in its capital")
+    assert(_FactionWarTownDocument:Landing("RED", "yancheng", board) == "nanzih", "an enemy capital is never a landing")
+    assert(_FactionWarTownDocument:Landing("BLUE", "nowhere", board) == "yancheng" and _FactionWarTownDocument:Landing("BLUE", "gushan", nil) == "yancheng", "unknown town or no table falls back to the capital")
+    assert(_FactionWarTownDocument:CanPass("RED", "zuoying", "gushan", board) and not _FactionWarTownDocument:CanPass("BLUE", "gushan", "zuoying", board), "a gate needs both towns to be the traveller's")
 
     -- AC3 board after Gushan turns red: front line for new players, gate and NPC options follow the new owner.
     assert(war:FindFrontline("RED", board) == "gushan", "a new red player lands in Gushan")
@@ -63,7 +63,7 @@ local ok, reason = pcall(function()
     assert(names(attack:Targets("gushan", "BLUE", board)) == "", "a town the faction lost offers nothing")
     assert(attack:CanTarget("yancheng", "gushan", "BLUE", board) and attack:CanTarget("gushan", "yancheng", "RED", board), "blue with only Yancheng and red at Gushan pick each other")
 
-    assert(war.FullStrength == 100 and war:InitialTowns().gushan.strength == war.FullStrength, "one constant for the full strength, used by the initial board")
+    assert(_FactionWarTownDocument.FullStrength == 100 and _FactionWarTownDocument:InitialTowns().gushan.strength == _FactionWarTownDocument.FullStrength, "one constant for the full strength, used by the initial board")
 
     -- C4 + C3: Vacate on planted tickets. The ids are made up, so no player, queue or storage is involved; the retry pause is shortened and restored at the end.
     local flow = _MatchFlow
@@ -102,7 +102,7 @@ local ok, reason = pcall(function()
     assert(vacate("probe-vacate-none") == true, "no ticket: free to go")
     log("[VRF][FactionWarConquest] vacate ok")
 
-    _FactionWar.TownStorageName = STORAGE
+    _FactionWarTownDocument.TownStorageName = STORAGE
 
     -- AC1: a human win over a 20-strength town flips it at once and refills it to 100.
     seed({}, { gushan = 20 })
@@ -171,12 +171,12 @@ local ok, reason = pcall(function()
     end
     towns = read()
     local bytes = #_HttpService:JSONEncode(towns)
-    assert(#towns.settled == attack.SettledHistory, "the history is capped at " .. tostring(attack.SettledHistory) .. ", got " .. tostring(#towns.settled))
+    assert(#towns.settled == _FactionWarTownDocument.SettledHistory, "the history is capped at " .. tostring(_FactionWarTownDocument.SettledHistory) .. ", got " .. tostring(#towns.settled))
     assert(bytes < 4000, "the town document stays under one storage credit, bytes=" .. tostring(bytes))
     log("[VRF][FactionWarConquest] document bytes=" .. tostring(bytes) .. " settled=" .. tostring(#towns.settled))
 end)
 
-_FactionWar.TownStorageName = original
+_FactionWarTownDocument.TownStorageName = original
 _MatchFlow.VacateRetrySeconds = vacatePause
 for _, userId in ipairs(plantedTickets) do _MatchFlow._T.records[userId] = nil end
 _DataStorageService:DeleteGlobalDataStorageAndWait(STORAGE)

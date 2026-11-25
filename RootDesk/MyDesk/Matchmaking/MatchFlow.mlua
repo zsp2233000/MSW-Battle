@@ -599,7 +599,7 @@ script MatchFlow extends Logic
     method void PlaceAtLogin(string userId, string cause)
         -- Hand a login to the war once the ticket has had its say: a player a ticket still owns (a queue, a match room, a return) is left to it.
         if _RoomService:IsInstanceRoom() then return end
-        local settled = _FactionWarAttack:WaitWhile(function() return self._T.busy[userId] or self._T.pendingRecover[userId] end, _FactionWar.LoginReadySeconds)
+        local settled = _FactionWarLanding:WaitWhile(function() return self._T.busy[userId] or self._T.pendingRecover[userId] end, _FactionWarLanding.LoginReadySeconds)
         if self._T.ended or self:Player(userId) == nil then
             log("[VRF][MatchFlow] login placement skipped user=" .. userId .. " cause=" .. cause .. "; the player is not available")
             return
@@ -608,10 +608,10 @@ script MatchFlow extends Logic
         local owned = self._T.records[userId] ~= nil or self._T.arrival[userId] == true or _FormationHandoff:IsLockedForUser(userId)
         if not settled then
             -- The recovery has not finished, so what it will say is not known: leave the player to it instead of judging on a half-read state.
-            log("[VRF][MatchFlow] login placement user=" .. userId .. " cause=" .. cause .. "; the recovery is still running after " .. tostring(_FactionWar.LoginReadySeconds) .. "s, treated as owned")
+            log("[VRF][MatchFlow] login placement user=" .. userId .. " cause=" .. cause .. "; the recovery is still running after " .. tostring(_FactionWarLanding.LoginReadySeconds) .. "s, treated as owned")
             owned = true
         end
-        _FactionWar:PlaceAtLogin(userId, cause, owned)
+        _FactionWarLanding:Judge(userId, { kind = "LOGIN", cause = cause, owned = owned })
     end
 
     @ExecSpace("Server")
@@ -843,14 +843,14 @@ script MatchFlow extends Logic
         if self._T.ended or self._T.records[userId] ~= ticket or self:Player(userId) == nil or ticket.data.state ~= "RETURNING" then return end
         if _FormationHandoff:Restore(userId, ticket.id) then
             -- The landing below reads the towns of the match after the ticket is closed, so it keeps its own copy of them.
-            local war = { data = { origin = ticket.data.origin or "", matchKey = ticket.data.matchKey or "" } }
+            local landing = { kind = "RESTORE", origin = ticket.data.origin or "", matchKey = ticket.data.matchKey or "" }
             local stored = self:Finish(userId, ticket, "RETURNED", function() return _FormationHandoff:Close(userId, ticket, "RETURNED") end)
             if self._T.records[userId] ~= ticket or self:Player(userId) == nil then return end
             if stored then
                 self._T.records[userId] = nil
                 self:QueueAdapter():Release(ticket.data.profile)
                 self:Report(userId, { code = "RETURN_COMPLETED" })
-                self:LandAfterRestore(userId, war)
+                _FactionWarLanding:Judge(userId, landing)
                 return
             end
         end
@@ -866,47 +866,6 @@ script MatchFlow extends Logic
             end, 1)
         else
             self:Report(userId, { code = "RESTORE_RETRY_REQUIRED" })
-        end
-    end
-
-    @ExecSpace("ServerOnly")
-    method void LandAfterRestore(string userId, table war)
-        -- A war ticket closed in the static room (a re-login after the match room was gone, a return that was cut short) puts the player where the match leaves them:
-        -- the landing the room-side return decides, judged again on the stored record. A player who already stands there (a normal return) is not moved twice.
-        if _RoomService:IsInstanceRoom() then return end
-        local origin = war.data.origin or ""
-        if origin == "" or not _FactionWar:IsTown(origin) then
-            log("[VRF][MatchFlow] landing after restore not needed user=" .. userId .. "; the ticket was not a war ticket")
-            return
-        end
-        local player = self:Player(userId)
-        if player == nil then
-            log("[VRF][MatchFlow] landing after restore skipped user=" .. userId .. "; the player is not available")
-            return
-        end
-        local result = _FactionWarAttack:ResolveLanding(userId, war)
-        local destination = result.destination
-        -- The landing read storage and yielded; the player may have moved on or left.
-        local here = self:Player(userId) == player and player.CurrentMapName or ""
-        if here == "" or not _FactionWar:IsTown(destination) then
-            log("[VRF][MatchFlow] landing after restore dropped user=" .. userId .. " destination=" .. destination .. "; the player is no longer there")
-            return
-        end
-        if not result.reliable then
-            -- The departure town the landing falls back to is no destination: a player who stands correctly stays put.
-            log("[VRF][MatchFlow] landing after restore left in place user=" .. userId .. " town=" .. here .. "; the landing could not be read")
-            return
-        end
-        if here == destination then
-            log("[VRF][MatchFlow] landing in place user=" .. userId .. " town=" .. destination)
-            return
-        end
-        local moved = _FactionWar:Move(player, destination)
-        log("[VRF][MatchFlow] landing after restore user=" .. userId .. " from=" .. here .. " to=" .. destination .. " moved=" .. tostring(moved))
-        if moved then
-            -- The notice comes from the outcome that decided the destination, not from another read of the board.
-            log("[VRF][MatchFlow] landing notice user=" .. userId .. " recorded=" .. tostring(result.outcome ~= nil))
-            _FactionWar:ReceiveTownNotice(destination, _FactionWarAttack:NoticeText(result.outcome, origin), userId)
         end
     end
 
@@ -1170,7 +1129,12 @@ script MatchFlow extends Logic
     method boolean MoveHome(string userId, any ticket)
         -- A war player lands where their faction holds ground (the town they took, the one they left, else their capital); every other player returns to the lobby.
         local origin = ticket ~= nil and ticket.data ~= nil and ticket.data.origin or ""
-        if origin ~= "" and _FactionWar:IsTown(origin) then return self:TransferAdapter():MoveToTown(userId, _FactionWarAttack:LandingFor(userId, ticket)) end
+        if _FactionWar:IsTown(origin) then
+            return _FactionWarLanding:Judge(userId, { kind = "RETURN", origin = origin, matchKey = ticket.data.matchKey or "", move = function(town)
+                if self:Player(userId) == nil then return false end
+                return self:TransferAdapter():MoveToTown(userId, town)
+            end })
+        end
         return self:TransferAdapter():MoveToLobby(userId)
     end
 

@@ -1,14 +1,14 @@
 -- Run in Maker's server_main after refresh and a fresh Play. Uses an isolated global storage name and fake queue entries only.
 -- Final line: [VRF][FactionWarAttack] PROBE PASS (or FAIL <reason>).
 local STORAGE = "CountryWarProbeV1"
-local original = _FactionWar.TownStorageName
+local original = _FactionWarTownDocument.TownStorageName
 local function await(predicate, tries)
     for _ = 1, tries or 100 do if predicate() then return true end wait(0.1) end
     return false
 end
 local function read()
     local result, done = nil, false
-    _FactionWar:ReadTowns(function(towns) result, done = towns, true end)
+    _FactionWarTownDocument:Read(function(towns) result, done = towns, true end)
     assert(await(function() return done end), "town read answered")
     return result
 end
@@ -22,15 +22,15 @@ end
 local ok, reason = pcall(function()
     local attack = _FactionWarAttack
     -- Rules.
-    assert(attack:IsCapital("nanzih") and attack:IsCapital("yancheng"), "both capitals are protected")
-    assert(not attack:IsCapital("zuoying") and not attack:IsCapital("gushan"), "front towns are contestable")
-    assert(attack:Deduction("gushan", "WIN", "HUMAN") == 20, "human win takes 20 from a contestable town")
-    assert(attack:Deduction("gushan", "WIN", "GUARD") == 10, "guard win takes 10 from a contestable town")
-    assert(attack:Deduction("gushan", "LOSE", "HUMAN") == 0 and attack:Deduction("gushan", "DRAW", "GUARD") == 0, "only a win deducts")
-    assert(attack:Deduction("yancheng", "WIN", "HUMAN") == 0 and attack:Deduction("nanzih", "WIN", "GUARD") == 0, "a capital never loses strength")
+    assert(_FactionWarTownDocument:IsCapital("nanzih") and _FactionWarTownDocument:IsCapital("yancheng"), "both capitals are protected")
+    assert(not _FactionWarTownDocument:IsCapital("zuoying") and not _FactionWarTownDocument:IsCapital("gushan"), "front towns are contestable")
+    assert(_FactionWarTownDocument:Deduction("gushan", "WIN", "HUMAN") == 20, "human win takes 20 from a contestable town")
+    assert(_FactionWarTownDocument:Deduction("gushan", "WIN", "GUARD") == 10, "guard win takes 10 from a contestable town")
+    assert(_FactionWarTownDocument:Deduction("gushan", "LOSE", "HUMAN") == 0 and _FactionWarTownDocument:Deduction("gushan", "DRAW", "GUARD") == 0, "only a win deducts")
+    assert(_FactionWarTownDocument:Deduction("yancheng", "WIN", "HUMAN") == 0 and _FactionWarTownDocument:Deduction("nanzih", "WIN", "GUARD") == 0, "a capital never loses strength")
 
     -- Options: only adjacent enemy towns, from the authored gates.
-    local towns = _FactionWar:InitialTowns()
+    local towns = _FactionWarTownDocument:InitialTowns()
     local function names(list) local out = {} for _, o in ipairs(list) do table.insert(out, o.town) end return table.concat(out, ",") end
     assert(names(attack:Targets("zuoying", "RED", towns)) == "gushan", "red at Zuoying sees Gushan only")
     assert(names(attack:Targets("nanzih", "RED", towns)) == "", "Nanzih has no enemy neighbour at the start")
@@ -86,7 +86,7 @@ local ok, reason = pcall(function()
     assert(guards.WaitSeconds == 10, "the guard waits ten seconds")
     assert(guards:Profile("gushan") == "guard:gushan" and guards:IsGuardProfile("guard:gushan") and guards:TownOf("guard:gushan") == "gushan", "guard profile round trip")
     assert(not guards:IsGuardProfile("wp2601") and guards:TownOf("wp2601") == "", "a player profile is never a guard")
-    for _, id in ipairs(_FactionWar.TownOrder) do
+    for _, id in ipairs(_FactionWarTownDocument.TownOrder) do
         local roster = guards:Roster(id)
         assert(roster ~= nil and #roster >= 1 and #roster <= 6, id .. " has a guard roster")
         roster[1].x = 99
@@ -95,10 +95,10 @@ local ok, reason = pcall(function()
     assert(guards:Roster("nowhere") == nil, "no guard outside the four towns")
 
     -- Settlement on isolated storage.
-    _FactionWar.TownStorageName = STORAGE
-    local fresh = _FactionWar:InitialTowns()
+    _FactionWarTownDocument.TownStorageName = STORAGE
+    local fresh = _FactionWarTownDocument:InitialTowns()
     local written = false
-    _FactionWar:WriteTowns(fresh, function(saved) written = saved end)
+    _FactionWarTownDocument:WriteTowns(fresh, function(saved) written = saved end)
     assert(await(function() return written end), "isolated storage seeded")
     local status, strength = settle("probe-m1", "zuoying", "gushan", "WIN")
     assert(status == "SAVED" and strength == 80, "red human win lowers Gushan from 100 to 80, got " .. tostring(status) .. "/" .. tostring(strength))
@@ -127,7 +127,7 @@ local ok, reason = pcall(function()
     -- Capital protection needs an enemy capital: make Zuoying blue, then red-side Nanzih loses nothing when blue wins.
     towns.zuoying.owner = "BLUE"
     written = false
-    _FactionWar:WriteTowns(towns, function(saved) written = saved end)
+    _FactionWarTownDocument:WriteTowns(towns, function(saved) written = saved end)
     assert(await(function() return written end), "ownership change written")
     status = settle("probe-m5", "zuoying", "nanzih", "WIN")
     assert(status == "NO_CHANGE", "winning against a capital deducts nothing")
@@ -139,6 +139,6 @@ local ok, reason = pcall(function()
     assert(settle("", "zuoying", "gushan", "WIN") == "SKIPPED", "a result without a match key is refused")
 end)
 
-_FactionWar.TownStorageName = original
+_FactionWarTownDocument.TownStorageName = original
 _DataStorageService:DeleteGlobalDataStorageAndWait(STORAGE)
 if ok then log("[VRF][FactionWarAttack] PROBE PASS") else log_error("[VRF][FactionWarAttack] PROBE FAIL " .. tostring(reason)) end

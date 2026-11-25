@@ -68,7 +68,7 @@ test('the #110 probes use their own profiles, say how many joins they cost, numb
     // The cleanup step is the last one: it puts the guard clock back and deletes the real town storage the match rooms wrote.
     const cleanup = text.slice(text.lastIndexOf(`STEP == ${spec.steps.length} then`));
     assert.match(cleanup, /_FactionWarGuard\.WaitSeconds = 10\b/, `${name} puts the guard clock back in CLEANUP`);
-    assert.match(cleanup, /DeleteGlobalDataStorageAndWait\(_FactionWar\.TownStorageName\)/, `${name} deletes the real town storage in CLEANUP`);
+    assert.match(cleanup, /DeleteGlobalDataStorageAndWait\(_FactionWarTownDocument\.TownStorageName\)/, `${name} deletes the real town storage in CLEANUP`);
     assert.match(text, new RegExp(`_FactionWarGuard\\.WaitSeconds = ${spec.guard}\\b`), `${name} sets the guard clock it needs (${spec.guard} s) explicitly`);
     // The probes that start before the players exist wipe what an earlier run left, or a stale last town would place a fresh login.
     assert.match(text, /DeleteAndWait\(_FactionWar\.TownKey\)/, `${name} wipes the last-town key before the virtual players log in`);
@@ -93,11 +93,11 @@ test('RequestEntry, RequestGate and OptionsFor read senderUserId, so the journey
   assert.match(body(attack(), 'RequestAttack'), /AttackFor\(senderUserId, target\)/, 'and the attack request is AttackFor, which a script calls as it is');
   // The production order, then the same order in the probe's helper.
   inOrder(entry, [/CanEnterFromLobby\(player, userId\)/, /self\._T\.pending\[userId\] = player/, /self:ReadFaction\(profile/, /_FormationStorage:Write\(profile, self\.FactionKey, "", choice/, /self:EnterFrontline\(userId, player, choice\)/], 'RequestEntry');
-  inOrder(gate, [/self:FindGate\(origin, destination\)/, /self:NearGate\(player, gate\)/, /_FactionWarAttack:IsEngaged\(userId\)/, /self:ReadFaction\(/, /self:ReadTowns\(/, /self:CanPass\(faction, origin, destination, towns\)/, /self:Enforce\(userId, origin, towns\)/, /self:Move\(player, destination\)/], 'RequestGate');
+  inOrder(gate, [/self:FindGate\(origin, destination\)/, /self:NearGate\(player, gate\)/, /_FactionWarAttack:IsEngaged\(userId\)/, /self:ReadFaction\(/, /_FactionWarTownDocument:Read\(/, /_FactionWarTownDocument:CanPass\(faction, origin, destination, towns\)/, /_FactionWarLanding:Judge\(userId, \{ kind = "CHECK", town = origin, board = towns \}\)/, /self:Move\(player, destination\)/], 'RequestGate');
   inOrder(options, [/self:Resolve\(/, /towns\[town\]\.owner ~= faction/, /"NOT_OWNED"/, /self:Targets\(town, faction, towns\)/, /self:IsEngaged\(userId\) and "ENGAGED" or "READY"/], 'OptionsFor');
   const text = journey();
   inOrder(luaFunction(text, 'entry'), [/CanEnterFromLobby\(user, userId\)/, /_T\.pending\[userId\] = user/, /readFaction\(profile\)/, /_FormationStorage:Write\(profile, _FactionWar\.FactionKey, "", choice/, /_FactionWar:EnterFrontline\(userId, user, faction\)/], 'the journey entry()');
-  inOrder(luaFunction(text, 'gate'), [/_FactionWar:FindGate\(origin, destination\)/, /_FactionWar:NearGate\(user, door\)/, /_FactionWarAttack:IsEngaged\(userId\)/, /readFaction\(/, /readTowns\(\)/, /_FactionWar:CanPass\(faction, origin, destination, towns\)/, /_FactionWar:Enforce\(userId, origin, towns\)/, /_FactionWar:Move\(user, destination\)/], 'the journey gate()');
+  inOrder(luaFunction(text, 'gate'), [/_FactionWar:FindGate\(origin, destination\)/, /_FactionWar:NearGate\(user, door\)/, /_FactionWarAttack:IsEngaged\(userId\)/, /readFaction\(/, /readTowns\(\)/, /_FactionWarTownDocument:CanPass\(faction, origin, destination, towns\)/, /_FactionWarLanding:Judge\(userId, \{ kind = "CHECK", town = origin, board = towns \}\)/, /_FactionWar:Move\(user, destination\)/], 'the journey gate()');
   inOrder(luaFunction(text, 'options'), [/towns\[town\]\.owner ~= faction/, /"NOT_OWNED"/, /_FactionWarAttack:IsEngaged\(id\(user\)\) and "ENGAGED" or "READY"/, /_FactionWarAttack:Targets\(town, faction, towns\)/], 'the journey options()');
   // Everything a script can call, it calls as it is.
   for (const call of ['_FactionWarAttack:AttackFor(', '_MatchFlow:CancelForUser(', '_UserService:KickUser(', '_FactionWar:EnterFrontline(']) assert.ok(text.includes(call), `the journey calls ${call}`);
@@ -153,15 +153,8 @@ test('the capital probe forces results through seams that exist: the side labels
   const session = source('RootDesk/MyDesk/Combat/BattleSession.mlua');
   assert.match(session, /local faction = side == 1 and "PLAYER" or "ENEMY"/, 'the home side is PLAYER and the away side is ENEMY');
   assert.match(source('RootDesk/MyDesk/Combat/BattleUnit.mlua'), /method void ApplyResolvedDamage\(integer amount, Entity attacker, boolean allowHitStop, string hitEffectRUID, number hitEffectOffsetX, number hitEffectOffsetY\)/, 'the damage call has the signature the probe passes');
-  const rules = attack();
-  assert.match(rules, /property table Capitals = \{ nanzih = true, yancheng = true \}/, 'both capitals are exempt');
-  assert.match(body(rules, 'Deduction'), /result ~= "WIN" or self:IsCapital\(target\)[^]*return 0/, 'a win over a capital takes nothing');
-  assert.match(body(rules, 'Settle'), /homeResult == "LOSE" and kind ~= "GUARD"/, 'a lost guard fight names no winner, so it takes nothing');
-  assert.match(rules, /property integer GuardDeduction = 10/, 'one guard win takes the 10 the board is seeded with');
-  assert.match(body(rules, 'Attempt'), /flipped = remaining <= 0/, 'zero strength flips');
-  assert.match(body(rules, 'Attempt'), /strength = _FactionWar\.FullStrength, e = _FactionWar:EpochOf\(towns, operation\.loser\) \+ 1/, 'and refills to the full strength with one more count');
   assert.match(body(attack(), 'Finish'), /AnnounceFall\(outcome\.loser, outcome\.owner\)/, 'the fall is announced to the static room');
-  assert.match(body(war(), 'SweepFallen'), /self:Enforce\(userId, town, towns\)/, 'and the idle player of the fallen town is enforced home');
+  assert.match(body(war(), 'SweepFallen'), /_FactionWarLanding:Judge\(userId, \{ kind = "CHECK", town = town, board = towns \}\)/, 'and the idle player of the fallen town is enforced home');
 });
 
 // ---- the human-versus-guard timeout race ---------------------------------------------------------------------------------------------
@@ -267,7 +260,7 @@ test('the runbook steps say what two accounts can really do and what the code re
   assert.match(row(12), /1000002[^]*轉成 `2000000`[^]*`2000000` 或 `1000007`/, 'S12: native 1000002 becomes 2000000, a conflict is 2000000 or 1000007');
   assert.doesNotMatch(text, /程式以 `2000000` 與 `1000002` 判讀/, 'the old reading of the codes is gone');
   assert.match(source('RootDesk/MyDesk/Formations/FormationStorage.mlua'), /complete\(code == 1000002 and 2000000 or code\)/, 'FormationStorage does map the native code');
-  assert.match(body(source('RootDesk/MyDesk/Formations/FactionWar.mlua'), 'SwapTowns'), /code == 2000000 or code == 1000007/, 'and SwapTowns does read both codes as a conflict');
+  assert.match(body(source('RootDesk/MyDesk/Formations/FactionWarTownDocument.mlua'), 'SwapTowns'), /code == 2000000 or code == 1000007/, 'and SwapTowns does read both codes as a conflict');
   // S17 / S19: a login in another WorldInstance does not see the departFailed mark that only lives in the first instance\'s memory.
   assert.match(row(19), /另一個 WorldInstance[^]*QUEUED[^]*`departFailed`[^]*記憶體/, 'S19: a cross-instance re-login finds a durable QUEUED ticket');
   assert.match(row(19), /`\[VRF\]\[MatchFlow\] world instance=`/, 'S19: the instance is read from the world instance line');

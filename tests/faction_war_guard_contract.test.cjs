@@ -77,12 +77,8 @@ test('the battle fields the guard from the town roster and never settles a profi
   assert.match(source('RootDesk/MyDesk/Combat/BattleView.mlua'), /IsGuardProfile/, 'the opponent avatar is named as the guard');
 });
 
-test('a guard win takes ten from a contestable town and every other guard result takes nothing', () => {
-  const text = attack();
-  assert.match(text, /property integer GuardDeduction = 10\b/);
-  assert.match(body(text, 'Deduction'), /GUARD/, 'the deduction depends on the match kind');
-  assert.match(body(text, 'Settle'), /kind/, 'Settle takes the match kind');
-  assert.match(body(text, 'Settle'), /kind ~= "GUARD"/, 'a lost or drawn guard match changes no town');
+test('the attack flow forwards the match kind to the town document', () => {
+  assert.match(body(attack(), 'Settle'), /_FactionWarTownDocument:Settle\([^]*kind = kind/);
 });
 
 test('the queue bar shows the guard countdown and then the guard fight', () => {

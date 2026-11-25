@@ -52,14 +52,14 @@ local function wipe(profile)
     storage:DeleteAndWait(_FactionWar.TownKey)
 end
 local function board(case)
-    local towns = _FactionWar:InitialTowns()
+    local towns = _FactionWarTownDocument:InitialTowns()
     for id, owner in pairs(case.owners or {}) do towns[id].owner = owner end
     for id, count in pairs(case.counts or {}) do towns[id].e = count end
     return towns
 end
 local function store(towns)
     local saved = false
-    _FactionWar:WriteTowns(towns, function(ok) saved = ok end)
+    _FactionWarTownDocument:WriteTowns(towns, function(ok) saved = ok end)
     assert(await(function() return saved end), "board stored")
 end
 local function readTown(profile)
@@ -78,14 +78,14 @@ local ok, reason = pcall(function()
     assert(case ~= nil, "unknown CASE " .. tostring(CASE))
     if STEP == 1 then
         assert(find(case.profile) == nil, case.profile .. " must not be connected yet: kick it (STEP 3) before seeding")
-        _FactionWar.TownStorageName = STORAGE
+        _FactionWarTownDocument.TownStorageName = STORAGE
         wipe(case.profile)
         if case.faction ~= nil then put(case.profile, _FactionWar.FactionKey, "", case.faction) end
         if case.town ~= nil then put(case.profile, _FactionWar.TownKey, "", case.town) end
         store(board(case))
         log("[VRF][ReconnectLogin] " .. CASE .. " SEEDED; now: add_virtual_player -profile_code " .. case.profile .. " -nickname Login109, then STEP 2")
     elseif STEP == 2 then
-        assert(_FactionWar.TownStorageName == STORAGE, "STEP 1 swapped the storage name")
+        assert(_FactionWarTownDocument.TownStorageName == STORAGE, "STEP 1 swapped the storage name")
         local user = find(case.profile)
         assert(isvalid(user), case.profile .. " is connected")
         local userId = user.PlayerComponent.UserId
@@ -97,7 +97,7 @@ local ok, reason = pcall(function()
             assert(await(function() return readTown(case.profile) == "gushan" end, 50), "Gushan is the last town")
             _MatchFlow:Depart(userId, "Probe")
             assert(_MatchFlow:IsOffline(userId), "offline, the entity stays in Gushan")
-            local fallen = _FactionWar:InitialTowns()
+            local fallen = _FactionWarTownDocument:InitialTowns()
             fallen.gushan.owner = "RED"
             fallen.gushan.e = 1
             store(fallen)
@@ -105,7 +105,7 @@ local ok, reason = pcall(function()
             wait(2)
             assert(user.CurrentMapName == "gushan", "the sweep leaves the disconnected player where they are")
             if CASE == "OFFLINE_RETAKEN" then
-                local retaken = _FactionWar:InitialTowns()
+                local retaken = _FactionWarTownDocument:InitialTowns()
                 retaken.gushan.e = 2
                 store(retaken)
             end
@@ -128,7 +128,7 @@ local ok, reason = pcall(function()
             assert(user.CurrentMapName == case.expected, "and the player stays there (one placement per login)")
         end
         assert(not _FactionWarAttack:IsEngaged(userId), "no ticket is held")
-        assert(await(function() return _FactionWar._T.placing[userId] == nil end, 50), "the placement slot is free")
+        assert(await(function() return not _FactionWarLanding:IsJudging(userId) end, 50), "the placement slot is free")
         if case.expected ~= "formationlobby" then
             assert(await(function() return readTown(case.profile) == (case.remembered or case.expected) end, 80), "the last town now is " .. (case.remembered or case.expected))
         end
@@ -140,7 +140,7 @@ local ok, reason = pcall(function()
         assert(await(function() return find(case.profile) == nil end, 100), "the entity left")
         log("[VRF][ReconnectLogin] kicked " .. case.profile)
     elseif STEP == 4 then
-        _FactionWar.TownStorageName = "CountryWarV1"
+        _FactionWarTownDocument.TownStorageName = "CountryWarV1"
         _DataStorageService:DeleteGlobalDataStorageAndWait(STORAGE)
         wipe("wp2625")
         wipe("wp2626")

@@ -32,7 +32,7 @@ end
 local function id(user) return user.PlayerComponent.UserId end
 local function readTowns()
     local towns, done = nil, false
-    _FactionWar:ReadTowns(function(result) towns, done = result, true end)
+    _FactionWarTownDocument:Read(function(result) towns, done = result, true end)
     assert(await(function() return done end, 100), "towns read")
     return towns
 end
@@ -62,10 +62,10 @@ local ok, reason = pcall(function()
             await(function() return saved end, 100)
         end
         -- Gushan one win from falling; the guard must not claim the queued player before the capture.
-        local towns = _FactionWar:InitialTowns()
+        local towns = _FactionWarTownDocument:InitialTowns()
         towns.gushan.strength = 20
         local written = false
-        _FactionWar:WriteTowns(towns, function(saved) written = saved end)
+        _FactionWarTownDocument:WriteTowns(towns, function(saved) written = saved end)
         assert(await(function() return written end, 100), "Gushan seeded at 20")
         _FactionWarGuard.WaitSeconds = 600
         assert(_FactionWar:Move(a, "zuoying") and _FactionWar:Move(b, "gushan") and _FactionWar:Move(c, "gushan") and _FactionWar:Move(d, "gushan"), "moves dispatched")
@@ -105,7 +105,7 @@ local ok, reason = pcall(function()
         for _, user in ipairs({ a, b, c, d }) do assert(await(function() return not _FactionWarAttack:IsEngaged(id(user)) end), "unlocked") end
         local towns = readTowns()
         assert(_FactionWar:FindFrontline("RED", towns) == "gushan" and _FactionWar:FindFrontline("BLUE", towns) == "yancheng", "new players land on the new front")
-        assert(_FactionWar:CanPass("RED", "zuoying", "gushan", towns) and not _FactionWar:CanPass("BLUE", "yancheng", "gushan", towns), "the gate follows the new owner")
+        assert(_FactionWarTownDocument:CanPass("RED", "zuoying", "gushan", towns) and not _FactionWarTownDocument:CanPass("BLUE", "yancheng", "gushan", towns), "the gate follows the new owner")
         local red = _FactionWarAttack:Targets("gushan", "RED", towns)
         local blue = _FactionWarAttack:Targets("yancheng", "BLUE", towns)
         assert(#red == 1 and red[1].town == "yancheng" and red[1].capital == true and #blue == 1 and blue[1].town == "gushan", "the NPC options follow the new owner")
@@ -141,23 +141,23 @@ local ok, reason = pcall(function()
         end
         local function store(towns)
             local saved = false
-            _FactionWar:WriteTowns(towns, function(ok) saved = ok end)
+            _FactionWarTownDocument:WriteTowns(towns, function(ok) saved = ok end)
             assert(await(function() return saved end, 100), "board stored")
         end
         -- (a) C1: the first check holds the pre-flip board; the sweep's request arrives while it still waits for the faction read.
         putInGushan()
-        _FactionWar:Enforce(id(d), "gushan", stale)
-        assert(_FactionWar._T.evicting[id(d)] ~= nil, "the first check is still waiting for the faction read; if this fails the read answered at once and the race was not exercised")
-        _FactionWar:Enforce(id(d), "gushan", live)
+        _FactionWarLanding:Judge(id(d), { kind = "CHECK", town = "gushan", board = stale })
+        assert(_FactionWarLanding:IsJudging(id(d)), "the first check is still waiting for the faction read; if this fails the read answered at once and the race was not exercised")
+        _FactionWarLanding:Judge(id(d), { kind = "CHECK", town = "gushan", board = live })
         assert(await(function() return d.CurrentMapName == "yancheng" end, 150), "the queued request moved D to Yancheng (a dropped request leaves D in Gushan)")
-        assert(await(function() return _FactionWar._T.evicting[id(d)] == nil end, 50), "the slot was released")
+        assert(await(function() return not _FactionWarLanding:IsJudging(id(d)) end, 50), "the slot was released")
         log("[VRF][ConquestE2E] EVICTRACE check race PASS")
         -- (b) C1: a slot nobody ever released expires, so the next request takes it over instead of being ignored for good.
         putInGushan()
-        _FactionWar._T.evicting[id(d)] = { started = DateTime.UtcNow.Elapsed - (_FactionWar.EnforceLeaseSeconds + 5) * 1000 }
-        _FactionWar:Enforce(id(d), "gushan", live)
+        _FactionWarLanding._T.slots[id(d)] = { kind = "CHECK", started = DateTime.UtcNow.Elapsed - (_FactionWarLanding.EnforceLeaseSeconds + 5) * 1000 }
+        _FactionWarLanding:Judge(id(d), { kind = "CHECK", town = "gushan", board = live })
         assert(await(function() return d.CurrentMapName == "yancheng" end, 150), "the expired slot was taken over and D was moved")
-        assert(await(function() return _FactionWar._T.evicting[id(d)] == nil end, 50), "the new check released its slot")
+        assert(await(function() return not _FactionWarLanding:IsJudging(id(d)) end, 50), "the new check released its slot")
         log("[VRF][ConquestE2E] EVICTRACE lease PASS")
         -- (c) C2: the board that called for the move is out of date. Gushan was taken and taken back (blue again, counted twice more).
         putInGushan()
@@ -165,15 +165,16 @@ local ok, reason = pcall(function()
         retaken.gushan.owner = "BLUE"
         retaken.gushan.e = (retaken.gushan.e or 0) + 2
         store(retaken)
-        assert(_FactionWar:Evict(id(d), d, "gushan", "BLUE", live) == false, "Evict does not send D away from a town its faction holds again")
+        _FactionWarLanding:Judge(id(d), { kind = "CHECK", town = "gushan", board = live })
+        assert(await(function() return not _FactionWarLanding:IsJudging(id(d)) end, 100), "the retaken-town check finished")
         assert(d.CurrentMapName == "gushan", "D stays in Gushan")
         store(live)
-        assert(_FactionWar:Evict(id(d), d, "gushan", "BLUE", live) == true, "on the fallen stored board the same call moves D")
+        _FactionWarLanding:Judge(id(d), { kind = "CHECK", town = "gushan", board = live })
         assert(await(function() return d.CurrentMapName == "yancheng" end, 150), "D is in Yancheng")
         log("[VRF][ConquestE2E] EVICTRACE retaken PASS")
     elseif STEP == 9 then
         _FactionWarGuard.WaitSeconds = 10
-        local code = _DataStorageService:DeleteGlobalDataStorageAndWait(_FactionWar.TownStorageName)
+        local code = _DataStorageService:DeleteGlobalDataStorageAndWait(_FactionWarTownDocument.TownStorageName)
         log("[VRF][ConquestE2E] CLEANUP town storage deleted code=" .. tostring(code))
     end
 end)

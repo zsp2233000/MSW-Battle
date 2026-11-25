@@ -10,9 +10,9 @@
 -- Review fix C6 is covered here too: the pause after a lost race (ConflictDelay), a settlement that loses more races than the old bound
 -- of ten and still lands exactly once, and the time budget that ends a settlement which can never win.
 local STORAGE = "CountryWarProbe108V1"
-local original = _FactionWar.TownStorageName
+local original = _FactionWarTownDocument.TownStorageName
 local originalLevelKey = _MonsterLevelStorage.StorageKey
-local tuning = { retry = _FactionWarAttack.ConflictRetrySeconds, cap = _FactionWarAttack.ConflictBackoffCap, budget = _FactionWarAttack.ConflictBudgetSeconds }
+local tuning = { retry = _FactionWarTownDocument.ConflictRetrySeconds, cap = _FactionWarTownDocument.ConflictBackoffCap, budget = _FactionWarTownDocument.ConflictBudgetSeconds }
 local stopInterference = nil
 local function await(predicate, tries)
     for _ = 1, tries or 100 do if predicate() then return true end wait(0.1) end
@@ -20,18 +20,18 @@ local function await(predicate, tries)
 end
 local function readRaw()
     local result, raw, done = nil, nil, false
-    _FactionWar:ReadTownsRaw(function(towns, bytes) result, raw, done = towns, bytes, true end)
+    _FactionWarTownDocument:ReadTownsRaw(function(towns, bytes) result, raw, done = towns, bytes, true end)
     assert(await(function() return done end), "town read answered")
     return result, raw
 end
 local function read() local towns = readRaw() return towns end
 local function write(towns)
     local saved = false
-    _FactionWar:WriteTowns(towns, function(ok) saved = ok end)
+    _FactionWarTownDocument:WriteTowns(towns, function(ok) saved = ok end)
     assert(await(function() return saved end), "town write confirmed")
 end
 local function seed(owners, strengths, epochs, settled)
-    local towns = _FactionWar:InitialTowns()
+    local towns = _FactionWarTownDocument:InitialTowns()
     for id, owner in pairs(owners or {}) do towns[id].owner = owner end
     for id, strength in pairs(strengths or {}) do towns[id].strength = strength end
     for id, epoch in pairs(epochs or {}) do towns[id].e = epoch end
@@ -57,7 +57,7 @@ local function settle(matchKey, home, away, homeResult, kind, snapshot)
 end
 local function swap(expected, towns)
     local result, done = nil, false
-    _FactionWar:SwapTowns(expected, towns, function(r) result, done = r, true end)
+    _FactionWarTownDocument:SwapTowns(expected, towns, function(r) result, done = r, true end)
     assert(await(function() return done end), "swap answered")
     return result
 end
@@ -71,32 +71,32 @@ local ok, reason = pcall(function()
     local war, attack = _FactionWar, _FactionWarAttack
 
     -- Pure rules: the count, its decoder, the stamp.
-    assert(war:EpochOf(war:InitialTowns(), "gushan") == 0 and war:EpochOf(nil, "gushan") == 0 and war:EpochOf({}, "gushan") == 0, "no count reads as zero")
-    local counted = war:InitialTowns()
+    assert(_FactionWarTownDocument:EpochOf(_FactionWarTownDocument:InitialTowns(), "gushan") == 0 and _FactionWarTownDocument:EpochOf(nil, "gushan") == 0 and _FactionWarTownDocument:EpochOf({}, "gushan") == 0, "no count reads as zero")
+    local counted = _FactionWarTownDocument:InitialTowns()
     counted.gushan.e = 2
-    assert(war:EpochOf(counted, "gushan") == 2 and war:DecodeTowns(_HttpService:JSONEncode(counted)) ~= nil, "a stored count is read back")
+    assert(_FactionWarTownDocument:EpochOf(counted, "gushan") == 2 and _FactionWarTownDocument:DecodeTowns(_HttpService:JSONEncode(counted)) ~= nil, "a stored count is read back")
     for label, value in pairs({ negative = -1, fraction = 1.5, text = "1" }) do
-        local bad = war:InitialTowns()
+        local bad = _FactionWarTownDocument:InitialTowns()
         bad.gushan.e = value
-        assert(war:DecodeTowns(_HttpService:JSONEncode(bad)) == nil, "a " .. label .. " count makes the document unreadable")
+        assert(_FactionWarTownDocument:DecodeTowns(_HttpService:JSONEncode(bad)) == nil, "a " .. label .. " count makes the document unreadable")
     end
     local combined = attack:Combine({ homeEpoch = 2, awayEpoch = 3 }, { homeEpoch = 1, awayEpoch = 5 })
     assert(combined.home == 1 and combined.away == 3, "the earlier reading of each town decides")
     local alone = attack:Combine({ homeEpoch = 0, awayEpoch = 0 }, nil)
     assert(alone.home == 0 and alone.away == 0, "one stamped ticket is enough, and a zero count is a count")
     assert(attack:Combine(nil, { homeOrigin = "zuoying" }) == nil and attack:Combine(nil, nil) == nil, "tickets without a stamp give no stamp")
-    local board = war:InitialTowns()
+    local board = _FactionWarTownDocument:InitialTowns()
     board.gushan.e = 1
-    assert(attack:ChangedSince({ home = 0, away = 0 }, "zuoying", "gushan", board) == true, "Gushan changed hands since the pairing")
-    assert(attack:ChangedSince({ home = 0, away = 1 }, "zuoying", "gushan", board) == false, "an equal count is no change")
-    assert(attack:ChangedSince(nil, "zuoying", "gushan", board) == false and attack:ChangedSince(false, "zuoying", "gushan", board) == false, "no stamp is no exemption")
+    assert(_FactionWarTownDocument:ChangedSince({ home = 0, away = 0 }, "zuoying", "gushan", board) == true, "Gushan changed hands since the pairing")
+    assert(_FactionWarTownDocument:ChangedSince({ home = 0, away = 1 }, "zuoying", "gushan", board) == false, "an equal count is no change")
+    assert(_FactionWarTownDocument:ChangedSince(nil, "zuoying", "gushan", board) == false and _FactionWarTownDocument:ChangedSince(false, "zuoying", "gushan", board) == false, "no stamp is no exemption")
     local pairing = { key = "k", homeOrigin = "zuoying", awayOrigin = "gushan" }
     local stamped = attack:Stamped(pairing, { home = 0, away = 1 })
     assert(stamped ~= pairing and stamped.homeEpoch == 0 and stamped.awayEpoch == 1 and stamped.key == "k" and pairing.homeEpoch == nil, "the stamp goes on a copy")
     assert(attack:Stamped(pairing, false) == pairing, "no stamp leaves the pairing alone")
     assert(attack:Snapshot({ key = "lobby", homeOrigin = "", awayOrigin = "" }) == false, "a lobby pairing has nothing to stamp")
 
-    _FactionWar.TownStorageName = STORAGE
+    _FactionWarTownDocument.TownStorageName = STORAGE
     _DataStorageService:DeleteGlobalDataStorageAndWait(STORAGE)
 
     -- The stored bytes arbitrate: a stale swap loses, and an absent document is created by exactly one of two first writers.
@@ -112,8 +112,8 @@ local ok, reason = pcall(function()
     local _, absent = readRaw()
     assert(absent == nil, "nothing stored after the delete")
     local x, y = nil, nil
-    _FactionWar:SwapTowns(nil, war:InitialTowns(), function(result) x = result end)
-    _FactionWar:SwapTowns(nil, war:InitialTowns(), function(result) y = result end)
+    _FactionWarTownDocument:SwapTowns(nil, _FactionWarTownDocument:InitialTowns(), function(result) x = result end)
+    _FactionWarTownDocument:SwapTowns(nil, _FactionWarTownDocument:InitialTowns(), function(result) y = result end)
     assert(await(function() return x ~= nil and y ~= nil end, 200), "both first writers answered")
     assert((x == "OK") ~= (y == "OK") and (x == "CONFLICT" or y == "CONFLICT"), "exactly one first creation wins, got " .. tostring(x) .. "/" .. tostring(y))
     log("[VRF][FactionWarContest] swap primitives ok first=" .. tostring(x) .. " second=" .. tostring(y))
@@ -135,8 +135,8 @@ local ok, reason = pcall(function()
     assert(winner.flipped == true and winner.owner == "RED" and winner.strength == 100, "the settling match took Gushan")
     assert(loser.flipped == false and loser.owner == "" and loser.amount == 20, "the other kept its result but changed no town")
     towns = read()
-    assert(towns.gushan.owner == "RED" and towns.gushan.strength == 100 and war:EpochOf(towns, "gushan") == 1, "Gushan is red, full, and counted once")
-    assert(towns.zuoying.strength == 100 and war:EpochOf(towns, "zuoying") == 0 and towns.nanzih.strength == 100 and towns.yancheng.strength == 100, "no other town moved")
+    assert(towns.gushan.owner == "RED" and towns.gushan.strength == 100 and _FactionWarTownDocument:EpochOf(towns, "gushan") == 1, "Gushan is red, full, and counted once")
+    assert(towns.zuoying.strength == 100 and _FactionWarTownDocument:EpochOf(towns, "zuoying") == 0 and towns.nanzih.strength == 100 and towns.yancheng.strength == 100, "no other town moved")
     assert(#towns.settled == 1 and towns.settled[1].k == winnerKey, "exactly one record, the settling match's")
     log("[VRF][FactionWarContest] race ok settled=" .. winnerKey .. " statuses=" .. statusA .. "/" .. statusB)
 
@@ -154,13 +154,13 @@ local ok, reason = pcall(function()
 
     -- C6: the pause after the nth lost race doubles from the base, is capped, and the roll jitters it inside its upper half.
     local function near(a, b) return math.abs(a - b) < 1e-9 end
-    assert(near(attack:ConflictDelay(1, 1), tuning.retry) and near(attack:ConflictDelay(1, 0), tuning.retry / 2), "the first pause is the base, jittered into its upper half")
-    assert(near(attack:ConflictDelay(2, 1), tuning.retry * 2) and near(attack:ConflictDelay(3, 1), tuning.retry * 4 > tuning.cap and tuning.cap or tuning.retry * 4), "it doubles until the cap")
-    assert(near(attack:ConflictDelay(40, 1), tuning.cap) and near(attack:ConflictDelay(40, 0), tuning.cap / 2), "and never exceeds the cap")
+    assert(near(_FactionWarTownDocument:ConflictDelay(1, 1), tuning.retry) and near(_FactionWarTownDocument:ConflictDelay(1, 0), tuning.retry / 2), "the first pause is the base, jittered into its upper half")
+    assert(near(_FactionWarTownDocument:ConflictDelay(2, 1), tuning.retry * 2) and near(_FactionWarTownDocument:ConflictDelay(3, 1), tuning.retry * 4 > tuning.cap and tuning.cap or tuning.retry * 4), "it doubles until the cap")
+    assert(near(_FactionWarTownDocument:ConflictDelay(40, 1), tuning.cap) and near(_FactionWarTownDocument:ConflictDelay(40, 0), tuning.cap / 2), "and never exceeds the cap")
     local previous = 0
     for lost = 1, 30 do
-        local top = attack:ConflictDelay(lost, 1)
-        assert(top >= previous - 1e-9 and top <= tuning.cap + 1e-9 and attack:ConflictDelay(lost, 0) >= top / 2 - 1e-9 and attack:ConflictDelay(lost, 0.5) <= top + 1e-9, "pause " .. tostring(lost) .. " stays in range")
+        local top = _FactionWarTownDocument:ConflictDelay(lost, 1)
+        assert(top >= previous - 1e-9 and top <= tuning.cap + 1e-9 and _FactionWarTownDocument:ConflictDelay(lost, 0) >= top / 2 - 1e-9 and _FactionWarTownDocument:ConflictDelay(lost, 0.5) <= top + 1e-9, "pause " .. tostring(lost) .. " stays in range")
         previous = top
     end
     -- An interfering writer that changes the stored bytes every 100 ms (fire and forget, every write different), so a settlement whose swap
@@ -172,12 +172,12 @@ local ok, reason = pcall(function()
         local timer = _TimerService:SetTimerRepeat(function()
             counter = counter + 1
             base.zuoying.strength = 100 - (counter % 50)
-            store:SetAsync(_FactionWar.TownStorageKey, _HttpService:JSONEncode(base), function() end)
+            store:SetAsync(_FactionWarTownDocument.TownStorageKey, _HttpService:JSONEncode(base), function() end)
         end, 0.1)
         stopInterference = function() _TimerService:ClearTimer(timer) stopInterference = nil end
     end
     -- A settlement that loses more than ten races (the old bound) is retried and still lands once.
-    attack.ConflictRetrySeconds, attack.ConflictBackoffCap = 0.05, 0.1
+    _FactionWarTownDocument.ConflictRetrySeconds, _FactionWarTownDocument.ConflictBackoffCap = 0.05, 0.1
     seed({}, { gushan = 100 })
     local lostStamp = stamp("c108-lost-races", "zuoying", "gushan")
     _FormationStorage:ConfigureMakerFaults(0, 0, 0.5)
@@ -185,7 +185,7 @@ local ok, reason = pcall(function()
     interfere()
     local lostDeadline = DateTime.UtcNow.Elapsed + 60000
     while not lostBox.done and DateTime.UtcNow.Elapsed < lostDeadline do
-        local running = attack._T.settling["c108-lost-races"]
+        local running = _FactionWarTownDocument._T.settling["c108-lost-races"]
         if running ~= nil and running.conflicts >= 12 then break end
         wait(0.1)
     end
@@ -198,7 +198,7 @@ local ok, reason = pcall(function()
     assert(towns.gushan.strength == 80 and towns.gushan.owner == "BLUE" and #towns.settled == 1 and towns.settled[1].k == "c108-lost-races", "applied exactly once: Gushan 100 -> 80, one record")
     log("[VRF][FactionWarContest] lost races ok conflicts=" .. tostring(lostOutcome.conflicts))
     -- A settlement that can never win is ended by the time budget, reported failed, and its redelivery lands once.
-    attack.ConflictBudgetSeconds = 1.5
+    _FactionWarTownDocument.ConflictBudgetSeconds = 1.5
     seed({}, { gushan = 100 })
     local neverStamp = stamp("c108-never-wins", "zuoying", "gushan")
     _FormationStorage:ConfigureMakerFaults(0, 0, 0.5)
@@ -208,12 +208,12 @@ local ok, reason = pcall(function()
     stopInterference()
     _FormationStorage:ConfigureMakerFaults(0, 0, 0)
     assert(neverStatus == "FAILED" and neverOutcome.conflicts >= 2, "the budget ended it, got " .. tostring(neverStatus))
-    attack.ConflictBudgetSeconds = tuning.budget
+    _FactionWarTownDocument.ConflictBudgetSeconds = tuning.budget
     wait(0.5)
     towns = read()
     assert(towns.gushan.strength == 100 and (towns.settled == nil or #towns.settled == 0), "a failed settlement changed nothing")
     assert(settle("c108-never-wins", "zuoying", "gushan", "WIN", "HUMAN", neverStamp) == "SAVED" and read().gushan.strength == 80, "its redelivery lands once")
-    attack.ConflictRetrySeconds, attack.ConflictBackoffCap = tuning.retry, tuning.cap
+    _FactionWarTownDocument.ConflictRetrySeconds, _FactionWarTownDocument.ConflictBackoffCap = tuning.retry, tuning.cap
     log("[VRF][FactionWarContest] time budget ok")
 
     -- AC2: a match paired before Gushan changed hands deducts nothing, even after the town is taken back.
@@ -226,7 +226,7 @@ local ok, reason = pcall(function()
         assert(settle("c108-back" .. index, "yancheng", "gushan", "WIN", "HUMAN", fresh) == "SAVED", "counter-attack " .. index)
     end
     towns = read()
-    assert(towns.gushan.owner == "BLUE" and towns.gushan.strength == 100 and war:EpochOf(towns, "gushan") == 2, "blue took Gushan back: same owner as at pairing, counted twice")
+    assert(towns.gushan.owner == "BLUE" and towns.gushan.strength == 100 and _FactionWarTownDocument:EpochOf(towns, "gushan") == 2, "blue took Gushan back: same owner as at pairing, counted twice")
     local _, before = readRaw()
     local status, _, outcome = settle("c108-late", "zuoying", "gushan", "WIN", "HUMAN", early)
     local _, after = readRaw()
@@ -234,9 +234,9 @@ local ok, reason = pcall(function()
     assert(before == after, "an exempt match writes nothing")
     assert(attack._T.outcomes["c108-late"].flipped == false, "the room remembers it as an outcome that changed no town")
     -- AC3: where the players of that match end up on the live board.
-    assert(war:Landing("RED", "zuoying", towns) == "zuoying", "red stays where it fought: Zuoying is still its own")
-    assert(war:Landing("BLUE", "gushan", towns) == "gushan", "blue stays in Gushan: it owns it again")
-    log("[VRF][FactionWarContest] flip-and-retake ok epoch=" .. tostring(war:EpochOf(towns, "gushan")))
+    assert(_FactionWarTownDocument:Landing("RED", "zuoying", towns) == "zuoying", "red stays where it fought: Zuoying is still its own")
+    assert(_FactionWarTownDocument:Landing("BLUE", "gushan", towns) == "gushan", "blue stays in Gushan: it owns it again")
+    log("[VRF][FactionWarContest] flip-and-retake ok epoch=" .. tostring(_FactionWarTownDocument:EpochOf(towns, "gushan")))
 
     -- The board where both towns of a match changed hands: the stamp keeps the wrong faction from taking a town.
     seed({ zuoying = "BLUE", gushan = "RED" }, {}, { zuoying = 1, gushan = 1 })
@@ -248,7 +248,7 @@ local ok, reason = pcall(function()
     towns = read()
     assert(towns.gushan.owner == "RED" and towns.zuoying.owner == "BLUE", "neither town moved to the wrong faction")
     -- AC3 on this board: the old red home player (origin Zuoying, now blue) goes to its capital, the old blue player (Gushan, now red) to its capital.
-    assert(war:Landing("RED", "zuoying", towns) == "nanzih" and war:Landing("BLUE", "gushan", towns) == "yancheng", "players of an exempt match whose town is now the enemy's go to their capital")
+    assert(_FactionWarTownDocument:Landing("RED", "zuoying", towns) == "nanzih" and _FactionWarTownDocument:Landing("BLUE", "gushan", towns) == "yancheng", "players of an exempt match whose town is now the enemy's go to their capital")
 
     -- AC4: a repeated result changes nothing and answers the same capture; the experience of a repeated result is credited once.
     seed({}, { gushan = 20 })
@@ -300,7 +300,7 @@ local ok, reason = pcall(function()
 
     -- The document with its counts stays under one storage credit with a full history.
     local history = {}
-    for index = 1, attack.SettledHistory do
+    for index = 1, _FactionWarTownDocument.SettledHistory do
         table.insert(history, { k = "c108-size" .. index .. "-" .. _UtilLogic:NewGuid(), w = "zuoying", l = "gushan", s = 60, o = index % 2 == 0 and "RED" or "" })
     end
     seed({ gushan = "BLUE", zuoying = "RED" }, { gushan = 60, zuoying = 60 }, { gushan = 12, zuoying = 12 }, history)
@@ -311,8 +311,8 @@ end)
 
 if stopInterference ~= nil then stopInterference() end
 _FormationStorage:ConfigureMakerFaults(0, 0, 0)
-_FactionWarAttack.ConflictRetrySeconds, _FactionWarAttack.ConflictBackoffCap, _FactionWarAttack.ConflictBudgetSeconds = tuning.retry, tuning.cap, tuning.budget
-_FactionWar.TownStorageName = original
+_FactionWarTownDocument.ConflictRetrySeconds, _FactionWarTownDocument.ConflictBackoffCap, _FactionWarTownDocument.ConflictBudgetSeconds = tuning.retry, tuning.cap, tuning.budget
+_FactionWarTownDocument.TownStorageName = original
 _MonsterLevelStorage.StorageKey = originalLevelKey
 _DataStorageService:DeleteGlobalDataStorageAndWait(STORAGE)
 if ok then log("[VRF][FactionWarContest] PROBE PASS") else log_error("[VRF][FactionWarContest] PROBE FAIL " .. tostring(reason)) end

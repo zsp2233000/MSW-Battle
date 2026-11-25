@@ -39,7 +39,7 @@ local ok, reason = pcall(function()
         local bar = ui:Ui("Overlay/Window/Map/Content/Links/Link" .. slot)
         assert(bar.Enable and bar.UITransformComponent.RectSize.x > 0, "link " .. slot .. " drawn")
     end
-    for _, id in ipairs(_FactionWar.TownOrder) do
+    for _, id in ipairs(_FactionWarTownDocument.TownOrder) do
         assert(ui:Ui("Overlay/Window/Side/Rows/" .. id .. "/Here").Enable == (id == here), "here line in the list on " .. id)
         assert(ui:Ui("Overlay/Window/Map/Content/Towns/" .. id .. "/Arrow").Enable == (id == here), "here arrow on " .. id)
     end

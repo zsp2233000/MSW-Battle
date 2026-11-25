@@ -33,7 +33,7 @@ local function find()
 end
 local function readTowns()
     local towns, done = nil, false
-    _FactionWar:ReadTowns(function(result) towns, done = result, true end)
+    _FactionWarTownDocument:Read(function(result) towns, done = result, true end)
     assert(await(function() return done end, 100), "towns read")
     return towns
 end
@@ -78,10 +78,10 @@ local ok, reason = pcall(function()
         _FormationStorage:Write(PROFILE, _FactionWar.FactionKey, "", "RED", function(code) saved = code == 0 end)
         await(function() return saved end, 100)
         -- Gushan one guard win from falling (a guard win takes 10).
-        local towns = _FactionWar:InitialTowns()
+        local towns = _FactionWarTownDocument:InitialTowns()
         towns.gushan.strength = 10
         local written = false
-        _FactionWar:WriteTowns(towns, function(ok) written = ok end)
+        _FactionWarTownDocument:WriteTowns(towns, function(ok) written = ok end)
         assert(await(function() return written end, 100), "Gushan seeded at 10")
         -- The #107 and #108 e2e probes park the guard at 600 s; this one needs the real 10 s.
         _FactionWarGuard.WaitSeconds = 10
@@ -126,7 +126,7 @@ local ok, reason = pcall(function()
                 towns = readTowns()
                 return towns ~= nil and recordsOf(towns, key) == 1
             end, 300), "the settlement was stored exactly once")
-            assert(towns.gushan.owner == "RED" and towns.gushan.strength == 100 and _FactionWar:EpochOf(towns, "gushan") == 1, "Gushan was captured and counted once")
+            assert(towns.gushan.owner == "RED" and towns.gushan.strength == 100 and _FactionWarTownDocument:EpochOf(towns, "gushan") == 1, "Gushan was captured and counted once")
         else
             wait(5)
             towns = readTowns()
@@ -190,14 +190,14 @@ local ok, reason = pcall(function()
         for _, id in ipairs(history(PROFILE).settled or {}) do if id == key then count = count + 1 end end
         assert(count == 1, "the match is in the monster-level history exactly once, found " .. tostring(count))
         if captured then
-            assert(towns.gushan.strength == 100 and recordsOf(towns, key) == 1 and _FactionWar:EpochOf(towns, "gushan") == 1, "one settlement, one capture")
+            assert(towns.gushan.strength == 100 and recordsOf(towns, key) == 1 and _FactionWarTownDocument:EpochOf(towns, "gushan") == 1, "one settlement, one capture")
         else
             assert(towns.gushan.strength == 10 and recordsOf(towns, key) == 0, "no settlement changed Gushan")
         end
         log("[VRF][ReconnectGuard] LANDING PASS in " .. expected)
     elseif STEP == 9 then
         _FactionWarGuard.WaitSeconds = 10
-        local code = _DataStorageService:DeleteGlobalDataStorageAndWait(_FactionWar.TownStorageName)
+        local code = _DataStorageService:DeleteGlobalDataStorageAndWait(_FactionWarTownDocument.TownStorageName)
         log("[VRF][ReconnectGuard] CLEANUP town storage deleted code=" .. tostring(code))
     end
 end)
