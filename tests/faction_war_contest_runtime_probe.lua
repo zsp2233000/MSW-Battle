@@ -232,7 +232,7 @@ local ok, reason = pcall(function()
     local _, after = readRaw()
     assert(status == "EXEMPT" and outcome.flipped == false and outcome.amount == 20, "the early match is exempt although the owner looks unchanged, got " .. tostring(status))
     assert(before == after, "an exempt match writes nothing")
-    assert(attack._T.outcomes["c108-late"].flipped == false, "the room remembers it as an outcome that changed no town")
+    assert(_FactionWarLanding._T.outcomes["c108-late"].flipped == false, "the room remembers it as an outcome that changed no town")
     -- AC3: where the players of that match end up on the live board.
     assert(_FactionWarTownDocument:Landing("RED", "zuoying", towns) == "zuoying", "red stays where it fought: Zuoying is still its own")
     assert(_FactionWarTownDocument:Landing("BLUE", "gushan", towns) == "gushan", "blue stays in Gushan: it owns it again")
