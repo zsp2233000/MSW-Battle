@@ -157,7 +157,7 @@ test('a reconnect inside the match room recovers the ticket and sends the experi
 
 // ---- a re-login while the ticket still says IN_ROOM ---------------------------------------------------------------------------
 
-test('a re-login with a ticket that says IN_ROOM goes back into the room while it runs, else the ticket is closed and the landing follows the match', () => {
+test('a re-login with a ticket that says IN_ROOM goes back into the room while it runs, else the ticket is closed and the origin is judged in the static room', () => {
   const text = flow();
   const recover = body(text, 'Recover');
   assert.match(recover, /data\.state == "IN_ROOM" and not _RoomService:IsInstanceRoom\(\) then\n(\s+--[^\n]*\n)*\s+if self:Rejoin\(userId, data\) then/, 'the static room tries the live room first');

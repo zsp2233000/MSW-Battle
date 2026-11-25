@@ -244,7 +244,8 @@ test('the runbook steps say what two accounts can really do and what the code re
   const row = n => runbookRows().map(cells => cells.join(' ')).find(line => line.startsWith(`S${n} `)) || '';
   // S18: a normal logout removes the entity, so the sweep cannot meet B; B needs the board flipped by A alone against a guard.
   assert.match(row(18), /正常關閉應用程式[^]*只有 A 排隊[^]*守衛[^]*鼓山 10 → 0/, 'S18: B logs out standing in Gushan at 10, A alone beats the guard and flips it');
-  assert.match(row(18), /左營/, 'S18: A starts from Zuoying');
+  assert.match(row(18), /\(4\) 返回後 A 在左營/, 'S18: A returns to Zuoying after beating the guard');
+  assert.match(runbookRows().find(([name]) => name === 'S18')[2], /A 返回左營[^]*奪下鼓山[^]*B 被放到鹽埕/, 'S18: the capture notice names Gushan without landing A there');
   assert.match(row(18), /不會有 `sweep skipped offline`[^]*網路切斷/, 'S18: sweep skipped offline is expected only for a network cut, not for a logout');
   // S6 and S8: the history holds the match key once; experience is the profile\'s own dead units, and 0 is valid.
   for (const n of [6, 8]) {
@@ -256,6 +257,7 @@ test('the runbook steps say what two accounts can really do and what the code re
   assert.match(text, /四場勝利把鼓山壓到 20[^\n]*100 → 80 → 60 → 40 → 20[^\n]*第五場勝利換旗[^\n]*S6、S7 已經算兩場/, 'prerequisite 6 counts the wins');
   assert.doesNotMatch(text, /連打五場真人戰勝（100/, 'the old five-wins-to-20 sentence is gone');
   assert.match(row(9), /第五場/, 'S9 is the fifth win');
+  assert.match(runbookRows().find(([name]) => name === 'S9')[2], /A 返回左營[^]*奪下鼓山[^]*B 回鹽埕/, 'S9: the human capturer returns to Zuoying and the defender to its capital');
   // S12: the native code is mapped by FormationStorage; SwapTowns reads 2000000 or 1000007 as a conflict.
   assert.match(row(12), /1000002[^]*轉成 `2000000`[^]*`2000000` 或 `1000007`/, 'S12: native 1000002 becomes 2000000, a conflict is 2000000 or 1000007');
   assert.doesNotMatch(text, /程式以 `2000000` 與 `1000002` 判讀/, 'the old reading of the codes is gone');

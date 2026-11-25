@@ -6,7 +6,7 @@
 
 配對成立後，兩城寫在 `match.homeOrigin / awayOrigin`，隨交接資料進入戰場房間。`MatchedBattle` 在戰果只發布一次時呼叫 `FactionWarAttack:Settle(matchKey, homeTown, awayTown, homeResult, kind)`（`complete` 是 #105 起就有的選填回報函式；#108 起只多一個選填參數 `snapshot`，即配對時蓋的章）；以全域儲存裡的 `settled` 清單去重，所以重複接收戰果不會重複扣兵力。真人戰勝利扣目標城 20 兵力（守衛戰勝利扣 10，見 ADR 0011，`Settle` 因此多一個 `kind` 參數），對主城、平手與同陣營城鎮不扣。（#107 起兵力降到零就換旗並回滿 100，見 ADR 0012；本段原本寫的「兵力不會降到零」已不成立。）
 
-戰後返回改走 `MatchTransfer:MoveToTown`：有 `origin` 的票券回到出發城，其餘仍回大廳。（#107 起戰爭票券的落點改依戰果與即時歸屬：奪城者進新城、出發城已易主者回己方主城，見 ADR 0012；`MoveToTown` 這條 adapter 邊界不變。）離城鎖定也用同一份票券：`FactionWarAttack:IsEngaged` 讀 `MatchFlow:StateForUser` 與 `FormationHandoff:IsLockedForUser`，傳送門與 NPC 都以它判斷。
+戰後返回改走 `MatchTransfer:MoveToTown`：有 `origin` 的票券回到出發城，其餘仍回大廳。（#107 起戰爭票券的落點改依戰果與即時歸屬：當時奪城者進新城（ADR 0012）。這條落點規則已由 ADR 0016 取代：一律回出發城，出發城已不屬己方才回主城。`MoveToTown` 這條 adapter 邊界不變。）離城鎖定也用同一份票券：`FactionWarAttack:IsEngaged` 讀 `MatchFlow:StateForUser` 與 `FormationHandoff:IsLockedForUser`，傳送門與 NPC 都以它判斷。
 
 ## 已知缺口（發布環境）
 

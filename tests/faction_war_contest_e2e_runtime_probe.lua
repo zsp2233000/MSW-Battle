@@ -4,7 +4,7 @@
 --   add_virtual_player -profile_code wp2613 -nickname RedTwo     (RED,  Zuoying, 3 tanks, home of match 2)
 --   add_virtual_player -profile_code wp2614 -nickname BlueTwo    (BLUE, Gushan,  1 tank,  away of match 2)
 --   add_virtual_player -profile_code wp2615 -nickname BlueIdle   (BLUE, Gushan,  stands still, must be sent home exactly once)
--- Writes the REAL town storage (Gushan starts at 20); STEP 9 deletes it. Keep the real player in formationlobby.
+-- ADR 0016 updates: written, not run. Uses REAL local town storage (Gushan starts at 20); STEP 9 deletes it. Keep the real player in formationlobby.
 -- Steps are numbered; set STEP below, dispatch, wait for the line it announces.
 --   1 SETUP      server_main, ~90 s, wait "SETUP PASS"
 --   2 QUEUE1     server_main: RedOne -> Gushan, BlueOne -> Zuoying (pair 1), RedTwo -> Gushan, BlueTwo -> Zuoying (pair 2).
@@ -16,9 +16,9 @@
 --                experience do not move (DUPLICATE for the room that flipped, EXEMPT for the other). It cannot run after RETURN: the
 --                match room is recycled once its players have left. A redelivery without a room (the same match key, with and
 --                without the stamp, after the world moved on) is covered by faction_war_contest_runtime_probe.lua.
---   6 LANDING1   server_main: exactly one red player stands in Gushan (the conqueror), the other in Zuoying; both blue players and the idle
---                one stand in Yancheng; nobody is locked; both matches are in the blue players' monster-level history
---   7 QUEUE2     server_main: Gushan is put back to blue/60; the red player who stayed in Zuoying and the blue player who went to Yancheng
+--   6 LANDING1   server_main: both red players return to Zuoying; both blue players and the idle one stand in Yancheng; nobody is locked;
+--                both matches are in the blue players' monster-level history
+--   7 QUEUE2     server_main: Gushan is put back to blue/60; RedOne in Zuoying and BlueOne (moved back from Yancheng to Gushan)
 --                are paired (stamp Gushan = 0), then the document is rewritten as "taken and taken back" (blue, 60, counted twice)
 --   8 LANDING2   server_main, after STEP 4 in the new room: no deduction (Gushan still 60, counted twice), the red player stays in Zuoying,
 --                the blue player stays in Gushan (its own town again)
@@ -159,14 +159,14 @@ local ok, reason = pcall(function()
         end
         log("[VRF][ContestE2E] REDELIVER PASS " .. key .. " status=" .. tostring(status) .. " flipped=" .. tostring(outcome.flipped))
     elseif STEP == 6 then
-        -- Expect: exactly one red player in Gushan (the conqueror), the other in Zuoying; both blue players and the idle one in Yancheng.
+        -- The actual capturer and the exempt RED player both go back to their origin.
         assert(await(function()
             users = find()
             r1, b1, r2, b2, idle = users.wp2611, users.wp2612, users.wp2613, users.wp2614, users.wp2615
             return isvalid(r1) and isvalid(r2) and isvalid(b1) and isvalid(b2) and isvalid(idle)
-                and ((r1.CurrentMapName == "gushan" and r2.CurrentMapName == "zuoying") or (r1.CurrentMapName == "zuoying" and r2.CurrentMapName == "gushan"))
+                and r1.CurrentMapName == "zuoying" and r2.CurrentMapName == "zuoying"
                 and b1.CurrentMapName == "yancheng" and b2.CurrentMapName == "yancheng" and idle.CurrentMapName == "yancheng"
-        end, 600), "one conqueror advanced to Gushan, the other red player stayed, every blue player is in Yancheng")
+        end, 600), "both RED players are in Zuoying and every BLUE player is in Yancheng")
         for _, user in ipairs({ r1, b1, r2, b2, idle }) do assert(await(function() return not _FactionWarAttack:IsEngaged(id(user)) end), "unlocked") end
         local towns = readTowns()
         assert(towns.gushan.owner == "RED" and towns.gushan.strength == 100, "the board is as the one flipping match left it")
@@ -184,11 +184,10 @@ local ok, reason = pcall(function()
         assert(keys[flipping] == true and credited == 2, "both matches, the exempt one too, were credited")
         log("[VRF][ContestE2E] LANDING1 PASS")
     elseif STEP == 7 then
-        -- Round two: Gushan is blue and at 60 again. The red player who stayed in Zuoying meets the blue player who went to Yancheng.
+        -- Round two: use fixed profiles so a player from the sidelines cannot satisfy the landing check.
         users = find()
-        r1, b1, r2, b2 = users.wp2611, users.wp2612, users.wp2613, users.wp2614
-        local red = r1.CurrentMapName == "zuoying" and r1 or r2
-        local blue = b1
+        local red, blue = users.wp2611, users.wp2612
+        assert(isvalid(red) and red.CurrentMapName == "zuoying" and isvalid(blue) and blue.CurrentMapName == "yancheng", "RedOne and BlueOne completed the first return")
         local seeded = _FactionWarTownDocument:InitialTowns()
         seeded.gushan.strength = 60
         local written = false
@@ -213,10 +212,10 @@ local ok, reason = pcall(function()
     elseif STEP == 8 then
         assert(await(function()
             users = find()
-            r1, b1, r2, b2 = users.wp2611, users.wp2612, users.wp2613, users.wp2614
-            local red = (r1.CurrentMapName == "zuoying" and r1) or (r2.CurrentMapName == "zuoying" and r2)
-            return isvalid(b1) and b1.CurrentMapName == "gushan" and red ~= nil and isvalid(red)
-        end, 1500), "the red player stayed in Zuoying and the blue player stayed in Gushan (its own town again)")
+            r1, b1 = users.wp2611, users.wp2612
+            return isvalid(r1) and r1.CurrentMapName == "zuoying" and not _FactionWarAttack:IsEngaged(id(r1))
+                and isvalid(b1) and b1.CurrentMapName == "gushan" and not _FactionWarAttack:IsEngaged(id(b1))
+        end, 1500), "RedOne returned to Zuoying and BlueOne returned to Gushan (its own town again); both unlocked")
         local towns = readTowns()
         assert(towns.gushan.owner == "BLUE" and towns.gushan.strength == 60 and _FactionWarTownDocument:EpochOf(towns, "gushan") == 2, "no strength was deducted: Gushan is still blue, 60, counted twice")
         assert(towns.zuoying.strength == 100 and towns.nanzih.strength == 100 and towns.yancheng.strength == 100, "no town lost strength")

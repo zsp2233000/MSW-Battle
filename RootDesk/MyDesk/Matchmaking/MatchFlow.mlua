@@ -822,7 +822,7 @@ script MatchFlow extends Logic
     @ExecSpace("ServerOnly")
     method boolean Rejoin(string userId, table data)
         -- A player whose entity is gone but whose match room still runs in this world instance goes back into it; the room's own coordinator takes over on their arrival.
-        -- The static room cannot read another room's battle phase, so a finished battle is rejoined too: the room shows its result and the return lands by its own outcome.
+        -- The static room cannot read another room's battle phase, so a finished battle is rejoined too: the room shows its result and judges origin ownership on return.
         if self._T.moving[userId] ~= nil then
             log("[VRF][MatchFlow] rejoin skipped match=" .. data.matchKey .. "; an admission is moving the player")
             return false
@@ -842,7 +842,7 @@ script MatchFlow extends Logic
         -- Restore from cached authority with bounded retries while catalog or prior saves become ready.
         if self._T.ended or self._T.records[userId] ~= ticket or self:Player(userId) == nil or ticket.data.state ~= "RETURNING" then return end
         if _FormationHandoff:Restore(userId, ticket.id) then
-            -- The landing below reads the towns of the match after the ticket is closed, so it keeps its own copy of them.
+            -- After closing the ticket, judge live ownership of the origin and use the match key to rebuild the arrival notice.
             local landing = { kind = "RESTORE", origin = ticket.data.origin or "", matchKey = ticket.data.matchKey or "" }
             local stored = self:Finish(userId, ticket, "RETURNED", function() return _FormationHandoff:Close(userId, ticket, "RETURNED") end)
             if self._T.records[userId] ~= ticket or self:Player(userId) == nil then return end
@@ -1127,7 +1127,7 @@ script MatchFlow extends Logic
 
     @ExecSpace("ServerOnly")
     method boolean MoveHome(string userId, any ticket)
-        -- A war player lands where their faction holds ground (the town they took, the one they left, else their capital); every other player returns to the lobby.
+        -- ADR 0016: return war players to their origin if still owned, otherwise to their capital; other players return to the lobby.
         local origin = ticket ~= nil and ticket.data ~= nil and ticket.data.origin or ""
         if _FactionWar:IsTown(origin) then
             return _FactionWarLanding:Judge(userId, { kind = "RETURN", origin = origin, matchKey = ticket.data.matchKey or "", move = function(town)

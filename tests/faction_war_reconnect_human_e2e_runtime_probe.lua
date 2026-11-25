@@ -14,8 +14,8 @@
 --                 tank is settled although they are away (the match is in their monster-level history exactly once)
 --   5 RECONNECT   room: a synthetic reconnect for the blue player: the ticket is back as IN_ROOM, the receipt is armed again
 --   6 REDELIVER   room, BEFORE RETURN: the same result again: DUPLICATE, the towns do not move, no experience is credited twice
---   7 RETURN      room: ReturnForUser for both. Red (the conqueror) lands in Gushan, blue (the loser) in Yancheng
---   8 LANDING     server_main: red in Gushan, blue in Yancheng, nobody locked, one settlement ("LANDING PASS")
+--   7 RETURN      room: ReturnForUser for both; ADR 0016 update written, not run
+--   8 LANDING     server_main: red (capturer) in Zuoying, blue (origin lost) in Yancheng, nobody locked, one settlement ("LANDING PASS")
 --   9 CLEANUP     deletes the war town storage and puts the guard clock back
 -- Expected [VRF] lines (read with logs): see tests/README.md, "Disconnect and reconnect (#109)".
 local STEP = 1
@@ -171,8 +171,8 @@ local ok, reason = pcall(function()
         assert(await(function()
             users = find()
             a, b = users[RED], users[BLUE]
-            return isvalid(a) and isvalid(b) and a.CurrentMapName == "gushan" and b.CurrentMapName == "yancheng"
-        end, 600), "the conqueror entered Gushan and the loser went to Yancheng")
+            return isvalid(a) and isvalid(b) and a.CurrentMapName == "zuoying" and b.CurrentMapName == "yancheng"
+        end, 600), "the capturer returned to Zuoying and the player who lost Gushan went to Yancheng")
         for _, user in ipairs({ a, b }) do assert(await(function() return not _FactionWarAttack:IsEngaged(id(user)) end), "unlocked") end
         local towns = readTowns()
         assert(towns.gushan.owner == "RED" and towns.gushan.strength == 100 and #towns.settled == 1, "one settlement is stored")
