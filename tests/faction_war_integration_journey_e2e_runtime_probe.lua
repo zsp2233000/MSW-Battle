@@ -326,9 +326,9 @@ local ok, reason = pcall(function()
             users = find()
             r1, b1 = users.R1, users.B1
             return isvalid(r1) and isvalid(b1) and r1.CurrentMapName == "zuoying" and b1.CurrentMapName == "yancheng"
-        end, 400), "R1 returned to Zuoying and B1 went to Yancheng after losing Gushan"
+        end, 400), "R1 returned to Zuoying and B1 went to Yancheng after losing Gushan")
         local redLanding = r1.CurrentMapName
-        log("[VRF][Journey] return destinations R1=" .. redLanding .. " B1=" .. b1.CurrentMapName))
+        log("[VRF][Journey] return destinations R1=" .. redLanding .. " B1=" .. b1.CurrentMapName)
         for _, alias in ipairs({ "R1", "B1", "B2", "B3" }) do assert(await(function() return not _FactionWarAttack:IsEngaged(id(users[alias])) end), alias .. " is unlocked") end
         local towns = readTowns()
         assert(towns.gushan.owner == "RED" and towns.gushan.strength == 100 and #towns.settled == 1, "one settlement is stored, found " .. board(towns))
