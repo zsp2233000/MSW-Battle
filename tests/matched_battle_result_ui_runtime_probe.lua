@@ -218,6 +218,11 @@ local ok, detail = pcall(function()
     wait(0.3)
     local expected = battle:ResultForProfile(player.PlayerComponent.ProfileCode)
     assert(expected ~= "" and _MatchFlowInput.Snapshot.state == "RESULT_" .. expected, "result belongs to this player's actual battle side")
+    -- BattleUIController.ResultDisplayDelaySeconds (2 s) holds the result window back after the state changes.
+    for _ = 1, 50 do
+        if ui.OwnResult == expected and ui.result.Enable then break end
+        wait(0.1)
+    end
     assert(ui.OwnResult == expected and ui.result.Enable, "result window shows this player's result")
     assert(ui.resultWin.Enable == (expected == "WIN") and ui.resultLose.Enable == (expected == "LOSE") and ui.resultDraw.Enable == (expected == "DRAW"), "exactly one result entity")
     local own, enemy = counts()
