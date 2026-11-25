@@ -222,7 +222,8 @@ script FormationHandoff extends Logic
             COMMITTING = { SAVING = true, COMMITTING = true },
             TRANSFER = { COMMITTING = true, TRANSFER = true, IN_ROOM = true },
             IN_ROOM = { TRANSFER = true },
-            RETURNING = { COMMITTING = true, TRANSFER = true, IN_ROOM = true, RETURNING = true },
+            RETURNING = { QUEUED = true, RENEWING = true, QUEUE_ERROR = true, SAVING = true,
+                COMMITTING = true, TRANSFER = true, IN_ROOM = true, RETURNING = true },
         }
         if not (allowed[target] and allowed[target][source]) and not (target == source and (target == "COMMITTING" or target == "RETURNING")) then return false end
         local metadata = self:Metadata(record.metadata)
@@ -486,7 +487,7 @@ script FormationHandoff extends Logic
 
     @ExecSpace("ServerOnly")
     method boolean BeginReturn(string forUserId, table ticket)
-        -- Confirm the return before the caller may leave the room.
+        -- Confirm the return before the caller may leave; MatchFlow authorizes failed unsealed pairings too.
         return self:Transition(forUserId, ticket, "RETURNING", nil)
     end
 
@@ -534,7 +535,7 @@ script FormationHandoff extends Logic
 
     @ExecSpace("ServerOnly")
     method boolean CanCancel(table ticket)
-        -- The same policy guards native cancellation and the durable terminal transition.
+        -- Storage eligibility only. MatchFlow independently rejects requests once an opponent is found.
         local record = self._T.records[ticket.profile]
         if not self:Current(ticket, record) or record.metadata == nil then return false end
         local state = record.metadata.state

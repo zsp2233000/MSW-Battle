@@ -1,4 +1,6 @@
 -- Client, fresh Play. Synthetic public observations only; no queue or storage commands.
+-- ROOM mode: client in a disposable matchprobe instance, after BattleMatch is selected and before any battle.
+local MODE = "LOBBY"
 local ok, detail = pcall(function()
     local rules = _MatchFlowState
     local context = { now = 65000, pending = false, formation = {}, ready = true,
@@ -8,16 +10,37 @@ local ok, detail = pcall(function()
             players = 2, busy = false, summary = "fixture", attempt = "new",
             sourceRoom = _RoomService.RoomKey, sequenceKey = "state-probe", sequence = 1 }
     end
+    if MODE == "ROOM" then
+        local input = _MatchFlowInput
+        assert(input._T.screen == "BattleMatch", "fixture shows the pre-battle panel")
+        local waiting = snapshot("WAITING")
+        waiting.origin = "zuoying"
+        local function observe(value, seq)
+            value.sequence = seq
+            _MatchFlow:ReceiveState(value)
+        end
+        observe(waiting, 1000000)
+        assert(not input.action.Enable, "valid WAITING is not allowed to leave")
+        local failed = snapshot("ENTRY_FAILED")
+        failed.origin = "zuoying"
+        observe(failed, 1000001)
+        assert(input.action.Enable and input.action.TextGUIRendererComponent.Text == "返回 左營", "war return names departure town")
+        failed.origin = ""
+        observe(failed, 1000002)
+        assert(input.action.Enable and input.action.TextGUIRendererComponent.Text == "返回大廳", "lobby return names the lobby")
+        return
+    end
     local groups = {
-        CANCEL = { "QUEUED", "RENEWING", "QUEUE_ERROR", "CANCELLING", "CANCELLED", "SAVING" },
-        RETURN = { "COMMITTING", "TRANSFER", "IN_ROOM", "WAITING", "ENTRY_FAILED", "ABORTED", "ROOM_MISMATCH", "RETURNING", "RESULT_WIN", "RESULT_LOSE", "RESULT_DRAW" },
+        [""] = { "CANCELLING", "SAVING", "COMMITTING", "TRANSFER", "IN_ROOM", "WAITING" },
+        CANCEL = { "QUEUED", "RENEWING", "QUEUE_ERROR", "CANCELLED" },
+        RETURN = { "ENTRY_FAILED", "ABORTED", "ROOM_MISMATCH", "RETURNING", "RESULT_WIN", "RESULT_LOSE", "RESULT_DRAW" },
         QUEUE = { "IDLE" },
     }
     for action, states in pairs(groups) do
         for _, state in ipairs(states) do
             local value = snapshot(state)
             local view = rules:Present(value, context)
-            assert(view.action == action and view.enabled, state .. " action")
+            assert(view.action == action and view.enabled == (action ~= ""), state .. " action")
             assert(view.allowsFormationActions == (state == "IDLE"), state .. " editing lock")
             for _, blocker in ipairs({ "editBusy", "unconfirmed", "confirming" }) do
                 context[blocker] = true
@@ -25,16 +48,20 @@ local ok, detail = pcall(function()
                 context[blocker] = false
             end
             context.pending = true
-            assert(rules:Present(value, context).label == (action == "CANCEL" and "取消中…" or (state == "IDLE" and "處理中…" or (state == "RETURNING" or string.sub(state, 1, 7) == "RESULT_") and "返回中…" or view.label)), state .. " pending label")
+            context.pendingAction = action
+            local pending = rules:Present(value, context)
+            assert(not pending.enabled, state .. " pending disables the action")
+            if action == "CANCEL" then assert(pending.text == "正在取消配對…" and pending.action == "", "cancel in flight has no button") end
             context.pending = false
+            context.pendingAction = ""
             value.busy = true
             assert(not rules:Present(value, context).enabled, state .. " busy")
         end
     end
     assert(not rules:Present(snapshot("BATTLE"), context).enabled, "battle cannot leave")
     assert(not rules:Present(snapshot("UNKNOWN"), context).enabled, "unknown state cannot queue")
-    assert(rules:Present(snapshot("TRANSFER", "READINESS_FAILED"), context).action == "STATUS", "readiness retry queries status")
-    assert(rules:Present(snapshot("QUEUED"), context).text == "正在尋找對手 · 已等候 64 秒", "elapsed is not a countdown")
+    assert(rules:Present(snapshot("TRANSFER", "READINESS_FAILED"), context).action == "", "recoverable readiness still hides entry actions")
+    assert(rules:Present(snapshot("QUEUED"), context).text == "配對中 · 已等候 64 秒", "lobby has no countdown")
     assert(rules:Failure(nil, { code = "QUEUE_SERVICE_FAILED", details = { serviceCode = "anything" } }, "new").code == "QUEUE_SERVICE_FAILED", "native service failures remain sticky")
     local failure = rules:Failure(nil, { code = "RETURN_MOVE_FAILED", details = { text = "anything" } }, "new")
     assert(failure.code == "RETURN_MOVE_FAILED", "explicit failed movement")

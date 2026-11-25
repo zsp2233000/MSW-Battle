@@ -11,16 +11,17 @@ end
 local ok, detail = pcall(function()
     if MODE == 'ENTRY' then
         assert(await(function() return m.Snapshot.reasonCode == 'ROOM_MOVE_FAILED' and not m.Snapshot.busy end), 'entry movement failed')
-        assert(m.Snapshot.state == 'TRANSFER' and string.find(m.status.TextGUIRendererComponent.Text, '進入戰場失敗', 1, true), 'entry failure reason visible')
-        assert(m.action.ButtonComponent.Enable and not m:AllowsFormationActions(), 'entry abort usable; editing locked')
+        assert(m.Snapshot.state == 'TRANSFER' and string.find(m.status.TextGUIRendererComponent.Text, '入場失敗', 1, true), 'entry failure reason visible')
+        assert(m.action.Enable and m.action.ButtonComponent.Enable and m.action.TextGUIRendererComponent.Text == '停止入場'
+            and not m:AllowsFormationActions(), 'Stop Entry usable; editing locked')
         m.action:SendEvent(ButtonClickEvent())
         assert(await(function() return m:AllowsFormationActions() end), 'visible abort restores confirmed lobby')
         log('[VRF][Cancel52Entry] PASS movement failure reason; visible abort; confirmed lobby restore')
         return
     elseif MODE == 'PROGRESS' then
         assert(await(function() return m.Snapshot.state == 'COMMITTING' end, 300), 'observed resumed commit')
-        assert(m.Snapshot.reasonCode ~= 'CANCEL_FAILED', 'resumed match clears obsolete cancellation failure')
-        log('[VRF][Cancel52Progress] PASS resumed commit clears cancellation error')
+        assert(m.Snapshot.reasonCode ~= 'CANCEL_FAILED' and not m.action.Enable, 'commit has no cancel action')
+        log('[VRF][Cancel52Progress] PASS post-pairing commit hides cancellation')
         return
     end
     assert(await(function() return m:AllowsFormationActions() and _FormationEditSession:HasValidActive() end), 'valid lobby fixture')
@@ -30,12 +31,13 @@ local ok, detail = pcall(function()
     m.action:SendEvent(ButtonClickEvent())
     assert(not m:AllowsFormationActions(), 'cancellation request keeps editing locked')
     assert(await(function() return m.Snapshot.state == 'CANCELLING' and m.Snapshot.busy end), 'pending cancellation is distinct from confirmed completion')
+    assert(not m.action.Enable, 'in-flight cancel has no button')
     assert(await(function() return m.Snapshot.reasonCode == 'CANCEL_FAILED' and not m.Snapshot.busy end), 'cancellation response failed')
     assert(m.Snapshot.state == 'QUEUED', 'failed cancellation retains the live queue state')
     assert(not m:AllowsFormationActions() and not l:Ui('Lobby/Edit').ButtonComponent.Enable, 'failure cannot unlock editing')
     assert(m.Snapshot.attempt == attempt and m.Snapshot.summary == summary, 'same attempt and fixed formation retained')
     assert(m.action.ButtonComponent.Enable, 'retry cancellation is usable')
-    assert(m.action.TextGUIRendererComponent.Text == '重試取消', 'failure offers an explicit retry')
+    assert(m.action.Enable and m.action.TextGUIRendererComponent.Text == '取消配對', 'failure offers cancellation with the same label')
     m.action:SendEvent(ButtonClickEvent())
     assert(await(function() return m.Snapshot.state == 'CANCELLING' and m.Snapshot.busy end), 'retry in flight')
     assert(m.Snapshot.reasonCode == 'CANCELLING', 'retry in flight no longer reports the previous failure')

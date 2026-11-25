@@ -181,7 +181,7 @@ test('the race probe queues the opposite ticket around the ten-second clock and 
 test('the race probe stands on production rules that exist: one guard clock per ticket, a claimed ticket is not live, a pairing clears the clock, and the claim logs', () => {
   const flowText = flow();
   assert.match(body(flowText, 'StartGuardClock'), /ticket\.guardStarted ~= nil then return end[^]*ticket\.guardStarted = DateTime\.UtcNow\.Elapsed/, 'the clock starts once per ticket and stamps guardStarted (the probe reads it as t0)');
-  assert.match(body(flowText, 'SubmitQueue'), /ticket\.data\.state == "QUEUED" and not ticket\.guarding and self:Player\(userId\) ~= nil/, 'a ticket being claimed is not live in the queue');
+  assert.match(body(flowText, 'SubmitQueue'), /ticket\.data\.state == "QUEUED" and not ticket\.guarding and not ticket\.cancelConfirmed and self:Player\(userId\) ~= nil/, 'a ticket being claimed is not live in the queue');
   assert.match(body(flowText, 'SubmitQueue'), /StartGuardClock\(userId, ticket\)[^]*Poll\(\)/, 'the clock starts when the queue accepted the ticket, before the pairing poll');
   assert.match(body(flowText, 'Matched'), /self:ClearGuardClock\(userId\)/, 'a pairing clears the guard clock');
   const fire = body(flowText, 'GuardFire');
