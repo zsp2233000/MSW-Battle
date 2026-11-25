@@ -100,27 +100,39 @@ local ok, reason = pcall(function()
         end), "players in their towns")
         log("[VRF][ContestE2E] SETUP PASS")
     elseif STEP == 2 then
+        -- The static room drops a player's ticket once the player is moved into the match room (about a second after the pair forms), so the
+        -- stamp and the match key are read here, right after each pair forms, not after both pairs are made. A ticket left over from an earlier
+        -- match (state RETURNED) still holds that match's pairing, so only a pairing with a NEW match key counts.
+        local stamps = {}
         local function pair(red, blue)
+            local previous = {}
+            for _, user in ipairs({ red, blue }) do previous[user] = (ticketData(user) or {}).matchKey end
             _FactionWarAttack:AttackFor(id(red), "gushan")
             assert(await(function() return _FactionWarAttack:IsEngaged(id(red)) end, 100), "red engaged")
             _FactionWarAttack:AttackFor(id(blue), "zuoying")
             assert(await(function() return _FactionWarAttack:IsEngaged(id(blue)) end, 100), "blue engaged")
             -- The pair must exist before the next ticket, or FIFO could pair a red with the wrong blue.
             assert(await(function() return _MatchFlow:StateForUser(id(red)) ~= "QUEUED" and _MatchFlow:StateForUser(id(blue)) ~= "QUEUED" end, 300), "pair formed")
+            -- Every ticket carries the stamp of the board it was paired on.
+            assert(await(function()
+                for _, user in ipairs({ red, blue }) do
+                    local data = ticketData(user)
+                    if data == nil or data.match == nil or data.matchKey == nil or data.matchKey == previous[user] then return false end
+                end
+                return true
+            end, 300), "both tickets hold the new pairing")
+            for _, user in ipairs({ red, blue }) do
+                -- The stamp in the pairing is the ticket's first reading of the board (the ticket drops its own copy once the match is committed).
+                local match = ticketData(user).match
+                assert(match.homeEpoch == 0 and match.awayEpoch == 0, "the pairing is stamped with Gushan and Zuoying at count zero, got " .. tostring(match.homeEpoch) .. "/" .. tostring(match.awayEpoch))
+                stamps[user] = ticketData(user).matchKey
+            end
         end
         pair(r1, b1)
         pair(r2, b2)
-        -- Every ticket carries the stamp of the board it was paired on, and the two matches are two different rooms.
-        assert(await(function() return ticketData(r1) ~= nil and ticketData(r1).match ~= nil and ticketData(b1) ~= nil and ticketData(b1).match ~= nil and ticketData(r2) ~= nil and ticketData(r2).match ~= nil and ticketData(b2) ~= nil and ticketData(b2).match ~= nil end, 300), "all four tickets hold their pairing")
-        for _, user in ipairs({ r1, b1, r2, b2 }) do
-            local match = ticketData(user).match
-            assert(match.homeEpoch == 0 and match.awayEpoch == 0, "the pairing is stamped with Gushan and Zuoying at count zero, got " .. tostring(match.homeEpoch) .. "/" .. tostring(match.awayEpoch))
-            -- The ticket keeps its first reading (a match that resumes after a cancellation never restamps).
-            local snapshot = _MatchFlow._T.records[id(user)].snapshot
-            assert(type(snapshot) == "table" and snapshot.home == 0 and snapshot.away == 0, "the ticket kept its first reading of the board")
-        end
-        assert(ticketData(r1).matchKey == ticketData(b1).matchKey and ticketData(r2).matchKey == ticketData(b2).matchKey and ticketData(r1).matchKey ~= ticketData(r2).matchKey, "two matches, two rooms")
-        log("[VRF][ContestE2E] QUEUED match1=" .. ticketData(r1).matchKey .. " match2=" .. ticketData(r2).matchKey .. "; wait for both results, then STEP 3")
+        -- The two matches are two different rooms.
+        assert(stamps[r1] == stamps[b1] and stamps[r2] == stamps[b2] and stamps[r1] ~= stamps[r2], "two matches, two rooms")
+        log("[VRF][ContestE2E] QUEUED match1=" .. stamps[r1] .. " match2=" .. stamps[r2] .. "; wait for both results, then STEP 3")
     elseif STEP == 3 then
         local towns
         assert(await(function()
@@ -194,13 +206,21 @@ local ok, reason = pcall(function()
         _FactionWarTownDocument:WriteTowns(seeded, function(saved) written = saved end)
         assert(await(function() return written end, 100), "Gushan reset to blue/60")
         assert(_FactionWar:Move(blue, "gushan") and await(function() return blue.CurrentMapName == "gushan" end), "the blue player went to Gushan")
+        -- Both players still hold the ticket of round one (state RETURNED) with round one's pairing; only a pairing with a NEW match key is round two's.
+        local previous = { red = (ticketData(red) or {}).matchKey, blue = (ticketData(blue) or {}).matchKey }
         _FactionWarAttack:AttackFor(id(red), "gushan")
         assert(await(function() return _FactionWarAttack:IsEngaged(id(red)) end, 100), "red engaged")
         _FactionWarAttack:AttackFor(id(blue), "zuoying")
         assert(await(function() return _FactionWarAttack:IsEngaged(id(blue)) end, 100), "blue engaged")
         assert(await(function() return _MatchFlow:StateForUser(id(red)) ~= "QUEUED" and _MatchFlow:StateForUser(id(blue)) ~= "QUEUED" end, 300), "pair formed")
-        assert(await(function() return ticketData(red) ~= nil and ticketData(red).match ~= nil end, 300), "the red ticket holds its pairing")
-        assert(ticketData(red).match.awayEpoch == 0, "the pairing was stamped with Gushan at count zero")
+        -- The tickets read the board a moment AFTER the state leaves QUEUED (the read yields), and the pairing carries that reading once the match is
+        -- committed. Rewriting the board before that would make the pairing see the "taken and taken back" board and the match would not be exempt.
+        assert(await(function()
+            local redData, blueData = ticketData(red), ticketData(blue)
+            return redData ~= nil and redData.match ~= nil and redData.matchKey ~= nil and redData.matchKey ~= previous.red
+                and blueData ~= nil and blueData.match ~= nil and blueData.matchKey ~= nil and blueData.matchKey ~= previous.blue
+        end, 300), "both tickets hold the new pairing")
+        assert(ticketData(red).match.awayEpoch == 0 and ticketData(blue).match.awayEpoch == 0, "the pairing was stamped with Gushan at count zero")
         -- While the match is on, Gushan is taken and taken back: blue again, strength 60, counted twice.
         local retaken = _FactionWarTownDocument:InitialTowns()
         retaken.gushan.strength = 60
