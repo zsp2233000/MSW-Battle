@@ -56,13 +56,28 @@ local ok, reason = pcall(function()
         for index = 1, 3 do three[index] = { monsterId = "monster_tank", x = -3.25 - (index - 1) * 0.75, y = -1.25 } end
         setup(a, three)
         setup(b, {{ monsterId = "monster_tank", x = -3.25, y = -1.25 }})
+        -- A record left by an earlier run (the absent-side probes leave theirs) would be mistaken for this match's.
+        for _, user in ipairs({ a, b }) do
+            local profile = user.PlayerComponent.ProfileCode
+            local old = _AbsentResult:PendingFor(profile)
+            if old ~= nil then
+                local cleared = false
+                _AbsentResult:Clear(profile, old.id, function() cleared = true end)
+                await(function() return cleared end, 100)
+            end
+        end
         local written = false
         _FactionWarTownDocument:WriteTowns(_FactionWarTownDocument:InitialTowns(), function(saved) written = saved == true end)
         assert(await(function() return written end, 100), "the town table is reset")
         for user, value in pairs({ [a] = "RED", [b] = "BLUE" }) do
-            local saved = false
-            _FormationStorage:Write(user.PlayerComponent.ProfileCode, _FactionWar.FactionKey, "", value, function(code) saved = code == 0 end)
-            await(function() return saved end, 100)
+            -- A stored faction (a real client has one) is replaced against its current value; a failed write must not pass silently.
+            local profile, saved, current = user.PlayerComponent.ProfileCode, false, nil
+            _FormationStorage:Read(profile, _FactionWar.FactionKey, function(code, _, raw) current = (code == 0 and raw ~= nil) and raw or "" end)
+            assert(await(function() return current ~= nil end, 100), "the faction is read")
+            if current ~= value then
+                _FormationStorage:Write(profile, _FactionWar.FactionKey, current, value, function(code) saved = code == 0 end)
+                assert(await(function() return saved end, 100), "the faction is written")
+            end
         end
         assert(_FactionWar:Move(a, "zuoying") and _FactionWar:Move(b, "gushan"), "moves dispatched")
         assert(await(function() return a.CurrentMapName == "zuoying" and b.CurrentMapName == "gushan" end), "players in their towns")

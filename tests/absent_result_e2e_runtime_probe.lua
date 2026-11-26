@@ -66,9 +66,14 @@ local ok, reason = pcall(function()
             _FactionWarTownDocument:WriteTowns(_FactionWarTownDocument:InitialTowns(), function(saved) written = saved == true end)
             assert(await(function() return written end, 100), "the town table is reset")
             for user, value in pairs({ [a] = "RED", [b] = "BLUE" }) do
-                local saved = false
-                _FormationStorage:Write(user.PlayerComponent.ProfileCode, _FactionWar.FactionKey, "", value, function(code) saved = code == 0 end)
-                await(function() return saved end, 100)
+                -- A stored faction (a real client has one) is replaced against its current value; a failed write must not pass silently.
+                local profile, saved, current = user.PlayerComponent.ProfileCode, false, nil
+                _FormationStorage:Read(profile, _FactionWar.FactionKey, function(code, _, raw) current = (code == 0 and raw ~= nil) and raw or "" end)
+                assert(await(function() return current ~= nil end, 100), "the faction is read")
+                if current ~= value then
+                    _FormationStorage:Write(profile, _FactionWar.FactionKey, current, value, function(code) saved = code == 0 end)
+                    assert(await(function() return saved end, 100), "the faction is written")
+                end
             end
             assert(_FactionWar:Move(a, "zuoying") and _FactionWar:Move(b, "gushan"), "moves dispatched")
             assert(await(function() return a.CurrentMapName == "zuoying" and b.CurrentMapName == "gushan" end), "players in their towns")

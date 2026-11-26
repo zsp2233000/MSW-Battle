@@ -148,6 +148,15 @@ local ok, reason = pcall(function()
         log("[VRF][AbsentE2E] CLIENT_WAIT PASS text=" .. view.text)
     elseif STEP == 6 then
         _MatchFaults:Remove()
+        -- The result of this run may have written an absent record (#122); leave none behind for the next probe.
+        for _, profile in ipairs({ A_PROFILE, "wp2602" }) do
+            local record = _AbsentResult:PendingFor(profile)
+            if record ~= nil then
+                local cleared = false
+                _AbsentResult:Clear(profile, record.id, function() cleared = true end)
+                await(function() return cleared end, 100)
+            end
+        end
         for _, user in ipairs({ a, b }) do
             -- Whoever still holds a ticket in this room (the absent side, or both in EMPTY) stops entry.
             if isvalid(user) then _MatchFlow:ReturnForUser(user.PlayerComponent.UserId) end
