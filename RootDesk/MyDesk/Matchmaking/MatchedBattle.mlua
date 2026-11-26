@@ -77,6 +77,13 @@ script MatchedBattle extends Component
                     -- A side that never saw the result page is told about this settled result (#122).
                     self:WriteAbsentResults(battle, war)
                 end, self._T.epochs)
+                -- Without the settlement answer no absent result is written (#122); say so instead of leaving the absent side without a window in silence.
+                local matchKey = self._T.matchKey
+                _TimerService:SetTimerOnce(function()
+                    if isvalid(self.Entity) and not self._T.absentDone then
+                        log_error("[VRF][MatchedBattle] absent result NOT written: the settlement of match=" .. matchKey .. " has not answered after 30 s")
+                    end
+                end, 30)
                 if war.outcome == nil then self:RefreshWarResultBoard() end
             else
                 self:WriteAbsentResults(battle, nil)

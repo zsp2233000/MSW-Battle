@@ -13,6 +13,7 @@ script AbsentResult extends Logic
         -- Each room delivers to the players it holds; a delivery in flight is remembered so a repeated hint does not repeat the window.
         self._T.delivered = {}
         self._T.delivering = {}
+        self._T.again = {}
         log("[VRF][AbsentResult] ready")
     end
 
@@ -162,7 +163,12 @@ script AbsentResult extends Logic
     method void Deliver(string userId, boolean recover)
         -- End the ticket of the match this player never entered (Recover reads this very record), then show the window once.
         local player = _MatchFlow:Player(userId)
-        if player == nil or _RoomService:IsInstanceRoom() or self._T.delivering[userId] then return end
+        if player == nil or _RoomService:IsInstanceRoom() then return end
+        if self._T.delivering[userId] then
+            -- A delivery is reading the record right now; what this call announces may have been written after that read, so it goes round once more.
+            self._T.again[userId] = self._T.again[userId] == true or recover
+            return
+        end
         self._T.delivering[userId] = true
         local ok, failure = pcall(function()
             if recover then
@@ -178,6 +184,12 @@ script AbsentResult extends Logic
         end)
         self._T.delivering[userId] = nil
         if not ok then log_error("[VRF][AbsentResult] deliver failed user=" .. userId .. " " .. tostring(failure)) end
+        local again = self._T.again[userId]
+        if again ~= nil then
+            self._T.again[userId] = nil
+            log("[VRF][AbsentResult] deliver again user=" .. userId .. " recover=" .. tostring(again))
+            self:Deliver(userId, again)
+        end
     end
 
     @ExecSpace("ServerOnly")
@@ -192,6 +204,7 @@ script AbsentResult extends Logic
     @EventSender("Service", "UserService")
     handler HandleUserLeaveEvent(UserLeaveEvent event)
         self._T.delivered[event.UserId] = nil
+        self._T.again[event.UserId] = nil
     end
 
     @ExecSpace("Client")

@@ -1094,6 +1094,8 @@ script MatchFlow extends Logic
             if timers[userId] ~= nil then _TimerService:ClearTimer(timers[userId]) timers[userId] = nil end
         end
         self._T.pendingRecover[userId] = nil
+        self._T.settledHint[userId] = nil
+        self._T.absentChecked[userId] = nil
         self._T.failures[userId] = nil
         self:QueueAdapter():Withdraw(userId)
         self._T.queueCommands[userId] = nil

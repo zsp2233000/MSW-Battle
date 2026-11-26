@@ -33,6 +33,8 @@
 - **離線的人下次登入跳出。** 進入事件在復原完票券後呼叫 `AbsentResult:Deliver`；斷線重連也會重新送出還沒確認的記錄。晚到者若在結果出來時還沒進房，他的票券會因為上面那條在結算當下結束（所以那之後他不能再進房，而是看到視窗）；在結果出來之前進房的人看過結果頁，不會有記錄。
 - **視窗。** 單獨一個 UIGroup（`ui/AbsentResultGroup.ui`，由 `assets/siege/build_absent_result_ui.cjs` 以 UIBuilder 建立，Cardgame 素材與戰術沙盤風格），顯示順序最高，蓋住城鎮 HUD、大廳與大地圖。國戰：標題「上一場戰果」，勝敗、兩城兵力之前 → 之後與歸屬結論；大廳：標題「上一場對戰結果」，只有勝敗。城鎮名稱沿用同一個高亮色（`FactionWarUI.TownNameHighlightHex`）。
 - 探針：`tests/absent_result_e2e_runtime_probe.lua`（`ONLINE` 在線推送、`RELOGIN` 離線後重新登入、`LOBBY` 大廳版本）。
+- 程式審查後補的：`AbsentResult:Deliver` 進行中又收到推送時不丟掉，讀完後再跑一輪（帶原本要的 Recover）；`MatchFlow:Depart` 一併清掉 `settledHint` 與 `absentChecked`；戰果結算 30 秒沒回應時 `MatchedBattle` 印出 `absent result NOT written` 錯誤，不再靜默少一個視窗。
+- 已知限制（沒改）：`SettledWithoutUs` 在 `Recover` 裡用 `PendingFor` 最多等 5 秒的讀取（每 3 秒最多一次，且只對 TRANSFER／COMMITTING／IN_ROOM 的票）；`LateEntryOpen` 在 `ROOM_MOVE_FAILED` 後每次 `Recover` 都重試、沒有次數上限，也沒看房間自己的 `AdmissionFailed`；結算沒回來或寫入三次都失敗時，缺席方只有等票券逾期；`BattleView` 的顯示層仍自己比對 `HomeProfile`／`AwayProfile`，`ParticipantSide` 是伺服器端所有判斷的唯一來源。
 
 ## 後果
 

@@ -193,4 +193,21 @@ doc:HandleRoomAbsentResult({ Profile = "red", MatchKey = "m1" })
 doc:HandleInstanceAbsentResult({ Profile = "red", MatchKey = "m1" })
 check(#pushed == before + 1, "a repeated hint repeats nothing")
 
+-- A hint that arrives while a delivery is reading the record is not dropped: the running delivery goes round once more with the recovery it asked for.
+local realPending, nested = doc.PendingFor, true
+doc.PendingFor = function(self, profile)
+    if nested then
+        nested = false
+        doc:Deliver("red-user", true)
+    end
+    return realPending(self, profile)
+end
+doc._T.delivered = {}
+local recoveredBefore, pushedBefore = #recovered, #pushed
+doc:Deliver("red-user", false)
+doc.PendingFor = realPending
+check(#recovered == recoveredBefore + 1, "the hint that came during the read ran its recovery after the read")
+check(#pushed == pushedBefore + 1, "and the window is still shown once")
+check(next(doc._T.again) == nil and next(doc._T.delivering) == nil, "nothing is left pending")
+
 print("[VRF][AbsentResult] record, presentation and delivery rules PASS checks=" .. tostring(checks))
