@@ -26,6 +26,7 @@ script MatchFaults extends Logic
         self._T.returnFailures = 0
         self._T.keepQueue = false
         self._T.hideRooms = false
+        self._T.absentUsers = {}
     end
 
     @ExecSpace("ServerOnly")
@@ -52,6 +53,15 @@ script MatchFaults extends Logic
         if not Environment:IsMakerPlay() then return end
         self:Install()
         self._T.keepQueue = keepQueue
+    end
+
+    @ExecSpace("ServerOnly")
+    method void ConfigureAbsent(string userId, boolean absent)
+        -- ADR 0017 probes: this one player never reaches the match room (every move into it fails), whoever else is admitted.
+        if not Environment:IsMakerPlay() then return end
+        self:Install()
+        if self._T.absentUsers == nil then self._T.absentUsers = {} end
+        self._T.absentUsers[userId] = absent or nil
     end
 
     @ExecSpace("ServerOnly")
@@ -128,6 +138,10 @@ script MatchFaults extends Logic
 
     @ExecSpace("ServerOnly")
     method boolean MoveToMatch(any room, string userId)
+        if (self._T.absentUsers or {})[userId] then
+            log("[VRF][MatchFaults] absent user never enters userId=" .. userId)
+            return false
+        end
         if (self._T.entryFailures or 0) > 0 then
             self._T.entryFailures = self._T.entryFailures - 1
             return false

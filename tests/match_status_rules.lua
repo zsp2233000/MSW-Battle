@@ -28,6 +28,10 @@ check({ state = "TRANSFER", reasonCode = "ROOM_MOVE_FAILED", entryDeadline = 310
 check({ state = "SAVING", reasonCode = "READINESS_FAILED", entryDeadline = 31000 }, 1500, entering, "", "", false)
 check({ state = "ENTRY_FAILED" }, 1500, "入場失敗", "返回大廳", "RETURN", true, true)
 check({ state = "WAITING", entryDeadline = 31000 }, 31000, "入場失敗", "返回大廳", "RETURN", true, true)
+-- ADR 0017: the human who is here waits for the absent side; the entry time does not end that wait, and the count never goes below zero.
+check({ state = "WAITING", waitDeadline = 41000, entryDeadline = 31000 }, 31000, "等待對手進入戰場…（10 秒）", "", "", false)
+check({ state = "WAITING", waitDeadline = 41000, entryDeadline = 31000 }, 41500, "等待對手進入戰場…（0 秒）", "", "", false)
+check({ state = "ENTRY_FAILED", waitDeadline = 41000 }, 1500, "入場失敗", "返回大廳", "RETURN", true, true)
 check({ state = "CANCELLING" }, 10001, "正在取消配對…", "", "", false)
 check({ state = "CANCELLED", busy = true }, 10001, "正在取消配對…", "", "", false)
 local stopped = "配對已停止，請取消後重新配對"

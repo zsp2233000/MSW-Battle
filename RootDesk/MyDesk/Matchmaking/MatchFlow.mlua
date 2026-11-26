@@ -154,7 +154,8 @@ script MatchFlow extends Logic
                 started = started, players = count, sourceRoom = _RoomService.RoomKey,
                 busy = self._T.busy[userId] == true or self._T.moving[userId] ~= nil, summary = summary,
                 attempt = attempt, origin = origin, target = target, guardAt = guardAt,
-                opponentFound = self:OpponentFound(ticket), entryDeadline = self:EntryDeadline(ticket), entryFailed = entryFailed } })
+                opponentFound = self:OpponentFound(ticket), entryDeadline = self:EntryDeadline(ticket), entryFailed = entryFailed,
+                waitDeadline = isvalid(flow) and flow.WaitDeadline or 0 } })
     end
 
     @ExecSpace("Client")
@@ -1266,22 +1267,28 @@ script MatchFlow extends Logic
     end
 
     @ExecSpace("ServerOnly")
-    method any RoomBattleAdmission()
+    method any RoomBattleAdmission(any allowAbsent)
         -- Read cached server-loaded capsules only; room updates never poll persistent storage.
+        -- allowAbsent (ADR 0017): once the entry time is over, a human side that is not here is fielded from its sealed roster, so it is
+        -- reported as absent instead of failing the admission. A present player whose ticket is not ready counts as absent then.
         if not _RoomService:IsInstanceRoom() then return nil end
         local byProfile = {}
         for _, player in ipairs(_UserService.UserEntities.Values) do
             if isvalid(player) and player.CurrentMapName == "matchprobe" then
                 local userId = player.PlayerComponent.UserId
                 local ticket = self._T.records[userId]
-                if ticket == nil or self._T.busy[userId] or self:Player(userId) == nil then return nil end
-                local data = ticket.data
-                if data.state ~= "IN_ROOM" or data.matchKey ~= _RoomService.RoomKey
-                    or data.profile ~= player.PlayerComponent.ProfileCode or data.expires <= DateTime.UtcNow.Elapsed then return nil end
-                byProfile[data.profile] = { userId = userId, data = data }
+                local ready = ticket ~= nil and ticket.data ~= nil and not self._T.busy[userId] and self:Player(userId) ~= nil
+                local data = ready and ticket.data or nil
+                if ready and (data.state ~= "IN_ROOM" or data.matchKey ~= _RoomService.RoomKey
+                    or data.profile ~= player.PlayerComponent.ProfileCode or data.expires <= DateTime.UtcNow.Elapsed) then ready = false end
+                if not ready then
+                    if allowAbsent ~= true then return nil end
+                else
+                    byProfile[data.profile] = { userId = userId, data = data }
+                end
             end
         end
-        local home, away = nil, nil
+        local home, away, absent = nil, nil, nil
         for _, entry in pairs(byProfile) do
             local matched = entry.data.match
             if type(matched) ~= "table" or matched.key ~= _RoomService.RoomKey
@@ -1294,22 +1301,32 @@ script MatchFlow extends Logic
                 away = { data = { profile = matched.away, attempt = "" } }
             else
                 away = byProfile[matched.away]
-                if home == nil or away == nil then return nil end
-                local peer = away.data.match
-                local first = home.data.match
-                if type(peer) ~= "table" or type(first) ~= "table" then return nil end
-                for _, key in ipairs({ "key", "home", "away", "homeAttempt", "awayAttempt" }) do
-                    if first[key] ~= matched[key] or peer[key] ~= matched[key] then return nil end
+                if home == nil or away == nil then
+                    -- One human side is not here. Only a room that waited out the entry time fields it from its own sealed roster.
+                    if allowAbsent ~= true then return nil end
+                    absent = home == nil and "home" or "away"
+                else
+                    local peer = away.data.match
+                    local first = home.data.match
+                    if type(peer) ~= "table" or type(first) ~= "table" then return nil end
+                    for _, key in ipairs({ "key", "home", "away", "homeAttempt", "awayAttempt" }) do
+                        if first[key] ~= matched[key] or peer[key] ~= matched[key] then return nil end
+                    end
+                    if not self:Belongs(home.data, matched) or not self:Belongs(away.data, matched) then return nil end
                 end
-                if not self:Belongs(home.data, matched) or not self:Belongs(away.data, matched) then return nil end
             end
         end
-        if home == nil or away == nil then return nil end
-        local pairing = home.data.match
+        local here = home or away
+        if here == nil then return nil end
+        local pairing = here.data.match
+        local homeProfile = absent == "home" and pairing.home or home.data.profile
+        local awayProfile = absent == "away" and pairing.away or away.data.profile
         -- Each ticket brought the war board of its own pairing reading; the room hands the earlier one to the settlement.
-        return { key = _RoomService.RoomKey, home = home.data.profile, away = away.data.profile, homeTicket = home.data.attempt, awayTicket = away.data.attempt,
+        return { key = _RoomService.RoomKey, home = homeProfile, away = awayProfile,
+            homeTicket = home ~= nil and home.data.attempt or "", awayTicket = away ~= nil and away.data.attempt or "",
             homeTown = pairing.homeOrigin or "", awayTown = pairing.awayOrigin or "", guard = pairing.guard == true,
-            epochs = _FactionWarAttack:Combine(pairing, away.data.match) }
+            epochs = _FactionWarAttack:Combine(pairing, away ~= nil and away.data.match or nil),
+            absent = absent, absentProfile = absent == "home" and homeProfile or (absent == "away" and awayProfile or nil), pairing = pairing }
     end
 
     @ExecSpace("ServerOnly")

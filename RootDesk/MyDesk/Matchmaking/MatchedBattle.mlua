@@ -2,13 +2,18 @@
 script MatchedBattle extends Component
 
     @Sync property boolean AdmissionFailed = false
+    -- ms clock (DateTime.UtcNow.Elapsed) at which a lone participant's wait for the opponent ends and the match starts without him; 0 when nobody waits.
+    @Sync property number WaitDeadline = 0
     property number AdmissionTimeoutSeconds = 30
+    property number AbsentLoadGraceSeconds = 10
     property table WarResultReceipt = {}
 
     @ExecSpace("ServerOnly")
     method void OnBeginPlay()
         -- This map owns admission and result publication for exactly one match room.
         self.AdmissionFailed = false
+        self.WaitDeadline = 0
+        self._T.absent = nil
         self._T.elapsed = 0
         self._T.interval = 0
         self._T.started = false
@@ -29,24 +34,20 @@ script MatchedBattle extends Component
         local battle = self.Entity.CurrentMap:GetComponent("script.BattleSession")
         if not isvalid(battle) then return end
         if not self._T.started and not self.AdmissionFailed then
-            local admission = _MatchFlow:RoomBattleAdmission()
+            local timedOut = self._T.elapsed >= self.AdmissionTimeoutSeconds
+            -- ADR 0017: both sides here (or a town guard) starts at once; a lone human is held until the entry time is over.
+            local admission = _MatchFlow:RoomBattleAdmission(true)
             if admission ~= nil and battle.Phase == "WAITING" then
-                local homeUnits = _FormationHandoff:Roster(admission.homeTicket)
-                -- A guard match fields the defended town's roster; a human match reads the opponent's sealed capsule.
-                local awayUnits = admission.guard and _FactionWarGuard:Roster(admission.awayTown) or _FormationHandoff:Roster(admission.awayTicket)
-                self._T.started = homeUnits ~= nil and awayUnits ~= nil and battle:InitializeMatchedBattle(admission.key, admission.home, admission.away, homeUnits, awayUnits)
-                -- A war match carries the two towns it was queued for; a lobby match leaves them empty.
-                self._T.homeTown = admission.homeTown
-                self._T.awayTown = admission.awayTown
-                self._T.kind = admission.guard and "GUARD" or "HUMAN"
-                -- The stamp says how often each town had changed hands when this match was paired (nil: the match was not stamped).
-                self._T.epochs = admission.epochs
-                if admission.epochs ~= nil then log("[VRF][MatchedBattle] stamp home=" .. tostring(admission.epochs.home) .. " away=" .. tostring(admission.epochs.away)) end
-                if not self._T.started then self.AdmissionFailed = true end
-            elseif battle.Phase == "CONFIG_ERROR" or self._T.elapsed >= self.AdmissionTimeoutSeconds then
+                if admission.absent == nil then
+                    self:StartMatch(battle, admission, nil)
+                else
+                    self:HoldForAbsent(battle, admission, users, timedOut)
+                end
+            elseif battle.Phase == "CONFIG_ERROR" or timedOut then
                 self.AdmissionFailed = true
             end
             if self._T.started or self.AdmissionFailed then
+                self.WaitDeadline = 0
                 for _, user in ipairs(users) do _MatchFlow:PublishState(user.PlayerComponent.UserId, self.AdmissionFailed and "ENTRY_FAILED" or "BATTLE_STARTED") end
                 log("[VRF][MatchedBattle] admission started=" .. tostring(self._T.started) .. " failed=" .. tostring(self.AdmissionFailed))
             end
@@ -74,6 +75,51 @@ script MatchedBattle extends Component
             end
         end
         self:PublishWarReceipts()
+    end
+
+    @ExecSpace("ServerOnly")
+    method void StartMatch(any battle, table admission, any absentUnits)
+        -- Field both rosters: a present side's from its ticket in this room, the absent side's from its own sealed roster.
+        local homeUnits = admission.absent == "home" and absentUnits or _FormationHandoff:Roster(admission.homeTicket)
+        local awayUnits = admission.absent == "away" and absentUnits
+            or (admission.guard and _FactionWarGuard:Roster(admission.awayTown) or _FormationHandoff:Roster(admission.awayTicket))
+        self._T.started = homeUnits ~= nil and awayUnits ~= nil and battle:InitializeMatchedBattle(admission.key, admission.home, admission.away, homeUnits, awayUnits)
+        -- A war match carries the two towns it was queued for; a lobby match leaves them empty.
+        self._T.homeTown = admission.homeTown
+        self._T.awayTown = admission.awayTown
+        self._T.kind = admission.guard and "GUARD" or "HUMAN"
+        -- The stamp says how often each town had changed hands when this match was paired (nil: the match was not stamped).
+        self._T.epochs = admission.epochs
+        if admission.epochs ~= nil then log("[VRF][MatchedBattle] stamp home=" .. tostring(admission.epochs.home) .. " away=" .. tostring(admission.epochs.away)) end
+        if admission.absent ~= nil then log("[VRF][MatchedBattle] absent side fielded side=" .. admission.absent .. " profile=" .. tostring(admission.absentProfile) .. " started=" .. tostring(self._T.started)) end
+        if not self._T.started then self.AdmissionFailed = true end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void HoldForAbsent(any battle, table admission, table users, boolean timedOut)
+        -- Only one human side is here: copy the other side's sealed roster into this room now, tell the one waiting, and start when the entry time ends.
+        local slot = self._T.absent
+        if slot == nil or slot.profile ~= admission.absentProfile then
+            slot = { profile = admission.absentProfile, status = "LOADING" }
+            self._T.absent = slot
+            _FormationHandoff:LoadAbsentRoster(slot.profile, admission.pairing, function(units)
+                if self._T.absent ~= slot then return end
+                slot.units = units
+                slot.status = units ~= nil and "READY" or "FAILED"
+            end)
+        end
+        if self.WaitDeadline == 0 then
+            self.WaitDeadline = DateTime.UtcNow.Elapsed + math.max(0, self.AdmissionTimeoutSeconds - self._T.elapsed) * 1000
+            for _, user in ipairs(users) do _MatchFlow:PublishState(user.PlayerComponent.UserId, "WAITING_OPPONENT") end
+            log("[VRF][MatchedBattle] waiting for the absent side=" .. admission.absent .. " profile=" .. tostring(admission.absentProfile))
+        end
+        if not timedOut then return end
+        if slot.status == "READY" then
+            self:StartMatch(battle, admission, slot.units)
+        elseif slot.status == "FAILED" or self._T.elapsed >= self.AdmissionTimeoutSeconds + self.AbsentLoadGraceSeconds then
+            self.AdmissionFailed = true
+            log("[VRF][MatchedBattle] absent roster unavailable profile=" .. tostring(admission.absentProfile) .. "; the match does not start")
+        end
     end
 
     @ExecSpace("ServerOnly")

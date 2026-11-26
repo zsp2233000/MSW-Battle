@@ -43,6 +43,29 @@ The 10 s clock applies only in towns; the lobby still shows elapsed search time.
 
 Verified in Maker on 2026-11-26 (integration branch, build 0 Error with the existing `IsPCPlatform` warning): `match_status_after_pairing_runtime_probe.lua` `TIMEOUT` (real client RED in Zuoying, guard claim held in SAVING): `SERVER PAIRED`, `CLIENT MATCHED` (`進攻 鼓山 / 配對成功，正在進入戰場`), `REJECTION PASS`, then after the 30 s deadline `停止入場` and `CLIENT PASS` (idle), then `FINISH` `CLEANUP PASS`, no runtime Error. The first run of this case failed: `Stop Entry` while the claim was still in SAVING left the ticket in `RETURNING` (`Recover` returned early on `guarding` / `OpponentFound` with no match key, so `RestoreReturning` was never reached; only the next login cleared it). `Recover` now skips that early return for a ticket that is already `RETURNING`; `tests/match_status_server_rules.lua` runs the real `Recover` for `HANDOFF_SEAL_FAILED`, `HANDOFF_SAVE_FAILED` and the timeout, with and without a guard claim (fixtures=21). The earlier fixtures stubbed `Recover`, which is why they could not see it. Earlier runs on this branch (`match_state` `LOBBY` and `ROOM`, `GUARD` and `HUMAN` of the pairing probe, `faction_war_attack_client_runtime_probe.lua`, `matched_battle_entry_failure_runtime_probe.lua`, the lobby UI probe and the cancel probes) are recorded in `docs/Handoff-Siege-114-116-2026-11-25.md`; they ran before this fix and only the `TIMEOUT` case was repeated. Not verified: the `返回 左營` label in a real war room (only through the synthetic `match_state` `ROOM` snapshot), a published world and two real accounts.
 
+## Absent side fights anyway (ADR 0017, #120)
+
+When a human match room has been created but one side does not enter it within 30 s, the room starts the battle with that side's frozen roster (levels included). The room copies the roster from the absent profile's own sealed record as soon as it sees a lone human (`FormationHandoff:LoadAbsentRoster`), so Stop Entry or an expired ticket afterwards cannot take it away. The waiting human sees `等待對手進入戰場…（N 秒）` (`WaitDeadline` on `MatchedBattle`, `waitDeadline` in the snapshot); the entry time does not fail a room that waits. A room where nobody can play never starts. Guard matches start at once, unchanged.
+
+```sh
+set -o pipefail
+node tests/matched_absent_local.cjs | npm exec --yes --package=fengari-node-cli@0.1.0 -- fengari -
+node --test tests/matched_absent_contract.test.cjs
+```
+
+Expect `[VRF][MatchedAbsent] absent-side rules PASS` (the production `RoomBattleAdmission`, `LoadAbsentRoster`, `MatchedBattle` and `MatchFlowState` bodies against a fake room, fake storage and fake clock). `match_status_local.cjs` carries the waiting-text rows.
+
+Maker end-to-end: `matched_absent_e2e_runtime_probe.lua` (`server_main`, two virtual players `wp2601` / `wp2602`; its header lists the steps). `MatchFaults:ConfigureAbsent(userId, true)` makes one player's every move into the room fail, the same way a player who never arrives looks to the room. Modes, each with fresh storage of the previous mode cleaned by STEP 6:
+
+| MODE | What it proves |
+| --- | --- |
+| `WAR` | The room started 30 s after the human arrived (`[VRF][MatchedBattle] absent side fielded`), Gushan 100 → 80 once, the result written once, the absent side's monsters got their experience once |
+| `STOP` | The absent side pressed Stop Entry while the room waited (ticket closed and unlocked), and the battle still fielded its frozen roster |
+| `EMPTY` | Both sides absent: no battle, no deduction, no experience |
+| `LOBBY` | A lobby match without towns: the absent side still fights and earns experience once |
+
+Verified in Maker on 2026-11-26 (build 0 Error): all four modes reached PASS in one Play with no runtime Error; the absent side's ticket was still in `TRANSFER` after the battle (Stop Entry then landed it in its own town with the recorded outcome notice). Not verified: the published native service and two real accounts, and the on-time human's countdown text on a real client (covered by the presentation matrix only). The absent player's after-battle result window belongs to #122, a late arrival joining a running battle to #121.
+
 ## Faction war attack via the town NPC (#105)
 
 `faction_war_attack_contract.test.cjs` checks the shared NPC model and its placement in all four towns, the attack panel and queue bar in `ui/FactionWarGroup.ui`, and the source seams (ticket towns, mutual pairing, settlement, return to the departure town). Runtime probes, each in a fresh Play (`stop` → `refresh` → `play`):

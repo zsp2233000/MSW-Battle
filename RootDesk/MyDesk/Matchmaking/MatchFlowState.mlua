@@ -38,6 +38,8 @@ script MatchFlowState extends Logic
     method boolean EntryFailed(table snapshot, number now)
         -- Readiness/diagnostic errors alone do not end an otherwise live admission.
         if snapshot.entryFailed or snapshot.state == "ENTRY_FAILED" or snapshot.state == "ABORTED" or snapshot.state == "ROOM_MISMATCH" then return true end
+        -- ADR 0017: a room that is waiting for the absent side starts the match by itself, so the entry time no longer ends it.
+        if snapshot.state == "WAITING" and (snapshot.waitDeadline or 0) > 0 then return false end
         if not snapshot.opponentFound and not self:IsEntering(snapshot.state) then return false end
         local reason = snapshot.reasonCode
         if reason == "HANDOFF_SAVE_FAILED" or reason == "HANDOFF_SEAL_FAILED" or reason == "ROOM_CREATE_FAILED"
@@ -51,6 +53,10 @@ script MatchFlowState extends Logic
         local enabled = not snapshot.busy and not context.pending
         if state == "RETURNING" then
             return { text = "正在返回…", label = enabled and "重試返回" or "返回中…", action = "RETURN", enabled = enabled }
+        end
+        if snapshot.state == "WAITING" and (snapshot.waitDeadline or 0) > 0 and not self:EntryFailed(snapshot, context.now) then
+            local remaining = math.max(0, math.ceil((snapshot.waitDeadline - context.now) / 1000))
+            return { text = "等待對手進入戰場…（" .. tostring(remaining) .. " 秒）", label = "", action = "", enabled = false }
         end
         if self:EntryFailed(snapshot, context.now) then
             local label = "停止入場"

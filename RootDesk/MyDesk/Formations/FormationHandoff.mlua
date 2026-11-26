@@ -503,6 +503,32 @@ script FormationHandoff extends Logic
     end
 
     @ExecSpace("ServerOnly")
+    method void LoadAbsentRoster(string profile, table matched, any complete)
+        -- ADR 0017: the match room copies the absent side's sealed roster (levels included) once. The copy is detached from the absent
+        -- player's ticket, so Stop Entry or an expired ticket afterwards cannot take it away. complete(units) gets nil when it cannot be fielded.
+        local catalog = _FormationService:GetCatalog()
+        if self._T.ended or catalog == nil or type(matched) ~= "table" or type(matched.key) ~= "string" then complete(nil) return end
+        _FormationStorage:Read(profile, self.StorageKey, function(code, key, raw)
+            if self._T.ended then return end
+            local units, reason = nil, "READ_FAILED"
+            if code == 0 and raw ~= nil then
+                local ok, data = pcall(function() return _HttpService:JSONDecode(raw) end)
+                if not ok or not self:ValidEnvelope(data, profile) or type(data.transfer) ~= "table" then
+                    reason = "NO_ROSTER"
+                elseif data.matchKey ~= matched.key or not _MatchFlow:Belongs(data, matched) then
+                    reason = "OTHER_MATCH"
+                else
+                    local decoded = self:DecodeTransfer(data.transfer, catalog)
+                    units = decoded ~= nil and decoded.units or nil
+                    reason = units ~= nil and "OK" or "INVALID_ROSTER"
+                end
+            end
+            log("[VRF][Handoff] absent roster profile=" .. profile .. " result=" .. reason .. " units=" .. tostring(units ~= nil and #units or 0))
+            complete(units)
+        end)
+    end
+
+    @ExecSpace("ServerOnly")
     method boolean Restore(string forUserId, string ticketId)
         -- Apply a login snapshot once; later cleanup retries must preserve new edits in that session.
         local record = self._T.byId[ticketId]

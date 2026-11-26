@@ -582,10 +582,14 @@ script BattleSession extends Component
         for _, user in ipairs(_UserService.UserEntities.Values) do
             if isvalid(user) and user.CurrentMap == self:GetMapEntity() then present[user.PlayerComponent.ProfileCode] = true end
         end
-        -- A town guard is the only participant that is allowed to be absent from the room.
+        -- ADR 0017: a human side may be absent (its sealed roster is fielded), but the room needs at least one human here; the guard is only ever the away side.
         local guardAway = _FactionWarGuard:IsGuardProfile(awayProfile)
-        if not present[homeProfile] or (not present[awayProfile] and not guardAway) then return false end
         if _FactionWarGuard:IsGuardProfile(homeProfile) then return false end
+        if guardAway then
+            if not present[homeProfile] then return false end
+        elseif not present[homeProfile] and not present[awayProfile] then
+            return false
+        end
         local home = self:PrepareMatchedRoster(homeUnits, false)
         local away = self:PrepareMatchedRoster(awayUnits, true)
         if home == nil or away == nil then return false end
