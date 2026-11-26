@@ -34,7 +34,7 @@ script FactionWarUI extends Logic
         self._T.siegeShown = false
         self._T.siegeStrengths = nil
         self._T.siegeAsked = 0
-        self._T.shown = {}
+        self._T.shownText = {}
         log("[VRF][WarUI] siege panel ready")
         self._T.panelOpen = false
     end
@@ -375,8 +375,7 @@ script FactionWarUI extends Logic
         -- countdown or an accepted new snapshot cannot send a stale action.
         local player = _UserService.LocalPlayer
         local snapshot = _MatchFlowInput.Snapshot
-        if not isvalid(player) or not _FactionWar:IsTown(player.CurrentMapName) or self._T.panelOpen
-            or (snapshot.target or "") == "" or snapshot.state == "IDLE" then return end
+        if not isvalid(player) or self._T.panelOpen or not self:SiegeActive(player.CurrentMapName, snapshot) then return end
         local view = self:SiegeSnapshotView(snapshot, player.CurrentMapName)
         if not view.enabled or view.action == "" then return end
         self._T.siegeSequenceKey = snapshot.sequenceKey
@@ -440,19 +439,24 @@ script FactionWarUI extends Logic
         elseif self._T.siegeShown then
             self._T.siegeShown = false
             self._T.siegeStrengths = nil
-            self._T.shown = {}
             _FactionWarMap:RequestSiegeClose()
         end
     end
 
     @ExecSpace("ClientOnly")
-    method void SetTextOnce(string path, string text)
+    method void SetTextIfChanged(string path, string text)
         -- Write a text node only when its words changed; the card is redrawn every frame.
-        if self._T.shown[path] == text then return end
+        if self._T.shownText[path] == text then return end
         local node = self:Ui(path)
         if not isvalid(node) then return end
         node.TextGUIRendererComponent.Text = text
-        self._T.shown[path] = text
+        self._T.shownText[path] = text
+    end
+
+    @ExecSpace("ClientOnly")
+    method boolean SiegeActive(string map, table snapshot)
+        -- A war pairing owns the player in a town: the ticket names a target town and is not idle.
+        return _FactionWar:IsTown(map) and (snapshot.target or "") ~= "" and snapshot.state ~= "IDLE"
     end
 
     @ExecSpace("ClientOnly")
@@ -461,7 +465,6 @@ script FactionWarUI extends Logic
         local card = self:Ui("SiegePanel")
         if not isvalid(card) then return end
         local snapshot = _MatchFlowInput.Snapshot
-        local war = _FactionWar:IsTown(map) and (snapshot.target or "") ~= "" and snapshot.state ~= "IDLE"
         if self._T.siegeSequenceKey ~= snapshot.sequenceKey or self._T.siegeSequence ~= snapshot.sequence then
             self._T.siegePendingAction = ""
         end
@@ -469,14 +472,17 @@ script FactionWarUI extends Logic
             if snapshot.state == "IDLE" and _FactionWar:IsTown(map) then _FactionWar:RequestTownStatus() end
             self._T.siegeState = snapshot.state
         end
-        local shown = war and not self._T.panelOpen
+        local shown = self:SiegeActive(map, snapshot) and not self._T.panelOpen
         card:SetEnable(shown)
         self:FollowSiege(shown)
-        if not shown then return end
+        if not shown then
+            self._T.shownText = {}
+            return
+        end
         local view = self:SiegeSnapshotView(snapshot, map)
-        self:SetTextOnce("SiegePanel/Origin", view.origin)
-        self:SetTextOnce("SiegePanel/Target", view.target)
-        self:SetTextOnce("SiegePanel/Status", view.status)
+        self:SetTextIfChanged("SiegePanel/Origin", view.origin)
+        self:SetTextIfChanged("SiegePanel/Target", view.target)
+        self:SetTextIfChanged("SiegePanel/Status", view.status)
         local button = self:Ui("SiegePanel/Cancel")
         if isvalid(button) then
             button:SetEnable(view.action ~= "")

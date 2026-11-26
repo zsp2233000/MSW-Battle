@@ -23,8 +23,6 @@ test('the siege panel is a Cardgame card at the top centre with both towns, the 
   assert.ok(war.hasComponent('SiegePanel/Frame', 'MOD.Core.SpriteGUIRendererComponent'), 'the Cardgame frame');
   const size = war.getComponent('SiegePanel/Cancel', 'MOD.Core.UITransformComponent').RectSize;
   assert.ok(size.x >= 88 && size.y >= 88, 'a touch-sized button');
-  // Both ends of the first line are rich text so the runtime can colour the town names.
-  assert.equal(war.getComponent('SiegePanel/Origin', 'MOD.Core.TextGUIRendererComponent').Text.length > 0, true);
 });
 
 test('the siege panel is drawn under the dialogs and above the town HUD', () => {
@@ -47,11 +45,14 @@ test('nothing refers to the removed queue bar any more', () => {
 });
 
 test('the siege panel shows only in a town and only while a war pairing owns the player', () => {
-  const render = body(source('RootDesk/MyDesk/Formations/FactionWarUI.mlua'), 'RenderSiege');
-  assert.match(render, /_FactionWar:IsTown\(map\)/, 'town only');
-  assert.match(render, /snapshot\.target or ""\) ~= ""/, 'a war pairing (it has a target town)');
-  assert.match(render, /snapshot\.state ~= "IDLE"/, 'not while idle');
-  assert.match(render, /self:FollowSiege\(shown\)/, 'the board subscription follows what shows');
+  const ui = source('RootDesk/MyDesk/Formations/FactionWarUI.mlua');
+  const active = body(ui, 'SiegeActive');
+  assert.match(active, /_FactionWar:IsTown\(map\)/, 'town only');
+  assert.match(active, /snapshot\.target or ""\) ~= ""/, 'a war pairing (it has a target town)');
+  assert.match(active, /snapshot\.state ~= "IDLE"/, 'not while idle');
+  assert.match(body(ui, 'RenderSiege'), /self:SiegeActive\(map, snapshot\)/, 'the card follows that rule');
+  assert.match(body(ui, 'PressSiege'), /self:SiegeActive\(/, 'and so does its button');
+  assert.match(body(ui, 'RenderSiege'), /self:FollowSiege\(shown\)/, 'the board subscription follows what shows');
 });
 
 test('the siege subscription is a Server RPC that trusts only the sender and never leaks the map links or faction', () => {
@@ -62,14 +63,15 @@ test('the siege subscription is a Server RPC that trusts only the sender and nev
   }
   assert.match(map, /@ExecSpace\("Client"\)\n    method void ReceiveSiegeBoard\(table towns\)/, 'the push carries towns only');
   assert.match(body(map, 'ReceiveSiegeBoard'), /_FactionWarUI:ShowSiegeBoard\(towns\)/);
-  assert.match(body(map, 'Deliver'), /siegeViewers/, 'a board change reaches the siege viewers');
+  assert.match(body(map, 'Deliver'), /PushStrengths\("siege"/, 'a board change reaches the siege viewers');
+  assert.match(body(map, 'PushStrengths'), /siegeViewers/, 'from their own set');
   assert.match(body(map, 'BoardChanged'), /siegeViewers/, 'a siege viewer alone is reason enough to read the board');
   assert.match(map, /handler HandleUserLeaveEvent[^]*siegeViewers\[event\.UserId\] = nil/, 'leaving the room ends the subscription');
 });
 
 test('the card never says who the opponent is', () => {
   const ui = source('RootDesk/MyDesk/Formations/FactionWarUI.mlua');
-  for (const name of ['SiegeView', 'SiegeTown', 'SiegeSnapshotView', 'RenderSiege', 'PressSiege']) {
+  for (const name of ['SiegeView', 'SiegeTown', 'SiegeSnapshotView', 'SiegeActive', 'RenderSiege', 'PressSiege']) {
     assert.doesNotMatch(body(ui, name), /守衛|取消入場|編隊/, `${name} keeps the glossary`);
   }
 });

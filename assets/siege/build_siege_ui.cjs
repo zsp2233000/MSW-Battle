@@ -2,7 +2,7 @@
 'use strict';
 
 // Rebuilds the attack panel (#117) and adds the team button and team preview (#118) in ui/FactionWarGroup.ui with the msw-ui-system UIBuilder.
-// Everything else in the group (faction choice, queue bar, town HUD, lobby buttons) is left as it is.
+// Everything else in the group (faction choice, the siege panel of #123, town HUD, lobby buttons) is left as it is.
 //
 //   node assets/siege/build_siege_ui.cjs
 //

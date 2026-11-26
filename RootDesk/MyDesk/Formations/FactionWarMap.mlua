@@ -152,30 +152,30 @@ script FactionWarMap extends Logic
     end
 
     @ExecSpace("ServerOnly")
+    method integer PushStrengths(string kind, any board, boolean changed, table answering)
+        -- The viewers of the attack panel ("panel") or the siege panel ("siege") get owner and strength per town; one who left the town is dropped.
+        local viewers = kind == "siege" and self._T.siegeViewers or self._T.panelViewers
+        local sent = 0
+        for userId, player in pairs(viewers) do
+            if not self:Watching(userId, player) then
+                viewers[userId] = nil
+            elseif board ~= nil and (changed or answering[userId]) then
+                if kind == "siege" then self:ReceiveSiegeBoard(board.towns, userId) else self:ReceivePanelBoard(board.towns, userId) end
+                sent = sent + 1
+                log("[VRF][FactionWarMap] " .. kind .. " board user=" .. userId)
+            end
+        end
+        return sent
+    end
+
+    @ExecSpace("ServerOnly")
     method void Deliver(any towns, table answering)
         -- Push the board to every viewer when it changed, and to the ones who asked; drop viewers who left their town.
         local board = towns ~= nil and self:Board(towns) or nil
         local changed = board ~= nil and board.signature ~= self._T.signature
         if board ~= nil then self._T.signature = board.signature end
         local sent = 0
-        for userId, player in pairs(self._T.panelViewers) do
-            if not self:Watching(userId, player) then
-                self._T.panelViewers[userId] = nil
-            elseif board ~= nil and (changed or answering[userId]) then
-                self:ReceivePanelBoard(board.towns, userId)
-                sent = sent + 1
-                log("[VRF][FactionWarMap] panel board user=" .. userId)
-            end
-        end
-        for userId, player in pairs(self._T.siegeViewers) do
-            if not self:Watching(userId, player) then
-                self._T.siegeViewers[userId] = nil
-            elseif board ~= nil and (changed or answering[userId]) then
-                self:ReceiveSiegeBoard(board.towns, userId)
-                sent = sent + 1
-                log("[VRF][FactionWarMap] siege board user=" .. userId)
-            end
-        end
+        sent = sent + self:PushStrengths("panel", board, changed, answering) + self:PushStrengths("siege", board, changed, answering)
         for userId, player in pairs(self._T.viewers) do
             if not self:Watching(userId, player) then
                 self._T.viewers[userId] = nil

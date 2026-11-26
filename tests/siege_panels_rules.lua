@@ -305,7 +305,7 @@ check(ui._T.siegeStrengths.zuoying == 70 and ui._T.siegeStrengths.gushan == 40, 
 local asks, closes = 0, 0
 _FactionWarMap = { RequestSiegeOpen = function() asks = asks + 1 end, RequestSiegeClose = function() closes = closes + 1 end }
 DateTime.UtcNow.Elapsed = 1000000
-ui._T.siegeShown, ui._T.siegeStrengths, ui._T.siegeAsked, ui._T.shown = false, nil, 0, {}
+ui._T.siegeShown, ui._T.siegeStrengths, ui._T.siegeAsked, ui._T.shownText = false, nil, 0, {}
 ui:FollowSiege(true)
 check(asks == 1 and ui._T.siegeShown, "showing the card asks the server for the board")
 ui:FollowSiege(true)
@@ -321,5 +321,75 @@ ui:FollowSiege(false)
 check(closes == 1 and not ui._T.siegeShown and ui._T.siegeStrengths == nil, "hiding the card ends the push and forgets the numbers")
 ui:FollowSiege(false)
 check(closes == 1, "hiding twice tells the server once")
+
+-- #123: the card as a whole, drawn against fake nodes: where it shows, what it writes, what its button sends.
+local nodes = {}
+local function fakeNode(path)
+    if nodes[path] == nil then
+        local entry = { Enable = false, writes = 0, ButtonComponent = { Enable = false }, SetEnable = function(self, value) self.Enable = value end }
+        local store = { Text = "" }
+        entry.TextGUIRendererComponent = setmetatable({}, { __index = store, __newindex = function(_, key, value)
+            if key == "Text" then entry.writes = entry.writes + 1 end
+            store[key] = value
+        end })
+        nodes[path] = entry
+    end
+    return nodes[path]
+end
+_EntityService = { GetEntityByPath = function(_, path) return fakeNode((string.gsub(path, "^/ui/FactionWarGroup/", ""))) end }
+local townStatusAsks = 0
+_FactionWar.RequestTownStatus = function() townStatusAsks = townStatusAsks + 1 end
+local sent = {}
+_MatchFlow = { RequestCancel = function(_, attempt) table.insert(sent, "CANCEL:" .. tostring(attempt)) end, RequestReturn = function(_, attempt) table.insert(sent, "RETURN:" .. tostring(attempt)) end }
+_UserService.LocalPlayer = { CurrentMapName = "zuoying" }
+DateTime.UtcNow.Elapsed = clock
+ui:OnBeginPlay()
+local waitingSnapshot = queued({ sequenceKey = "k", sequence = 1 })
+_MatchFlowInput = { Snapshot = waitingSnapshot }
+asks, closes = 0, 0
+ui:RenderSiege("zuoying")
+local siege, cancel = fakeNode("SiegePanel"), fakeNode("SiegePanel/Cancel")
+check(siege.Enable and asks == 1, "a war pairing in a town shows the card and asks for the board")
+check(fakeNode("SiegePanel/Status").TextGUIRendererComponent.Text == "配對中 · 倒數 2 秒" and cancel.Enable and cancel.ButtonComponent.Enable, "the words and the button")
+local writes = fakeNode("SiegePanel/Status").writes
+ui:RenderSiege("zuoying")
+check(fakeNode("SiegePanel/Status").writes == writes and asks == 1, "an unchanged frame writes nothing and asks nothing")
+ui:PressSiege()
+check(sent[1] == "CANCEL:a", "the button sends the cancel of the observed attempt")
+ui:RenderSiege("zuoying")
+check(fakeNode("SiegePanel/Status").TextGUIRendererComponent.Text == "正在取消配對…" and not cancel.Enable, "pending until the server answers")
+ui:PressSiege()
+check(#sent == 1, "a second click while pending sends nothing")
+-- Not in a town, or the lobby's town panel open: no card, no subscription.
+ui._T.siegePendingAction = ""
+_UserService.LocalPlayer.CurrentMapName = "formationlobby"
+ui:RenderSiege("formationlobby")
+check(not siege.Enable and closes == 1 and not ui._T.siegeShown, "outside a town the card is hidden and the subscription ends")
+ui:PressSiege()
+check(#sent == 1, "no button outside a town")
+_UserService.LocalPlayer.CurrentMapName = "zuoying"
+ui:RenderSiege("zuoying")
+check(siege.Enable and asks == 2, "back in a town it shows and asks again")
+ui._T.panelOpen = true
+ui:RenderSiege("zuoying")
+check(not siege.Enable and closes == 2, "the lobby's town panel covers the town: the card hides")
+ui:PressSiege()
+check(#sent == 1, "and its button is dead")
+ui._T.panelOpen = false
+-- Idle ends it; a failed entry offers Stop Entry through the same button.
+_MatchFlowInput.Snapshot = { state = "IDLE", reasonCode = "CANCELLED", started = 0, players = 0, busy = false, summary = "", attempt = "", origin = "", target = "" }
+ui:RenderSiege("zuoying")
+check(not siege.Enable and townStatusAsks >= 1, "cancelled: the card hides and the town status is read again")
+_MatchFlowInput.Snapshot = queued({ state = "SAVING", opponentFound = true, reasonCode = "HANDOFF_SEAL_FAILED", sequenceKey = "k2", sequence = 1 })
+ui:RenderSiege("zuoying")
+check(siege.Enable and cancel.TextGUIRendererComponent.Text == "停止入場" and cancel.Enable, "a failed entry offers Stop Entry")
+ui:PressSiege()
+check(sent[2] == "RETURN:a", "Stop Entry sends the return of the observed attempt")
+-- A reconnect restarts the client logic: the card subscribes again by itself.
+asks = 0
+ui:OnBeginPlay()
+_MatchFlowInput.Snapshot = waitingSnapshot
+ui:RenderSiege("zuoying")
+check(siege.Enable and asks == 1, "after a reconnect the card asks for the board again")
 
 print("[VRF][SiegePanels] attack panel, siege panel and team preview rules PASS checks=" .. tostring(checks))

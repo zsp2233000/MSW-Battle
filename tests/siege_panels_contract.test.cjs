@@ -77,7 +77,8 @@ test('the attack answer carries strengths from the one board read and the panel 
   assert.match(text, /method void ReceiveOptions\(string town, table options, string status, table header\)/, 'the reply carries the header');
   const map = mapLogic();
   assert.match(body(map, 'WatchPanel'), /panelViewers\[userId\] = player/, 'panel viewers are their own table, so the map\'s subscription is unchanged');
-  assert.match(body(map, 'Deliver'), /panelViewers[^]*ReceivePanelBoard\(board\.towns, userId\)/, 'a changed board is pushed to them');
+  assert.match(body(map, 'Deliver'), /PushStrengths\("panel"/, 'a changed board is pushed to them');
+  assert.match(body(map, 'PushStrengths'), /panelViewers[^]*ReceivePanelBoard\(board\.towns, userId\)/, 'by the shared push, to the panel viewers');
   assert.match(body(map, 'Deliver'), /ReceiveBoard\(board\.towns, board\.links, userId\)/, 'the map viewers still get the map board');
   assert.match(body(map, 'BoardChanged'), /next\(self\._T\.viewers\) == nil and next\(self\._T\.panelViewers\) == nil/, 'a panel alone is enough to read the board');
   assert.match(map, /handler HandleUserLeaveEvent[^]*panelViewers\[event\.UserId\] = nil/, 'leaving the room ends the push');

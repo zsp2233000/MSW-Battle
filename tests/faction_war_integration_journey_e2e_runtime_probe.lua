@@ -7,7 +7,7 @@
 -- client call has). The helpers entry(), gate() and options() below repeat their bodies with the same production calls in the same order
 -- (CanEnterFromLobby, ReadFaction, the write of the choice, EnterFrontline; FindGate, NearGate, IsEngaged, CanPass, Enforce, Move; Targets, IsEngaged);
 -- tests/faction_war_integration_contract.test.cjs pins those bodies so the mirror cannot drift. AttackFor and CancelForUser run as they are.
--- What only a real client does is NOT here: walking to the gate or the NPC, the interaction key, the dialog, the queue bar, the HUD (README "Manual visual checklist").
+-- What only a real client does is NOT here: walking to the gate or the NPC, the interaction key, the dialog, the siege panel, the HUD (README "Manual visual checklist").
 -- The human fight is NOT forced: 3 tanks (RED) against 1 tank (BLUE) is played out, about a minute.
 -- Joins: 6 of the 10 virtual players a Play allows (kicked players count too): five adds before STEP 2 and one add after STEP 10.
 --   add_virtual_player -profile_code wp2631 -nickname JourneyR1    (R1, RED,  3 tanks, enters at Zuoying)
