@@ -102,6 +102,22 @@ script MatchFlow extends Logic
     end
 
     @ExecSpace("ServerOnly")
+    method string TicketIdForUser(string userId)
+        -- The attempt id of the player's ticket, or "" when none; the team preview asks the handoff for its roster by this id.
+        local ticket = self._T.records[userId]
+        if ticket == nil or ticket.data == nil then return "" end
+        return ticket.data.attempt or ""
+    end
+
+    @ExecSpace("ServerOnly")
+    method string TargetForUser(string userId)
+        -- The enemy town a war ticket attacks, or "" when the player has no war ticket (no payload leaves the coordinator).
+        local ticket = self._T.records[userId]
+        if ticket == nil or ticket.data == nil then return "" end
+        return ticket.data.target or ""
+    end
+
+    @ExecSpace("ServerOnly")
     method any MatchMap()
         -- The map of the match this room runs, or nil in a room that has none (the static room).
         local map = _EntityService:GetEntityByPath("/maps/matchprobe")

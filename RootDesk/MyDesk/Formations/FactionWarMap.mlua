@@ -7,6 +7,8 @@ script FactionWarMap extends Logic
     method void OnBeginPlay()
         -- The players looking at the world map in this room, and the one board read that answers them.
         self._T.viewers = {}
+        -- #117: players with the attack panel open are viewers too; they get the strengths only, never the map's links or faction.
+        self._T.panelViewers = {}
         self._T.waiting = {}
         self._T.reading = false
         self._T.readStarted = 0
@@ -40,6 +42,22 @@ script FactionWarMap extends Logic
             self:ReceiveFaction(faction == nil and "UNREADABLE" or faction, userId)
         end)
         self:Refresh(userId)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void WatchPanel(string userId, any player)
+        -- The attack panel was just answered from a board read, so it only needs the changes that come after; this adds no read.
+        if not self:Watching(userId, player) then return end
+        self._T.panelViewers[userId] = player
+        log("[VRF][FactionWarMap] panel watch user=" .. userId)
+    end
+
+    @ExecSpace("Server")
+    method void RequestPanelClose()
+        -- The panel was closed (or the player left the town): later board changes are not pushed to it.
+        if self._T.panelViewers[senderUserId] == nil then return end
+        self._T.panelViewers[senderUserId] = nil
+        log("[VRF][FactionWarMap] panel close user=" .. senderUserId)
     end
 
     @ExecSpace("Server")
@@ -119,6 +137,15 @@ script FactionWarMap extends Logic
         local changed = board ~= nil and board.signature ~= self._T.signature
         if board ~= nil then self._T.signature = board.signature end
         local sent = 0
+        for userId, player in pairs(self._T.panelViewers) do
+            if not self:Watching(userId, player) then
+                self._T.panelViewers[userId] = nil
+            elseif board ~= nil and (changed or answering[userId]) then
+                self:ReceivePanelBoard(board.towns, userId)
+                sent = sent + 1
+                log("[VRF][FactionWarMap] panel board user=" .. userId)
+            end
+        end
         for userId, player in pairs(self._T.viewers) do
             if not self:Watching(userId, player) then
                 self._T.viewers[userId] = nil
@@ -156,7 +183,7 @@ script FactionWarMap extends Logic
     @ExecSpace("ServerOnly")
     method void BoardChanged(string via)
         -- Nobody looking at the map here means nothing to read.
-        if next(self._T.viewers) == nil then return end
+        if next(self._T.viewers) == nil and next(self._T.panelViewers) == nil then return end
         log("[VRF][FactionWarMap] change received via=" .. via)
         self:Refresh("")
     end
@@ -174,6 +201,12 @@ script FactionWarMap extends Logic
         -- This instance's own change already arrived as a room event.
         if event.Source == _WorldInstanceService.WorldInstanceId then return end
         self:BoardChanged("instance")
+    end
+
+    @ExecSpace("Client")
+    method void ReceivePanelBoard(table towns)
+        -- A pushed board for the open attack panel: owner and strength per town.
+        _FactionWarUI:ShowAttackBoard(towns)
     end
 
     @ExecSpace("Client")
@@ -199,6 +232,7 @@ script FactionWarMap extends Logic
     handler HandleUserLeaveEvent(UserLeaveEvent event)
         -- Leaving the room (a match, a logout) ends the subscription.
         self._T.viewers[event.UserId] = nil
+        self._T.panelViewers[event.UserId] = nil
         self._T.waiting[event.UserId] = nil
     end
 end

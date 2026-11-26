@@ -2,6 +2,9 @@
 script FactionWarUI extends Logic
 
     property integer AttackRows = 2
+    -- Widths of the strength bars in the attack panel (assets/siege/build_siege_ui.cjs): a target card's bar and the departure town's.
+    property number AttackBarWidth = 380
+    property number OriginBarWidth = 680
     -- Cardgame cyan; use this same highlight for runtime town names on all war UI.
     property string TownNameHighlightHex = "#4DFEE7"
 
@@ -48,12 +51,15 @@ script FactionWarUI extends Logic
             self:Bind("AttackPanel/Window/Row1/Option", function() self:Attack(1) end)
             self:Bind("AttackPanel/Window/Row2/Option", function() self:Attack(2) end)
             self:Bind("QueueBar/Cancel", function() self:CancelQueue() end)
+            self:Bind("TeamButton", function() _FactionWarTeam:Open() end)
+            self:Bind("TeamPreview/Window/Close", function() _FactionWarTeam:Close() end)
             self:Bind("LobbyClose", function() _FormationLobby:CloseTownPanel() end)
         end
         local name = player.CurrentMapName
         if name ~= self._T.mapName then self:EnterMap(name, entry, choice, hud) end
         self:SyncTownPanel(name, hud)
         self:RenderQueue(name)
+        _FactionWarTeam:Sync(name)
     end
 
     @ExecSpace("ClientOnly")
@@ -190,38 +196,147 @@ script FactionWarUI extends Logic
         log("[VRF][FactionWar] notice shown=" .. tostring(message ~= ""))
     end
 
+    method string AttackStatusText(string status, table header, integer count)
+        -- What the line under the cards says: the live answer of the server, in the player's words.
+        if status == "ENGAGED" then
+            local target = header ~= nil and header.target or ""
+            if target ~= "" and _FactionWarTownDocument:IsTown(target) then
+                return "目前正在進攻 " .. self:HighlightedTownName(target) .. "，要改變目標請先取消配對"
+            end
+            return "已在配對中，請先取消目前的配對"
+        elseif status == "UNAVAILABLE" then
+            return "暫時無法讀取國戰資料，請再試一次"
+        elseif status == "NOT_OWNED" then
+            return "這座城已不屬於你的陣營"
+        elseif count == 0 then
+            return "目前沒有可進攻的相鄰敵城"
+        end
+        return "選擇要進攻的城鎮"
+    end
+
+    method string StrengthText(any strength)
+        -- "兵力 80 / 100"; a town the panel has no reading for shows a dash.
+        if type(strength) ~= "number" then return "兵力 —" end
+        return "兵力 " .. string.format("%d", strength) .. " / " .. string.format("%d", _FactionWarTownDocument.FullStrength)
+    end
+
+    method number StrengthRatio(any strength)
+        -- The bar's fill, clamped to the full width.
+        if type(strength) ~= "number" then return 0 end
+        return math.max(0, math.min(1, strength / _FactionWarTownDocument.FullStrength))
+    end
+
     @ExecSpace("ClientOnly")
-    method void ShowAttackOptions(string town, table options, string status)
-        -- Open the NPC dialog with exactly the answer the server derived from live ownership.
+    method void SetText(string path, string text)
+        -- One text node of the panel; a missing node is skipped rather than raising in the middle of a render.
+        local node = self:Ui(path)
+        if isvalid(node) then node.TextGUIRendererComponent.Text = text end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void SetBar(string path, any strength, string owner, number width)
+        -- The bar of one card: width from the strength, colour from the faction that owns the town.
+        local fill = self:Ui(path .. "/Fill")
+        if not isvalid(fill) then return end
+        local ratio = self:StrengthRatio(strength)
+        fill:SetEnable(ratio > 0)
+        fill.UITransformComponent.RectSize = Vector2(width * ratio, fill.UITransformComponent.RectSize.y)
+        fill.SpriteGUIRendererComponent.Color = _FactionWarMapUI:OwnerColor(owner or "")
+    end
+
+    @ExecSpace("ClientOnly")
+    method void RenderAttack()
+        -- Draw the whole panel from the last answer and the last pushed board: the departure town on top, one card per target.
+        local state = self._T.attack
+        if state == nil then return end
+        local header = state.header or {}
+        local ready = state.status == "READY" or state.status == "ENGAGED"
+        local origin = self:Ui("AttackPanel/Window/Origin")
+        if isvalid(origin) then origin:SetEnable(ready and header.town ~= nil) end
+        if ready and header.town ~= nil then
+            self:SetText("AttackPanel/Window/Origin/Name", self:HighlightedTownName(header.town))
+            self:SetText("AttackPanel/Window/Origin/Value", self:StrengthText(header.strength))
+            local capital = self:Ui("AttackPanel/Window/Origin/Capital")
+            if isvalid(capital) then capital:SetEnable(header.capital == true) end
+            self:SetBar("AttackPanel/Window/Origin/Bar", header.strength, header.owner, self.OriginBarWidth)
+        end
+        for index = 1, self.AttackRows do
+            local path = "AttackPanel/Window/Row" .. tostring(index)
+            local row = self:Ui(path)
+            local option = state.options[index]
+            if isvalid(row) then row:SetEnable(option ~= nil and ready) end
+            if option ~= nil then
+                self:SetText(path .. "/Name", self:HighlightedTownName(option.town))
+                self:SetText(path .. "/Value", self:StrengthText(option.strength))
+                self:SetText(path .. "/Note", option.capital and "打贏不扣主城兵力" or "")
+                local capital = self:Ui(path .. "/Capital")
+                if isvalid(capital) then capital:SetEnable(option.capital == true) end
+                self:SetBar(path .. "/Bar", option.strength, option.owner, self.AttackBarWidth)
+                local button = self:Ui(path .. "/Option")
+                if isvalid(button) then
+                    local current = state.status == "ENGAGED" and option.town == header.target
+                    button.TextGUIRendererComponent.Text = current and "進攻中" or "進攻"
+                    button.ButtonComponent.Enable = state.status == "READY" and not self._T.attackPending
+                end
+            end
+        end
+        self:SetText("AttackPanel/Window/Status", self._T.attackNote or self:AttackStatusText(state.status, header, #state.options))
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ShowAttackOptions(string town, table options, string status, table header)
+        -- Open the panel with exactly the answer the server derived from live ownership: one board read for the whole answer.
         if not self:IsCurrentTown(town) then return end
         local panel = self:Ui("AttackPanel")
         if not isvalid(panel) then return end
         self._T.options = options
         self._T.attackPending = false
-        local message = "選擇要進攻的城鎮"
-        if status == "ENGAGED" then message = "已在配對中，請先取消目前的配對"
-        elseif status == "UNAVAILABLE" then message = "暫時無法讀取國戰資料，請再試一次"
-        elseif status == "NOT_OWNED" then message = "這座城已不屬於你的陣營"
-        elseif #options == 0 then message = "目前沒有可進攻的相鄰敵城" end
-        self:Ui("AttackPanel/Window/Status").TextGUIRendererComponent.Text = message
-        for index = 1, self.AttackRows do
-            local row = self:Ui("AttackPanel/Window/Row" .. tostring(index))
-            local option = options[index]
-            if isvalid(row) then row:SetEnable(option ~= nil and status == "READY") end
-            if option ~= nil then
-                self:Ui("AttackPanel/Window/Row" .. tostring(index) .. "/Option").TextGUIRendererComponent.Text = "進攻 " .. option.name
-                self:Ui("AttackPanel/Window/Row" .. tostring(index) .. "/Note").TextGUIRendererComponent.Text = option.capital and "敵方主城不會被攻下，勝利也不會扣除主城兵力" or ""
+        self._T.attackNote = nil
+        self._T.attack = { town = town, status = status, header = header, options = options }
+        -- The server registered this panel for board pushes when it answered READY or ENGAGED.
+        self._T.attackWatching = status == "READY" or status == "ENGAGED"
+        self:RenderAttack()
+        panel:SetEnable(true)
+        log("[VRF][FactionWarAttack] options town=" .. town .. " count=" .. tostring(#options) .. " status=" .. status
+            .. " origin=" .. tostring(header.town) .. "/" .. tostring(header.strength) .. " target=" .. tostring(header.target))
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ShowAttackBoard(table towns)
+        -- A pushed board while the panel is open: the strengths follow at once; a changed owner needs a fresh list of targets.
+        local state = self._T.attack
+        if state == nil then return end
+        local header, relist = state.header or {}, false
+        for _, entry in ipairs(towns) do
+            if entry.id == header.town then
+                header.strength, header.owner = entry.strength, entry.owner
+                if header.faction ~= nil and entry.owner ~= header.faction then relist = true end
+            end
+            for _, option in ipairs(state.options) do
+                if option.town == entry.id then
+                    option.strength, option.owner = entry.strength, entry.owner
+                    if header.faction ~= nil and entry.owner == header.faction then relist = true end
+                end
             end
         end
-        panel:SetEnable(true)
-        log("[VRF][FactionWarAttack] options town=" .. town .. " count=" .. tostring(#options) .. " status=" .. status)
+        log("[VRF][FactionWarAttack] panel board origin=" .. tostring(header.strength) .. " relist=" .. tostring(relist))
+        if relist then
+            _FactionWarAttack:RequestOptions()
+        else
+            self:RenderAttack()
+        end
     end
 
     @ExecSpace("ClientOnly")
     method void CloseAttack()
-        -- Hide the NPC dialog; the queue bar keeps showing any waiting match.
+        -- Hide the panel and stop the server pushing boards to it; the queue bar keeps showing any waiting match.
         local panel = self:Ui("AttackPanel")
         if isvalid(panel) then panel:SetEnable(false) end
+        if self._T.attackWatching then
+            self._T.attackWatching = false
+            _FactionWarMap:RequestPanelClose()
+        end
+        self._T.attack = nil
     end
 
     @ExecSpace("ClientOnly")
@@ -230,7 +345,8 @@ script FactionWarUI extends Logic
         local option = self._T.options[index]
         if option == nil or self._T.attackPending then return end
         self._T.attackPending = true
-        self:Ui("AttackPanel/Window/Status").TextGUIRendererComponent.Text = "正在加入配對…"
+        self._T.attackNote = "正在加入配對…"
+        self:RenderAttack()
         _FactionWarAttack:RequestAttack(option.town)
     end
 
@@ -244,7 +360,8 @@ script FactionWarUI extends Logic
             -- Ownership moved while the dialog was open; list the towns again.
             _FactionWarAttack:RequestOptions()
         else
-            self:Ui("AttackPanel/Window/Status").TextGUIRendererComponent.Text = result == "ENGAGED" and "已在配對中，請先取消目前的配對" or "暫時無法配對，請再試一次"
+            self._T.attackNote = result == "ENGAGED" and "已在配對中，請先取消目前的配對" or "暫時無法配對，請再試一次"
+            self:RenderAttack()
         end
     end
 
