@@ -15,11 +15,14 @@ local MODE = "WAR"
 local BASE_LEVEL = 1
 local BASE_EXP = 0
 local BASE_SETTLED = 0
+-- "wp2601" is the second virtual player. Set the ProfileCode of the real Maker client to see the waiting text on a real screen (STEP 7);
+-- an isolated formation key keeps that profile's saved teams untouched.
+local A_PROFILE = "wp2601"
 local function await(predicate, tries) for _ = 1, tries or 300 do if predicate() then return true end wait(0.1) end return false end
 local function find()
     local found = {}
     for _, user in ipairs(_UserService.UserEntities.Values) do found[user.PlayerComponent.ProfileCode] = user end
-    return found["wp2601"], found["wp2602"]
+    return found[A_PROFILE], found["wp2602"]
 end
 local function progressOf(profile)
     -- B's tank level and experience, and how many settled matches the profile's level document lists.
@@ -39,9 +42,11 @@ local ok, reason = pcall(function()
     if STEP == 1 or STEP == 2 then assert(isvalid(a) and isvalid(b), "both virtual players connected") end
     if STEP == 3 or STEP == 4 or STEP == 6 then assert(isvalid(b), "B is connected") end
     if STEP == 1 then
+        if A_PROFILE ~= "wp2601" then _FormationService.StorageKey = "Absent120_" .. _UtilLogic:NewGuid() end
         for _, user in ipairs({ a, b }) do
             local record = _FormationService:GetSession(user.PlayerComponent.UserId)
-            if not record.initialized then _FormationService:Load(record) end
+            -- An isolated formation key (the real client) must be read again; the virtual players load once.
+            if A_PROFILE ~= "wp2601" or not record.initialized then _FormationService:Load(record) end
             assert(await(function() return record.initialized and not record.pending end), "formation loaded")
         end
         local function setup(user, units)
@@ -129,6 +134,18 @@ local ok, reason = pcall(function()
             _MatchFlow:ReturnForUser(user.PlayerComponent.UserId)
         end
         log("[VRF][AbsentE2E] ROOM return dispatched")
+    elseif STEP == 7 then
+        -- client context, while the room waits: the on-time human reads the countdown on the real screen.
+        local player = _UserService.LocalPlayer
+        assert(player.CurrentMapName == "matchprobe", "the real client is in the match room")
+        assert(await(function() return string.find(_MatchFlowInput:View().text, "等待對手進入戰場", 1, true) ~= nil end, 150), "the waiting text is shown")
+        local view = _MatchFlowInput:View()
+        assert(view.action == "" and view.label == "" and not view.enabled, "no button while waiting")
+        assert(await(function()
+            local status = _MatchFlowInput.status
+            return isvalid(status) and string.find(status.TextGUIRendererComponent.Text, view.text, 1, true) ~= nil
+        end, 50), "the visible status line shows it")
+        log("[VRF][AbsentE2E] CLIENT_WAIT PASS text=" .. view.text)
     elseif STEP == 6 then
         _MatchFaults:Remove()
         for _, user in ipairs({ a, b }) do

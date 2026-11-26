@@ -1,7 +1,7 @@
 -- #115 / #119 Maker only. Runbook: tests/README.md, War result receipts (#115) and the return button (#119).
 -- This probe changes the Maker local board and the two disposable accounts. Never use production or valuable saves.
 local STEP = "SETUP" -- SETUP, QUEUE, ARM, CLIENT, RECONNECT, RECHECK, BOARD, BOARD_CLIENT, LOBBY_CLIENT, RETURN, CLEANUP
-local KIND = "HUMAN" -- HUMAN or GUARD; one fresh Play per case
+local KIND = "HUMAN" -- HUMAN, GUARD or HUMAN_LOSS (#119: the real client loses its own departure town in the match); one fresh Play per case
 local RED_PROFILE = "SET_ME" -- the real Maker client must play RED, so its screen can be inspected
 local BLUE_PROFILE = "wp2624" -- virtual BLUE only in HUMAN
 local MATCH_KEY = "SET_ME" -- only BOARD (from the room/transfer logs)
@@ -121,6 +121,16 @@ local ok, failure = pcall(function()
         assert(not ui.hud.Enable and ui.resultWindow.UITransformComponent.RectSize.y == 360 and ui.resultWindow.UITransformComponent.anchoredPosition.y == 90, "the lobby result keeps the plain window and the HUD steps aside")
         assert(battle.RequireMatchedFormations, "this is a lobby match, not the POC")
         log("[VRF][Result115] LOBBY_CLIENT PASS")
+    elseif STEP == "LOSS_CLIENT" then
+        -- #119: the match itself takes the departure town from the viewer; the button names the capital and the line above says why.
+        local player, battle, coordinator, ui = clientMatch()
+        assert(await(function()
+            local receipt = coordinator.WarResultReceipt
+            return receipt.status == "SAVED" and receipt.originLost == true and receipt.destination == "nanzih"
+        end, 3000), "a committed result that cost the viewer's own town")
+        assert(await(function() return ui.OwnResult == "LOSE" end, 100), "the fixture must produce a red loss")
+        checkReturnButton("nanzih", true)
+        log("[VRF][Result115] LOSS_CLIENT PASS match=" .. battle.MatchKey)
     elseif STEP == "CLIENT" or STEP == "RECHECK" then
         local player, battle, coordinator, ui = clientMatch()
         if STEP == "CLIENT" then
@@ -147,27 +157,34 @@ local ok, failure = pcall(function()
         local found = users()
         _FormationService.StorageKey = "Result115_" .. _UtilLogic:NewGuid()
         local roster = {}
-        for index = 1, (KIND == "HUMAN" and 3 or 4) do
-            local monster = KIND == "HUMAN" and "monster_tank" or (index <= 2 and "monster_dark_centaur" or "monster_shooter")
+        for index = 1, (KIND == "HUMAN_LOSS" and 1 or (KIND == "HUMAN" and 3 or 4)) do
+            local monster = (KIND == "HUMAN" or KIND == "HUMAN_LOSS") and "monster_tank" or (index <= 2 and "monster_dark_centaur" or "monster_shooter")
             roster[index] = { monsterId = monster, x = -3.25 - (index - 1) * 0.75, y = -1.25 }
         end
         prepare(found[RED_PROFILE], "RED", roster)
         if KIND == "HUMAN" then prepare(found[BLUE_PROFILE], "BLUE", {{ monsterId = "monster_tank", x = -3.25, y = -1.25 }}) end
+        if KIND == "HUMAN_LOSS" then
+            local three = {}
+            for index = 1, 3 do three[index] = { monsterId = "monster_tank", x = -3.25 - (index - 1) * 0.75, y = -1.25 } end
+            prepare(found[BLUE_PROFILE], "BLUE", three)
+        end
         local board = _FactionWarTownDocument:InitialTowns()
         board.gushan.strength = KIND == "HUMAN" and 20 or 25
+        -- The real client (RED, one tank) is about to lose to three tanks: its own Zuoying has 20 left and falls.
+        if KIND == "HUMAN_LOSS" then board.zuoying.strength = 20 end
         saveBoard(board)
-        _FactionWarGuard.WaitSeconds = KIND == "HUMAN" and 600 or 10
+        _FactionWarGuard.WaitSeconds = KIND ~= "GUARD" and 600 or 10
         assert(_FactionWar:Move(found[RED_PROFILE], "zuoying"), "red moves to origin")
-        if KIND == "HUMAN" then assert(_FactionWar:Move(found[BLUE_PROFILE], "gushan"), "blue moves to origin") end
+        if KIND ~= "GUARD" then assert(_FactionWar:Move(found[BLUE_PROFILE], "gushan"), "blue moves to origin") end
         assert(await(function() return found[RED_PROFILE].CurrentMapName == "zuoying"
-            and (KIND ~= "HUMAN" or found[BLUE_PROFILE].CurrentMapName == "gushan") end), "both origins ready")
+            and (KIND == "GUARD" or found[BLUE_PROFILE].CurrentMapName == "gushan") end), "both origins ready")
         log("[VRF][Result115] SETUP PASS kind=" .. KIND)
     elseif STEP == "QUEUE" then
         local found = users()
         local red = userId(found[RED_PROFILE])
         _FactionWarAttack:AttackFor(red, "gushan")
         assert(await(function() return _FactionWarAttack:IsEngaged(red) end), "red engaged")
-        if KIND == "HUMAN" then
+        if KIND ~= "GUARD" then
             local blue = userId(found[BLUE_PROFILE])
             _FactionWarAttack:AttackFor(blue, "zuoying")
             assert(await(function() return _FactionWarAttack:IsEngaged(blue) or _UserService:GetUserEntityByUserId(blue) == nil end), "blue engaged or transferred")
