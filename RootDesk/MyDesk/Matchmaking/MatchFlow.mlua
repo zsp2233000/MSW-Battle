@@ -759,7 +759,8 @@ script MatchFlow extends Logic
         -- A reply deferred while offline continues now that its failed cancellation left the match valid.
         if current ~= nil and current.matchPending then self:ResumeDeferredMatch(userId, current) return end
         -- Until commit, an observed matchup or guard claim owns the live callback, not a stale stored reservation.
-        if current ~= nil and current.data ~= nil and (current.guarding or self:OpponentFound(current))
+        -- A ticket already returning (Stop Entry) has given that claim up, and its restore is exactly what this call must reach.
+        if current ~= nil and current.data ~= nil and current.data.state ~= "RETURNING" and (current.guarding or self:OpponentFound(current))
             and (current.data.matchKey or "") == "" then return end
         -- A war ticket that was still waiting for an opponent when its owner left, and whose cleanup could not finish then, is not resumed:
         -- the player re-chooses their attack, and the guard countdown starts again with that choice.

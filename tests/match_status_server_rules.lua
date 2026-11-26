@@ -21,6 +21,7 @@ function flow:Player(user) assert(user == id); return player end
 function flow:Battle() return battle end
 function flow:MatchMap() return nil end
 function flow:Finish(_, _, _, operation) return operation() end
+local realRecover = flow.Recover
 function flow:Recover() end
 function flow:MoveHome() moves = moves + 1; return true end
 function flow:PublishState(_, code) table.insert(notices, code) end
@@ -96,6 +97,31 @@ ticket.entryDeadline = 31000
 flow:Report(id, { code = "HANDOFF_SEAL_FAILED" })
 flow:RequestReturn(attempt)
 assert(returns == 1, "even an unsealed failed pairing can be left")
+
+-- Stop Entry must also finish: the real Recover carries the RETURNING ticket to its restore. A claim that never committed has no
+-- match key, and the live ticket still remembers the pairing it recognised (entryDeadline) or, for a guard, its claim (guarding).
+local function stopEntry(code, guard)
+    reset("SAVING")
+    ticket.data.matchKey = ""
+    ticket.entryDeadline = 31000
+    if guard then ticket.guarding, ticket.guardPairing = true, match end
+    local restores = 0
+    flow.Recover, flow.RestoreReturning, flow.Settled, flow.IsGuard = realRecover, function() restores = restores + 1 end,
+        function() return true end, function() return false end
+    flow._T.pendingRecover, flow._T.arrival, flow._T.recoveryTimers = {}, {}, {}
+    flow._T.queue.Reclaim = function() return nil end
+    _FormationHandoff.OpenForUser = function() return ticket end
+    if code ~= nil then flow:Report(id, { code = code }) else DateTime.UtcNow.Elapsed = 31000 end
+    flow:RequestReturn(attempt)
+    assert(returns == 1 and ticket.data.state == "RETURNING", "Stop Entry writes the return")
+    assert(restores == 1, "Stop Entry on an unsealed claim reaches the restore (" .. tostring(code or "timeout") .. ", guard=" .. tostring(guard == true) .. ")")
+    flow.Recover = function() end
+end
+for _, guard in ipairs({ false, true }) do
+    stopEntry("HANDOFF_SEAL_FAILED", guard)
+    stopEntry("HANDOFF_SAVE_FAILED", guard)
+    stopEntry(nil, guard)
+end
 
 local function inRoom(phase)
     instance = true
