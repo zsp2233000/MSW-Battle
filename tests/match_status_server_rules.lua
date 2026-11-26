@@ -123,9 +123,37 @@ for _, guard in ipairs({ false, true }) do
     stopEntry(nil, guard)
 end
 
+-- ADR 0017 (#121): a side whose entry time ran out, or whose move failed, still walks into a room that lives; Stop Entry, a closed or gone room and a broken handoff are final.
+local function lateEntry(label, expectWalksIn, arrange)
+    reset("TRANSFER")
+    ticket.data.expires = 900000
+    ticket.entryDeadline = 31000
+    DateTime.UtcNow.Elapsed = 40000
+    local walkIns, room = 0, { alive = true }
+    flow.Recover, flow.Rendezvous, flow.Settled, flow.IsGuard, flow.Pairing, flow.Belongs, flow.NotifyReady =
+        realRecover, function() walkIns = walkIns + 1 end, function() return true end, function() return false end,
+        function() return match end, function() return true end, function() end
+    flow._T.pendingRecover, flow._T.arrival, flow._T.recoveryTimers = {}, {}, {}
+    flow._T.queue.Reclaim = function() return nil end
+    flow._T.transfer = { FindRoom = function() return room.alive and room or nil end }
+    _FormationHandoff.OpenForUser = function() return ticket end
+    arrange(room)
+    flow:Recover(id)
+    assert((walkIns == 1) == expectWalksIn, "late entry: " .. label .. " walkIns=" .. tostring(walkIns))
+    if not expectWalksIn then assert(notices[#notices - 1] == "ENTRY_FAILED" or notices[#notices] == "ENTRY_FAILED", "late entry: " .. label .. " stays failed") end
+    flow.Recover = function() end
+end
+lateEntry("entry time over", true, function() end)
+lateEntry("move failed, room alive", true, function() flow:Report(id, { code = "ROOM_MOVE_FAILED" }) end)
+lateEntry("Stop Entry pressed", false, function() ticket.entryFailed = true end)
+lateEntry("closed room", false, function() flow._T.closedMatches["room"] = true end)
+lateEntry("room gone", false, function(room) room.alive = false end)
+lateEntry("sealed handoff failed", false, function() flow:Report(id, { code = "HANDOFF_SEAL_FAILED" }) end)
+
 local function inRoom(phase)
     instance = true
     battle = { Phase = phase, MatchKey = "room", HomeProfile = profile, AwayProfile = "b",
+        ParticipantSide = function(self, who) return who == self.HomeProfile and "PLAYER" or (who == self.AwayProfile and "ENEMY" or "") end,
         IsBattleActive = function(self) return self.Phase == "BATTLE" end,
         ResultForProfile = function() return "WIN" end }
 end

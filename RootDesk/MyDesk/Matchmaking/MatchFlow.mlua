@@ -164,7 +164,7 @@ script MatchFlow extends Logic
         return _MatchFlowState:Resolve({ state = state, inMatchRoom = inMatchRoom,
             instanceRoom = _RoomService:IsInstanceRoom(), admissionFailed = isvalid(flow) and flow.AdmissionFailed,
             battlePhase = isvalid(battle) and battle.Phase or "",
-            battleAuthorized = not isvalid(battle) or battle.MatchKey == "" or (battle.MatchKey == ticket.data.matchKey and (ticket.data.profile == battle.HomeProfile or ticket.data.profile == battle.AwayProfile)),
+            battleAuthorized = not isvalid(battle) or battle.MatchKey == "" or (battle.MatchKey == ticket.data.matchKey and battle:ParticipantSide(ticket.data.profile) ~= ""),
             result = isvalid(battle) and battle:ResultForProfile(ticket.data.profile) or "",
             failure = self._T.failures[userId], snapshot = { eventCode = message, reasonCode = message,
                 started = started, players = count, sourceRoom = _RoomService.RoomKey,
@@ -856,7 +856,7 @@ script MatchFlow extends Logic
                 end
             elseif (data.state == "COMMITTING" or data.state == "TRANSFER" or data.state == "IN_ROOM") and not _RoomService:IsInstanceRoom()
                 and (data.state ~= "IN_ROOM" or (current ~= nil and current.data ~= nil and current.data.attempt == data.attempt and self._T.failures[userId] ~= nil))
-                and _MatchFlowState:EntryFailed(self:StateSnapshot(userId, ""), DateTime.UtcNow.Elapsed) then
+                and _MatchFlowState:EntryFailed(self:StateSnapshot(userId, ""), DateTime.UtcNow.Elapsed) and not self:LateEntryOpen(userId, ticket) then
                 -- Leave the failed admission available for Stop Entry instead of retrying movement behind it.
                 self:PublishState(userId, "ENTRY_FAILED")
             elseif data.state == "COMMITTING" and data.expires > DateTime.UtcNow.Elapsed and not _RoomService:IsInstanceRoom() then
@@ -904,6 +904,19 @@ script MatchFlow extends Logic
             self._T.pendingRecover[userId] = nil
             self._T.recoveryTimers[userId] = _TimerService:SetTimerOnce(function() self:Recover(userId) end, 0.1)
         end
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean LateEntryOpen(string userId, table ticket)
+        -- ADR 0017: the match room runs without its absent side, so a side whose entry time ran out (or whose move failed) may still walk in while the room lives and its ticket is open.
+        -- Pressing Stop Entry, a known closed room and a broken sealed handoff are final.
+        local data = ticket.data
+        if data == nil or (data.state ~= "TRANSFER" and data.state ~= "COMMITTING") or ticket.entryFailed == true then return false end
+        if (data.matchKey or "") == "" or self._T.closedMatches[data.matchKey] then return false end
+        local failure = self._T.failures[userId]
+        local code = failure ~= nil and failure.attempt == data.attempt and failure.code or ""
+        if code == "HANDOFF_SAVE_FAILED" or code == "HANDOFF_SEAL_FAILED" or code == "ROOM_CREATE_FAILED" or code == "ADMISSION_SAVE_FAILED" then return false end
+        return self:TransferAdapter():FindRoom(data.matchKey) ~= nil
     end
 
     @ExecSpace("ServerOnly")
@@ -1172,7 +1185,7 @@ script MatchFlow extends Logic
         if _RoomService:IsInstanceRoom() then
             local battle = self:Battle()
             local profile = player.PlayerComponent.ProfileCode
-            if isvalid(battle) and battle:IsBattleActive() and (profile == battle.HomeProfile or profile == battle.AwayProfile) then self:Report(userId, { code = "BATTLE_IN_PROGRESS" }) return end
+            if isvalid(battle) and battle:IsBattleActive() and battle:ParticipantSide(profile) ~= "" then self:Report(userId, { code = "BATTLE_IN_PROGRESS" }) return end
             if ticket == nil or ticket.data.state == "CANCELLED" or ticket.data.state == "RETURNED" then
                 local moved = self:MoveHome(userId, ticket)
                 self:Report(userId, { code = moved and "RETURN_MOVE_OK" or "RETURN_MOVE_FAILED", details = { moved = moved } })
