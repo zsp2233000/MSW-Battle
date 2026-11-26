@@ -78,6 +78,22 @@ node --test tests/late_arrival_contract.test.cjs
 
 Expect `server command scenarios PASS` (six `late entry` fixtures: entry time over, move failed, Stop Entry, closed room, room gone, broken handoff) and the three contract tests. Maker: `late_arrival_e2e_runtime_probe.lua` (`server_main` plus `server_instance_<matchKey>`, `wp2601` as the on-time RED side and `wp2602` or the real client as the late BLUE side; its header lists the steps). Verified in Maker on 2026-11-26 (build 0 Error): the absent B was released 36 s after queueing, while the fight ran (`phase=BATTLE`), `[VRF][MatchTransfer] entry=true` and `ARRIVED players=2`, B's snapshot read `BATTLE` and then `RESULT_LOSE`, B received its experience receipt once (`status=SAVED`), Gushan went 100 -> 80 once, the result was written once (`settled` 1), B's tank progress advanced and its settled count rose by one, both pressed Return and landed in their own towns unlocked (`ASSERT PASS`). Not verified: a late arrival after the result, a real client as the late player, a late arrival that comes from another world instance (the static room only sees the rooms it created).
 
+## Absent result window (ADR 0017, #122)
+
+A side that was not in the match room when the result settled gets one window afterwards: 國戰 **上一場戰果** (result, the two towns' strengths before → after and the conclusion) or 大廳 **上一場對戰結果** (the result only), never experience. `MatchedBattle` writes the latest absent result (`AbsentResult`, key `AbsentResultV1`, newest replaces older) for each human side that did not see the result page, announces it (`AbsentResultEvent` to the static room and every world instance), and the static room ends the ticket of that match at once (`MatchFlow:SettledWithoutUs` inside `Recover`, then the same return and landing as Stop Entry, ADR 0016) and pushes the window to a player who is online; an offline player gets it at the next login (`AbsentResult:Deliver` after the recovery) or reconnect. 確定 clears the record. A side that was in the room when the result stood is owed nothing, and a late side that comes in and sees the page takes its record back. `ui/AbsentResultGroup.ui` is built by `assets/siege/build_absent_result_ui.cjs` (UIBuilder, Cardgame parts); `AbsentResultUI` drives it.
+
+```sh
+set -o pipefail
+node tests/absent_result_local.cjs | npm exec --yes --package=fengari-node-cli@0.1.0 -- fengari -
+node tests/faction_war_town_document_local.cjs | npm exec --yes --package=fengari-node-cli@0.1.0 -- fengari -
+node tests/match_status_local.cjs | npm exec --yes --package=fengari-node-cli@0.1.0 -- fengari -
+node --test tests/absent_result_contract.test.cjs
+```
+
+Expect `[VRF][AbsentResult] record, presentation and delivery rules PASS` (the production `AbsentResult` bodies against a fake storage: compose, decode, write / replace / same match / lost race, clear, presentation of every status, delivery once per match, reconnect, announce), `[VRF][AbsentResult] room writes only for sides that did not see the result PASS` (the production `MatchedBattle` for HUMAN / GUARD / LOBBY, with and without a late arrival), `server command scenarios PASS` (the new `absent result` fixtures run the real `Recover`: a waiting record ends TRANSFER / COMMITTING / IN_ROOM tickets, the check interval and the hint) and the contract tests (nodes, Cardgame art, group order, seams).
+
+Maker: `absent_result_e2e_runtime_probe.lua` (`server_main`, two virtual players `wp2601` / `wp2602`, one fresh Play per MODE; its header lists the steps).
+
 ## Attack panel and team preview (#117, #118)
 
 `ui/FactionWarGroup.ui`: the attack panel (`AttackPanel/Window`: `Origin` card, two target cards `Row1` / `Row2` with name, capital mark, strength number and bar, `進攻` button) and the team preview (`TeamButton` beside the world map button, `TeamPreview/Window` with six `UnitN` markers showing a portrait and `Lv N`) are rebuilt by `assets/siege/build_siege_ui.cjs` with the UIBuilder, Cardgame parts only. After a structural change to an existing `.ui`, Maker imported a **new subtree one level per refresh**: after the first refresh only the new roots existed, and each further refresh with a content change (a sibling's display order bumped through the builder) added one more level until all 29 + 27 entities were there. Do not rebuild the subtrees again unless needed; patch components in place instead (stretch entities need their real `RectSize`, otherwise the engine insets them to 100 px). Look at the tree in Play (`/ui/FactionWarGroup`, children recursively) before running a probe.

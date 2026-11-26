@@ -137,7 +137,8 @@ local ok, reason = pcall(function()
         end, 300), "both are back in their towns")
         local x, y = find()
         assert(await(function() return not _FormationHandoff:IsLockedForUser(y.PlayerComponent.UserId) and not _FormationHandoff:IsLockedForUser(x.PlayerComponent.UserId) end, 150), "both are unlocked")
-        log("[VRF][LateE2E] ASSERT PASS settled once, B experience once, both home and unlocked")
+        assert(_AbsentResult:PendingFor("wp2601") == nil and _AbsentResult:PendingFor(B_PROFILE) == nil, "B arrived in time to see the result page: no absent result is owed to either side")
+        log("[VRF][LateE2E] ASSERT PASS settled once, B experience once, both home and unlocked, no absent result")
     elseif STEP == 5 then
         local player = _UserService.LocalPlayer
         assert(player.CurrentMapName == "matchprobe", "the real client is in the match room")

@@ -11,6 +11,7 @@ script MatchFlow extends Logic
     property integer EntryTimeoutSeconds = 30
     property integer VacateAttempts = 6
     property number VacateRetrySeconds = 0.5
+    property number AbsentCheckSeconds = 3
 
     @ExecSpace("ServerOnly")
     method void OnBeginPlay()
@@ -32,6 +33,8 @@ script MatchFlow extends Logic
         self._T.arrivalTimers = {}
         self._T.progressTimers = {}
         self._T.closedMatches = {}
+        self._T.settledHint = {}
+        self._T.absentChecked = {}
         self._T.ended = false
         -- Maker plays against an in-process FIFO; a published world uses the native matchmaking service.
         self._T.queue = Environment:IsMakerPlay() and _MatchQueueLocal or _MatchQueueNative
@@ -644,6 +647,8 @@ script MatchFlow extends Logic
             self._T.arrivalTimers[event.UserId] = nil
             if self._T.ended or self:Player(event.UserId) == nil then return end
             self:Recover(event.UserId)
+            -- A match that settled while this player was away is shown now (#122).
+            _AbsentResult:Deliver(event.UserId, false)
             self:AdvancePending()
             -- A login is judged once the ticket has had its say; a player a ticket still owns stays with it.
             self:PlaceAtLogin(event.UserId, "enter")
@@ -821,7 +826,15 @@ script MatchFlow extends Logic
             -- The adapter never held a guard match, so it has no opinion on one.
             local verdict = nil
             if not self:IsGuard(ticket) then verdict = self:QueueAdapter():Reclaim(userId, data, false) end
-            if verdict == "RENEW" then
+            if self:SettledWithoutUs(userId, data) then
+                -- #122: the match this ticket was sealed for already settled without this player, who gets its result as a window instead of waiting for the ticket to expire.
+                if self:Finish(userId, ticket, "RETURNING", function() return _FormationHandoff:BeginReturn(userId, ticket) end) then
+                    self:Report(userId, { code = "ABSENT_RESULT_SETTLED" })
+                    self:RestoreReturning(userId, ticket)
+                else
+                    self:Report(userId, { code = "RETURN_SAVE_FAILED" })
+                end
+            elseif verdict == "RENEW" then
                 self._T.busy[userId] = nil
                 self:ResumeRenew(userId, ticket, "")
                 return
@@ -904,6 +917,27 @@ script MatchFlow extends Logic
             self._T.pendingRecover[userId] = nil
             self._T.recoveryTimers[userId] = _TimerService:SetTimerOnce(function() self:Recover(userId) end, 0.1)
         end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void HintSettled(string userId)
+        -- The absent-result record of this player was just written: the next recovery looks for it without waiting for the check interval.
+        self._T.settledHint[userId] = true
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean SettledWithoutUs(string userId, table data)
+        -- #122: a ticket whose match is waiting in the player's absent-result record (written when the room settled without them) is over.
+        -- The record is read at most once per interval unless a fresh write hinted it, so a ticket that is merely waiting does not cost a read per recovery.
+        if _RoomService:IsInstanceRoom() then return false end
+        if data.state ~= "TRANSFER" and data.state ~= "COMMITTING" and data.state ~= "IN_ROOM" then return false end
+        local now = DateTime.UtcNow.Elapsed
+        local hinted = self._T.settledHint[userId] == true
+        self._T.settledHint[userId] = nil
+        local last = self._T.absentChecked[userId]
+        if not hinted and last ~= nil and now - last < self.AbsentCheckSeconds * 1000 then return false end
+        self._T.absentChecked[userId] = now
+        return _AbsentResult:IsPending(data.profile, data.matchKey or "")
     end
 
     @ExecSpace("ServerOnly")

@@ -18,6 +18,9 @@ script MatchedBattle extends Component
         self._T.interval = 0
         self._T.started = false
         self._T.published = false
+        self._T.seen = {}
+        self._T.absentWritten = {}
+        self._T.absentDone = false
         self._T.matchKey = _RoomService.RoomKey
         log("[VRF][MatchedBattle] room controller ready")
     end
@@ -52,6 +55,7 @@ script MatchedBattle extends Component
                 log("[VRF][MatchedBattle] admission started=" .. tostring(self._T.started) .. " failed=" .. tostring(self.AdmissionFailed))
             end
         end
+        if battle.Phase == "RESULT" and battle.MatchKey == self._T.matchKey then self:TrackResultViewers(battle, users) end
         if battle.Phase == "RESULT" and battle.MatchKey == self._T.matchKey and not self._T.published then
             self._T.published = true
             for _, user in ipairs(users) do
@@ -70,11 +74,63 @@ script MatchedBattle extends Component
                     war.towns = nil
                     self:RefreshWarResultBoard()
                     self:PublishWarReceipts()
+                    -- A side that never saw the result page is told about this settled result (#122).
+                    self:WriteAbsentResults(battle, war)
                 end, self._T.epochs)
                 if war.outcome == nil then self:RefreshWarResultBoard() end
+            else
+                self:WriteAbsentResults(battle, nil)
             end
         end
         self:PublishWarReceipts()
+    end
+
+    @ExecSpace("ServerOnly")
+    method void TrackResultViewers(any battle, table users)
+        -- #122: whoever is in this room while the result stands sees the result page, so nothing is owed to them; a side that comes in after its
+        -- absent result was written takes that record back, because it saw the page after all.
+        for _, user in ipairs(users) do
+            if isvalid(user) and user.CurrentMap == self.Entity.CurrentMap and isvalid(user.PlayerComponent) then
+                local profile = user.PlayerComponent.ProfileCode
+                if battle:ParticipantSide(profile) ~= "" and not self._T.seen[profile] then
+                    self._T.seen[profile] = true
+                    if self._T.absentWritten[profile] then
+                        self._T.absentWritten[profile] = nil
+                        local matchKey = self._T.matchKey
+                        _AbsentResult:Clear(profile, matchKey, function(cleared)
+                            log("[VRF][MatchedBattle] late arrival saw the result page profile=" .. profile .. " absent result cleared=" .. tostring(cleared))
+                        end)
+                    end
+                end
+            end
+        end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void WriteAbsentResults(any battle, any war)
+        -- #122 / ADR 0017: every human side that was not in this room to see the result gets it as its latest absent result, once per match.
+        -- A war match waits for its settlement (the war block needs the settled figures); a lobby match writes at once. A guard has no profile storage.
+        if self._T.absentDone then return end
+        self._T.absentDone = true
+        local matchKey = self._T.matchKey
+        for _, profile in ipairs({ battle.HomeProfile, battle.AwayProfile }) do
+            local result = profile ~= "" and battle:ResultForProfile(profile) or ""
+            if result ~= "" and not _FactionWarGuard:IsGuardProfile(profile) and not self._T.seen[profile] then
+                local receipt = nil
+                local side = war ~= nil and war.profiles[profile] or nil
+                if side ~= nil then receipt = _FactionWarTownDocument:Summarize(side.origin, side.target, "", war.outcome, nil) end
+                local record = _AbsentResult:Compose(side ~= nil and "WAR" or "LOBBY", matchKey, result, receipt)
+                self._T.absentWritten[profile] = true
+                _AbsentResult:Write(profile, record, function(saved)
+                    log("[VRF][MatchedBattle] absent result written profile=" .. profile .. " match=" .. matchKey .. " kind=" .. record.kind .. " result=" .. result .. " saved=" .. tostring(saved))
+                    if not saved then
+                        self._T.absentWritten[profile] = nil
+                    elseif self._T.absentWritten[profile] then
+                        _AbsentResult:Announce(profile, matchKey)
+                    end
+                end)
+            end
+        end
     end
 
     @ExecSpace("ServerOnly")

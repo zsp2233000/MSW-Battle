@@ -4,6 +4,9 @@ local id, profile, attempt = "requester", "a", "first"
 local instance, battle, held, outcome, ticket
 local cancels, closes, returns, moves, notices
 local cases = 0
+-- #122: the absent-result record of the player's match; a ticket whose match is in it is over.
+local pendingAbsent = false
+_AbsentResult = { IsPending = function() return pendingAbsent end }
 local player = { PlayerComponent = { ProfileCode = profile } }
 local match = { key = "room", home = profile, away = "b", homeAttempt = attempt }
 DateTime = { UtcNow = { Elapsed = 1000 } }
@@ -30,7 +33,8 @@ local function reset(state)
     instance, battle, held, outcome = false, nil, nil, true
     DateTime.UtcNow.Elapsed = 1000
     ticket = { data = { state = state, attempt = attempt, profile = profile, matchKey = "room" } }
-    flow._T = { records = { [id] = ticket }, busy = {}, failures = {}, guardTimers = {}, moving = {}, closedMatches = {} }
+    flow._T = { records = { [id] = ticket }, busy = {}, failures = {}, guardTimers = {}, moving = {}, closedMatches = {}, settledHint = {}, absentChecked = {} }
+    pendingAbsent = false
     flow._T.queue = { Lookup = function() return held end, Cancel = function() cancels = cancels + 1; return outcome end }
     cancels, closes, returns, moves, notices = 0, 0, 0, 0, {}
     senderUserId = id
@@ -149,6 +153,36 @@ lateEntry("Stop Entry pressed", false, function() ticket.entryFailed = true end)
 lateEntry("closed room", false, function() flow._T.closedMatches["room"] = true end)
 lateEntry("room gone", false, function(room) room.alive = false end)
 lateEntry("sealed handoff failed", false, function() flow:Report(id, { code = "HANDOFF_SEAL_FAILED" }) end)
+
+-- #122: a ticket whose match settled without the player (the record is waiting) ends at once and restores; a ticket that merely waits costs one record read per interval.
+local function absentRecord(label, state, expectEnds, arrange)
+    reset(state)
+    ticket.data.expires = 900000
+    ticket.entryDeadline = 31000
+    DateTime.UtcNow.Elapsed = 40000
+    local restores, reads = 0, 0
+    flow.Recover, flow.RestoreReturning, flow.Settled, flow.IsGuard = realRecover, function() restores = restores + 1 end,
+        function() return true end, function() return false end
+    flow._T.pendingRecover, flow._T.arrival, flow._T.recoveryTimers = {}, {}, {}
+    flow._T.queue.Reclaim = function() return nil end
+    _FormationHandoff.OpenForUser = function() return ticket end
+    _AbsentResult.IsPending = function() reads = reads + 1; return pendingAbsent end
+    flow._T.transfer = { FindRoom = function() return nil end }
+    arrange()
+    flow:Recover(id)
+    assert((returns == 1 and restores == 1) == expectEnds, "absent result: " .. label .. " returns=" .. tostring(returns) .. " restores=" .. tostring(restores))
+    flow.Recover = function() end
+    return reads
+end
+assert(absentRecord("waiting record ends a TRANSFER ticket", "TRANSFER", true, function() pendingAbsent = true end) == 1)
+assert(absentRecord("waiting record ends a COMMITTING ticket", "COMMITTING", true, function() pendingAbsent = true end) == 1)
+assert(absentRecord("waiting record ends an IN_ROOM ticket the static room still holds", "IN_ROOM", true, function() pendingAbsent = true end) == 1)
+assert(absentRecord("no record leaves the ticket alone", "TRANSFER", false, function() pendingAbsent = false end) == 1)
+assert(absentRecord("a state that never entered is not touched", "QUEUED", false, function() pendingAbsent = true end) == 0)
+assert(absentRecord("a recent check is not repeated", "TRANSFER", false, function() pendingAbsent = true; flow._T.absentChecked[id] = 39000 end) == 0)
+assert(absentRecord("a fresh write hints the check past the interval", "TRANSFER", true, function() pendingAbsent = true; flow._T.absentChecked[id] = 39000; flow:HintSettled(id) end) == 1)
+assert(absentRecord("an old check is repeated", "TRANSFER", true, function() pendingAbsent = true; flow._T.absentChecked[id] = 36000 end) == 1)
+pendingAbsent = false
 
 local function inRoom(phase)
     instance = true
