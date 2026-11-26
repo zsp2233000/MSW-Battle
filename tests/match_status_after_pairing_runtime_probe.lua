@@ -11,16 +11,16 @@ local function runStage()
     if STAGE == "CHECK" then
         local client = _MatchFlowInput
         local view = _FactionWarUI
-        local bar = view:Ui("QueueBar")
-        local status = view:Ui("QueueBar/Status")
-        local button = view:Ui("QueueBar/Cancel")
+        local bar = view:Ui("SiegePanel")
+        local status = view:Ui("SiegePanel/Status")
+        local button = view:Ui("SiegePanel/Cancel")
         assert(_UserService.LocalPlayer.CurrentMapName == "zuoying", "real client must start in Zuoying")
         assert(await(function()
             return bar.Enable and client.Snapshot.opponentFound and client.Snapshot.state == "SAVING" and not button.Enable
         end, 250), "real pairing enters the pre-commit hold; no button")
         local paired = client.Snapshot
         local line = status.TextGUIRendererComponent.Text
-        assert(line == "進攻 鼓山\n配對成功，正在進入戰場" and paired.guard == nil, "same visible text and no kind discriminator")
+        assert(line == "配對成功，正在進入戰場" and paired.guard == nil, "same visible text and no kind discriminator")
         log("[VRF][MatchStatus] " .. CASE .. " CLIENT MATCHED " .. line:gsub("\n", " / "))
         -- Bypass the hidden control to exercise the actual authenticated RPC with the current attempt.
         _MatchFlow:RequestCancel(paired.attempt)
@@ -32,7 +32,7 @@ local function runStage()
         assert(await(function()
             return button.Enable and button.ButtonComponent.Enable and button.TextGUIRendererComponent.Text == "停止入場"
         end), "failure/timeout offers Stop Entry")
-        assert(status.TextGUIRendererComponent.Text == "進攻 鼓山\n入場失敗", "entry failure status")
+        assert(status.TextGUIRendererComponent.Text == "入場失敗", "entry failure status")
         if CASE == "TIMEOUT" then
             assert(client.Snapshot.state == "SAVING" and DateTime.UtcNow.Elapsed >= paired.entryDeadline, "expiry measured from pairing, even before commit")
         else

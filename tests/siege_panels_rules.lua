@@ -81,7 +81,7 @@ function map:ReceivePanelBoard(towns, userId) table.insert(panelSent, { userId =
 function map:ReceiveFaction() end
 function map:ReceiveUnavailable() end
 local function freshMap()
-    map._T = { viewers = {}, panelViewers = {}, waiting = {}, reading = false, readStarted = 0, inflight = {}, again = false, signature = "", links = nil }
+    map._T = { viewers = {}, panelViewers = {}, siegeViewers = {}, waiting = {}, reading = false, readStarted = 0, inflight = {}, again = false, signature = "", links = nil }
     mapSent, panelSent = {}, {}
 end
 freshMap()
@@ -210,4 +210,116 @@ local minX, maxX = math.huge, -math.huge
 for _, place in ipairs(layout.places) do minX, maxX = math.min(minX, place.x), math.max(maxX, place.x) end
 check(math.abs(minX + maxX) < 0.001 and maxX - minX <= 740 - team.FieldPadX + 0.001, "centered and inside the field")
 
-print("[VRF][SiegePanels] attack panel and team preview rules PASS checks=" .. tostring(checks))
+-- #123: the siege panel follows the board for as long as it shows, as a viewer of its own kind (never the attack panel's, never the map's).
+freshMap()
+local siegeSent = {}
+function map:ReceiveSiegeBoard(towns, userId) table.insert(siegeSent, { userId = userId, towns = towns }) end
+senderUserId = "stranger"
+map:RequestSiegeOpen()
+check(next(map._T.siegeViewers) == nil and #siegeSent == 0, "an unknown sender is not watched")
+senderUserId = "red-user"
+reads = 0
+board.gushan.strength = 55
+map:RequestSiegeOpen()
+check(map._T.siegeViewers["red-user"] == players["red-user"] and next(map._T.viewers) == nil and next(map._T.panelViewers) == nil, "the siege viewer is its own kind")
+check(reads == 1 and #siegeSent == 1 and siegeSent[1].userId == "red-user" and #panelSent == 0 and #mapSent == 0, "opening reads the board once and answers the opener alone")
+local seen = {}
+for _, town in ipairs(siegeSent[1].towns) do seen[town.id] = town end
+check(seen.gushan.strength == 55 and seen.zuoying.owner == "RED" and seen.nanzih.capital == true, "owner and strength per town reach the siege panel")
+siegeSent = {}
+reads = 0
+board.gushan.strength = 35
+map:BoardChanged("room")
+check(reads == 1 and #siegeSent == 1 and #panelSent == 0 and #mapSent == 0, "a change with only the siege panel showing reads once and pushes to it alone")
+map:BoardChanged("room")
+check(#siegeSent == 1, "an unchanged board is not pushed again")
+players["red-user"].CurrentMapName = "formationlobby"
+board.gushan.strength = 15
+map:BoardChanged("room")
+check(map._T.siegeViewers["red-user"] == nil and #siegeSent == 1, "a player who left the town is dropped without a push")
+players["red-user"].CurrentMapName = "zuoying"
+map:RequestSiegeOpen()
+map:RequestSiegeClose()
+check(map._T.siegeViewers["red-user"] == nil, "hiding the panel ends the push")
+map:RequestSiegeOpen()
+map:HandleUserLeaveEvent({ UserId = "red-user" })
+check(next(map._T.siegeViewers) == nil, "leaving the room ends it too")
+freshMap()
+reads = 0
+map:BoardChanged("room")
+check(reads == 0, "nobody looking at all means nothing to read")
+-- The attack panel and the siege panel are open at the same time for a queued player; closing one keeps the other.
+freshMap()
+map._T.panelViewers["red-user"] = red
+map._T.siegeViewers["red-user"] = red
+map:RequestPanelClose()
+check(map._T.siegeViewers["red-user"] == red, "closing the attack panel keeps the siege panel following")
+map._T.panelViewers["red-user"] = red
+map:RequestSiegeClose()
+check(map._T.panelViewers["red-user"] == red, "closing the siege panel keeps the attack panel following")
+
+-- #123: what the siege card says, from the same pre-battle rules as the lobby.
+local clock = 500000
+local function queued(fields)
+    local value = { state = "QUEUED", reasonCode = "", started = clock - 8000, players = 0, busy = false, summary = "", attempt = "a",
+        origin = "zuoying", target = "gushan", guardAt = clock + 2000, opponentFound = false }
+    for key, entry in pairs(fields or {}) do value[key] = entry end
+    return value
+end
+local figures = { zuoying = 80, gushan = 55 }
+local function card(fields, strengths, pendingAction)
+    return ui:SiegeView(queued(fields), { origin = "zuoying", now = clock, strengths = strengths or figures, pendingAction = pendingAction })
+end
+local queuing = card()
+check(queuing.origin == "<c>左營</c> 兵力 80" and queuing.target == "<c>鼓山</c> 兵力 55", "line one: each town with its strength")
+check(queuing.status == "配對中 · 倒數 2 秒" and queuing.label == "取消配對" and queuing.action == "CANCEL" and queuing.enabled, "line two and the button while waiting")
+local unknown = card({}, {})
+check(unknown.origin == "<c>左營</c> 兵力 —" and unknown.target == "<c>鼓山</c> 兵力 —", "a strength not heard yet is a dash, never 0")
+local live = card({}, { zuoying = 60, gushan = 0 })
+check(live.origin == "<c>左營</c> 兵力 60" and live.target == "<c>鼓山</c> 兵力 0", "the numbers follow the board, a real 0 included")
+local fired = card({ guardAt = clock })
+check(fired.status == "即將開戰…" and fired.action == "" and fired.label == "", "countdown at zero: no button")
+local matched = card({ state = "SAVING", opponentFound = true })
+check(matched.status == "配對成功，正在進入戰場" and matched.action == "" and not matched.enabled, "a pairing cannot be cancelled")
+local failed = card({ state = "SAVING", opponentFound = true, reasonCode = "HANDOFF_SEAL_FAILED" })
+check(failed.status == "入場失敗" and failed.label == "停止入場" and failed.action == "RETURN" and failed.enabled, "a failed entry offers Stop Entry")
+local cancelling = card({}, nil, "CANCEL")
+check(cancelling.status == "正在取消配對…" and cancelling.action == "" and not cancelling.enabled, "cancelling")
+local waiting = card({ state = "WAITING", opponentFound = true, waitDeadline = clock + 9000, entryDeadline = clock + 9000 })
+check(waiting.status == "等待對手進入戰場…（9 秒）" and waiting.action == "", "waiting for the absent side")
+-- The glossary: the card never says who the opponent is, never 守衛, never 編隊.
+for _, shown in ipairs({ queuing, fired, matched, failed, cancelling, waiting, card({ state = "QUEUE_ERROR" }) }) do
+    local text = shown.origin .. shown.target .. shown.status .. shown.label
+    check(not string.find(text, "守衛", 1, true) and not string.find(text, "編隊", 1, true) and not string.find(text, "取消入場", 1, true), "no 守衛, 編隊 or 取消入場 on the card")
+end
+
+-- #123: the card keeps the board it heard, and forgets it when it hides.
+ui._T.siegeStrengths = nil
+ui._T.siegeShown = false
+ui:ShowSiegeBoard({ { id = "zuoying", owner = "RED", strength = 70 }, { id = "gushan", owner = "BLUE", strength = 40 } })
+check(ui._T.siegeStrengths == nil, "a board that arrives after the card hid is stale")
+ui._T.siegeShown = true
+ui:ShowSiegeBoard({ { id = "zuoying", owner = "RED", strength = 70 }, { id = "gushan", owner = "BLUE", strength = 40 } })
+check(ui._T.siegeStrengths.zuoying == 70 and ui._T.siegeStrengths.gushan == 40, "a pushed board is kept by town")
+-- Following: ask when the card starts to show, again only while nothing has arrived, tell the server when it hides.
+local asks, closes = 0, 0
+_FactionWarMap = { RequestSiegeOpen = function() asks = asks + 1 end, RequestSiegeClose = function() closes = closes + 1 end }
+DateTime.UtcNow.Elapsed = 1000000
+ui._T.siegeShown, ui._T.siegeStrengths, ui._T.siegeAsked, ui._T.shown = false, nil, 0, {}
+ui:FollowSiege(true)
+check(asks == 1 and ui._T.siegeShown, "showing the card asks the server for the board")
+ui:FollowSiege(true)
+check(asks == 1, "once is enough while it is within ten seconds")
+DateTime.UtcNow.Elapsed = 1011000
+ui:FollowSiege(true)
+check(asks == 2, "no strength heard after ten seconds: ask again")
+ui._T.siegeStrengths = { zuoying = 80 }
+DateTime.UtcNow.Elapsed = 1030000
+ui:FollowSiege(true)
+check(asks == 2, "a heard board needs no new ask")
+ui:FollowSiege(false)
+check(closes == 1 and not ui._T.siegeShown and ui._T.siegeStrengths == nil, "hiding the card ends the push and forgets the numbers")
+ui:FollowSiege(false)
+check(closes == 1, "hiding twice tells the server once")
+
+print("[VRF][SiegePanels] attack panel, siege panel and team preview rules PASS checks=" .. tostring(checks))

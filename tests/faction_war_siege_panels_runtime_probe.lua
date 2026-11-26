@@ -1,7 +1,8 @@
--- #117 / #118 Maker end-to-end with the REAL local client: the attack panel's numbers and live updates, and the team preview.
+-- #117 / #118 / #123 Maker end-to-end with the REAL local client: the attack panel's numbers and live updates, the team preview and the siege panel.
 -- This probe changes the Maker local board and the real test profile's faction, isolated formation key and last town. Use a disposable save only.
 -- Edit STEP, and REAL (the real client's ProfileCode) by substitution. Contexts: server_main for SETUP, PUSH, QUEUE, CANCEL, CLEANUP; client for the rest.
--- Order: SETUP, ATTACK_OPEN, PUSH, ATTACK_PUSHED, ATTACK_CLOSE, TEAM_IDLE, QUEUE, TEAM_QUEUED, ATTACK_ENGAGED, CANCEL, TEAM_AFTER, CLEANUP. Final lines: [VRF][Siege] <STEP> PASS.
+-- Order: SETUP, ATTACK_OPEN, PUSH, ATTACK_PUSHED, ATTACK_CLOSE, TEAM_IDLE, QUEUE, SIEGE_SHOWN, PUSH_SIEGE, SIEGE_PUSHED, TEAM_QUEUED, ATTACK_ENGAGED, ATTACK_CLOSE, CANCEL, SIEGE_HIDDEN, SIEGE_ENDED, TEAM_AFTER, CLEANUP.
+-- Server steps (server_main): SETUP, PUSH, QUEUE, PUSH_SIEGE, CANCEL, SIEGE_ENDED, CLEANUP; the others run in client. Final lines: [VRF][Siege] <STEP> PASS.
 local STEP = "SETUP"
 local REAL = "SET_ME"
 local function await(predicate, count)
@@ -82,6 +83,18 @@ local ok, failure = pcall(function()
         _MatchFlow:CancelForUser(id)
         assert(await(function() return not _FactionWarAttack:IsEngaged(id) end, 200), "the ticket is cancelled and unlocked")
         log("[VRF][Siege] CANCEL PASS")
+    elseif STEP == "PUSH_SIEGE" then
+        -- Another match changes both towns of the queued player's card; the siege panel must follow without a request.
+        local board = readBoard()
+        board.zuoying.strength = 70
+        board.gushan.strength = 20
+        saveBoard(board)
+        _FactionWarMap:AnnounceChange()
+        log("[VRF][Siege] PUSH_SIEGE PASS board written (Zuoying 70, Gushan 20), change announced; run SIEGE_PUSHED on the client")
+    elseif STEP == "SIEGE_ENDED" then
+        -- The card hid on the client, so the server must have dropped the subscription (and the other kinds are not involved).
+        assert(await(function() return next(_FactionWarMap._T.siegeViewers) == nil end, 100), "no siege viewer is left")
+        log("[VRF][Siege] SIEGE_ENDED PASS siege viewers=0")
     elseif STEP == "CLEANUP" then
         _FactionWarGuard.WaitSeconds = 10
         local code = _DataStorageService:DeleteGlobalDataStorageAndWait(_FactionWarTownDocument.TownStorageName)
@@ -128,6 +141,25 @@ local ok, failure = pcall(function()
         assert(await(function() return _FactionWarUI:Ui("AttackPanel").Enable and text("AttackPanel/Window/Status") ~= "" and string.find(text("AttackPanel/Window/Status"), "目前正在進攻", 1, true) end, 100), "queued: the panel says which town is being attacked")
         assert(text("AttackPanel/Window/Row1/Option") == "進攻中" and not _FactionWarUI:Ui("AttackPanel/Window/Row1/Option").ButtonComponent.Enable, "and offers nothing")
         log("[VRF][Siege] ATTACK_ENGAGED PASS")
+    elseif STEP == "SIEGE_SHOWN" then
+        -- The real client queued against Gushan from Zuoying: the card replaces the old queue bar, with both towns and the live strengths.
+        local card = _FactionWarUI:Ui("SiegePanel")
+        assert(await(function() return card.Enable and text("SiegePanel/Origin") == highlight .. "左營</color> 兵力 100" end, 150), "the card shows the departure town and its strength")
+        assert(text("SiegePanel/Target") == highlight .. "鼓山</color> 兵力 35", "and the target with the board's strength: " .. text("SiegePanel/Target"))
+        assert(text("SiegePanel/Versus") ~= "", "the versus mark")
+        assert(string.find(text("SiegePanel/Status"), "配對中", 1, true), "the status: " .. text("SiegePanel/Status"))
+        local button = _FactionWarUI:Ui("SiegePanel/Cancel")
+        assert(button.Enable and button.ButtonComponent.Enable and button.TextGUIRendererComponent.Text == "取消配對", "the cancel button")
+        assert(_FactionWarUI:Ui("QueueBar") == nil, "the old queue bar is gone")
+        assert(not string.find(text("SiegePanel/Status") .. text("SiegePanel/Origin") .. text("SiegePanel/Target"), "守衛", 1, true), "no 守衛")
+        log("[VRF][Siege] SIEGE_SHOWN PASS origin=" .. text("SiegePanel/Origin") .. " target=" .. text("SiegePanel/Target") .. " status=" .. text("SiegePanel/Status"))
+    elseif STEP == "SIEGE_PUSHED" then
+        assert(await(function() return text("SiegePanel/Origin") == highlight .. "左營</color> 兵力 70" and text("SiegePanel/Target") == highlight .. "鼓山</color> 兵力 20" end, 100), "the card followed the other match without a request: " .. text("SiegePanel/Origin") .. " / " .. text("SiegePanel/Target"))
+        log("[VRF][Siege] SIEGE_PUSHED PASS")
+    elseif STEP == "SIEGE_HIDDEN" then
+        local card = _FactionWarUI:Ui("SiegePanel")
+        assert(await(function() return not card.Enable and not _FactionWarUI._T.siegeShown and _FactionWarUI._T.siegeStrengths == nil end, 100), "after the cancel the card hides and forgets the numbers")
+        log("[VRF][Siege] SIEGE_HIDDEN PASS; run SIEGE_ENDED on the server")
     elseif STEP == "TEAM_AFTER" then
         _FactionWarTeam:Close()
         _FactionWarTeam:Open()

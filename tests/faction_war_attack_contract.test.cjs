@@ -30,7 +30,7 @@ test('every town carries the same shared NPC on the town platform', () => {
   }
 });
 
-test('the attack panel and queue controls are authored in the faction war UI', () => {
+test('the attack panel and the siege panel are authored in the faction war UI', () => {
   const war = UIBuilder.read('ui/FactionWarGroup.ui');
   assert.equal(war.find('AttackPanel').jsonString.enable, false);
   for (const part of ['Title', 'Status']) assert.ok(war.hasComponent(`AttackPanel/Window/${part}`, 'MOD.Core.TextGUIRendererComponent'), part);
@@ -39,9 +39,10 @@ test('the attack panel and queue controls are authored in the faction war UI', (
     assert.ok(war.hasComponent(`AttackPanel/Window/Row${row}/Option`, 'MOD.Core.ButtonComponent'), `Row${row} option`);
     assert.ok(war.hasComponent(`AttackPanel/Window/Row${row}/Note`, 'MOD.Core.TextGUIRendererComponent'), `Row${row} note`);
   }
-  assert.equal(war.find('QueueBar').jsonString.enable, false);
-  assert.ok(war.hasComponent('QueueBar/Status', 'MOD.Core.TextGUIRendererComponent'));
-  assert.ok(war.hasComponent('QueueBar/Cancel', 'MOD.Core.ButtonComponent'));
+  assert.equal(war.find('SiegePanel').jsonString.enable, false);
+  for (const part of ['Origin', 'Versus', 'Target', 'Status']) assert.ok(war.hasComponent(`SiegePanel/${part}`, 'MOD.Core.TextGUIRendererComponent'), `SiegePanel/${part}`);
+  assert.ok(war.hasComponent('SiegePanel/Cancel', 'MOD.Core.ButtonComponent'));
+  assert.equal(war.find('QueueBar'), null, 'the queue bar is gone (#123)');
 });
 
 test('FactionWarAttack owns options, queueing, settlement and answers only authenticated callers', () => {

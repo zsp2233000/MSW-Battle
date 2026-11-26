@@ -81,12 +81,12 @@ test('the attack flow forwards the match kind to the town document', () => {
   assert.match(body(attack(), 'Settle'), /_FactionWarTownDocument:Settle\([^]*kind = kind/);
 });
 
-test('the queue bar uses the same presentation as the lobby and receives no opponent kind', () => {
+test('the siege panel uses the same presentation as the lobby and receives no opponent kind', () => {
   const ui = source('RootDesk/MyDesk/Formations/FactionWarUI.mlua');
   const state = source('RootDesk/MyDesk/Matchmaking/MatchFlowState.mlua');
-  assert.match(body(ui, 'QueueView'), /_MatchFlowState:PresentMatch\(/);
+  assert.match(body(ui, 'SiegeView'), /_MatchFlowState:PresentMatch\(/);
   assert.match(body(state, 'Present'), /self:PresentMatch\(/);
   assert.match(body(state, 'PresentMatch'), /snapshot\.guardAt/, 'use the authoritative deadline');
   assert.doesNotMatch(body(flow(), 'StateSnapshot'), /\bguard\s*=/, 'no guard identity in the snapshot');
-  for (const code of [body(ui, 'QueueView'), body(state, 'PresentMatch')]) assert.doesNotMatch(code, /守衛|取消入場/);
+  for (const code of [body(ui, 'SiegeView'), body(ui, 'SiegeTown'), body(state, 'PresentMatch')]) assert.doesNotMatch(code, /守衛|取消入場/);
 });

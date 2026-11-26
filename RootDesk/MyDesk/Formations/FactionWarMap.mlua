@@ -9,6 +9,8 @@ script FactionWarMap extends Logic
         self._T.viewers = {}
         -- #117: players with the attack panel open are viewers too; they get the strengths only, never the map's links or faction.
         self._T.panelViewers = {}
+        -- #123: players with the siege panel showing follow the board too, as a kind of their own: both panels can be open at once.
+        self._T.siegeViewers = {}
         self._T.waiting = {}
         self._T.reading = false
         self._T.readStarted = 0
@@ -58,6 +60,25 @@ script FactionWarMap extends Logic
         if self._T.panelViewers[senderUserId] == nil then return end
         self._T.panelViewers[senderUserId] = nil
         log("[VRF][FactionWarMap] panel close user=" .. senderUserId)
+    end
+
+    @ExecSpace("Server")
+    method void RequestSiegeOpen()
+        -- The siege panel started to show for the sender: follow the board from now on and answer with it as it is. Asking again is harmless.
+        local userId = senderUserId
+        local player = _UserService:GetUserEntityByUserId(userId)
+        if not self:Watching(userId, player) then return end
+        self._T.siegeViewers[userId] = player
+        log("[VRF][FactionWarMap] siege watch user=" .. userId)
+        self:Refresh(userId)
+    end
+
+    @ExecSpace("Server")
+    method void RequestSiegeClose()
+        -- The siege panel stopped showing: later board changes are not pushed to it.
+        if self._T.siegeViewers[senderUserId] == nil then return end
+        self._T.siegeViewers[senderUserId] = nil
+        log("[VRF][FactionWarMap] siege close user=" .. senderUserId)
     end
 
     @ExecSpace("Server")
@@ -146,6 +167,15 @@ script FactionWarMap extends Logic
                 log("[VRF][FactionWarMap] panel board user=" .. userId)
             end
         end
+        for userId, player in pairs(self._T.siegeViewers) do
+            if not self:Watching(userId, player) then
+                self._T.siegeViewers[userId] = nil
+            elseif board ~= nil and (changed or answering[userId]) then
+                self:ReceiveSiegeBoard(board.towns, userId)
+                sent = sent + 1
+                log("[VRF][FactionWarMap] siege board user=" .. userId)
+            end
+        end
         for userId, player in pairs(self._T.viewers) do
             if not self:Watching(userId, player) then
                 self._T.viewers[userId] = nil
@@ -183,7 +213,7 @@ script FactionWarMap extends Logic
     @ExecSpace("ServerOnly")
     method void BoardChanged(string via)
         -- Nobody looking at the map here means nothing to read.
-        if next(self._T.viewers) == nil and next(self._T.panelViewers) == nil then return end
+        if next(self._T.viewers) == nil and next(self._T.panelViewers) == nil and next(self._T.siegeViewers) == nil then return end
         log("[VRF][FactionWarMap] change received via=" .. via)
         self:Refresh("")
     end
@@ -210,6 +240,12 @@ script FactionWarMap extends Logic
     end
 
     @ExecSpace("Client")
+    method void ReceiveSiegeBoard(table towns)
+        -- A pushed board for the showing siege panel: owner and strength per town.
+        _FactionWarUI:ShowSiegeBoard(towns)
+    end
+
+    @ExecSpace("Client")
     method void ReceiveBoard(table towns, table links)
         -- The board for this client's open map.
         _FactionWarMapUI:ShowBoard(towns, links)
@@ -233,6 +269,7 @@ script FactionWarMap extends Logic
         -- Leaving the room (a match, a logout) ends the subscription.
         self._T.viewers[event.UserId] = nil
         self._T.panelViewers[event.UserId] = nil
+        self._T.siegeViewers[event.UserId] = nil
         self._T.waiting[event.UserId] = nil
     end
 end

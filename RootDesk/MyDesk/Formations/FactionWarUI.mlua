@@ -26,12 +26,16 @@ script FactionWarUI extends Logic
         self._T.pending = false
         self._T.options = {}
         self._T.attackPending = false
-        self._T.queueState = "IDLE"
-        self._T.queueText = ""
-        self._T.queueSequenceKey = ""
-        self._T.queueSequence = 0
-        self._T.queuePendingAction = ""
-        log("[VRF][WarUI] match queue bar ready")
+        -- #123: the siege panel (the card at the top of a town while a war pairing owns the player) follows the board only while it shows.
+        self._T.siegeState = "IDLE"
+        self._T.siegeSequenceKey = ""
+        self._T.siegeSequence = 0
+        self._T.siegePendingAction = ""
+        self._T.siegeShown = false
+        self._T.siegeStrengths = nil
+        self._T.siegeAsked = 0
+        self._T.shown = {}
+        log("[VRF][WarUI] siege panel ready")
         self._T.panelOpen = false
     end
 
@@ -50,7 +54,7 @@ script FactionWarUI extends Logic
             self:Bind("AttackPanel/Window/Close", function() self:CloseAttack() end)
             self:Bind("AttackPanel/Window/Row1/Option", function() self:Attack(1) end)
             self:Bind("AttackPanel/Window/Row2/Option", function() self:Attack(2) end)
-            self:Bind("QueueBar/Cancel", function() self:CancelQueue() end)
+            self:Bind("SiegePanel/Cancel", function() self:PressSiege() end)
             self:Bind("TeamButton", function() _FactionWarTeam:Open() end)
             self:Bind("TeamPreview/Window/Close", function() _FactionWarTeam:Close() end)
             self:Bind("LobbyClose", function() _FormationLobby:CloseTownPanel() end)
@@ -58,7 +62,7 @@ script FactionWarUI extends Logic
         local name = player.CurrentMapName
         if name ~= self._T.mapName then self:EnterMap(name, entry, choice, hud) end
         self:SyncTownPanel(name, hud)
-        self:RenderQueue(name)
+        self:RenderSiege(name)
         _FactionWarTeam:Sync(name)
     end
 
@@ -329,7 +333,7 @@ script FactionWarUI extends Logic
 
     @ExecSpace("ClientOnly")
     method void CloseAttack()
-        -- Hide the panel and stop the server pushing boards to it; the queue bar keeps showing any waiting match.
+        -- Hide the panel and stop the server pushing boards to it; the siege panel keeps showing any waiting match.
         local panel = self:Ui("AttackPanel")
         if isvalid(panel) then panel:SetEnable(false) end
         if self._T.attackWatching then
@@ -352,7 +356,7 @@ script FactionWarUI extends Logic
 
     @ExecSpace("ClientOnly")
     method void ShowAttackResult(string result)
-        -- QUEUING hands the rest of the presentation to the queue bar; every other answer keeps the dialog open.
+        -- QUEUING hands the rest of the presentation to the siege panel; every other answer keeps the dialog open.
         self._T.attackPending = false
         if result == "QUEUING" then
             self:CloseAttack()
@@ -366,17 +370,18 @@ script FactionWarUI extends Logic
     end
 
     @ExecSpace("ClientOnly")
-    method void CancelQueue()
-        -- Re-project at click time so an expired countdown or an accepted new snapshot cannot send a stale action.
+    method void PressSiege()
+        -- The card's one button: cancel while waiting, Stop Entry after a failed entry. Re-project at click time so an expired
+        -- countdown or an accepted new snapshot cannot send a stale action.
         local player = _UserService.LocalPlayer
         local snapshot = _MatchFlowInput.Snapshot
         if not isvalid(player) or not _FactionWar:IsTown(player.CurrentMapName) or self._T.panelOpen
             or (snapshot.target or "") == "" or snapshot.state == "IDLE" then return end
-        local view = self:QueueView(snapshot)
+        local view = self:SiegeSnapshotView(snapshot, player.CurrentMapName)
         if not view.enabled or view.action == "" then return end
-        self._T.queueSequenceKey = snapshot.sequenceKey
-        self._T.queueSequence = snapshot.sequence
-        self._T.queuePendingAction = view.action
+        self._T.siegeSequenceKey = snapshot.sequenceKey
+        self._T.siegeSequence = snapshot.sequence
+        self._T.siegePendingAction = view.action
         if view.action == "RETURN" then
             _MatchFlow:RequestReturn(snapshot.attempt)
         elseif view.action == "CANCEL" then
@@ -385,43 +390,98 @@ script FactionWarUI extends Logic
     end
 
     @ExecSpace("ClientOnly")
-    method table QueueView(table snapshot)
-        -- Decorate the same pre-battle result shown by the lobby; keep the current queue bar.
-        local sameObservation = self._T.queueSequenceKey == snapshot.sequenceKey and self._T.queueSequence == snapshot.sequence
-        local pendingAction = sameObservation and self._T.queuePendingAction or ""
-        local view = _MatchFlowState:PresentMatch(snapshot, { now = DateTime.UtcNow.Elapsed,
-            pending = pendingAction ~= "", pendingAction = pendingAction })
-        local name = _FactionWarTownDocument.TownNames[snapshot.target] or snapshot.target
-        view.text = "進攻 " .. name .. "\n" .. view.text
-        return view
+    method string SiegeTown(string town, any strength)
+        -- One side of the card's first line: "<town> 兵力 80"; a strength not heard yet is a dash, never 0.
+        local figure = type(strength) == "number" and string.format("%d", strength) or "—"
+        return self:HighlightedTownName(town) .. " 兵力 " .. figure
     end
 
     @ExecSpace("ClientOnly")
-    method void RenderQueue(string map)
-        -- An accepted sequence can answer a command without changing its phase (e.g. a refused cancel).
-        local bar = self:Ui("QueueBar")
-        if not isvalid(bar) then return end
+    method table SiegeView(table snapshot, table context)
+        -- The whole card from one pre-battle snapshot: both towns with their strengths on the first line, the lobby's status and
+        -- button below. context = { origin, now (ms), strengths (town -> number), pendingAction }. Nothing here says who the opponent is.
+        local pending = context.pendingAction or ""
+        local match = _MatchFlowState:PresentMatch(snapshot, { now = context.now, pending = pending ~= "", pendingAction = pending })
+        local strengths = context.strengths or {}
+        return { origin = self:SiegeTown(context.origin, strengths[context.origin]), target = self:SiegeTown(snapshot.target, strengths[snapshot.target]),
+            status = match.text, label = match.label, action = match.action, enabled = match.enabled }
+    end
+
+    @ExecSpace("ClientOnly")
+    method table SiegeSnapshotView(table snapshot, string map)
+        -- The card for the live snapshot: the departure town of the ticket (the town the player stands in while waiting), the player's
+        -- own pending command, and the board heard so far.
+        local sameObservation = self._T.siegeSequenceKey == snapshot.sequenceKey and self._T.siegeSequence == snapshot.sequence
+        local origin = (snapshot.origin or "") ~= "" and snapshot.origin or map
+        return self:SiegeView(snapshot, { origin = origin, now = DateTime.UtcNow.Elapsed, strengths = self._T.siegeStrengths,
+            pendingAction = sameObservation and self._T.siegePendingAction or "" })
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ShowSiegeBoard(table towns)
+        -- A pushed board while the card shows: the strengths follow at once. One that arrives after the card hid is stale and ignored.
+        if not self._T.siegeShown then return end
+        local strengths = {}
+        for _, entry in ipairs(towns) do strengths[entry.id] = entry.strength end
+        self._T.siegeStrengths = strengths
+        log("[VRF][WarUI] siege board strengths=" .. tostring(#towns))
+    end
+
+    @ExecSpace("ClientOnly")
+    method void FollowSiege(boolean shown)
+        -- Ask the server for the board when the card starts to show (again every 10 s while no strength has arrived); tell it when the card hides.
+        if shown then
+            local now = DateTime.UtcNow.Elapsed
+            if not self._T.siegeShown or (self._T.siegeStrengths == nil and now - self._T.siegeAsked >= 10000) then
+                self._T.siegeShown = true
+                self._T.siegeAsked = now
+                _FactionWarMap:RequestSiegeOpen()
+            end
+        elseif self._T.siegeShown then
+            self._T.siegeShown = false
+            self._T.siegeStrengths = nil
+            self._T.shown = {}
+            _FactionWarMap:RequestSiegeClose()
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void SetTextOnce(string path, string text)
+        -- Write a text node only when its words changed; the card is redrawn every frame.
+        if self._T.shown[path] == text then return end
+        local node = self:Ui(path)
+        if not isvalid(node) then return end
+        node.TextGUIRendererComponent.Text = text
+        self._T.shown[path] = text
+    end
+
+    @ExecSpace("ClientOnly")
+    method void RenderSiege(string map)
+        -- The card shows in a town while a war pairing owns the player. An accepted sequence can answer a command without changing its phase.
+        local card = self:Ui("SiegePanel")
+        if not isvalid(card) then return end
         local snapshot = _MatchFlowInput.Snapshot
         local war = _FactionWar:IsTown(map) and (snapshot.target or "") ~= "" and snapshot.state ~= "IDLE"
-        if self._T.queueSequenceKey ~= snapshot.sequenceKey or self._T.queueSequence ~= snapshot.sequence then
-            self._T.queuePendingAction = ""
+        if self._T.siegeSequenceKey ~= snapshot.sequenceKey or self._T.siegeSequence ~= snapshot.sequence then
+            self._T.siegePendingAction = ""
         end
-        if snapshot.state ~= self._T.queueState then
+        if snapshot.state ~= self._T.siegeState then
             if snapshot.state == "IDLE" and _FactionWar:IsTown(map) then _FactionWar:RequestTownStatus() end
-            self._T.queueState = snapshot.state
+            self._T.siegeState = snapshot.state
         end
-        bar:SetEnable(war and not self._T.panelOpen)
-        if not war then return end
-        local view = self:QueueView(snapshot)
-        if view.text ~= self._T.queueText then
-            self._T.queueText = view.text
-            self:Ui("QueueBar/Status").TextGUIRendererComponent.Text = view.text
-        end
-        local cancel = self:Ui("QueueBar/Cancel")
-        if isvalid(cancel) then
-            cancel:SetEnable(view.action ~= "")
-            cancel.ButtonComponent.Enable = view.enabled
-            cancel.TextGUIRendererComponent.Text = view.label
+        local shown = war and not self._T.panelOpen
+        card:SetEnable(shown)
+        self:FollowSiege(shown)
+        if not shown then return end
+        local view = self:SiegeSnapshotView(snapshot, map)
+        self:SetTextOnce("SiegePanel/Origin", view.origin)
+        self:SetTextOnce("SiegePanel/Target", view.target)
+        self:SetTextOnce("SiegePanel/Status", view.status)
+        local button = self:Ui("SiegePanel/Cancel")
+        if isvalid(button) then
+            button:SetEnable(view.action ~= "")
+            button.ButtonComponent.Enable = view.enabled
+            button.TextGUIRendererComponent.Text = view.label
         end
     end
 end
