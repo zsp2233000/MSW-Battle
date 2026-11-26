@@ -60,10 +60,21 @@ script FactionWarUI extends Logic
             self:Bind("LobbyClose", function() _FormationLobby:CloseTownPanel() end)
         end
         local name = player.CurrentMapName
+        self:KeepAvatarVisible(player, name)
         if name ~= self._T.mapName then self:EnterMap(name, entry, choice, hud) end
         self:SyncTownPanel(name, hud)
         self:RenderSiege(name)
         _FactionWarTeam:Sync(name)
+    end
+
+    @ExecSpace("ClientOnly")
+    method boolean KeepAvatarVisible(Entity player, string map)
+        -- A town never hides the player's avatar (only the lobby screen and a battle room do). A hidden one was seen after a gate
+        -- teleport, cause unknown: show it again and say so, so the log tells when it happens.
+        if not _FactionWar:IsTown(map) or player.Visible then return false end
+        player:SetVisible(true, false, false)
+        log("[VRF][FactionWarUI] avatar was hidden in town=" .. map .. "; shown again")
+        return true
     end
 
     @ExecSpace("ClientOnly")

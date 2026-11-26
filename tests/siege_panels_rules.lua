@@ -392,4 +392,13 @@ _MatchFlowInput.Snapshot = waitingSnapshot
 ui:RenderSiege("zuoying")
 check(siege.Enable and asks == 1, "after a reconnect the card asks for the board again")
 
+-- A town never hides the player's avatar (only the lobby screen and a battle room do): a hidden one is shown again, anywhere else it is left alone.
+local avatar = { Visible = false, shown = 0 }
+function avatar:SetVisible(value) self.Visible = value; self.shown = self.shown + 1 end
+check(ui:KeepAvatarVisible(avatar, "zuoying") == true and avatar.Visible and avatar.shown == 1, "a hidden avatar in a town is shown again")
+check(ui:KeepAvatarVisible(avatar, "zuoying") == false and avatar.shown == 1, "a visible one is left alone")
+avatar.Visible = false
+check(ui:KeepAvatarVisible(avatar, "formationlobby") == false and not avatar.Visible, "the lobby hides it on purpose")
+check(ui:KeepAvatarVisible(avatar, "matchprobe") == false and not avatar.Visible, "so does a battle room")
+
 print("[VRF][SiegePanels] attack panel, siege panel and team preview rules PASS checks=" .. tostring(checks))
