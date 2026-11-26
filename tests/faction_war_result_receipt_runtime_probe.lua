@@ -1,4 +1,4 @@
--- #115 Maker only; written, not run. Runbook: tests/README.md, War result receipts (#115).
+-- #115 / #119 Maker only. Runbook: tests/README.md, War result receipts (#115) and the return button (#119).
 -- This probe changes the Maker local board and the two disposable accounts. Never use production or valuable saves.
 local STEP = "SETUP" -- SETUP, QUEUE, ARM, CLIENT, RECONNECT, RECHECK, BOARD, BOARD_CLIENT, LOBBY_CLIENT, RETURN, CLEANUP
 local KIND = "HUMAN" -- HUMAN or GUARD; one fresh Play per case
@@ -66,6 +66,23 @@ local function clientMatch()
     assert(isvalid(battle) and isvalid(coordinator), "battle and receipt controller present")
     return player, battle, coordinator, _BattleUIController
 end
+local function checkReturnButton(destination, lost)
+    -- #119 (ADR 0016): the button says where it goes, the line above it says so first when the departure town fell, and the screen shows exactly that.
+    local highlight = "<color=" .. _FactionWarUI.TownNameHighlightHex .. ">"
+    local view = _MatchFlowInput:View()
+    local name = _FactionWarTownDocument.TownNames[destination]
+    assert(view.label == "返回 " .. highlight .. name .. "</color>" and view.action == "RETURN" and view.enabled, "return label names " .. name .. ": " .. tostring(view.label))
+    assert(await(function()
+        local action, status = _MatchFlowInput.action, _MatchFlowInput.status
+        return isvalid(action) and isvalid(status) and action.TextGUIRendererComponent.Text == view.label and status.TextGUIRendererComponent.Text == view.text
+    end, 100), "the visible return button and the line above it show the same words")
+    if lost then
+        assert(view.text == highlight .. "左營</color>已失守", "the fall notice above the button: " .. tostring(view.text))
+    else
+        assert(not string.find(view.text, "已失守", 1, true), "no fall notice while the departure town stands: " .. tostring(view.text))
+    end
+    log("[VRF][Return119] button label=" .. view.label .. " notice=" .. view.text)
+end
 local function inspectSaved(player, battle, coordinator, ui, destination)
     assert(await(function()
         local receipt = coordinator.WarResultReceipt
@@ -89,6 +106,7 @@ local function inspectSaved(player, battle, coordinator, ui, destination)
     assert(label(ui.warTarget) == highlight .. "鼓山</color>　兵力 " .. before .. " → " .. after, "target row")
     local conclusion = KIND == "HUMAN" and ("奪城：" .. highlight .. "鼓山</color> 改為 紅方") or "未易主"
     assert(label(ui.warConclusion) == conclusion, "ownership conclusion")
+    checkReturnButton(destination, destination == "nanzih")
     assert(await(function() return battle.ExperienceResult.status == "SAVED" end), "experience still settles")
     assert(await(function() return label(ui.result:GetChildByName("Window"):GetChildByName("Caption")) == "本局怪物經驗" end), "experience UI unchanged")
     log("[VRF][Result115] " .. STEP .. " PASS kind=" .. KIND .. " match=" .. receipt.matchId .. " revision=" .. tostring(receipt.revision) .. " destination=" .. destination)
@@ -115,6 +133,9 @@ local ok, failure = pcall(function()
             local pending = ui.resultWindow.UITransformComponent.RectSize.y
             assert(pending > 360 and pending < 360 + ui.WarExtraHeight and not ui.hud.Enable
                 and ui.warConclusion.UITransformComponent.anchoredPosition.y == ui.warOrigin.UITransformComponent.anchoredPosition.y, "pending uses the short war window")
+            -- Until the receipt knows, the departure town is what the button promises.
+            local view = _MatchFlowInput:View()
+            assert(view.label == "返回 <color=" .. _FactionWarUI.TownNameHighlightHex .. ">左營</color>", "pending return button names the departure town: " .. tostring(view.label))
             log("[VRF][Result115] PENDING PASS kind=" .. KIND)
         end
         inspectSaved(player, battle, coordinator, ui, "zuoying")

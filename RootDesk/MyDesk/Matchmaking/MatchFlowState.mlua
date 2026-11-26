@@ -90,16 +90,28 @@ script MatchFlowState extends Logic
         return { text = "", label = "", action = "", enabled = false }
     end
 
+    method table ReturnPlan(table context)
+        -- ADR 0016: a war result says where Return goes (the departure town, or the capital once that town fell) and says so first when it fell.
+        -- A lobby match, and a war match whose town is not known, keep the lobby wording.
+        local destination = context.destinationName or ""
+        if destination == "" then return { war = false, label = "返回大廳", text = "可返回大廳繼續整備或再次配對" } end
+        local lost = context.originLost == true and (context.originLabel or context.originName or "") ~= ""
+        local text = lost and ((context.originLabel or context.originName) .. "已失守") or "戰鬥已結束，可返回城鎮繼續行動"
+        return { war = true, lost = lost, label = "返回 " .. destination, text = text }
+    end
+
     method table Present(table snapshot, table context)
         -- The lobby owns idle and result/return controls; pre-battle states share the town's rule.
         local state = snapshot.state
         local blocked = snapshot.busy or context.pending or context.editBusy or context.unconfirmed or context.confirming
         local text, label, action = "", "", ""
+        local plan = { war = false }
         if state == "BATTLE" then
             text = "自動戰鬥中，戰鬥結束後可返回大廳"
         elseif state == "RETURNING" or string.sub(state, 1, 7) == "RESULT_" then
-            text = state == "RETURNING" and "正在返回大廳並還原已儲存隊伍" or "可返回大廳繼續整備或再次配對"
-            label = state == "RETURNING" and (snapshot.busy and "返回中…" or "重試返回") or "返回大廳"
+            plan = self:ReturnPlan(context)
+            text = state == "RETURNING" and "正在返回大廳並還原已儲存隊伍" or plan.text
+            label = state == "RETURNING" and (snapshot.busy and "返回中…" or "重試返回") or plan.label
             action = "RETURN"
             local reason = snapshot.reasonCode
             if reason == "RESTORE_RETRY_REQUIRED" then text = "隊伍尚未完成還原，請重試返回" end
@@ -109,7 +121,7 @@ script MatchFlowState extends Logic
             if reason == "RETURN_SAVE_FAILED" or reason == "ROOM_MISMATCH_SAVE_FAILED" then
                 text, label = "返回資料儲存失敗，請重試返回", "重試返回"
             end
-            if context.pending then text, label = "正在返回大廳…", "返回中…" end
+            if context.pending then text, label = (plan.war and "正在返回…" or "正在返回大廳…"), "返回中…" end
         elseif state == "IDLE" then
             text, label, action = "選好已儲存的出戰隊伍後，即可開始配對", "開始配對", "QUEUE"
             local reason = snapshot.reasonCode

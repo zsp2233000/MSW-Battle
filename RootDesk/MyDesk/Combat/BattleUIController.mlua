@@ -500,6 +500,12 @@ script BattleUIController extends Logic
 	end
 
 	@ExecSpace("ClientOnly")
+	method any CurrentWarResult()
+		-- The settlement receipt this client displays now (null when there is none), so the return button can name its destination.
+		return self._T.warReceipt
+	end
+
+	@ExecSpace("ClientOnly")
 	method void RenderWarResult(BattleSession session, Entity map, string profile)
 		local matched = self.OwnResult ~= "" and session.RequireMatchedFormations and map:GetFirstChildComponentByTypeName("script.MatchedBattle", true) or nil
 		local receipt = isvalid(matched) and matched.WarResultReceipt or nil

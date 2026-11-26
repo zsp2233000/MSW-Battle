@@ -117,10 +117,18 @@ script MatchFlowInput extends Logic
         -- Supply client-only readiness and clock facts to the shared presentation rules.
         local player = _UserService.LocalPlayer
         local map = isvalid(player) and player.CurrentMapName or ""
-        local originName = _FactionWarTownDocument.TownNames[self.Snapshot.origin or ""] or ""
+        local origin = self.Snapshot.origin or ""
+        local originName = _FactionWarTownDocument.TownNames[origin] or ""
+        -- ADR 0016: the settlement receipt names where Return goes; until it says, the departure town is the preview.
+        local receipt = map == "matchprobe" and originName ~= "" and _BattleUIController:CurrentWarResult() or nil
+        local destination = receipt ~= nil and (receipt.destination or "") or ""
+        if destination == "" and originName ~= "" then destination = origin end
         return _MatchFlowState:Present(self.Snapshot, { now = DateTime.UtcNow.Elapsed,
             pending = self._T.pending, pendingAction = self._T.pendingAction, formation = _FormationEditSession.Snapshot,
             inMatchRoom = map == "matchprobe", originName = originName,
+            originLabel = originName ~= "" and _FactionWarUI:HighlightedTownName(origin) or "",
+            destinationName = (originName ~= "" and destination ~= "") and _FactionWarUI:HighlightedTownName(destination) or "",
+            originLost = receipt ~= nil and receipt.originLost == true,
             ready = _FormationSchema:IsLoadConfirmed(_FormationEditSession.Snapshot.loadState),
             editBusy = _FormationEditSession:Busy(), unconfirmed = _FormationEditSession:Unconfirmed(),
             confirming = _FormationEditSession.ConfirmKind ~= "", hasActive = _FormationEditSession:HasValidActive(),
