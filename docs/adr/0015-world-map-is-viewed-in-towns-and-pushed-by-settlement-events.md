@@ -14,6 +14,8 @@ Roadmap 原本把「國戰大地圖」放在 Backlog，呈現與操作形式待�
 
 按「大地圖」或 M 鍵時，客戶端呼叫 `FactionWarMap:RequestOpen`。伺服器確認玩家站在城鎮裡，記下他是這個靜態房的觀看者，讀一次城鎮文件後回傳戰況，另外讀一次他的陣營。關閉地圖、離開城鎮（客戶端在 `OnUpdate` 偵測到後關閉，並送 `RequestClose`）、離開這個房間（`UserLeaveEvent`）都會結束訂閱。
 
+補記（#117）：開著進攻面板的玩家是另一類觀看者，登記在 `FactionWarMap` 的 `panelViewers`（和地圖的 `viewers` 分開，地圖既有的訂閱行為不變）。進攻選項的回應已經讀過一次城鎮文件，所以面板的登記不再多讀一次；之後城鎮表變動時，面板收到各城的歸屬與兵力（`ReceivePanelBoard`）。關閉面板、離開城鎮、離開房間都會結束訂閱。
+
 ## 決定三：戰果寫入後發事件，有觀看者的房間才重讀
 
 `FactionWarAttack:Finish` 在 `SAVED` 或 `DUPLICATE` 時呼叫 `FactionWarMap:AnnounceChange`：

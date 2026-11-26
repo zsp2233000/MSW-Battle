@@ -136,7 +136,7 @@ script FactionWarTeam extends Logic
         self._T.open = true
         self._T.reply = nil
         self._T.key = ""
-        self._T.queueState = _MatchFlowInput.Snapshot.state
+        self._T.queued = _MatchFlowInput.Snapshot.state ~= "IDLE"
         overlay:SetEnable(true)
         if _FormationEditSession.Snapshot.loadState == nil then _FormationService:RequestOpen() end
         self:Render()
@@ -165,10 +165,10 @@ script FactionWarTeam extends Logic
             self:Close()
             return
         end
-        -- A queue that starts or ends while the preview is open changes which team stands for the player.
-        local state = _MatchFlowInput.Snapshot.state
-        if state ~= self._T.queueState then
-            self._T.queueState = state
+        -- A queue that starts or ends while the preview is open changes which team stands for the player; the phases inside a queue do not.
+        local queued = _MatchFlowInput.Snapshot.state ~= "IDLE"
+        if queued ~= self._T.queued then
+            self._T.queued = queued
             self._T.reply = nil
             self:RequestTeam()
         end
