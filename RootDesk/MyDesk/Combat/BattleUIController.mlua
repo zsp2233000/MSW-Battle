@@ -15,12 +15,15 @@ script BattleUIController extends Logic
 	property Entity resultDraw = "36bfb65f-5d84-4014-b644-73c4ca3e8f2b"
 	property Entity resultPlayerCount = "506bb73b-00a6-4313-ba14-ba1d3189f3a9"
 	property Entity resultEnemyCount = "585aa74a-1ef0-4897-9885-4b996eb49840"
-	property Entity warResult = "fa11de2c-fefc-4d75-9ac0-991e130eabeb"
-	property Entity warOrigin = "357f4933-a5ed-4e74-884b-e9a0493c4b95"
-	property Entity warTarget = "6b515488-b110-4a14-b709-3f1e5dc42714"
-	property Entity warConclusion = "e8c5af8c-d443-48c0-a6e7-aecb9655f793"
+	property Entity resultWindow = "42a65499-66fb-456e-8638-962e6e5de5c2"
+	property Entity warResult = "873da064-a044-4f3d-8045-f641df92051a"
+	property Entity warOrigin = "5acb0c76-62c4-4e6a-8f83-3befa94ac7a7"
+	property Entity warTarget = "b7277999-467d-4567-b6a4-a167cf50d659"
+	property Entity warConclusion = "0a3a81f8-f844-44e6-a7b2-51624902ee2f"
 	property string OwnResult = ""
 	property number ResultDisplayDelaySeconds = 2
+	-- The war rows sit inside the result window; with a war receipt the window grows upward by this height (bottom edge fixed).
+	property number WarExtraHeight = 146
 	-- Result list layout: rows are 580x84 and centred 640 left/right of the screen, clear of the centre window.
 	property number ResultRowCenterX = 640
 	property number ResultRowFirstY = 288
@@ -52,6 +55,15 @@ script BattleUIController extends Logic
 		self._T.hudKey = ""
 		self._T.healthGeometry = {}
 		self._T.levelUpEffects = {}
+		-- The war section grows the result window upward; remember the authored geometry it returns to.
+		if isvalid(self.resultWindow) and isvalid(self.warResult) and isvalid(self.warOrigin) and isvalid(self.warConclusion) then
+			local frame = self.resultWindow.UITransformComponent
+			self._T.windowBase = { x = frame.anchoredPosition.x, y = frame.anchoredPosition.y, size = frame.RectSize,
+				sectionHeight = self.warResult.UITransformComponent.RectSize.y,
+				originY = self.warOrigin.UITransformComponent.anchoredPosition.y,
+				conclusionY = self.warConclusion.UITransformComponent.anchoredPosition.y }
+			self._T.windowLayout = "NONE"
+		end
 		local frames = {}
 		for _, frame in ipairs(self.LevelUpFrames) do table.insert(frames, frame[1]) end
 		_ResourceService:PreloadAsync(frames, function() end)
@@ -138,6 +150,7 @@ script BattleUIController extends Logic
 			self:ClearResultCards()
 			self:ClearExperienceCards()
 			self:SetEnabled(self.warResult, false)
+			self:SetWarLayout(false, true)
 			self._T.warReceipt = nil
 			self._T.pendingResult = nil
 			self._T.resultDisplayAt = nil
@@ -466,11 +479,33 @@ script BattleUIController extends Logic
 	end
 
 	@ExecSpace("ClientOnly")
+	method void SetWarLayout(boolean grown, boolean rows)
+		-- The war rows are part of the result window: it grows upward by the section's height and keeps its bottom edge (the return panel hangs below it).
+		-- Without strength rows the conclusion takes the first row's place and the window is that much shorter.
+		local base = self._T.windowBase
+		if base == nil or not isvalid(self.resultWindow) then return end
+		local key = grown and (rows and "ROWS" or "LINE") or "NONE"
+		if self._T.windowLayout == key then return end
+		self._T.windowLayout = key
+		local shrink = rows and 0 or (base.originY - base.conclusionY)
+		local extra = grown and (self.WarExtraHeight - shrink) or 0
+		local frame = self.resultWindow.UITransformComponent
+		frame.RectSize = Vector2(base.size.x, base.size.y + extra)
+		frame.anchoredPosition = Vector2(base.x, base.y + extra / 2)
+		local section = self.warResult.UITransformComponent
+		section.RectSize = Vector2(section.RectSize.x, base.sectionHeight - shrink)
+		local conclusion = self.warConclusion.UITransformComponent
+		conclusion.anchoredPosition = Vector2(conclusion.anchoredPosition.x, base.conclusionY + shrink)
+		log("[VRF][WarResultUI] window layout=" .. key .. " height=" .. tostring(base.size.y + extra))
+	end
+
+	@ExecSpace("ClientOnly")
 	method void RenderWarResult(BattleSession session, Entity map, string profile)
 		local matched = self.OwnResult ~= "" and session.RequireMatchedFormations and map:GetFirstChildComponentByTypeName("script.MatchedBattle", true) or nil
 		local receipt = isvalid(matched) and matched.WarResultReceipt or nil
 		if receipt == nil or profile == "" or session.MatchKey == "" or receipt.matchId ~= session.MatchKey or receipt.profile ~= profile then
 			self:SetEnabled(self.warResult, false)
+			self:SetWarLayout(false, true)
 			self._T.warReceipt = nil
 			return
 		end
@@ -489,6 +524,7 @@ script BattleUIController extends Logic
 			if town ~= nil then local replaced, replacedCount = string.gsub(conclusion, town, _FactionWarUI:HighlightedTownName(receipt.capturedTown), 1) conclusion = replaced end
 		end
 		self:SetText(self.warConclusion, conclusion)
+		self:SetWarLayout(true, showRows)
 		self:SetEnabled(self.warResult, true)
 		self._T.warReceipt = receipt
 		log("[VRF][WarResultUI] displayed match=" .. receipt.matchId .. " status=" .. receipt.status .. " revision=" .. tostring(receipt.revision))
@@ -520,7 +556,6 @@ script BattleUIController extends Logic
 		local matched = session.RequireMatchedFormations
 		local showDeployment = isvalid(presentation) and presentation.ShowDeploymentUI and phase == "DEPLOYMENT"
 		local poc = not matched and isvalid(map:GetComponent("script.BattleDeploymentInput"))
-		self:SetEnabled(self.hud, phase ~= "CONFIG_ERROR")
 		self:SetEnabled(self.deployment, showDeployment)
 		self:SetEnabled(self.configErrorGroup, poc and phase == "CONFIG_ERROR")
 
@@ -543,6 +578,8 @@ script BattleUIController extends Logic
 			viewerResult = session.Result
 		end
 		self:SetResult(viewerResult)
+		-- The result window carries the counts and the war rows, so the HUD steps aside while it shows.
+		self:SetEnabled(self.hud, phase ~= "CONFIG_ERROR" and self.OwnResult == "")
 		self:RenderWarResult(session, map, profile)
 		-- Experience first: once settled it absorbs the own survivor rows, so the order decides which list shows.
 		self:RenderExperienceResult(session, map, ownFaction)

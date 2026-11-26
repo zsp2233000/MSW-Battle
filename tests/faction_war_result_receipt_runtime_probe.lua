@@ -81,6 +81,10 @@ local function inspectSaved(player, battle, coordinator, ui, destination)
     local highlight = "<color=" .. _FactionWarUI.TownNameHighlightHex .. ">"
     local function label(node) return node.TextGUIRendererComponent.Text end
     assert(ui.warOrigin.EnabledInHierarchy and ui.warTarget.EnabledInHierarchy, "strength rows visible")
+    -- One merged panel: the HUD steps aside and the window grew upward by the section, bottom edge kept.
+    local frame = ui.resultWindow.UITransformComponent
+    assert(not ui.hud.Enable, "the HUD steps aside for the merged result panel")
+    assert(frame.RectSize.y == 360 + ui.WarExtraHeight and frame.anchoredPosition.y == 90 + ui.WarExtraHeight / 2, "window grown by the war section")
     assert(label(ui.warOrigin) == highlight .. "左營</color>　兵力 100 → 100", "origin row")
     assert(label(ui.warTarget) == highlight .. "鼓山</color>　兵力 " .. before .. " → " .. after, "target row")
     local conclusion = KIND == "HUMAN" and ("奪城：" .. highlight .. "鼓山</color> 改為 紅方") or "未易主"
@@ -96,6 +100,7 @@ local ok, failure = pcall(function()
         local _, battle, coordinator, ui = clientMatch()
         assert(await(function() return ui.OwnResult ~= "" and ui.result.EnabledInHierarchy end, 3000), "lobby battle result visible")
         assert(coordinator.WarResultReceipt.matchId == nil and not ui.warResult.EnabledInHierarchy, "lobby has no war receipt or war block")
+        assert(not ui.hud.Enable and ui.resultWindow.UITransformComponent.RectSize.y == 360 and ui.resultWindow.UITransformComponent.anchoredPosition.y == 90, "the lobby result keeps the plain window and the HUD steps aside")
         assert(battle.RequireMatchedFormations, "this is a lobby match, not the POC")
         log("[VRF][Result115] LOBBY_CLIENT PASS")
     elseif STEP == "CLIENT" or STEP == "RECHECK" then
@@ -106,6 +111,10 @@ local ok, failure = pcall(function()
                     and ui.warConclusion.TextGUIRendererComponent.Text == "戰果結算中…"
             end, 3000), "visible pending; ARM before the fight finishes and dispatch CLIENT promptly")
             assert(not ui.warOrigin.EnabledInHierarchy and not ui.warTarget.EnabledInHierarchy and ui.OwnResult ~= "", "pending doesn't block WIN/LOSE or show proposed values")
+            -- No strength rows yet: the conclusion takes the first row's place and the window is shorter than the full war window.
+            local pending = ui.resultWindow.UITransformComponent.RectSize.y
+            assert(pending > 360 and pending < 360 + ui.WarExtraHeight and not ui.hud.Enable
+                and ui.warConclusion.UITransformComponent.anchoredPosition.y == ui.warOrigin.UITransformComponent.anchoredPosition.y, "pending uses the short war window")
             log("[VRF][Result115] PENDING PASS kind=" .. KIND)
         end
         inspectSaved(player, battle, coordinator, ui, "zuoying")
