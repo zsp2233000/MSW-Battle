@@ -4,7 +4,7 @@
 // Rebuilds the faction choice screen (#126, ADR 0018) in ui/FactionWarGroup.ui with the msw-ui-system UIBuilder: a Cardgame window with two
 // colourless Cardgame buttons, "A 方" and "B 方". They are the same button; only the text tells them apart, because the player has no "own side"
 // yet and a red / blue button would suggest one.
-// Everything else in the group (attack panel, siege panel, team preview, town HUD, lobby buttons) is left as it is.
+// Everything else in the group (siege panel, team preview, town HUD, lobby buttons) is left as it is.
 //
 //   node assets/siege/build_faction_choice_ui.cjs
 //
@@ -17,7 +17,7 @@ const { UIBuilder } = require('../../.agents/skills/msw-ui-system/scripts/msw_ui
 const ROOT = path.join(__dirname, '..', '..');
 const uiFile = path.join(ROOT, 'ui', 'FactionWarGroup.ui');
 
-// Cardgame theme parts (the same ones the attack panel, the world map and the result window use).
+// Cardgame theme parts (the same ones the world map and the result window use).
 const CARD_BUTTON = { normal: '9505617fb63c447c8ff9c15c18d88064', highlighted: '398dfdb46d534ea2a2373e4f5d29ae2a', pressed: '1016088c7aca43c78cdd06c01645ab1b' };
 const BASE_FRAME = 'ac319875b43f40ea86a069c468a1a26e'; // Base_4 panel frame (hollow, 43 px slices)
 const OUTLINE = { outline: true, outline_color: { r: 0, g: 0, b: 0, a: 0.7 }, outline_width: 0.2, face_dilate: 0.2 };

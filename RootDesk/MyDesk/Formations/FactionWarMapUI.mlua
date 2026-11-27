@@ -42,6 +42,8 @@ script FactionWarMapUI extends Logic
         self._T.selected = nil
         self._T.pending = false
         self._T.note = nil
+        -- True from a select request the open map made itself (INVALID, a changed owner) until its answer; see ShowSelect.
+        self._T.relisting = false
         self._T.key = _InputService:ConnectEvent(KeyDownEvent, self.HandleKey)
         self._T.wheel = _InputService:ConnectEvent(MouseScrollEvent, self.HandleWheel)
     end
@@ -321,6 +323,7 @@ script FactionWarMapUI extends Logic
         local overlay = self:Ui("Overlay")
         if isvalid(overlay) then overlay:SetEnable(true) end
         self._T.open = true
+        self._T.relisting = false
         self._T.wheelLogged = false
         self:SetMapView(1, Vector2(0, 0))
         self:SetMode(mode, {}, "")
@@ -351,16 +354,32 @@ script FactionWarMapUI extends Logic
     end
 
     @ExecSpace("ClientOnly")
+    method void BeginSelect()
+        -- The NPC press: its answer is wanted even if an earlier relist of the map is still unanswered.
+        self._T.relisting = false
+    end
+
+    @ExecSpace("ClientOnly")
     method void ShowSelect(string town, string status, table header, table targets, table board)
         -- The server's answer to the NPC press. READY opens (or switches) the map in target selection with the board and links of that answer;
         -- any other status opens nothing (their messages come with their own ticket), and closes a selection that was already open.
+        -- A READY that is not shown (the map was closed since the map's own relist asked, or the town cannot show it) has already made the server
+        -- count the player as a map viewer, so the player tells it they are not watching.
         log("[VRF][FactionWarMap] ui select status=" .. status .. " town=" .. town .. " targets=" .. tostring(#targets))
+        local relisted = self._T.relisting == true
+        self._T.relisting = false
         if status ~= "READY" then
             if self._T.open and self._T.mode == "select" then self:Close() end
             return
         end
         local player = _UserService.LocalPlayer
-        if not isvalid(player) or player.CurrentMapName ~= town or not self:CanOpen() then return end
+        local showable = isvalid(player) and player.CurrentMapName == town and self:CanOpen()
+        if not self._T.open and (relisted or not showable) then
+            _FactionWarMap:RequestClose()
+            log("[VRF][FactionWarMap] ui select unwatch")
+            return
+        end
+        if not showable then return end
         if not self._T.open then self:Reveal("select") end
         self:SetMode("select", targets, header.town)
         self._T.unavailable = false
@@ -410,6 +429,8 @@ script FactionWarMapUI extends Logic
         -- QUEUING closes the map and leaves the rest to the siege panel; any other answer keeps the window and says why.
         log("[VRF][FactionWarMap] ui attack result=" .. result)
         self._T.pending = false
+        -- The player closed the map before the answer came: there is no window to update, and nothing may reopen it.
+        if not self._T.open then return end
         if result == "QUEUING" then
             self:Close()
         elseif result == "INVALID" then
@@ -417,6 +438,7 @@ script FactionWarMapUI extends Logic
             self._T.selected = nil
             self._T.note = nil
             self:RenderConfirm()
+            self._T.relisting = true
             _FactionWarAttack:RequestSelect()
         else
             self._T.note = result == "ENGAGED" and "已在配對中，請先取消目前的配對" or "暫時無法配對，請再試一次"
@@ -504,6 +526,7 @@ script FactionWarMapUI extends Logic
         self:ApplyBoard(towns, links)
         if relist then
             log("[VRF][FactionWarMap] ui select relist")
+            self._T.relisting = true
             _FactionWarAttack:RequestSelect()
         end
     end
