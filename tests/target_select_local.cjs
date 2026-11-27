@@ -2,7 +2,8 @@
 //   node tests/target_select_local.cjs | npm exec --yes --package=fengari-node-cli@0.1.0 -- fengari -
 // The production Lua bodies of FactionWarAttack (SelectFor, AttackFor), FactionWarMap (WatchMap and the push) and FactionWarMapUI (ShowSelect, Pick,
 // ConfirmAttack, ShowAttackResult, the board, the confirmation window and (#127) the message window with the NPC guard) and both town NPC handlers run against fakes (board read, gates, players, UI nodes, RPC targets).
-// This is not Maker; tests/target_select_client_runtime_probe.lua covers the real window and its buttons.
+// (#129) it also drives the selection zoom, the click or drag decision, the hit test and the crest marks through the touch handlers.
+// This is not Maker; tests/target_select_client_runtime_probe.lua covers the real window and its buttons, tests/target_select_click_client_runtime_probe.lua the real mouse.
 const { readFileSync } = require('node:fs');
 const { join } = require('node:path');
 const read = (path) => readFileSync(join(__dirname, path), 'utf8').replace(/\r\n/g, '\n');
