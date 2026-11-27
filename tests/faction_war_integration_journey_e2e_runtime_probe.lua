@@ -167,7 +167,9 @@ local function options(user)
     if faction == nil or faction == "" then return "UNAVAILABLE", {} end
     if towns[town].owner ~= faction then return "NOT_OWNED", {} end
     if _FactionWarAttack:IsEngaged(id(user)) then return "ENGAGED", {} end
-    return "READY", _FactionWarAttack:Targets(town, faction, towns)
+    local targets = _FactionWarAttack:Targets(town, faction, towns)
+    if #targets == 0 then return "NO_TARGETS", {} end
+    return "READY", targets
 end
 local function total(counts)
     local n = 0
@@ -263,7 +265,7 @@ local ok, reason = pcall(function()
         assert(r1.CurrentMapName == "zuoying", "a refused gate moves nobody")
         assert(gate(r1, "nanzih") == "PASSED", "the gate to friendly Nanzih opens")
         local status, list = options(r1)
-        assert(status == "READY" and #list == 0, "the capital has no enemy neighbour to attack, found " .. status .. " " .. names(list))
+        assert(status == "NO_TARGETS" and #list == 0, "the capital has no enemy neighbour to attack (the NPC answers with a message, not a map), found " .. status .. " " .. names(list))
         assert(await(function() return readTown(PROFILES.A1) == "nanzih" end, 80), "the last town follows the gate")
         assert(gate(r1, "zuoying") == "PASSED", "and back")
         assert(await(function() return readTown(PROFILES.A1) == "zuoying" end, 80), "the last town is Zuoying again")

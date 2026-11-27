@@ -409,12 +409,14 @@ ui:DismissMessage()
 ui:HandleKey({ key = KeyboardKey.M })
 check(not ui._T.open, "after 確定 M closes the view again")
 
--- Leaving the town takes the message with it.
+-- A fallen departure town lands the player in their capital right after the answer: the message must still be there to read.
 fresh()
-ui:ShowSelect("zuoying", "NO_TARGETS", {}, {}, {})
-_UserService.LocalPlayer.CurrentMapName = "formationlobby"
-ui:ExpireStale()
-check(shown() == nil and not ui:BlocksInteraction(), "a message of a town the player left is dismissed")
+ui:ShowSelect("zuoying", "NOT_OWNED", {}, {}, {})
+_UserService.LocalPlayer.CurrentMapName = "nanzih"
+ui:ExpireAsk()
+check(shown() == "這座城已不屬於你的陣營" and ui:BlocksInteraction(), "the message stays after the player was moved, until 確定")
+ui:DismissMessage()
+check(shown() == nil and not ui:BlocksInteraction(), "確定 closes it")
 _UserService.LocalPlayer.CurrentMapName = "zuoying"
 
 -- ---- the guard: one request and one window per press, no interaction behind a window -------------------------------------------------
@@ -459,10 +461,10 @@ fresh()
 DateTime.UtcNow.Elapsed = 1000
 pressWar()
 DateTime.UtcNow.Elapsed = 1000 + ui.AskTimeout * 1000 - 1
-ui:ExpireStale()
+ui:ExpireAsk()
 check(ui:BlocksInteraction(), "the wait lasts the whole timeout")
 DateTime.UtcNow.Elapsed = 1000 + ui.AskTimeout * 1000 + 1
-ui:ExpireStale()
+ui:ExpireAsk()
 check(not ui:BlocksInteraction(), "then it ends and the NPC answers a new press")
 pressWar()
 check(calls.select == 2, "which asks again")

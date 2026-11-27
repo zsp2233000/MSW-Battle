@@ -50,7 +50,6 @@ script FactionWarMapUI extends Logic
         self._T.asking = false
         self._T.askedAt = 0
         self._T.message = nil
-        self._T.messageTown = ""
         self._T.key = _InputService:ConnectEvent(KeyDownEvent, self.HandleKey)
         self._T.wheel = _InputService:ConnectEvent(MouseScrollEvent, self.HandleWheel)
     end
@@ -281,18 +280,16 @@ script FactionWarMapUI extends Logic
             if self._T.open then self:ShowHere() end
         end
         if self._T.open and self._T.board ~= nil then self:ShowAge() end
-        self:ExpireStale()
+        self:ExpireAsk()
     end
 
     @ExecSpace("ClientOnly")
-    method void ExpireStale()
-        -- An answer that never came must not lock the NPCs, and a message belongs to the town it answered for.
+    method void ExpireAsk()
+        -- An answer that never came (the server drops a press it cannot answer) must not lock the NPCs for good.
         if self._T.asking and DateTime.UtcNow.Elapsed - self._T.askedAt > self.AskTimeout * 1000 then
             self._T.asking = false
             log("[VRF][FactionWarMap] ui select answer timed out")
         end
-        local player = _UserService.LocalPlayer
-        if self._T.message ~= nil and (not isvalid(player) or player.CurrentMapName ~= self._T.messageTown) then self:DismissMessage() end
     end
 
     @ExecSpace("ClientOnly")
@@ -399,7 +396,7 @@ script FactionWarMapUI extends Logic
             -- A relist answered after the player closed the map is not an answer to anything the player is waiting for.
             if relisted and not wasOpen then return end
             local here = _UserService.LocalPlayer
-            if isvalid(here) and here.CurrentMapName == town then self:ShowMessage(town, self:MessageFor(status, header)) end
+            if isvalid(here) and here.CurrentMapName == town then self:ShowMessage(self:MessageFor(status, header)) end
             return
         end
         local player = _UserService.LocalPlayer
@@ -442,13 +439,13 @@ script FactionWarMapUI extends Logic
     end
 
     @ExecSpace("ClientOnly")
-    method void ShowMessage(string town, string text)
-        -- The message window: one window, above the map, with the one 確定 button; it needs no map to be open.
+    method void ShowMessage(string text)
+        -- The message window: one window, above the map, with the one 確定 button; it needs no map to be open. It stays until 確定, also when
+        -- the answer sends the player away (a fallen departure town lands the player in their capital).
         if text == "" then return end
         local window = self:Ui("Message")
         if not isvalid(window) then return end
         self._T.message = text
-        self._T.messageTown = town
         self:SetText("Message/Window/Text", text)
         window:SetEnable(true)
         log("[VRF][FactionWarMap] ui message " .. text)
@@ -456,10 +453,9 @@ script FactionWarMapUI extends Logic
 
     @ExecSpace("ClientOnly")
     method void DismissMessage()
-        -- 確定 (or leaving the town): close the message window; the NPCs answer again.
+        -- 確定: close the message window; the NPCs answer again.
         if self._T.message == nil then return end
         self._T.message = nil
-        self._T.messageTown = ""
         local window = self:Ui("Message")
         if isvalid(window) then window:SetEnable(false) end
         log("[VRF][FactionWarMap] ui message dismissed")

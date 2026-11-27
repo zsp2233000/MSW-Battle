@@ -87,15 +87,16 @@ test('the NPC press asks the server, which answers once with the whole selection
   assert.match(select, /self:Targets\(town, faction, towns\)/, 'the targets are the server\'s Targets');
   assert.match(select, /_FactionWarMap:Board\(towns\)/, 'the map board is built from the same read');
   assert.match(select, /\{ towns = board\.towns, links = board\.links \}/, 'with its links');
-  const ready = select.slice(select.indexOf('else\n                local board'));
+  const ready = select.slice(select.indexOf('else\n                    local board'));
   assert.match(ready, /"READY"[^]*_FactionWarMap:WatchMap\(userId, player\)/, 'only READY registers the map viewer');
   assert.equal((select.match(/WatchMap/g) || []).length, 1, 'and nothing else does');
   for (const status of ['UNAVAILABLE', 'NOT_OWNED', 'NO_TARGETS']) {
     assert.match(select, new RegExp(`ReceiveSelect\\(town, "${status}", \\{\\}, \\{\\}, \\{\\}, userId\\)`), `${status} answers with the status alone`);
   }
   assert.match(select, /ReceiveSelect\(town, "ENGAGED", \{ target = _MatchFlow:TargetForUser\(userId\) \}, \{\}, \{\}, userId\)/, 'ENGAGED also names the town being attacked (#127)');
-  assert.match(select, /elseif #self:Targets\(town, faction, towns\) == 0 then\s+[^\n]*\n\s+self:ReceiveSelect\(town, "NO_TARGETS"/, 'an owner with no adjacent enemy town gets NO_TARGETS, not an empty map (#127)');
+  assert.match(select, /local targets = self:Targets\(town, faction, towns\)\s+if #targets == 0 then\s+[^\n]*\n\s+self:ReceiveSelect\(town, "NO_TARGETS", \{\}, \{\}, \{\}, userId\)\s+else/, 'an owner with no adjacent enemy town gets NO_TARGETS, not an empty map (#127)');
   assert.ok(select.indexOf('"NO_TARGETS"') < select.indexOf('"READY"'), 'and it is decided before READY registers the viewer');
+  assert.equal((select.match(/self:Targets\(/g) || []).length, 1, 'from the one list that READY then carries');
   assert.match(select, /_FactionWarLanding:Judge\(userId, \{ kind = "CHECK", town = town, board = towns \}\)/, 'a fallen departure town still sends the player to their capital');
   assert.match(body(text, 'CanTarget'), /self:Targets\(origin, faction, towns\)/, 'the attack check uses the same list');
   assert.match(body(text, 'AttackFor'), /self:CanTarget\(origin, target, faction, towns\)/, 'and repeats it on the server');
@@ -201,16 +202,17 @@ test('only a status other than READY shows a message, with the words of the tick
   assert.doesNotMatch(words, /<color|#[0-9A-Fa-f]{6}/, 'the colour is not repeated here');
   const select = body(text, 'ShowSelect');
   const rest = select.slice(select.indexOf('if status ~= "READY" then'), select.indexOf('local player = _UserService.LocalPlayer'));
-  assert.match(rest, /self:ShowMessage\(town, self:MessageFor\(status, header\)\)/, 'every other status goes to the message window');
+  assert.match(rest, /self:ShowMessage\(self:MessageFor\(status, header\)\)/, 'every other status goes to the message window');
   assert.doesNotMatch(rest, /Reveal|RequestOpen|SetMode\("select"/, 'and never to the map');
   assert.match(select, /self\._T\.asking = false/, 'the answer ends the wait for it, shown or not');
   assert.match(body(text, 'ShowMessage'), /self:Ui\("Message"\)[^]*window:SetEnable\(true\)/);
   assert.match(body(text, 'DismissMessage'), /window:SetEnable\(false\)/);
-  assert.match(body(text, 'OnUpdate'), /self:ExpireStale\(\)/, 'the wait times out and a message follows its town');
-  assert.match(body(text, 'ExpireStale'), /self\.AskTimeout \* 1000[^]*self\._T\.asking = false[^]*self:DismissMessage\(\)/);
+  assert.match(body(text, 'OnUpdate'), /self:ExpireAsk\(\)/, 'the wait times out');
+  assert.match(body(text, 'ExpireAsk'), /self\.AskTimeout \* 1000[^]*self\._T\.asking = false/);
+  assert.doesNotMatch(text, /messageTown/, 'a message is not tied to a town: a fallen town sends the player away and the message must stay');
   assert.match(text, /property number AskTimeout = \d+/, 'the timeout is a property');
   assert.match(body(text, 'Open'), /self\._T\.message ~= nil/, 'the map button opens nothing behind a message');
-  for (const method of ['MessageFor', 'ShowMessage', 'DismissMessage', 'ExpireStale']) assert.match(annotation(text, method), /@ExecSpace\("ClientOnly"\)/, `${method} runs on the client only`);
+  for (const method of ['MessageFor', 'ShowMessage', 'DismissMessage', 'ExpireAsk']) assert.match(annotation(text, method), /@ExecSpace\("ClientOnly"\)/, `${method} runs on the client only`);
   assert.match(annotation(source('RootDesk/MyDesk/Matchmaking/MatchFlow.mlua'), 'TargetForUser'), /@ExecSpace\("ServerOnly"\)/, 'the target of a ticket is read on the server');
 });
 
