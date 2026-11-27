@@ -1,9 +1,9 @@
 -- Maker end-to-end for #108 (two matches contest one town). Needs five virtual players, added in Play before running this in server_main:
---   add_virtual_player -profile_code wp2611 -nickname RedOne    (RED,  Zuoying, 3 tanks, home of match 1)
---   add_virtual_player -profile_code wp2612 -nickname BlueOne    (BLUE, Gushan,  1 tank,  away of match 1)
---   add_virtual_player -profile_code wp2613 -nickname RedTwo     (RED,  Zuoying, 3 tanks, home of match 2)
---   add_virtual_player -profile_code wp2614 -nickname BlueTwo    (BLUE, Gushan,  1 tank,  away of match 2)
---   add_virtual_player -profile_code wp2615 -nickname BlueIdle   (BLUE, Gushan,  stands still, must be sent home exactly once)
+--   add_virtual_player -profile_code wp2611 -nickname RedOne    (A,  Zuoying, 3 tanks, home of match 1)
+--   add_virtual_player -profile_code wp2612 -nickname BlueOne    (B, Gushan,  1 tank,  away of match 1)
+--   add_virtual_player -profile_code wp2613 -nickname RedTwo     (A,  Zuoying, 3 tanks, home of match 2)
+--   add_virtual_player -profile_code wp2614 -nickname BlueTwo    (B, Gushan,  1 tank,  away of match 2)
+--   add_virtual_player -profile_code wp2615 -nickname BlueIdle   (B, Gushan,  stands still, must be sent home exactly once)
 -- ADR 0016 updates: written, not run. Uses REAL local town storage (Gushan starts at 20); STEP 9 deletes it. Keep the real player in formationlobby.
 -- Steps are numbered; set STEP below, dispatch, wait for the line it announces.
 --   1 SETUP      server_main, ~90 s, wait "SETUP PASS"
@@ -82,7 +82,7 @@ local ok, reason = pcall(function()
         setup(r2, three)
         setup(b1, {{ monsterId = "monster_tank", x = -3.25, y = -1.25 }})
         setup(b2, {{ monsterId = "monster_tank", x = -3.25, y = -1.25 }})
-        for user, value in pairs({ [r1] = "RED", [r2] = "RED", [b1] = "BLUE", [b2] = "BLUE", [idle] = "BLUE" }) do
+        for user, value in pairs({ [r1] = "A", [r2] = "A", [b1] = "B", [b2] = "B", [idle] = "B" }) do
             local saved = false
             _FormationStorage:Write(user.PlayerComponent.ProfileCode, _FactionWar.FactionKey, "", value, function(code) saved = code == 0 end)
             await(function() return saved end, 100)
@@ -137,13 +137,13 @@ local ok, reason = pcall(function()
         local towns
         assert(await(function()
             towns = readTowns()
-            return towns ~= nil and towns.gushan.owner == "RED" and towns.settled ~= nil
+            return towns ~= nil and towns.gushan.owner == "A" and towns.settled ~= nil
         end, 2000), "Gushan changed flag within 200 s")
         wait(5)
         towns = readTowns()
         assert(towns.gushan.strength == 100 and _FactionWarTownDocument:EpochOf(towns, "gushan") == 1, "refilled to 100 and counted once, got " .. tostring(towns.gushan.strength) .. "/" .. tostring(_FactionWarTownDocument:EpochOf(towns, "gushan")))
         assert(#towns.settled == 1, "only one match left a record, got " .. tostring(#towns.settled))
-        assert(towns.zuoying.strength == 100 and towns.zuoying.owner == "RED" and towns.nanzih.strength == 100 and towns.yancheng.strength == 100 and towns.yancheng.owner == "BLUE", "no other town moved")
+        assert(towns.zuoying.strength == 100 and towns.zuoying.owner == "A" and towns.nanzih.strength == 100 and towns.yancheng.strength == 100 and towns.yancheng.owner == "B", "no other town moved")
         assert(await(function() return idle.CurrentMapName == "yancheng" end, 300), "the idle blue player was sent to Yancheng")
         log("[VRF][ContestE2E] CAPTURE PASS flipping match=" .. tostring(towns.settled[1].k))
     elseif STEP == 4 then
@@ -171,17 +171,17 @@ local ok, reason = pcall(function()
         end
         log("[VRF][ContestE2E] REDELIVER PASS " .. key .. " status=" .. tostring(status) .. " flipped=" .. tostring(outcome.flipped))
     elseif STEP == 6 then
-        -- The actual capturer and the exempt RED player both go back to their origin.
+        -- The actual capturer and the exempt A player both go back to their origin.
         assert(await(function()
             users = find()
             r1, b1, r2, b2, idle = users.wp2611, users.wp2612, users.wp2613, users.wp2614, users.wp2615
             return isvalid(r1) and isvalid(r2) and isvalid(b1) and isvalid(b2) and isvalid(idle)
                 and r1.CurrentMapName == "zuoying" and r2.CurrentMapName == "zuoying"
                 and b1.CurrentMapName == "yancheng" and b2.CurrentMapName == "yancheng" and idle.CurrentMapName == "yancheng"
-        end, 600), "both RED players are in Zuoying and every BLUE player is in Yancheng")
+        end, 600), "both A players are in Zuoying and every B player is in Yancheng")
         for _, user in ipairs({ r1, b1, r2, b2, idle }) do assert(await(function() return not _FactionWarAttack:IsEngaged(id(user)) end), "unlocked") end
         local towns = readTowns()
-        assert(towns.gushan.owner == "RED" and towns.gushan.strength == 100, "the board is as the one flipping match left it")
+        assert(towns.gushan.owner == "A" and towns.gushan.strength == 100, "the board is as the one flipping match left it")
         -- Experience is independent of the town result: both blue players lost their tank and both matches are in their history.
         local keys = {}
         for _, user in ipairs({ b1, b2 }) do
@@ -237,7 +237,7 @@ local ok, reason = pcall(function()
                 and isvalid(b1) and b1.CurrentMapName == "gushan" and not _FactionWarAttack:IsEngaged(id(b1))
         end, 1500), "RedOne returned to Zuoying and BlueOne returned to Gushan (its own town again); both unlocked")
         local towns = readTowns()
-        assert(towns.gushan.owner == "BLUE" and towns.gushan.strength == 60 and _FactionWarTownDocument:EpochOf(towns, "gushan") == 2, "no strength was deducted: Gushan is still blue, 60, counted twice")
+        assert(towns.gushan.owner == "B" and towns.gushan.strength == 60 and _FactionWarTownDocument:EpochOf(towns, "gushan") == 2, "no strength was deducted: Gushan is still blue, 60, counted twice")
         assert(towns.zuoying.strength == 100 and towns.nanzih.strength == 100 and towns.yancheng.strength == 100, "no town lost strength")
         log("[VRF][ContestE2E] LANDING2 PASS")
     elseif STEP == 9 then

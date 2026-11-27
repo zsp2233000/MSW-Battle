@@ -253,7 +253,7 @@ script FactionWarMap extends Logic
 
     @ExecSpace("Client")
     method void ReceiveFaction(string faction)
-        -- RED, BLUE, "" (none yet) or UNREADABLE.
+        -- A, B, "" (none yet) or UNREADABLE.
         _FactionWarMapUI:ShowFaction(faction)
     end
 

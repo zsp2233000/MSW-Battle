@@ -1,5 +1,5 @@
--- Maker end-to-end for #110 (integration): the human-versus-guard timeout race. Ticket A (RED, Zuoying, attacks Gushan) starts its ten-second guard clock at t0.
--- Ticket B (BLUE, Gushan, attacks Zuoying: the opposite direction) queues at a measured offset around that clock, one trial per step group:
+-- Maker end-to-end for #110 (integration): the human-versus-guard timeout race. Ticket A (Zuoying, attacks Gushan) starts its ten-second guard clock at t0.
+-- Ticket B (Gushan, attacks Zuoying: the opposite direction) queues at a measured offset around that clock, one trial per step group:
 --   trial 1  B queues about 9.5 s after t0   (before the clock: the two humans pair, A's clock is cleared and no guard claim is made)
 --   trial 2  B queues about 9.9 s after t0   (just before: normally a human pairing; either outcome is allowed inside the band below)
 --   trial 3  B queues about 10.1 s after t0  (just after: A's claim has fired, A fights the guard and B is left waiting)
@@ -10,15 +10,15 @@
 -- exactly one match room, a ticket never in two rooms, the guard claim dropped when a human match stands (A's and B's clocks cleared, no guard- key appears, still none
 -- 1.5 s after the clock would have fired), B never pulled into A's guard fight (B keeps waiting and is cancelled in place), the result settled once (at most one record,
 -- strength arithmetic against the board before the trial) and each profile credited with its experience once.
--- A trial that pairs humans plays a WHOLE FIGHT (3 tanks against 1 tank, about a minute: FORCE.HUMAN is false in the ROOM steps); a guard fight is FORCED to a RED win (the
+-- A trial that pairs humans plays a WHOLE FIGHT (3 tanks against 1 tank, about a minute: FORCE.HUMAN is false in the ROOM steps); a guard fight is FORCED to an A win (the
 -- guard's units are killed in the room) so it takes seconds. Set FORCE.HUMAN to true in the ROOM steps to force the human fights too.
 -- NOT reachable in Maker: the local queue confirms every cancel and cannot pair a ticket that is being claimed (a claimed ticket is not "live"), so the deferred-human-result
 -- path of the claim ("[VRF][Guard] human result deferred", "[VRF][Guard] a human match stands") and the native service answering AlreadyMatched (ADR 0011) need two real accounts
 -- at the ten-second mark; they are rows of docs/Issue-110-War-Acceptance.md.
 -- Joins: 2 of the 10 virtual players a Play allows (kicked players count too); nobody is kicked, both players are reused by all four trials.
---   add_virtual_player -profile_code wp2638 -nickname RaceRed110    (A, RED,  3 tanks, stands in Zuoying)
---   add_virtual_player -profile_code wp2639 -nickname RaceBlue110   (B, BLUE, 1 tank,  stands in Gushan)
--- Writes the REAL town storage (the match room reads the real one; Gushan starts BLUE at 100 and cannot fall in four trials); STEP 15 deletes it. Keep the real player in formationlobby.
+--   add_virtual_player -profile_code wp2638 -nickname RaceRed110    (A, 3 tanks, stands in Zuoying)
+--   add_virtual_player -profile_code wp2639 -nickname RaceBlue110   (B, 1 tank,  stands in Gushan)
+-- Writes the REAL town storage (the match room reads the real one; Gushan starts B at 100 and cannot fall in four trials); STEP 15 deletes it. Keep the real player in formationlobby.
 -- STEP 1 runs BEFORE any virtual player exists: it wipes what an earlier run left for the two profiles (a profile with a last town is placed there at login), writes their factions
 -- and seeds the board. The guard clock is the real 10 s here (every other e2e parks it at 600 s); STEP 15 puts it back to 10.
 -- Steps are numbered; set STEP below, dispatch, wait for the line it announces. ROOM steps run in server_instance_<matchKey> (the key is in the "TRIAL n" line), after
@@ -147,7 +147,7 @@ local ok, reason = pcall(function()
     if STEP == 1 then
         assert(a == nil and b == nil, "no virtual player may be connected yet: stop, play, and run STEP 1 before the adds")
         for _, profile in ipairs({ A_PROFILE, B_PROFILE }) do wipe(profile) end
-        for profile, faction in pairs({ [A_PROFILE] = "RED", [B_PROFILE] = "BLUE" }) do
+        for profile, faction in pairs({ [A_PROFILE] = "A", [B_PROFILE] = "B" }) do
             local saved = false
             _FormationStorage:Write(profile, _FactionWar.FactionKey, "", faction, function(code) saved = code == 0 end)
             assert(await(function() return saved end, 100), "faction written for " .. profile)
@@ -185,7 +185,7 @@ local ok, reason = pcall(function()
         assert(latency < 3000, "AttackFor reaches the queue within 3 s, took " .. tostring(latency) .. " ms")
         _FactionWar._T.raceLatency = latency
         local towns = readTowns()
-        assert(towns.gushan.owner == "BLUE" and towns.gushan.strength == 100 and towns.zuoying.strength == 100, "the board is the initial one, found " .. board(towns))
+        assert(towns.gushan.owner == "B" and towns.gushan.strength == 100 and towns.zuoying.strength == 100, "the board is the initial one, found " .. board(towns))
         log("[VRF][Interleave] SETUP PASS latency=" .. tostring(latency) .. " ms (" .. tostring(first) .. ", " .. tostring(second) .. ") " .. board(towns))
     elseif STEP == 3 or STEP == 6 or STEP == 9 or STEP == 12 then
         local trial = TRIALS[STEP]
@@ -286,7 +286,7 @@ local ok, reason = pcall(function()
             .. " outcome=" .. outcome .. " inClaim=" .. tostring(inClaim) .. " rooms=1 key=" .. keyA .. " before " .. board(before)
             .. "; wait for [VRF][MatchedBattle] admission started=true, then run the ROOM step in server_instance_" .. keyA)
     elseif STEP == 4 or STEP == 7 or STEP == 10 or STEP == 13 then
-        -- In the match room: let the fight end (a human fight is played, a guard fight is forced to a RED win), wait for the settlement, return everyone.
+        -- In the match room: let the fight end (a human fight is played, a guard fight is forced to an A win), wait for the settlement, return everyone.
         local map = _EntityService:GetEntityByPath("/maps/matchprobe")
         local battle = map:GetComponent("script.BattleSession")
         local flow = map:GetFirstChildComponentByTypeName("script.MatchedBattle", true)
@@ -301,7 +301,7 @@ local ok, reason = pcall(function()
         end
         local forced = FORCE[kind] == true
         if forced then
-            -- A is the home side (PLAYER) in a guard fight and the first ticket (home) of a human pairing; kill the other side so that RED wins.
+            -- A is the home side (PLAYER) in a guard fight and the first ticket (home) of a human pairing; kill the other side so that A wins.
             local doomed = battle.HomeProfile == A_PROFILE and "ENEMY" or "PLAYER"
             local units = map:GetChildComponentsByTypeName("BattleUnit", true)
             if #units == 0 then units = map:GetChildComponentsByTypeName("script.BattleUnit", true) end

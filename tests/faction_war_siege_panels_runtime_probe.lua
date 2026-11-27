@@ -52,10 +52,10 @@ local ok, failure = pcall(function()
         assert(await(function() return not record.pending and record.saved.activeSlot == slot end), "active slot confirmed")
         local previous, read
         _FactionWar:ReadFaction(REAL, function(value) previous, read = value, true end)
-        assert(await(function() return read end) and (previous == "" or previous == "RED"), "the real profile must be unaligned or RED")
+        assert(await(function() return read end) and (previous == "" or previous == "A"), "the real profile must be unaligned or A")
         if previous == "" then
             local written
-            _FormationStorage:Write(REAL, _FactionWar.FactionKey, "", "RED", function(code) written = code == 0 end)
+            _FormationStorage:Write(REAL, _FactionWar.FactionKey, "", "A", function(code) written = code == 0 end)
             assert(await(function() return written end), "faction stored")
         end
         local board = _FactionWarTownDocument:InitialTowns()

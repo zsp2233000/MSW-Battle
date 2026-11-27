@@ -36,7 +36,7 @@ local function exercise(kind)
     _FactionWarGuard = { Roster = function() return {} end, IsGuardProfile = function(_, profile) return string.sub(profile, 1, 6) == "guard:" end }
     _AbsentResult = { Compose = function() return {} end, Write = function() error("everyone saw the result page: nothing is owed") end,
         Announce = function() error("nobody to announce") end, Clear = function() end }
-    _FactionWar = { ReadFaction = function(_, profile, complete) complete(profile == "red-profile" and "RED" or "BLUE") end }
+    _FactionWar = { ReadFaction = function(_, profile, complete) complete(profile == "red-profile" and "A" or "B") end }
     _FactionWarAttack = { Settle = function(_, key, home, away, result, battleKind, complete)
         settleCount = settleCount + 1
         settled = function()
@@ -92,7 +92,7 @@ local function exercise(kind)
         match:OnUpdate(1)
         match:OnUpdate(1)
         assert(#redPackets == before + 1 and redPackets[#redPackets].revision > last.revision and settleCount == 1)
-        board.zuoying = { owner = "BLUE", strength = 100 }
+        board.zuoying = { owner = "B", strength = 100 }
         match:HandleWarResultRoomBoardChanged({})
         match:OnUpdate(1)
         last = redPackets[#redPackets]
@@ -150,7 +150,7 @@ local function exerciseAbsent(kind, blueArrives)
     _RoomService = { RoomKey = battle.MatchKey }
     _FormationHandoff = { Roster = function() return {} end }
     _FactionWarGuard = { Roster = function() return {} end, IsGuardProfile = function(_, profile) return string.sub(profile, 1, 6) == "guard:" end }
-    _FactionWar = { ReadFaction = function(_, profile, complete) complete(profile == "red-profile" and "RED" or "BLUE") end }
+    _FactionWar = { ReadFaction = function(_, profile, complete) complete(profile == "red-profile" and "A" or "B") end }
     _FactionWarAttack = { Settle = function(_, key, home, away, result, battleKind, complete)
         settled = function()
             local save = doc:Apply(board, { matchKey = key, home = home, away = away, result = result, kind = battleKind })

@@ -122,9 +122,9 @@ view = doc:Present(doc:Compose("WAR", "m", "LOSE", { origin = "zuoying", target 
 check(#view.rows == 0 and view.conclusion == "過期戰果：本場不計兵力", "a stale result")
 view = doc:Present(doc:Compose("WAR", "m", "LOSE", { origin = "zuoying", target = "gushan", status = "FAILED", conclusion = "戰果結算失敗，兵力未變動" }))
 check(#view.rows == 0 and view.conclusion == "戰果結算失敗，兵力未變動", "a failed settlement")
-view = doc:Present(doc:Compose("WAR", "m", "WIN", { origin = "zuoying", target = "gushan", status = "SAVED", conclusion = "奪城：鼓山 改為 紅方",
-    originBefore = 100, originAfter = 100, targetBefore = 20, targetAfter = 100, capturedTown = "gushan", newOwner = "RED" }))
-check(view.conclusion == "奪城：<c>鼓山</c> 改為 紅方" and view.rows[2] == "<c>鼓山</c>　兵力 20 → 100", "a captured town is highlighted in the conclusion")
+view = doc:Present(doc:Compose("WAR", "m", "WIN", { origin = "zuoying", target = "gushan", status = "SAVED", conclusion = "奪城：鼓山 改為 A 方",
+    originBefore = 100, originAfter = 100, targetBefore = 20, targetAfter = 100, capturedTown = "gushan", newOwner = "A" }))
+check(view.conclusion == "奪城：<c>鼓山</c> 改為 A 方" and view.rows[2] == "<c>鼓山</c>　兵力 20 → 100", "a captured town is highlighted in the conclusion")
 
 -- Delivery in the static room: the window is pushed once per match, again after a reconnect, never in a match room.
 local users, recovered, hinted, pushed, instance = {}, {}, {}, {}, false

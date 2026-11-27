@@ -1,6 +1,6 @@
 -- Maker end-to-end for #106. One virtual player, added in Play before running this in server_main:
 --   add_virtual_player -profile_code wp2601 -nickname WarA
--- STEP 1 prepares it (4-unit formation, RED, standing in Zuoying) and takes ~20 s; wait for "SETUP PASS".
+-- STEP 1 prepares it (4-unit formation, A, standing in Zuoying) and takes ~20 s; wait for "SETUP PASS".
 -- STEP 2 queues against Gushan, cancels after 3 s and checks that no guard fight starts after the ten seconds ("CANCEL PASS" after ~14 s).
 -- STEP 3 queues again, waits for the guard clock and the move into the match room ("GUARD ENTRY PASS"), then the battle runs; wait for RESULT.
 -- STEP 4 (run inside server_instance_<matchKey>): _MatchFlow:ReturnForUser for the player in the room.
@@ -33,8 +33,8 @@ local ok, reason = pcall(function()
         local saved, current = false, nil
         _FactionWar:ReadFaction(a.PlayerComponent.ProfileCode, function(faction) current = faction end)
         assert(await(function() return current ~= nil end, 100), "faction read")
-        if current == "RED" then saved = true
-        else _FormationStorage:Write(a.PlayerComponent.ProfileCode, _FactionWar.FactionKey, current, "RED", function(code) saved = code == 0 end) end
+        if current == "A" then saved = true
+        else _FormationStorage:Write(a.PlayerComponent.ProfileCode, _FactionWar.FactionKey, current, "A", function(code) saved = code == 0 end) end
         assert(await(function() return saved end, 100), "faction saved")
         assert(_FactionWar:Move(a, "zuoying"), "move dispatched")
         assert(await(function() return a.CurrentMapName == "zuoying" end), "in Zuoying")

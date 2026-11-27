@@ -39,6 +39,10 @@ script AbsentResult extends Logic
         if record.kind ~= "WAR" and record.kind ~= "LOBBY" then return nil end
         if record.result ~= "WIN" and record.result ~= "LOSE" and record.result ~= "DRAW" then return nil end
         if record.kind == "WAR" and type(record.war) ~= "table" then return nil end
+        if record.kind == "WAR" and record.war.newOwner ~= nil then
+            -- ADR 0018: a stored retired colour id reads as A / B; a value that is no faction is dropped and the rest of the result stays readable.
+            record.war.newOwner = _FactionWarTownDocument:NormalizeFaction(record.war.newOwner)
+        end
         return record
     end
 

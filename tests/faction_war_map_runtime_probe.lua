@@ -18,8 +18,8 @@ local function call(start)
     return box.value
 end
 local function board(gushan)
-    return { nanzih = { owner = "RED", strength = 100 }, zuoying = { owner = "RED", strength = 80 },
-        gushan = { owner = "BLUE", strength = gushan }, yancheng = { owner = "BLUE", strength = 100 } }
+    return { nanzih = { owner = "A", strength = 100 }, zuoying = { owner = "A", strength = 80 },
+        gushan = { owner = "B", strength = gushan }, yancheng = { owner = "B", strength = 100 } }
 end
 local function viewers()
     local n = 0
@@ -41,7 +41,7 @@ local ok, reason = pcall(function()
 
     -- Stand in a town the player's faction owns on this board, so no eviction interferes.
     local faction = call(function(done) _FactionWar:ReadFaction(player.PlayerComponent.ProfileCode, done) end)
-    local town = faction == "BLUE" and "gushan" or "zuoying"
+    local town = faction == "B" and "gushan" or "zuoying"
     local arrival = _EntityService:GetEntityByPath("/maps/" .. town):GetChildByName("TownArrival")
     _TeleportService:TeleportToMapPosition(player, arrival.TransformComponent.WorldPosition, town)
     log("[VRF][MapProbe] SETUP faction=" .. tostring(faction) .. " town=" .. town)

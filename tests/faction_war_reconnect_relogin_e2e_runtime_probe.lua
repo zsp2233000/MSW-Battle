@@ -1,6 +1,6 @@
 -- Maker end-to-end for #109 (P6): a player really leaves in the middle of a guard fight and logs in again with a NEW user id (KickUser, then add_virtual_player
 -- -profile_code wp2625). Two modes, set MODE below; each run is a fresh Play (stop, refresh, play) with one virtual player:
---   add_virtual_player -profile_code wp2625 -nickname Relogin109   (RED, Zuoying, 4 units; Gushan is seeded at 10, so a guard win captures it)
+--   add_virtual_player -profile_code wp2625 -nickname Relogin109   (A, Zuoying, 4 units; Gushan is seeded at 10, so a guard win captures it)
 -- ABORTED the only player really leaves in the middle of the fight: the engine reclaims a match room about a second after its last user leaves (measured in
 --         Maker), so the fight never reaches a result and nothing is settled. The login finds no room ("[VRF][MatchFlow] rejoin match=... room=none"),
 --         closes the stale ticket ("STALE_ROOM_RECOVERY"), finds no stored result and lands the player in the town they set out from, with the towns untouched
@@ -17,7 +17,7 @@
 --              view of the player: the entity stays in the match room and keeps it alive). Then (ABORTED) run the console command above at once, or (STALE) run STEP 4 first
 --   4 PREPARE  server_main, STALE only: the fault adapter hides every room. Then run the console command above
 --   5 CHECK    server_main, after the new virtual player appeared.
---              ABORTED: no room is left, the ticket is closed, the new entity stands in Zuoying (where it set out from), Gushan is still BLUE / 10 with no stored
+--              ABORTED: no room is left, the ticket is closed, the new entity stands in Zuoying (where it set out from), Gushan is still B / 10 with no stored
 --                       result and the match is not in the experience history ("ABORTED PASS")
 --              STALE:  the new entity is in Zuoying, holds no ticket, the town document is untouched, the match is in the history once ("STALE PASS");
 --                      look for "rebuilt=true" on the landing and one "landing notice ... town=zuoying ... recorded=true" in server_main
@@ -80,7 +80,7 @@ local ok, reason = pcall(function()
         _FormationService:ActivateForUser(userId, slotId, record.saved.slots[tostring(slotId)].revision)
         assert(await(function() return not record.pending and record.saved.activeSlot == slotId end), "activate confirmed")
         local saved = false
-        _FormationStorage:Write(PROFILE, _FactionWar.FactionKey, "", "RED", function(code) saved = code == 0 end)
+        _FormationStorage:Write(PROFILE, _FactionWar.FactionKey, "", "A", function(code) saved = code == 0 end)
         await(function() return saved end, 100)
         local towns = _FactionWarTownDocument:InitialTowns()
         towns.gushan.strength = 10
@@ -116,7 +116,7 @@ local ok, reason = pcall(function()
                 towns = readTowns()
                 return towns ~= nil and recordsOf(towns, key) == 1
             end, 3000), "the match settled and left its record")
-            assert(towns.gushan.owner == "RED" and towns.gushan.strength == 100, "Gushan was captured (a guard win; run again after a loss)")
+            assert(towns.gushan.owner == "A" and towns.gushan.strength == 100, "Gushan was captured (a guard win; run again after a loss)")
         end
         _UserService:KickUser(user.PlayerComponent.UserId, KickReason.ETC)
         assert(await(function() return find() == nil end, 100), "the entity left")
@@ -138,7 +138,7 @@ local ok, reason = pcall(function()
             userId = a.PlayerComponent.UserId
             assert(await(function() return _MatchFlow._T.records[userId] == nil and not _FactionWarAttack:IsEngaged(userId) end, 100), "the stale ticket is closed and nothing is locked")
             local towns = readTowns()
-            assert(towns.gushan.owner == "BLUE" and towns.gushan.strength == 10 and recordsOf(towns, key) == 0 and #(towns.settled or {}) == 0, "nothing was settled")
+            assert(towns.gushan.owner == "B" and towns.gushan.strength == 10 and recordsOf(towns, key) == 0 and #(towns.settled or {}) == 0, "nothing was settled")
             assert(creditedOnce(key) == 0, "no experience was credited for a match that never finished")
             log("[VRF][ReconnectRelogin] ABORTED PASS match=" .. key)
         else
@@ -150,7 +150,7 @@ local ok, reason = pcall(function()
             assert(await(function() return _MatchFlow._T.records[userId] == nil and not _FactionWarAttack:IsEngaged(userId) end, 100), "the stale ticket is closed and nothing is locked")
             assert(_FactionWarLanding._T.outcomes[key] == nil, "this room holds no outcome of its own: the notice must use the stored record")
             local towns = readTowns()
-            assert(towns.gushan.owner == "RED" and towns.gushan.strength == 100 and recordsOf(towns, key) == 1 and #towns.settled == 1, "the town document was only read")
+            assert(towns.gushan.owner == "A" and towns.gushan.strength == 100 and recordsOf(towns, key) == 1 and #towns.settled == 1, "the town document was only read")
             assert(creditedOnce(key) == 1, "the match is in the history exactly once")
             log("[VRF][ReconnectRelogin] STALE PASS match=" .. key)
         end

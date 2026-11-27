@@ -2,8 +2,8 @@
 -- This probe changes the Maker local board and the two disposable accounts. Never use production or valuable saves.
 local STEP = "SETUP" -- SETUP, QUEUE, ARM, CLIENT, RECONNECT, RECHECK, BOARD, BOARD_CLIENT, LOBBY_CLIENT, RETURN, CLEANUP
 local KIND = "HUMAN" -- HUMAN, GUARD or HUMAN_LOSS (#119: the real client loses its own departure town in the match); one fresh Play per case
-local RED_PROFILE = "SET_ME" -- the real Maker client must play RED, so its screen can be inspected
-local BLUE_PROFILE = "wp2624" -- virtual BLUE only in HUMAN
+local A_PROFILE = "SET_ME" -- the real Maker client must play A, so its screen can be inspected
+local B_PROFILE = "wp2624" -- virtual B only in HUMAN
 local MATCH_KEY = "SET_ME" -- only BOARD (from the room/transfer logs)
 local function await(predicate, count)
     for _ = 1, count or 300 do if predicate() then return true end wait(0.1) end
@@ -104,7 +104,7 @@ local function inspectSaved(player, battle, coordinator, ui, destination)
     assert(frame.RectSize.y == 360 + ui.WarExtraHeight and frame.anchoredPosition.y == 90 + ui.WarExtraHeight / 2, "window grown by the war section")
     assert(label(ui.warOrigin) == highlight .. "左營</color>　兵力 100 → 100", "origin row")
     assert(label(ui.warTarget) == highlight .. "鼓山</color>　兵力 " .. before .. " → " .. after, "target row")
-    local conclusion = KIND == "HUMAN" and ("奪城：" .. highlight .. "鼓山</color> 改為 紅方") or "未易主"
+    local conclusion = KIND == "HUMAN" and ("奪城：" .. highlight .. "鼓山</color> 改為 A 方") or "未易主"
     assert(label(ui.warConclusion) == conclusion, "ownership conclusion")
     checkReturnButton(destination, destination == "nanzih")
     assert(await(function() return battle.ExperienceResult.status == "SAVED" end), "experience still settles")
@@ -153,7 +153,7 @@ local ok, failure = pcall(function()
         local player, battle, coordinator, ui = clientMatch()
         inspectSaved(player, battle, coordinator, ui, "nanzih")
     elseif STEP == "SETUP" then
-        assert(not _RoomService:IsInstanceRoom() and RED_PROFILE ~= "SET_ME", "set RED_PROFILE and dispatch in server_main")
+        assert(not _RoomService:IsInstanceRoom() and A_PROFILE ~= "SET_ME", "set A_PROFILE and dispatch in server_main")
         local found = users()
         _FormationService.StorageKey = "Result115_" .. _UtilLogic:NewGuid()
         local roster = {}
@@ -161,31 +161,31 @@ local ok, failure = pcall(function()
             local monster = (KIND == "HUMAN" or KIND == "HUMAN_LOSS") and "monster_tank" or (index <= 2 and "monster_dark_centaur" or "monster_shooter")
             roster[index] = { monsterId = monster, x = -3.25 - (index - 1) * 0.75, y = -1.25 }
         end
-        prepare(found[RED_PROFILE], "RED", roster)
-        if KIND == "HUMAN" then prepare(found[BLUE_PROFILE], "BLUE", {{ monsterId = "monster_tank", x = -3.25, y = -1.25 }}) end
+        prepare(found[A_PROFILE], "A", roster)
+        if KIND == "HUMAN" then prepare(found[B_PROFILE], "B", {{ monsterId = "monster_tank", x = -3.25, y = -1.25 }}) end
         if KIND == "HUMAN_LOSS" then
             local three = {}
             for index = 1, 3 do three[index] = { monsterId = "monster_tank", x = -3.25 - (index - 1) * 0.75, y = -1.25 } end
-            prepare(found[BLUE_PROFILE], "BLUE", three)
+            prepare(found[B_PROFILE], "B", three)
         end
         local board = _FactionWarTownDocument:InitialTowns()
         board.gushan.strength = KIND == "HUMAN" and 20 or 25
-        -- The real client (RED, one tank) is about to lose to three tanks: its own Zuoying has 20 left and falls.
+        -- The real client (A, one tank) is about to lose to three tanks: its own Zuoying has 20 left and falls.
         if KIND == "HUMAN_LOSS" then board.zuoying.strength = 20 end
         saveBoard(board)
         _FactionWarGuard.WaitSeconds = KIND ~= "GUARD" and 600 or 10
-        assert(_FactionWar:Move(found[RED_PROFILE], "zuoying"), "red moves to origin")
-        if KIND ~= "GUARD" then assert(_FactionWar:Move(found[BLUE_PROFILE], "gushan"), "blue moves to origin") end
-        assert(await(function() return found[RED_PROFILE].CurrentMapName == "zuoying"
-            and (KIND == "GUARD" or found[BLUE_PROFILE].CurrentMapName == "gushan") end), "both origins ready")
+        assert(_FactionWar:Move(found[A_PROFILE], "zuoying"), "red moves to origin")
+        if KIND ~= "GUARD" then assert(_FactionWar:Move(found[B_PROFILE], "gushan"), "blue moves to origin") end
+        assert(await(function() return found[A_PROFILE].CurrentMapName == "zuoying"
+            and (KIND == "GUARD" or found[B_PROFILE].CurrentMapName == "gushan") end), "both origins ready")
         log("[VRF][Result115] SETUP PASS kind=" .. KIND)
     elseif STEP == "QUEUE" then
         local found = users()
-        local red = userId(found[RED_PROFILE])
+        local red = userId(found[A_PROFILE])
         _FactionWarAttack:AttackFor(red, "gushan")
         assert(await(function() return _FactionWarAttack:IsEngaged(red) end), "red engaged")
         if KIND ~= "GUARD" then
-            local blue = userId(found[BLUE_PROFILE])
+            local blue = userId(found[B_PROFILE])
             _FactionWarAttack:AttackFor(blue, "zuoying")
             assert(await(function() return _FactionWarAttack:IsEngaged(blue) or _UserService:GetUserEntityByUserId(blue) == nil end), "blue engaged or transferred")
         end
@@ -197,7 +197,7 @@ local ok, failure = pcall(function()
         log("[VRF][Result115] ARM PASS match=" .. _RoomService.RoomKey .. "; run CLIENT now")
     elseif STEP == "RECONNECT" then
         assert(matchPhase().Phase == "RESULT", "reconnect on the result page")
-        local id = userId(users()[RED_PROFILE])
+        local id = userId(users()[A_PROFILE])
         _FormationStorage:ConfigureMakerFaults(0, 0, 0)
         assert(_FactionWarTownDocument:OutcomeFrom(readBoard(), _RoomService.RoomKey).status == "DUPLICATE", "battle already committed")
         _MatchFlow:Depart(id, "Probe115")
@@ -210,7 +210,7 @@ local ok, failure = pcall(function()
         assert(not _RoomService:IsInstanceRoom() and MATCH_KEY ~= "SET_ME", "set MATCH_KEY and dispatch in server_main")
         local board = readBoard()
         assert(_FactionWarTownDocument:OutcomeFrom(board, MATCH_KEY) ~= nil, "board contains this match")
-        board.zuoying.owner = "BLUE"
+        board.zuoying.owner = "B"
         board.zuoying.e = _FactionWarTownDocument:EpochOf(board, "zuoying") + 1
         saveBoard(board)
         local event = TownBoardChangedEvent()

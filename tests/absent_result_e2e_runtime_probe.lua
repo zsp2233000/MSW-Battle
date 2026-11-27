@@ -1,7 +1,7 @@
 -- Maker end-to-end for #122 / ADR 0017: the side that was not in the room when the result settled gets the 上一場戰果 / 上一場對戰結果 window.
 -- Two virtual players, added in a fresh Play (one Play per MODE):
---   add_virtual_player -profile_code wp2601 -nickname AbsentRA     (A, RED, Zuoying, 3 tanks, on time; in LOBBY mode both are in the lobby)
---   add_virtual_player -profile_code wp2602 -nickname AbsentRB     (B, BLUE, Gushan, 1 tank, never enters the room)
+--   add_virtual_player -profile_code wp2601 -nickname AbsentRA     (A, Zuoying, 3 tanks, on time; in LOBBY mode both are in the lobby)
+--   add_virtual_player -profile_code wp2602 -nickname AbsentRB     (B, Gushan, 1 tank, never enters the room)
 -- Set B_PROFILE to the ProfileCode of the real Maker client to read the window on a real screen (STEP 5 and 6, client); the real client then plays B
 -- with an isolated formation key and "wp2602" is not needed. MODE is edited by substitution before dispatch:
 --   ONLINE   B stays online in Gushan: when the room settles B's ticket ends at once (not at expiry), B lands in his own town and the window is pushed.
@@ -65,7 +65,7 @@ local ok, reason = pcall(function()
             local written = false
             _FactionWarTownDocument:WriteTowns(_FactionWarTownDocument:InitialTowns(), function(saved) written = saved == true end)
             assert(await(function() return written end, 100), "the town table is reset")
-            for user, value in pairs({ [a] = "RED", [b] = "BLUE" }) do
+            for user, value in pairs({ [a] = "A", [b] = "B" }) do
                 -- A stored faction (a real client has one) is replaced against its current value; a failed write must not pass silently.
                 local profile, saved, current = user.PlayerComponent.ProfileCode, false, nil
                 _FormationStorage:Read(profile, _FactionWar.FactionKey, function(code, _, raw) current = (code == 0 and raw ~= nil) and raw or "" end)

@@ -5,12 +5,12 @@
 -- STEP 4 restores the storage name and deletes what the probe wrote. Final line of each STEP 2: [VRF][ReconnectLogin] <CASE> PASS.
 -- For every CASE in the table: STEP 1 (seed), then the console command in the table, then STEP 2 (check), then STEP 3 (kick). Set CASE and STEP below.
 --   CASE            profile  seeded                                              expected
---   FRIENDLY        wp2625   RED, last town Zuoying, Zuoying red                 lands in Zuoying
---   FALLEN          wp2625   RED, last town Zuoying, Zuoying BLUE (count 1)      lands in Nanzih (the capital), the last town is now Nanzih
---   RETAKEN         wp2625   RED, last town Zuoying, Zuoying red (count 2)       lands in Zuoying (fell and was retaken: home)
+--   FRIENDLY        wp2625   A, last town Zuoying, Zuoying red                 lands in Zuoying
+--   FALLEN          wp2625   A, last town Zuoying, Zuoying B (count 1)      lands in Nanzih (the capital), the last town is now Nanzih
+--   RETAKEN         wp2625   A, last town Zuoying, Zuoying red (count 2)       lands in Zuoying (fell and was retaken: home)
 --   NOFACTION       wp2626   no faction, last town Zuoying                       stays in formationlobby
---   NOTOWN          wp2625   RED, no last town                                   stays in formationlobby
---   OFFLINE_FALL    wp2626   BLUE, no last town; the probe moves it to Gushan     goes offline in Gushan; Gushan falls to red; the fall sweep skips it
+--   NOTOWN          wp2625   A, no last town                                   stays in formationlobby
+--   OFFLINE_FALL    wp2626   B, no last town; the probe moves it to Gushan     goes offline in Gushan; Gushan falls to red; the fall sweep skips it
 --                                                                                 ("sweep skipped offline"); the reconnect sends it to Yancheng
 --   OFFLINE_RETAKEN wp2626   as above                                            Gushan falls and is taken back while it is away; the sweep skips it;
 --                                                                                 the reconnect keeps it in Gushan ("evict not needed")
@@ -26,13 +26,13 @@ local CASE = "FRIENDLY"
 local STEP = 1
 local STORAGE = "CountryWarProbe109V1"
 local CASES = {
-    FRIENDLY = { profile = "wp2625", faction = "RED", town = "zuoying", expected = "zuoying" },
-    FALLEN = { profile = "wp2625", faction = "RED", town = "zuoying", owners = { zuoying = "BLUE" }, counts = { zuoying = 1 }, expected = "nanzih", remembered = "nanzih" },
-    RETAKEN = { profile = "wp2625", faction = "RED", town = "zuoying", counts = { zuoying = 2 }, expected = "zuoying" },
+    FRIENDLY = { profile = "wp2625", faction = "A", town = "zuoying", expected = "zuoying" },
+    FALLEN = { profile = "wp2625", faction = "A", town = "zuoying", owners = { zuoying = "B" }, counts = { zuoying = 1 }, expected = "nanzih", remembered = "nanzih" },
+    RETAKEN = { profile = "wp2625", faction = "A", town = "zuoying", counts = { zuoying = 2 }, expected = "zuoying" },
     NOFACTION = { profile = "wp2626", town = "zuoying", expected = "formationlobby" },
-    NOTOWN = { profile = "wp2625", faction = "RED", expected = "formationlobby" },
-    OFFLINE_FALL = { profile = "wp2626", faction = "BLUE" },
-    OFFLINE_RETAKEN = { profile = "wp2626", faction = "BLUE" },
+    NOTOWN = { profile = "wp2625", faction = "A", expected = "formationlobby" },
+    OFFLINE_FALL = { profile = "wp2626", faction = "B" },
+    OFFLINE_RETAKEN = { profile = "wp2626", faction = "B" },
 }
 local function await(predicate, tries) for _ = 1, tries or 100 do if predicate() then return true end wait(0.1) end return false end
 local function find(profile)
@@ -98,7 +98,7 @@ local ok, reason = pcall(function()
             _MatchFlow:Depart(userId, "Probe")
             assert(_MatchFlow:IsOffline(userId), "offline, the entity stays in Gushan")
             local fallen = _FactionWarTownDocument:InitialTowns()
-            fallen.gushan.owner = "RED"
+            fallen.gushan.owner = "A"
             fallen.gushan.e = 1
             store(fallen)
             _FactionWar:SweepFallen("gushan")

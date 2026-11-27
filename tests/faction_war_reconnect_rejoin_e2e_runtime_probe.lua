@@ -2,15 +2,15 @@
 -- room alive, so the static room finds the room (InstanceRooms) and moves the new entity back into it. (A guard fight cannot show this in Maker: its only
 -- human is the last user, and the engine reclaims a room about a second after its last user leaves, so nothing is left to rejoin; that case is P6 STALE.)
 -- Two virtual players, added in Play before running this in server_main; the blue one is added AGAIN after STEP 3 (3 of the 10 virtual players a Play allows):
---   add_virtual_player -profile_code wp2623 -nickname RedStay109    (RED,  Zuoying, 3 tanks; stays connected, keeps the room alive)
---   add_virtual_player -profile_code wp2624 -nickname BlueLeave109  (BLUE, Gushan,  1 tank;  is kicked mid-fight, then logs in again)
+--   add_virtual_player -profile_code wp2623 -nickname RedStay109    (A,  Zuoying, 3 tanks; stays connected, keeps the room alive)
+--   add_virtual_player -profile_code wp2624 -nickname BlueLeave109  (B, Gushan,  1 tank;  is kicked mid-fight, then logs in again)
 -- Writes the REAL town storage (Gushan starts at 20, so the red win captures it); STEP 8 deletes it. Keep the real player in formationlobby.
 -- The guard is parked at 600 s by STEP 1 so no guard fight can claim a ticket; STEP 8 puts it back to 10.
 -- Steps are numbered; set STEP below, dispatch, wait for the line it announces. STEP 3, 4, 5 and 6 run in server_instance_<matchKey> (the key is in the
 -- "QUEUED match=" line); the others in server_main.
 --   1 SETUP    server_main, ~60 s, wait "SETUP PASS"
 --   2 QUEUE    server_main: red -> Gushan, blue -> Zuoying; the pair forms and both are moved into one room
---   3 KICK     room, after "[VRF][MatchedBattle] admission started=true": KickUser for the BLUE player. Then run the second console command at once
+--   3 KICK     room, after "[VRF][MatchedBattle] admission started=true": KickUser for the B player. Then run the second console command at once
 --   4 REJOIN   room, after the second add_virtual_player: the new blue entity is back in this room ("[VRF][MatchFlow] rejoin match=... moved=true"), the ticket is
 --              IN_ROOM for this room ("REJOIN PASS")
 --   5 RESULT   room: the battle reaches its result; one settlement is stored (Gushan red / 100, counted once); blue's lost tank is credited exactly once
@@ -19,7 +19,7 @@
 --   8 CLEANUP  deletes the war town storage and puts the guard clock back
 -- Expected [VRF] lines (read with logs): see tests/README.md, "Disconnect and reconnect (#109)".
 local STEP = 1
-local RED, BLUE = "wp2623", "wp2624"
+local PROFILE_A, PROFILE_B = "wp2623", "wp2624"
 local function await(predicate, tries) for _ = 1, tries or 300 do if predicate() then return true end wait(0.1) end return false end
 local function find()
     local found = {}
@@ -61,7 +61,7 @@ local function room()
 end
 local ok, reason = pcall(function()
     local users = find()
-    local a, b = users[RED], users[BLUE]
+    local a, b = users[PROFILE_A], users[PROFILE_B]
     if STEP == 1 then
         assert(isvalid(a) and isvalid(b), "both virtual players connected")
         local function setup(user, units)
@@ -78,7 +78,7 @@ local ok, reason = pcall(function()
         for index = 1, 3 do three[index] = { monsterId = "monster_tank", x = -3.25 - (index - 1) * 0.75, y = -1.25 } end
         setup(a, three)
         setup(b, {{ monsterId = "monster_tank", x = -3.25, y = -1.25 }})
-        for user, value in pairs({ [a] = "RED", [b] = "BLUE" }) do
+        for user, value in pairs({ [a] = "A", [b] = "B" }) do
             local saved = false
             _FormationStorage:Write(user.PlayerComponent.ProfileCode, _FactionWar.FactionKey, "", value, function(code) saved = code == 0 end)
             await(function() return saved end, 100)
@@ -108,15 +108,15 @@ local ok, reason = pcall(function()
     elseif STEP == 3 then
         local _, battle = room()
         assert(battle:IsBattleActive(), "the battle is on, phase " .. tostring(battle.Phase))
-        assert(isvalid(users[RED]) and isvalid(users[BLUE]), "both players are in the room")
-        _UserService:KickUser(id(users[BLUE]), KickReason.ETC)
-        assert(await(function() return find()[BLUE] == nil end, 100), "the blue entity left the room")
-        assert(isvalid(find()[RED]) and battle:IsBattleActive(), "red stays, the fight goes on")
-        log("[VRF][ReconnectRejoin] KICKED match=" .. _RoomService.RoomKey .. "; now add_virtual_player -profile_code " .. BLUE .. " -nickname BlueLeave109, then STEP 4")
+        assert(isvalid(users[PROFILE_A]) and isvalid(users[PROFILE_B]), "both players are in the room")
+        _UserService:KickUser(id(users[PROFILE_B]), KickReason.ETC)
+        assert(await(function() return find()[PROFILE_B] == nil end, 100), "the blue entity left the room")
+        assert(isvalid(find()[PROFILE_A]) and battle:IsBattleActive(), "red stays, the fight goes on")
+        log("[VRF][ReconnectRejoin] KICKED match=" .. _RoomService.RoomKey .. "; now add_virtual_player -profile_code " .. PROFILE_B .. " -nickname BlueLeave109, then STEP 4")
     elseif STEP == 4 then
         local key = _RoomService.RoomKey
         assert(await(function()
-            b = find()[BLUE]
+            b = find()[PROFILE_B]
             return isvalid(b)
         end, 600), "the new blue entity is in this room")
         assert(await(function()
@@ -128,18 +128,18 @@ local ok, reason = pcall(function()
         local _, battle = room()
         assert(await(function() return battle.Phase == "RESULT" end, 3000), "the battle reaches its result")
         local key = _RoomService.RoomKey
-        local red = battle:ResultForProfile(RED)
+        local red = battle:ResultForProfile(PROFILE_A)
         if red == "WIN" then
             local towns
             assert(await(function()
                 towns = readTowns()
                 return towns ~= nil and recordsOf(towns, key) == 1
             end, 300), "one settlement was stored")
-            assert(towns.gushan.owner == "RED" and towns.gushan.strength == 100 and _FactionWarTownDocument:EpochOf(towns, "gushan") == 1, "Gushan was captured and counted once")
+            assert(towns.gushan.owner == "A" and towns.gushan.strength == 100 and _FactionWarTownDocument:EpochOf(towns, "gushan") == 1, "Gushan was captured and counted once")
         else
             log("[VRF][ReconnectRejoin] red did not win (" .. red .. "); the capture checks of this probe do not apply, run it again")
         end
-        assert(await(function() return creditedOnce(BLUE, key) == 1 end, 100), "the rejoined player's experience was settled exactly once")
+        assert(await(function() return creditedOnce(PROFILE_B, key) == 1 end, 100), "the rejoined player's experience was settled exactly once")
         log("[VRF][ReconnectRejoin] RESULT PASS red=" .. red .. "; run STEP 6")
     elseif STEP == 6 then
         for _, user in pairs(users) do _MatchFlow:ReturnForUser(id(user)) end
@@ -147,13 +147,13 @@ local ok, reason = pcall(function()
     elseif STEP == 7 then
         assert(await(function()
             users = find()
-            a, b = users[RED], users[BLUE]
+            a, b = users[PROFILE_A], users[PROFILE_B]
             return isvalid(a) and isvalid(b) and a.CurrentMapName == "zuoying" and b.CurrentMapName == "yancheng"
         end, 600), "the capturer returned to Zuoying and the player who lost Gushan went to Yancheng")
         for _, user in ipairs({ a, b }) do assert(await(function() return not _FactionWarAttack:IsEngaged(id(user)) end), "unlocked") end
         local towns = readTowns()
-        assert(towns.gushan.owner == "RED" and towns.gushan.strength == 100 and #towns.settled == 1, "one settlement is stored")
-        assert(creditedOnce(BLUE, towns.settled[1].k) == 1, "blue's match is in their history once")
+        assert(towns.gushan.owner == "A" and towns.gushan.strength == 100 and #towns.settled == 1, "one settlement is stored")
+        assert(creditedOnce(PROFILE_B, towns.settled[1].k) == 1, "blue's match is in their history once")
         log("[VRF][ReconnectRejoin] LANDING PASS")
     elseif STEP == 8 then
         _FactionWarGuard.WaitSeconds = 10

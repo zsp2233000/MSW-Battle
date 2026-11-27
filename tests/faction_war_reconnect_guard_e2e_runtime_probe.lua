@@ -1,6 +1,6 @@
 -- Maker end-to-end for #109 (a guard fight goes on while the only player is disconnected, the reconnect gets the same room back, the result is delivered once).
 -- One virtual player, added in Play before running this in server_main:
---   add_virtual_player -profile_code wp2622 -nickname Guard109   (RED, Zuoying, 4 units; Gushan is seeded at 10, so a guard win captures it)
+--   add_virtual_player -profile_code wp2622 -nickname Guard109   (A, Zuoying, 4 units; Gushan is seeded at 10, so a guard win captures it)
 -- Writes the REAL town storage (Gushan starts at 10); STEP 9 deletes it. Keep the real player in formationlobby.
 -- The disconnect is the production Depart run inside the match room plus a synthetic UserReconnectEvent there: the entity stays in the room, like a
 -- retained disconnected entity. A real leave (KickUser) while the room runs is faction_war_reconnect_relogin_e2e_runtime_probe.lua.
@@ -77,7 +77,7 @@ local ok, reason = pcall(function()
         _FormationService:ActivateForUser(userId, slotId, record.saved.slots[tostring(slotId)].revision)
         assert(await(function() return not record.pending and record.saved.activeSlot == slotId end), "activate confirmed")
         local saved = false
-        _FormationStorage:Write(PROFILE, _FactionWar.FactionKey, "", "RED", function(code) saved = code == 0 end)
+        _FormationStorage:Write(PROFILE, _FactionWar.FactionKey, "", "A", function(code) saved = code == 0 end)
         await(function() return saved end, 100)
         -- Gushan one guard win from falling (a guard win takes 10).
         local towns = _FactionWarTownDocument:InitialTowns()
@@ -128,11 +128,11 @@ local ok, reason = pcall(function()
                 towns = readTowns()
                 return towns ~= nil and recordsOf(towns, key) == 1
             end, 300), "the settlement was stored exactly once")
-            assert(towns.gushan.owner == "RED" and towns.gushan.strength == 100 and _FactionWarTownDocument:EpochOf(towns, "gushan") == 1, "Gushan was captured and counted once")
+            assert(towns.gushan.owner == "A" and towns.gushan.strength == 100 and _FactionWarTownDocument:EpochOf(towns, "gushan") == 1, "Gushan was captured and counted once")
         else
             wait(5)
             towns = readTowns()
-            assert(recordsOf(towns, key) == 0 and towns.gushan.owner == "BLUE" and towns.gushan.strength == 10, "a loss or a draw to the guard changes nothing")
+            assert(recordsOf(towns, key) == 0 and towns.gushan.owner == "B" and towns.gushan.strength == 10, "a loss or a draw to the guard changes nothing")
         end
         assert(isvalid(human) and await(function() return battle._T.experienceSent[human] ~= nil end, 100), "the receipt was sent to the entity that is away")
         log("[VRF][ReconnectGuard] RESULT PASS result=" .. result .. "; run STEP 5")
@@ -173,9 +173,9 @@ local ok, reason = pcall(function()
         log("[VRF][ReconnectGuard] RETURN issued")
     elseif STEP == 8 then
         local towns = readTowns()
-        local captured = towns.gushan.owner == "RED"
+        local captured = towns.gushan.owner == "A"
         local expected = EXPECT_ORIGIN_LOST and "nanzih" or "zuoying"
-        assert(towns.zuoying.owner == (EXPECT_ORIGIN_LOST and "BLUE" or "RED"), "expected origin ownership at return")
+        assert(towns.zuoying.owner == (EXPECT_ORIGIN_LOST and "B" or "A"), "expected origin ownership at return")
         assert(await(function()
             a = find()
             return isvalid(a) and a.CurrentMapName == expected
@@ -205,9 +205,9 @@ local ok, reason = pcall(function()
     elseif STEP == 10 then
         assert(not _RoomService:IsInstanceRoom() and not isvalid(find()), "run in server_main while the player is still looking at the result")
         local towns = readTowns()
-        assert(towns.gushan.owner == "RED" and towns.zuoying.owner == "RED", "the guard capture completed and the origin is still owned")
+        assert(towns.gushan.owner == "A" and towns.zuoying.owner == "A", "the guard capture completed and the origin is still owned")
         -- Simulate another battle winning Zuoying during the result screen, without altering the guard capture record.
-        towns.zuoying.owner, towns.zuoying.strength, towns.zuoying.e = "BLUE", 100, _FactionWarTownDocument:EpochOf(towns, "zuoying") + 1
+        towns.zuoying.owner, towns.zuoying.strength, towns.zuoying.e = "B", 100, _FactionWarTownDocument:EpochOf(towns, "zuoying") + 1
         local written = false
         _FactionWarTownDocument:WriteTowns(towns, function(saved) written = saved end)
         assert(await(function() return written end, 100), "the origin changed hands before RETURN")

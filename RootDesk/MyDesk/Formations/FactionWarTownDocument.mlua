@@ -5,7 +5,8 @@ script FactionWarTownDocument extends Logic
     property string TownStorageKey = "Towns"
     property table TownOrder = { "nanzih", "zuoying", "gushan", "yancheng" }
     property table TownNames = { nanzih = "楠梓", zuoying = "左營", gushan = "鼓山", yancheng = "鹽埕" }
-    property table CapitalByFaction = { RED = "nanzih", BLUE = "yancheng" }
+    property table CapitalByFaction = { A = "nanzih", B = "yancheng" }
+    property table FactionNames = { A = "A 方", B = "B 方" }
     property integer FullStrength = 100
     property integer HumanDeduction = 20
     property integer GuardDeduction = 10
@@ -29,6 +30,25 @@ script FactionWarTownDocument extends Logic
         return self.TownNames[town] ~= nil
     end
 
+    method any NormalizeFaction(any raw)
+        -- ADR 0018: the one place the retired colour ids are known. Every stored faction value is read through here; nothing is ever written with them.
+        -- A and B pass through, RED becomes A, BLUE becomes B, anything else is no faction (nil).
+        if self.FactionNames[raw] ~= nil then return raw end
+        if raw == "RED" then return "A" end
+        if raw == "BLUE" then return "B" end
+        return nil
+    end
+
+    method boolean IsFaction(any id)
+        -- True for a current faction id; the retired colour ids are not factions until they are read through NormalizeFaction.
+        return self.FactionNames[id] ~= nil
+    end
+
+    method string FactionName(any faction)
+        -- The faction as players read it.
+        return self.FactionNames[faction] or "未知"
+    end
+
     method string CapitalOf(string faction)
         -- An unknown faction has no capital.
         return self.CapitalByFaction[faction] or ""
@@ -36,7 +56,7 @@ script FactionWarTownDocument extends Logic
 
     method boolean IsCapital(string town)
         -- A capital can be targeted but never falls or loses strength.
-        return town == self:CapitalOf("RED") or town == self:CapitalOf("BLUE")
+        return town == self:CapitalOf("A") or town == self:CapitalOf("B")
     end
 
     method string Landing(string faction, string preferred, any towns)
@@ -73,7 +93,7 @@ script FactionWarTownDocument extends Logic
             if outcome.flipped then
                 summary.capturedTown, summary.newOwner = outcome.loser, outcome.owner
                 local name = self.TownNames[outcome.loser] or outcome.loser
-                summary.conclusion = "奪城：" .. name .. " 改為 " .. (outcome.owner == "RED" and "紅方" or "藍方")
+                summary.conclusion = "奪城：" .. name .. " 改為 " .. self:FactionName(outcome.owner)
             end
         end
         return summary
@@ -93,24 +113,26 @@ script FactionWarTownDocument extends Logic
     method table InitialTowns()
         -- Build a fresh document for a world with no town save yet.
         return {
-            [self:CapitalOf("RED")] = { owner = "RED", strength = self.FullStrength },
-            zuoying = { owner = "RED", strength = self.FullStrength },
-            gushan = { owner = "BLUE", strength = self.FullStrength },
-            [self:CapitalOf("BLUE")] = { owner = "BLUE", strength = self.FullStrength }
+            [self:CapitalOf("A")] = { owner = "A", strength = self.FullStrength },
+            zuoying = { owner = "A", strength = self.FullStrength },
+            gushan = { owner = "B", strength = self.FullStrength },
+            [self:CapitalOf("B")] = { owner = "B", strength = self.FullStrength }
         }
     end
 
     @ExecSpace("ServerOnly")
     method table DecodeTowns(string raw)
-        -- Reject unreadable town data rather than silently treating it as a fresh world.
+        -- Reject unreadable town data rather than silently treating it as a fresh world. Owners are read as A / B whichever ids were stored.
         local ok, towns = pcall(function() return _HttpService:JSONDecode(raw) end)
         if not ok or type(towns) ~= "table" then return nil end
         for _, id in ipairs(self.TownOrder) do
             local town = towns[id]
-            if type(town) ~= "table" or (town.owner ~= "RED" and town.owner ~= "BLUE")
+            local owner = type(town) == "table" and self:NormalizeFaction(town.owner) or nil
+            if owner == nil
                 or type(town.strength) ~= "number" or town.strength % 1 ~= 0
                 or town.strength < 1 or town.strength > self.FullStrength
                 or (town.e ~= nil and (type(town.e) ~= "number" or town.e % 1 ~= 0 or town.e < 0)) then return nil end
+            town.owner = owner
         end
         for faction, id in pairs(self.CapitalByFaction) do
             if towns[id].owner ~= faction or towns[id].strength ~= self.FullStrength then return nil end
@@ -205,7 +227,8 @@ script FactionWarTownDocument extends Logic
         for _, entry in ipairs(towns.settled) do
             if (type(entry) == "table" and tostring(entry.k) or tostring(entry)) == matchKey then
                 if type(entry) ~= "table" then return { status = "DUPLICATE", winner = "", loser = "", strength = 0, owner = "", flipped = false } end
-                local owner = entry.o or ""
+                -- A recorded owner is read as A / B; one that is no faction claims no capture.
+                local owner = self:NormalizeFaction(entry.o) or ""
                 return { status = "DUPLICATE", winner = entry.w or "", loser = entry.l or "", strength = entry.s or 0, owner = owner, flipped = owner ~= "",
                     winnerBefore = self:RecordedStrength(entry.wb), winnerAfter = self:RecordedStrength(entry.wa),
                     loserBefore = self:RecordedStrength(entry.lb), loserAfter = self:RecordedStrength(entry.s) }
@@ -252,6 +275,8 @@ script FactionWarTownDocument extends Logic
             if type(entry) == "table" then
                 local copy = {}
                 for key, value in pairs(entry) do copy[key] = value end
+                -- Whatever is written carries the new ids, so a document written by the old version is converted by its next settlement.
+                if copy.o ~= nil then copy.o = self:NormalizeFaction(copy.o) or "" end
                 table.insert(updated.settled, copy)
             else
                 table.insert(updated.settled, entry)

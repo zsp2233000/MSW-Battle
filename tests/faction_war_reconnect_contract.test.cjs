@@ -49,7 +49,8 @@ test('the last town is one small per-profile key written through the storage bou
   assert.ok(methods(text).includes('ReadProfileKey') && methods(text).includes('IsMissing'), 'one reader of a per-profile key and one rule for "nothing stored yet"');
   assert.equal(tag(text, 'IsMissing'), '', 'the missing-value rule is pure');
   assert.match(body(text, 'ReadTown'), /self:ReadProfileKey\(profile, self\.TownKey, function\(raw\) return self:IsTown\(raw\) end, complete\)/, 'it reads through the same boundary as the faction');
-  assert.match(body(text, 'ReadFaction'), /self:ReadProfileKey\(profile, self\.FactionKey, function\(raw\) return raw == "RED" or raw == "BLUE" end, complete\)/, 'the faction is the same reader with its own accepted values');
+  assert.match(body(text, 'ReadFaction'), /self:ReadProfileKey\(profile, self\.FactionKey, function\(raw\) return document:NormalizeFaction\(raw\) ~= nil end, function\(value\)/, 'the faction is the same reader and accepts exactly what the one converter recognizes (ADR 0018)');
+  assert.match(body(text, 'ReadFaction'), /complete\(value == "" and "" or document:NormalizeFaction\(value\)\)/, 'a stored retired colour id is delivered as A / B');
   const reader = body(text, 'ReadProfileKey');
   assert.match(reader, /_FormationStorage:Read\(profile, storageKey/, 'it reads through FormationStorage');
   assert.match(reader, /complete\(""\)[^]*complete\(raw\)[^]*complete\(nil\)/, 'nothing stored reads as "", a value that is accepted as itself, a storage error or any other value as unreadable, never as a guess');

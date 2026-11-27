@@ -1,11 +1,11 @@
 -- Maker end-to-end for #105. Needs two virtual players, added in Play before running this in server_main:
 --   add_virtual_player -profile_code wp2601 -nickname WarA
 --   add_virtual_player -profile_code wp2602 -nickname WarB
--- STEP 1 prepares them (3-unit vs 1-unit formation, RED vs BLUE, in Zuoying and Gushan) and takes ~40 s; wait for "SETUP PASS".
+-- STEP 1 prepares them (3-unit vs 1-unit formation, A vs B, in Zuoying and Gushan) and takes ~40 s; wait for "SETUP PASS".
 -- STEP 2 queues both through the NPC's server entry (AttackFor), so the human match forms on mutual targets; wait for RESULT.
 -- STEP 3 (run inside server_instance_<matchKey>): _MatchFlow:ReturnForUser for each user in the room.
 -- STEP 4 asserts the return, the unlock and the stored strength. CLEANUP deletes the war town storage that the room wrote.
--- Expected: Gushan 100 -> 80 after the RED (home, 3 tanks) win; Zuoying 100; both players back in their own town and unlocked.
+-- Expected: Gushan 100 -> 80 after the A (home, 3 tanks) win; Zuoying 100; both players back in their own town and unlocked.
 local STEP = 1
 local function await(predicate, tries) for _ = 1, tries or 300 do if predicate() then return true end wait(0.1) end return false end
 local function find()
@@ -35,7 +35,7 @@ local ok, reason = pcall(function()
         for index = 1, 3 do three[index] = { monsterId = "monster_tank", x = -3.25 - (index - 1) * 0.75, y = -1.25 } end
         setup(a, three)
         setup(b, {{ monsterId = "monster_tank", x = -3.25, y = -1.25 }})
-        for user, value in pairs({ [a] = "RED", [b] = "BLUE" }) do
+        for user, value in pairs({ [a] = "A", [b] = "B" }) do
             local saved = false
             _FormationStorage:Write(user.PlayerComponent.ProfileCode, _FactionWar.FactionKey, "", value, function(code) saved = code == 0 end)
             await(function() return saved end, 100)
@@ -63,7 +63,7 @@ local ok, reason = pcall(function()
         local towns, done = nil, false
         _FactionWarTownDocument:Read(function(result) towns, done = result, true end)
         assert(await(function() return done end), "towns read")
-        assert(towns.gushan.strength == 80 and towns.zuoying.strength == 100 and towns.gushan.owner == "BLUE", "Gushan 100 -> 80 only")
+        assert(towns.gushan.strength == 80 and towns.zuoying.strength == 100 and towns.gushan.owner == "B", "Gushan 100 -> 80 only")
         assert(towns.nanzih.strength == 100 and towns.yancheng.strength == 100, "capitals untouched")
         log("[VRF][WarE2E] E2E PASS")
     elseif STEP == 5 then

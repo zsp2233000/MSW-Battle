@@ -59,13 +59,13 @@ local ok, reason = pcall(function()
     -- OutcomeFrom: pure, rebuilt from the record { k, w, l, s, o }.
     local board = _FactionWarTownDocument:InitialTowns()
     board.settled = {
-        { k = "r109-flip", w = "zuoying", l = "gushan", s = 100, o = "RED" },
+        { k = "r109-flip", w = "zuoying", l = "gushan", s = 100, o = "A" },
         { k = "r109-hit", w = "zuoying", l = "gushan", s = 80, o = "" },
         "r109-legacy",
     }
     local encoded = _HttpService:JSONEncode(board)
     local flip = _FactionWarTownDocument:OutcomeFrom(board, "r109-flip")
-    assert(flip ~= nil and flip.flipped == true and flip.owner == "RED" and flip.winner == "zuoying" and flip.loser == "gushan" and flip.strength == 100, "a capture is rebuilt with its winner, loser, owner and refilled strength")
+    assert(flip ~= nil and flip.flipped == true and flip.owner == "A" and flip.winner == "zuoying" and flip.loser == "gushan" and flip.strength == 100, "a capture is rebuilt with its winner, loser, owner and refilled strength")
     local hit = _FactionWarTownDocument:OutcomeFrom(board, "r109-hit")
     assert(hit ~= nil and hit.flipped == false and hit.owner == "" and hit.strength == 80 and hit.loser == "gushan", "a deduction is rebuilt without a capture")
     local legacy = _FactionWarTownDocument:OutcomeFrom(board, "r109-legacy")
@@ -86,26 +86,26 @@ local ok, reason = pcall(function()
 
     -- Landing for a login: home if the faction holds it (again), else the capital; no faction, no landing.
     local rules = _FactionWarTownDocument:InitialTowns()
-    assert(_FactionWarTownDocument:Landing("RED", "zuoying", rules) == "zuoying", "friendly: home")
-    rules.zuoying.owner = "BLUE"
+    assert(_FactionWarTownDocument:Landing("A", "zuoying", rules) == "zuoying", "friendly: home")
+    rules.zuoying.owner = "B"
     rules.zuoying.e = 1
-    assert(_FactionWarTownDocument:Landing("RED", "zuoying", rules) == "nanzih", "fallen: the capital")
-    rules.zuoying.owner = "RED"
+    assert(_FactionWarTownDocument:Landing("A", "zuoying", rules) == "nanzih", "fallen: the capital")
+    rules.zuoying.owner = "A"
     rules.zuoying.e = 2
-    assert(_FactionWarTownDocument:Landing("RED", "zuoying", rules) == "zuoying", "fallen and retaken (count +2, same owner): home")
+    assert(_FactionWarTownDocument:Landing("A", "zuoying", rules) == "zuoying", "fallen and retaken (count +2, same owner): home")
     assert(_FactionWarTownDocument:Landing("", "zuoying", rules) == "", "no faction: nowhere")
-    assert(_FactionWarTownDocument:Landing("BLUE", "zuoying", rules) == "yancheng", "the other faction at a town it does not own: its capital")
+    assert(_FactionWarTownDocument:Landing("B", "zuoying", rules) == "yancheng", "the other faction at a town it does not own: its capital")
     log("[VRF][FactionWarReconnect] rules ok")
 
     -- OutcomeFrom against stored documents: a repeat answers the same capture, nothing is written, a record falls out of the capped history.
     seed({}, { gushan = 20 })
     local status, strength, outcome = settle("r109-m1", "zuoying", "gushan", "WIN")
-    assert(status == "SAVED" and outcome.flipped == true and outcome.owner == "RED" and strength == 100, "the first delivery captures Gushan")
+    assert(status == "SAVED" and outcome.flipped == true and outcome.owner == "A" and strength == 100, "the first delivery captures Gushan")
     local towns, before = readRaw()
     local rebuilt = _FactionWarTownDocument:OutcomeFrom(towns, "r109-m1")
-    assert(rebuilt ~= nil and rebuilt.flipped == true and rebuilt.winner == "zuoying" and rebuilt.loser == "gushan" and rebuilt.owner == "RED" and rebuilt.strength == 100, "the stored record rebuilds the capture")
+    assert(rebuilt ~= nil and rebuilt.flipped == true and rebuilt.winner == "zuoying" and rebuilt.loser == "gushan" and rebuilt.owner == "A" and rebuilt.strength == 100, "the stored record rebuilds the capture")
     status, strength, outcome = settle("r109-m1", "zuoying", "gushan", "WIN")
-    assert(status == "DUPLICATE" and outcome.flipped == true and outcome.owner == "RED" and outcome.strength == 100, "the repeat answer is the same capture, through the shared reader")
+    assert(status == "DUPLICATE" and outcome.flipped == true and outcome.owner == "A" and outcome.strength == 100, "the repeat answer is the same capture, through the shared reader")
     local _, after = readRaw()
     assert(after == before, "reading and repeating wrote nothing")
     local old = {}

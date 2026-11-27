@@ -2,7 +2,7 @@
 --   add_virtual_player -profile_code wp2601 -nickname AbsentA
 --   add_virtual_player -profile_code wp2602 -nickname AbsentB
 -- Run every step in server_main unless it says otherwise. MODE is edited by substitution before dispatch:
---   WAR   A (RED, Zuoying, 3 tanks) attacks Gushan, B (BLUE, Gushan, 1 tank) attacks Zuoying but never enters the room.
+--   WAR   A (A, Zuoying, 3 tanks) attacks Gushan, B (B, Gushan, 1 tank) attacks Zuoying but never enters the room.
 --   STOP  as WAR, and B presses Stop Entry while the room waits (STEP 3): the battle still fields B's frozen roster.
 --   EMPTY nobody enters the room: no battle, nothing deducted, no experience.
 --   LOBBY lobby match (no towns): B never enters, the battle still runs and both experiences are settled.
@@ -66,7 +66,7 @@ local ok, reason = pcall(function()
             local written = false
             _FactionWarTownDocument:WriteTowns(_FactionWarTownDocument:InitialTowns(), function(saved) written = saved == true end)
             assert(await(function() return written end, 100), "the town table is reset")
-            for user, value in pairs({ [a] = "RED", [b] = "BLUE" }) do
+            for user, value in pairs({ [a] = "A", [b] = "B" }) do
                 local saved = false
                 _FormationStorage:Write(user.PlayerComponent.ProfileCode, _FactionWar.FactionKey, "", value, function(code) saved = code == 0 end)
                 await(function() return saved end, 100)
@@ -120,7 +120,7 @@ local ok, reason = pcall(function()
             assert(#(towns.settled or {}) == 0, "no result was written")
             log("[VRF][AbsentE2E] EMPTY PASS no battle, no deduction, no experience")
         elseif war then
-            assert(towns.gushan.strength == 80 and towns.zuoying.strength == 100 and towns.gushan.owner == "BLUE", "Gushan 100 -> 80 once, by the absent side's loss")
+            assert(towns.gushan.strength == 80 and towns.zuoying.strength == 100 and towns.gushan.owner == "B", "Gushan 100 -> 80 once, by the absent side's loss")
             assert(#(towns.settled or {}) == 1, "the result was written exactly once")
             assert(advanced(afterB) and afterB.settled == BASE_SETTLED + 1, "B's frozen tank died once: its progress advanced and the match settled exactly once; now level " .. tostring(afterB.level) .. " exp " .. tostring(afterB.experience) .. " settled " .. tostring(afterB.settled))
             log("[VRF][AbsentE2E] " .. MODE .. " PASS the absent side fought, settled once, experience saved")

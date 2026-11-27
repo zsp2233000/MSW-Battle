@@ -32,18 +32,18 @@ local ok, reason = pcall(function()
     -- Options: only adjacent enemy towns, from the authored gates.
     local towns = _FactionWarTownDocument:InitialTowns()
     local function names(list) local out = {} for _, o in ipairs(list) do table.insert(out, o.town) end return table.concat(out, ",") end
-    assert(names(attack:Targets("zuoying", "RED", towns)) == "gushan", "red at Zuoying sees Gushan only")
-    assert(names(attack:Targets("nanzih", "RED", towns)) == "", "Nanzih has no enemy neighbour at the start")
-    assert(names(attack:Targets("gushan", "BLUE", towns)) == "zuoying", "blue at Gushan sees Zuoying only")
-    assert(names(attack:Targets("gushan", "RED", towns)) == "", "a town not owned by the faction offers nothing")
-    towns.zuoying.owner = "BLUE"
-    local fromCapital = attack:Targets("nanzih", "RED", towns)
+    assert(names(attack:Targets("zuoying", "A", towns)) == "gushan", "red at Zuoying sees Gushan only")
+    assert(names(attack:Targets("nanzih", "A", towns)) == "", "Nanzih has no enemy neighbour at the start")
+    assert(names(attack:Targets("gushan", "B", towns)) == "zuoying", "blue at Gushan sees Zuoying only")
+    assert(names(attack:Targets("gushan", "A", towns)) == "", "a town not owned by the faction offers nothing")
+    towns.zuoying.owner = "B"
+    local fromCapital = attack:Targets("nanzih", "A", towns)
     assert(#fromCapital == 1 and fromCapital[1].town == "zuoying" and fromCapital[1].capital == false, "the capital can counter-attack the lost town")
-    towns.gushan.owner = "RED"
-    local both = attack:Targets("gushan", "RED", towns)
+    towns.gushan.owner = "A"
+    local both = attack:Targets("gushan", "A", towns)
     assert(#both == 2 and both[1].town == "zuoying" and both[1].capital == false and both[2].town == "yancheng" and both[2].capital == true,
         "a town with two enemy neighbours offers both and flags the capital")
-    assert(attack:CanTarget("gushan", "yancheng", "RED", towns) and not attack:CanTarget("zuoying", "yancheng", "BLUE", towns), "no target that skips a town")
+    assert(attack:CanTarget("gushan", "yancheng", "A", towns) and not attack:CanTarget("zuoying", "yancheng", "B", towns), "no target that skips a town")
 
     -- Local queue: only mutual targets pair; lobby tickets never pair with war tickets.
     local queue = _MatchQueueLocal
@@ -125,14 +125,14 @@ local ok, reason = pcall(function()
     towns = read()
     assert(towns.gushan.strength == 70 and towns.zuoying.strength == 60, "only the one guard win was applied")
     -- Capital protection needs an enemy capital: make Zuoying blue, then red-side Nanzih loses nothing when blue wins.
-    towns.zuoying.owner = "BLUE"
+    towns.zuoying.owner = "B"
     written = false
     _FactionWarTownDocument:WriteTowns(towns, function(saved) written = saved end)
     assert(await(function() return written end), "ownership change written")
     status = settle("probe-m5", "zuoying", "nanzih", "WIN")
     assert(status == "NO_CHANGE", "winning against a capital deducts nothing")
     towns = read()
-    assert(towns.nanzih.strength == 100 and towns.nanzih.owner == "RED", "the capital keeps its strength and owner")
+    assert(towns.nanzih.strength == 100 and towns.nanzih.owner == "A", "the capital keeps its strength and owner")
     assert(settle("probe-g4", "zuoying", "nanzih", "WIN", "GUARD") == "NO_CHANGE", "beating a capital guard deducts nothing")
     status = settle("probe-m6", "zuoying", "gushan", "WIN")
     assert(status == "SKIPPED", "a result between towns of the same faction deducts nothing")

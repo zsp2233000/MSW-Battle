@@ -1,8 +1,8 @@
 -- Maker end-to-end for #107 (capture, landing, eviction). Needs four virtual players, added in Play before running this in server_main:
---   add_virtual_player -profile_code wp2601 -nickname Conqueror   (RED,  Zuoying, 3 tanks)
---   add_virtual_player -profile_code wp2602 -nickname Loser       (BLUE, Gushan,   1 tank, fights A)
---   add_virtual_player -profile_code wp2603 -nickname Queued      (BLUE, Gushan,   queues AFTER the pair formed, must be cancelled)
---   add_virtual_player -profile_code wp2604 -nickname Idle        (BLUE, Gushan,   stands still, must be sent home)
+--   add_virtual_player -profile_code wp2601 -nickname Conqueror   (A,  Zuoying, 3 tanks)
+--   add_virtual_player -profile_code wp2602 -nickname Loser       (B, Gushan,   1 tank, fights A)
+--   add_virtual_player -profile_code wp2603 -nickname Queued      (B, Gushan,   queues AFTER the pair formed, must be cancelled)
+--   add_virtual_player -profile_code wp2604 -nickname Idle        (B, Gushan,   stands still, must be sent home)
 -- ADR 0016 updates: written, not run. Uses REAL local town storage (Gushan starts at 20); STEP 9 deletes it. Keep the real player in formationlobby.
 -- Steps are numbered; set STEP below, dispatch, wait for the line it announces.
 --   1 SETUP      server_main, ~60 s, wait "SETUP PASS"
@@ -12,7 +12,7 @@
 --   4 RETURN     server_instance_<matchKey> (each match): ReturnForUser for every user in the room
 --   5 LANDING1   server_main: A (the capturer) is in Zuoying; B (lost Gushan) is in Yancheng; nobody is locked
 --   6 QUEUE2     server_main: A travels from Zuoying to Gushan first, then attacks Yancheng; B (Yancheng) attacks Gushan (capital win: nothing changes)
---   7 LANDING2   server_main, after STEP 4 again: Yancheng is still BLUE/100, Gushan RED/100, A in Gushan, B in Yancheng
+--   7 LANDING2   server_main, after STEP 4 again: Yancheng is still B/100, Gushan A/100, A in Gushan, B in Yancheng
 --   8 EVICTRACE server_main (review fixes C1 + C2), run after STEP 7: D (blue, idle) is put into Gushan, which is red, and
 --                (a) a check that holds the board from before the flip is still running when the sweep's request arrives: the request is queued,
 --                    not dropped, and D ends in Yancheng ("[VRF][FactionWar] enforce queued" then "recheck" then "evicted");
@@ -56,7 +56,7 @@ local ok, reason = pcall(function()
         setup(a, three)
         setup(b, {{ monsterId = "monster_tank", x = -3.25, y = -1.25 }})
         setup(c, {{ monsterId = "monster_tank", x = -3.25, y = -1.25 }})
-        for user, value in pairs({ [a] = "RED", [b] = "BLUE", [c] = "BLUE", [d] = "BLUE" }) do
+        for user, value in pairs({ [a] = "A", [b] = "B", [c] = "B", [d] = "B" }) do
             local saved = false
             _FormationStorage:Write(user.PlayerComponent.ProfileCode, _FactionWar.FactionKey, "", value, function(code) saved = code == 0 end)
             await(function() return saved end, 100)
@@ -86,10 +86,10 @@ local ok, reason = pcall(function()
         local towns
         assert(await(function()
             towns = readTowns()
-            return towns ~= nil and towns.gushan.owner == "RED"
+            return towns ~= nil and towns.gushan.owner == "A"
         end, 1500), "Gushan changed flag within 150 s")
         assert(towns.gushan.strength == 100, "and refilled to 100, got " .. tostring(towns.gushan.strength))
-        assert(towns.nanzih.strength == 100 and towns.nanzih.owner == "RED" and towns.yancheng.strength == 100 and towns.yancheng.owner == "BLUE", "capitals untouched")
+        assert(towns.nanzih.strength == 100 and towns.nanzih.owner == "A" and towns.yancheng.strength == 100 and towns.yancheng.owner == "B", "capitals untouched")
         assert(await(function() return c.CurrentMapName == "yancheng" and d.CurrentMapName == "yancheng" end, 300), "the queued and the idle blue player were sent to Yancheng")
         assert(_MatchFlow:StateForUser(id(c)) == "IDLE" and not _FactionWarAttack:IsEngaged(id(c)), "C's ticket was cancelled before the move")
         log("[VRF][ConquestE2E] CAPTURE PASS")
@@ -104,16 +104,16 @@ local ok, reason = pcall(function()
         end, 400), "the capturer is back in Zuoying and the player who lost Gushan went to Yancheng")
         for _, user in ipairs({ a, b, c, d }) do assert(await(function() return not _FactionWarAttack:IsEngaged(id(user)) end), "unlocked") end
         local towns = readTowns()
-        assert(_FactionWar:FindFrontline("RED", towns) == "gushan" and _FactionWar:FindFrontline("BLUE", towns) == "yancheng", "new players land on the new front")
-        assert(_FactionWarTownDocument:CanPass("RED", "zuoying", "gushan", towns) and not _FactionWarTownDocument:CanPass("BLUE", "yancheng", "gushan", towns), "the gate follows the new owner")
-        local red = _FactionWarAttack:Targets("gushan", "RED", towns)
-        local blue = _FactionWarAttack:Targets("yancheng", "BLUE", towns)
+        assert(_FactionWar:FindFrontline("A", towns) == "gushan" and _FactionWar:FindFrontline("B", towns) == "yancheng", "new players land on the new front")
+        assert(_FactionWarTownDocument:CanPass("A", "zuoying", "gushan", towns) and not _FactionWarTownDocument:CanPass("B", "yancheng", "gushan", towns), "the gate follows the new owner")
+        local red = _FactionWarAttack:Targets("gushan", "A", towns)
+        local blue = _FactionWarAttack:Targets("yancheng", "B", towns)
         assert(#red == 1 and red[1].town == "yancheng" and red[1].capital == true and #blue == 1 and blue[1].town == "gushan", "the NPC options follow the new owner")
         log("[VRF][ConquestE2E] LANDING1 PASS")
     elseif STEP == 6 then
         -- The return did not move A to Gushan. Travel there explicitly to preserve the capital battle.
         assert(isvalid(a) and a.CurrentMapName == "zuoying", "A is still at the first landing")
-        assert(isvalid(_FactionWar:FindGate("zuoying", "gushan")) and _FactionWarTownDocument:CanPass("RED", "zuoying", "gushan", readTowns()), "RED can take the gate to Gushan")
+        assert(isvalid(_FactionWar:FindGate("zuoying", "gushan")) and _FactionWarTownDocument:CanPass("A", "zuoying", "gushan", readTowns()), "A can take the gate to Gushan")
         assert(_FactionWar:Move(a, "gushan") and await(function() return a.CurrentMapName == "gushan" end), "A traveled to Gushan")
         _FactionWarAttack:AttackFor(id(a), "yancheng")
         assert(await(function() return _FactionWarAttack:IsEngaged(id(a)) end, 100), "A engaged")
@@ -127,18 +127,18 @@ local ok, reason = pcall(function()
             return isvalid(a) and isvalid(b) and a.CurrentMapName == "gushan" and b.CurrentMapName == "yancheng"
         end, 1500), "both are back where they were")
         local towns = readTowns()
-        assert(towns.yancheng.owner == "BLUE" and towns.yancheng.strength == 100, "a red win over the capital changes nothing")
-        assert(towns.gushan.owner == "RED" and towns.gushan.strength == 100, "Gushan stays red and full")
+        assert(towns.yancheng.owner == "B" and towns.yancheng.strength == 100, "a red win over the capital changes nothing")
+        assert(towns.gushan.owner == "A" and towns.gushan.strength == 100, "Gushan stays red and full")
         log("[VRF][ConquestE2E] LANDING2 PASS")
     elseif STEP == 8 then
         users = find()
         d = users.wp2604
         assert(isvalid(d), "D connected")
         local live = readTowns()
-        assert(live.gushan.owner == "RED", "Gushan is red")
+        assert(live.gushan.owner == "A", "Gushan is red")
         -- The board a HUD check read before the flip: the same document with Gushan still blue.
         local stale = _HttpService:JSONDecode(_HttpService:JSONEncode(live))
-        stale.gushan.owner = "BLUE"
+        stale.gushan.owner = "B"
         local function putInGushan()
             assert(_FactionWar:Move(d, "gushan"), "move dispatched")
             assert(await(function() return d.CurrentMapName == "gushan" end, 100), "D stands in Gushan")
@@ -166,7 +166,7 @@ local ok, reason = pcall(function()
         -- (c) C2: the board that called for the move is out of date. Gushan was taken and taken back (blue again, counted twice more).
         putInGushan()
         local retaken = _HttpService:JSONDecode(_HttpService:JSONEncode(live))
-        retaken.gushan.owner = "BLUE"
+        retaken.gushan.owner = "B"
         retaken.gushan.e = (retaken.gushan.e or 0) + 2
         store(retaken)
         _FactionWarLanding:Judge(id(d), { kind = "CHECK", town = "gushan", board = live })

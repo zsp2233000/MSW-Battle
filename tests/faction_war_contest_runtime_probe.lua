@@ -132,10 +132,10 @@ local ok, reason = pcall(function()
     local winner, loser = outcomeA, outcomeB
     local winnerKey = "c108-race-a"
     if statusB == "SAVED" then winner, loser, winnerKey = outcomeB, outcomeA, "c108-race-b" end
-    assert(winner.flipped == true and winner.owner == "RED" and winner.strength == 100, "the settling match took Gushan")
+    assert(winner.flipped == true and winner.owner == "A" and winner.strength == 100, "the settling match took Gushan")
     assert(loser.flipped == false and loser.owner == "" and loser.amount == 20, "the other kept its result but changed no town")
     towns = read()
-    assert(towns.gushan.owner == "RED" and towns.gushan.strength == 100 and _FactionWarTownDocument:EpochOf(towns, "gushan") == 1, "Gushan is red, full, and counted once")
+    assert(towns.gushan.owner == "A" and towns.gushan.strength == 100 and _FactionWarTownDocument:EpochOf(towns, "gushan") == 1, "Gushan is red, full, and counted once")
     assert(towns.zuoying.strength == 100 and _FactionWarTownDocument:EpochOf(towns, "zuoying") == 0 and towns.nanzih.strength == 100 and towns.yancheng.strength == 100, "no other town moved")
     assert(#towns.settled == 1 and towns.settled[1].k == winnerKey, "exactly one record, the settling match's")
     log("[VRF][FactionWarContest] race ok settled=" .. winnerKey .. " statuses=" .. statusA .. "/" .. statusB)
@@ -150,7 +150,7 @@ local ok, reason = pcall(function()
     local pb = finish(plainB, "c108-plain-b")
     _FormationStorage:ConfigureMakerFaults(0, 0, 0)
     towns = read()
-    assert(pa == "SAVED" and pb == "SAVED" and towns.gushan.strength == 20 and towns.gushan.owner == "BLUE" and #towns.settled == 2, "both wins counted once each: 60 -> 20")
+    assert(pa == "SAVED" and pb == "SAVED" and towns.gushan.strength == 20 and towns.gushan.owner == "B" and #towns.settled == 2, "both wins counted once each: 60 -> 20")
 
     -- C6: the pause after the nth lost race doubles from the base, is capped, and the roll jitters it inside its upper half.
     local function near(a, b) return math.abs(a - b) < 1e-9 end
@@ -195,7 +195,7 @@ local ok, reason = pcall(function()
     assert(lostStatus == "SAVED" and lostOutcome.conflicts > 10, "the settlement lost more than ten races and still landed, got " .. tostring(lostStatus) .. " after " .. tostring(lostOutcome.conflicts) .. " lost races")
     wait(0.5)
     towns = read()
-    assert(towns.gushan.strength == 80 and towns.gushan.owner == "BLUE" and #towns.settled == 1 and towns.settled[1].k == "c108-lost-races", "applied exactly once: Gushan 100 -> 80, one record")
+    assert(towns.gushan.strength == 80 and towns.gushan.owner == "B" and #towns.settled == 1 and towns.settled[1].k == "c108-lost-races", "applied exactly once: Gushan 100 -> 80, one record")
     log("[VRF][FactionWarContest] lost races ok conflicts=" .. tostring(lostOutcome.conflicts))
     -- A settlement that can never win is ended by the time budget, reported failed, and its redelivery lands once.
     _FactionWarTownDocument.ConflictBudgetSeconds = 1.5
@@ -219,14 +219,14 @@ local ok, reason = pcall(function()
     -- AC2: a match paired before Gushan changed hands deducts nothing, even after the town is taken back.
     seed({}, { gushan = 20 })
     local early = stamp("c108-late", "zuoying", "gushan")
-    assert(settle("c108-flip", "zuoying", "gushan", "WIN", "HUMAN", early) == "SAVED" and read().gushan.owner == "RED", "another match flipped Gushan")
+    assert(settle("c108-flip", "zuoying", "gushan", "WIN", "HUMAN", early) == "SAVED" and read().gushan.owner == "A", "another match flipped Gushan")
     for index = 1, 5 do
         local fresh = stamp("c108-back" .. index, "yancheng", "gushan")
         assert(fresh.away == 1, "paired after the flip, the town counts once")
         assert(settle("c108-back" .. index, "yancheng", "gushan", "WIN", "HUMAN", fresh) == "SAVED", "counter-attack " .. index)
     end
     towns = read()
-    assert(towns.gushan.owner == "BLUE" and towns.gushan.strength == 100 and _FactionWarTownDocument:EpochOf(towns, "gushan") == 2, "blue took Gushan back: same owner as at pairing, counted twice")
+    assert(towns.gushan.owner == "B" and towns.gushan.strength == 100 and _FactionWarTownDocument:EpochOf(towns, "gushan") == 2, "blue took Gushan back: same owner as at pairing, counted twice")
     local _, before = readRaw()
     local status, _, outcome = settle("c108-late", "zuoying", "gushan", "WIN", "HUMAN", early)
     local _, after = readRaw()
@@ -234,21 +234,21 @@ local ok, reason = pcall(function()
     assert(before == after, "an exempt match writes nothing")
     assert(_FactionWarLanding._T.outcomes["c108-late"].flipped == false, "the room remembers it as an outcome that changed no town")
     -- AC3: where the players of that match end up on the live board.
-    assert(_FactionWarTownDocument:Landing("RED", "zuoying", towns) == "zuoying", "red stays where it fought: Zuoying is still its own")
-    assert(_FactionWarTownDocument:Landing("BLUE", "gushan", towns) == "gushan", "blue stays in Gushan: it owns it again")
+    assert(_FactionWarTownDocument:Landing("A", "zuoying", towns) == "zuoying", "red stays where it fought: Zuoying is still its own")
+    assert(_FactionWarTownDocument:Landing("B", "gushan", towns) == "gushan", "blue stays in Gushan: it owns it again")
     log("[VRF][FactionWarContest] flip-and-retake ok epoch=" .. tostring(_FactionWarTownDocument:EpochOf(towns, "gushan")))
 
     -- The board where both towns of a match changed hands: the stamp keeps the wrong faction from taking a town.
-    seed({ zuoying = "BLUE", gushan = "RED" }, {}, { zuoying = 1, gushan = 1 })
+    seed({ zuoying = "B", gushan = "A" }, {}, { zuoying = 1, gushan = 1 })
     local old = { home = 0, away = 0 }
     local _, swapped = readRaw()
     status, _, outcome = settle("c108-both", "zuoying", "gushan", "WIN", "HUMAN", old)
     local _, unchanged = readRaw()
     assert(status == "EXEMPT" and swapped == unchanged, "both towns changed hands: nothing is written")
     towns = read()
-    assert(towns.gushan.owner == "RED" and towns.zuoying.owner == "BLUE", "neither town moved to the wrong faction")
+    assert(towns.gushan.owner == "A" and towns.zuoying.owner == "B", "neither town moved to the wrong faction")
     -- AC3 on this board: the old red home player (origin Zuoying, now blue) goes to its capital, the old blue player (Gushan, now red) to its capital.
-    assert(_FactionWarTownDocument:Landing("RED", "zuoying", towns) == "nanzih" and _FactionWarTownDocument:Landing("BLUE", "gushan", towns) == "yancheng", "players of an exempt match whose town is now the enemy's go to their capital")
+    assert(_FactionWarTownDocument:Landing("A", "zuoying", towns) == "nanzih" and _FactionWarTownDocument:Landing("B", "gushan", towns) == "yancheng", "players of an exempt match whose town is now the enemy's go to their capital")
 
     -- AC4: a repeated result changes nothing and answers the same capture; the experience of a repeated result is credited once.
     seed({}, { gushan = 20 })
@@ -258,7 +258,7 @@ local ok, reason = pcall(function()
     local _, afterFirst = readRaw()
     local repeatStatus, _, repeatOutcome = settle("c108-once", "zuoying", "gushan", "WIN", "HUMAN", once)
     local _, afterRepeat = readRaw()
-    assert(repeatStatus == "DUPLICATE" and repeatOutcome.flipped == true and repeatOutcome.owner == "RED" and repeatOutcome.strength == 100, "the repeat is the same capture")
+    assert(repeatStatus == "DUPLICATE" and repeatOutcome.flipped == true and repeatOutcome.owner == "A" and repeatOutcome.strength == 100, "the repeat is the same capture")
     assert(afterFirst == afterRepeat, "the repeat wrote nothing")
     assert(settle("c108-after", "yancheng", "gushan", "WIN", "HUMAN", stamp("c108-after", "yancheng", "gushan")) == "SAVED" and read().gushan.strength == 80, "the town moved on")
     local lateStatus, _, lateOutcome = settle("c108-once", "zuoying", "gushan", "WIN", "HUMAN", once)
@@ -301,9 +301,9 @@ local ok, reason = pcall(function()
     -- The document with its counts stays under one storage credit with a full history.
     local history = {}
     for index = 1, _FactionWarTownDocument.SettledHistory do
-        table.insert(history, { k = "c108-size" .. index .. "-" .. _UtilLogic:NewGuid(), w = "zuoying", l = "gushan", s = 60, o = index % 2 == 0 and "RED" or "" })
+        table.insert(history, { k = "c108-size" .. index .. "-" .. _UtilLogic:NewGuid(), w = "zuoying", l = "gushan", s = 60, o = index % 2 == 0 and "A" or "" })
     end
-    seed({ gushan = "BLUE", zuoying = "RED" }, { gushan = 60, zuoying = 60 }, { gushan = 12, zuoying = 12 }, history)
+    seed({ gushan = "B", zuoying = "A" }, { gushan = 60, zuoying = 60 }, { gushan = 12, zuoying = 12 }, history)
     local _, big = readRaw()
     assert(big ~= nil and #big < 4000, "the town document stays under 4000 bytes, bytes=" .. tostring(big ~= nil and #big or -1))
     log("[VRF][FactionWarContest] document bytes=" .. tostring(#big))

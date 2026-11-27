@@ -7,9 +7,9 @@ local ok, reason = pcall(function()
     local town = _UserService.LocalPlayer.CurrentMapName
     assert(_FactionWar:IsTown(town), "client stands in a town")
     local highlight = "<color=" .. ui.TownNameHighlightHex .. ">"
-    local both = { { town = "zuoying", name = "左營", capital = false, strength = 80, owner = "BLUE" },
-        { town = "yancheng", name = "鹽埕", capital = true, strength = 100, owner = "BLUE" } }
-    local header = { town = town, name = _FactionWarTownDocument.TownNames[town], capital = _FactionWarTownDocument:IsCapital(town), strength = 60, owner = "RED", faction = "RED" }
+    local both = { { town = "zuoying", name = "左營", capital = false, strength = 80, owner = "B" },
+        { town = "yancheng", name = "鹽埕", capital = true, strength = 100, owner = "B" } }
+    local header = { town = town, name = _FactionWarTownDocument.TownNames[town], capital = _FactionWarTownDocument:IsCapital(town), strength = 60, owner = "A", faction = "A" }
     local function text(path) return ui:Ui(path).TextGUIRendererComponent.Text end
     ui:ShowAttackOptions(town, both, "READY", header)
     local panel = ui:Ui("AttackPanel")
@@ -29,13 +29,13 @@ local ok, reason = pcall(function()
     assert(text("AttackPanel/Window/Row1/Note") == "" and text("AttackPanel/Window/Row2/Note") ~= "", "capital note beside the capital")
     assert(text("AttackPanel/Window/Row1/Option") == "進攻" and ui:Ui("AttackPanel/Window/Row1/Option").ButtonComponent.Enable, "attack button offered")
     -- A pushed board updates the numbers in place, without a new request.
-    ui:ShowAttackBoard({ { id = town, owner = "RED", strength = 40 }, { id = "zuoying", owner = "BLUE", strength = 30 }, { id = "yancheng", owner = "BLUE", strength = 100 } })
+    ui:ShowAttackBoard({ { id = town, owner = "A", strength = 40 }, { id = "zuoying", owner = "B", strength = 30 }, { id = "yancheng", owner = "B", strength = 100 } })
     assert(text("AttackPanel/Window/Origin/Value") == "兵力 40 / 100" and text("AttackPanel/Window/Row1/Value") == "兵力 30 / 100", "pushed strengths drawn live")
     assert(math.abs(originFill.UITransformComponent.RectSize.x - ui.OriginBarWidth * 0.4) < 0.01, "the bar follows")
     ui:ShowAttackOptions(town, { both[2] }, "READY", header)
     assert(ui:Ui("AttackPanel/Window/Row1").Enable and not ui:Ui("AttackPanel/Window/Row2").Enable, "one town shows one row")
     -- Already queued: the panel names the target and offers nothing.
-    ui:ShowAttackOptions(town, { both[2] }, "ENGAGED", { town = town, strength = 60, owner = "RED", faction = "RED", target = "yancheng" })
+    ui:ShowAttackOptions(town, { both[2] }, "ENGAGED", { town = town, strength = 60, owner = "A", faction = "A", target = "yancheng" })
     assert(ui:Ui("AttackPanel/Window/Row1").Enable and text("AttackPanel/Window/Row1/Option") == "進攻中" and not ui:Ui("AttackPanel/Window/Row1/Option").ButtonComponent.Enable, "the attacked town is marked and cannot be picked again")
     assert(text("AttackPanel/Window/Status") == "目前正在進攻 " .. highlight .. "鹽埕</color>，要改變目標請先取消配對", "the line says which town is being attacked")
     ui:ShowAttackOptions(town, {}, "NOT_OWNED", {})
@@ -57,7 +57,7 @@ local ok, reason = pcall(function()
         wait(0.1)
     end
     assert(ui._T.siegeShown and ui._T.siegeStrengths ~= nil, "the card asked for the board and the server answered")
-    ui:ShowSiegeBoard({ { id = town, owner = "RED", strength = 80 }, { id = "yancheng", owner = "BLUE", strength = 100 } })
+    ui:ShowSiegeBoard({ { id = town, owner = "A", strength = 80 }, { id = "yancheng", owner = "B", strength = 100 } })
     ui:RenderSiege(town)
     assert(bar.Enable and string.match(text("SiegePanel/Status"), "^配對中 · 倒數 %d+ 秒$"), "siege panel uses the real deadline: " .. text("SiegePanel/Status"))
     assert(text("SiegePanel/Origin") == highlight .. _FactionWarTownDocument.TownNames[town] .. "</color> 兵力 80" and text("SiegePanel/Target") == highlight .. "鹽埕</color> 兵力 100", "both towns with their strengths")
@@ -68,7 +68,7 @@ local ok, reason = pcall(function()
     value.sequence = 2
     ui:RenderSiege(town)
     assert(button.Enable, "another accepted sequence on the same phase clears pending")
-    ui:ShowSiegeBoard({ { id = town, owner = "RED", strength = 60 }, { id = "yancheng", owner = "BLUE", strength = 100 } })
+    ui:ShowSiegeBoard({ { id = town, owner = "A", strength = 60 }, { id = "yancheng", owner = "B", strength = 100 } })
     ui:RenderSiege(town)
     assert(text("SiegePanel/Origin") == highlight .. _FactionWarTownDocument.TownNames[town] .. "</color> 兵力 60", "the first line follows a pushed board")
     value.guardAt = DateTime.UtcNow.Elapsed

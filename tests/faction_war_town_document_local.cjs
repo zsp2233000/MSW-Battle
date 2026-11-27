@@ -128,7 +128,7 @@ a, b = race("capture-a", "capture-b")
 assert(a.status == "SAVED" and a.outcome.flipped and a.detail == 100)
 assert(b.status == "EXEMPT" and b.outcome.conflicts == 1 and not b.outcome.flipped)
 local board = read()
-assert(board.gushan.owner == "RED" and board.gushan.e == 1 and #board.settled == 1 and commits == 3)
+assert(board.gushan.owner == "A" and board.gushan.e == 1 and #board.settled == 1 and commits == 3)
 assert(a.outcome.loserBefore == 20 and a.outcome.loserAfter == 100 and b.outcome.loserBefore == nil)
 local captured = doc:OutcomeFrom(board, "capture-a")
 assert(captured.loserBefore == 20 and captured.loserAfter == 100 and captured.winnerBefore == 100 and captured.winnerAfter == 100)
@@ -179,7 +179,7 @@ assert(read() == nil)
 invalid.gushan.strength, invalid.gushan.e = 100, -1
 bytes = _HttpService:JSONEncode(invalid)
 assert(read() == nil)
-invalid.gushan.e, invalid.nanzih.owner = nil, "BLUE"
+invalid.gushan.e, invalid.nanzih.owner = nil, "B"
 bytes = _HttpService:JSONEncode(invalid)
 assert(read() == nil)
 bytes = "undecodable"
@@ -206,7 +206,7 @@ local function compactSize(value)
 end
 local full = doc:InitialTowns()
 for index = 1, 21 do
-    full.gushan = { owner = "BLUE", strength = 20, e = 99999 + index }
+    full.gushan = { owner = "B", strength = 20, e = 99999 + index }
     local key = "m30-" .. string.format("%032x", index) .. "-" .. string.rep("b", 32)
     full = assert(doc:Apply(full, { matchKey = key, home = "zuoying", away = "gushan", result = "WIN", kind = "HUMAN" }).document)
 end

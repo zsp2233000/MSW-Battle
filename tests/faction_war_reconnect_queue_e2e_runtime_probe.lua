@@ -50,7 +50,7 @@ local ok, reason = pcall(function()
         _FormationService:ActivateForUser(userId, slotId, record.saved.slots[tostring(slotId)].revision)
         assert(await(function() return not record.pending and record.saved.activeSlot == slotId end), "activate confirmed")
         local saved = false
-        _FormationStorage:Write(PROFILE, _FactionWar.FactionKey, "", "RED", function(code) saved = code == 0 end)
+        _FormationStorage:Write(PROFILE, _FactionWar.FactionKey, "", "A", function(code) saved = code == 0 end)
         await(function() return saved end, 100)
         -- A clean board: the real storage starts empty, so Gushan reads 100.
         _DataStorageService:DeleteGlobalDataStorageAndWait(_FactionWarTownDocument.TownStorageName)

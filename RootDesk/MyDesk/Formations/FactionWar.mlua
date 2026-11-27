@@ -41,8 +41,9 @@ script FactionWar extends Logic
     method string FindFrontline(string faction, table towns)
         -- Search from the opposing end so a faction with two borders starts furthest from home.
         local order = _FactionWarTownDocument.TownOrder
+        local fromEnd = _FactionWarTownDocument:CapitalOf(faction) == order[1]
         for index = 1, #order do
-            local id = order[faction == "RED" and #order - index + 1 or index]
+            local id = order[fromEnd and #order - index + 1 or index]
             if towns[id].owner == faction then
                 for _, enemy in ipairs(order) do
                     if towns[enemy].owner ~= faction and isvalid(self:FindGate(id, enemy)) then return id end
@@ -82,8 +83,11 @@ script FactionWar extends Logic
 
     @ExecSpace("ServerOnly")
     method void ReadFaction(string profile, any complete)
-        -- The player's faction: "" when none was chosen yet, nil when storage failed or holds something that is no faction.
-        self:ReadProfileKey(profile, self.FactionKey, function(raw) return raw == "RED" or raw == "BLUE" end, complete)
+        -- The player's faction as A / B (a stored retired colour id is converted, ADR 0018): "" when none was chosen yet, nil when storage failed or holds something that is no faction.
+        local document = _FactionWarTownDocument
+        self:ReadProfileKey(profile, self.FactionKey, function(raw) return document:NormalizeFaction(raw) ~= nil end, function(value)
+            complete(value == "" and "" or document:NormalizeFaction(value))
+        end)
     end
 
     @ExecSpace("ServerOnly")
@@ -145,7 +149,7 @@ script FactionWar extends Logic
 
     @ExecSpace("Server")
     method void RequestEntry(string choice)
-        if choice ~= "" and choice ~= "RED" and choice ~= "BLUE" then return end
+        if choice ~= "" and not _FactionWarTownDocument:IsFaction(choice) then return end
         local userId = senderUserId
         local player = _UserService:GetUserEntityByUserId(userId)
         if not self:CanEnterFromLobby(player, userId) then

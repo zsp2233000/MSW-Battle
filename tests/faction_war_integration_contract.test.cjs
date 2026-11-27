@@ -140,10 +140,10 @@ test('the capital probe forces its results, says so, and runs the board the issu
   assert.match(text, /ApplyResolvedDamage\(99999, nil, false, "", 0, 0\)/, 'a fight ends by killing one side with the production damage call');
   assert.match(text, /plan == "WIN" and "ENEMY" or "PLAYER"/, 'a forced win kills the guard, a forced loss kills the human');
   assert.match(text, /ROOM_PLAN = \{ \[4\] = "WIN", \[7\] = "LOSE", \[10\] = "WIN" \}/, 'a capital win, a guard loss, then the counterattack win, in this order');
-  // BLUE owns only Yancheng; Gushan is RED at strength 10.
-  assert.match(text, /towns\.gushan\.owner = "RED"\n\s+towns\.gushan\.strength = 10/, 'Gushan is seeded RED at 10');
-  assert.match(text, /queue\("CAPITAL P gushan -> yancheng", p, "yancheng"\)/, 'the RED player attacks the enemy capital');
-  assert.match(text, /queue\("COUNTER Q yancheng -> gushan", q, "gushan"\)/, 'the BLUE player counterattacks from its only town');
+  // B owns only Yancheng; Gushan is A at strength 10.
+  assert.match(text, /towns\.gushan\.owner = "A"\n\s+towns\.gushan\.strength = 10/, 'Gushan is seeded A at 10');
+  assert.match(text, /queue\("CAPITAL P gushan -> yancheng", p, "yancheng"\)/, 'the A player attacks the enemy capital');
+  assert.match(text, /queue\("COUNTER Q yancheng -> gushan", q, "gushan"\)/, 'the B player counterattacks from its only town');
   assert.match(text, /string\.sub\(key, 1, 6\) == "guard-"/, 'every fight is a guard match');
   assert.match(text, /EpochOf\(towns, "gushan"\) == 2/, 'the flip is counted');
   assert.match(text, /a lost guard fight changes nothing/, 'a lost guard fight is asserted to change nothing');

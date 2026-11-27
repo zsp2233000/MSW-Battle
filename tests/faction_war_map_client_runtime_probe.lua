@@ -28,7 +28,7 @@ local ok, reason = pcall(function()
     assert(await(function() return strengthOf("gushan") == 70 end, 10), "first board arrived")
     assert(text("Overlay/Window/Map/Content/Towns/zuoying/Strength") == "兵力 80/100", "map strength label: " .. text("Overlay/Window/Map/Content/Towns/zuoying/Strength"))
     assert(text("Overlay/Window/Side/Rows/gushan/Value") == "70/100", "side row value")
-    assert(text("Overlay/Window/Side/Rows/nanzih/Owner") == "紅方・主城", "capital row owner: " .. text("Overlay/Window/Side/Rows/nanzih/Owner"))
+    assert(text("Overlay/Window/Side/Rows/nanzih/Owner") == "A 方・主城", "capital row owner: " .. text("Overlay/Window/Side/Rows/nanzih/Owner"))
     assert(ui:Ui("Overlay/Window/Map/Content/Towns/nanzih/Capital").Enable and not ui:Ui("Overlay/Window/Map/Content/Towns/zuoying/Capital").Enable, "capital tags")
     local red = ui:Ui("Overlay/Window/Map/Content/Districts/zuoying").SpriteGUIRendererComponent.Color
     local blue = ui:Ui("Overlay/Window/Map/Content/Districts/gushan").SpriteGUIRendererComponent.Color

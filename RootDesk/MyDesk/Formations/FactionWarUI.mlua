@@ -48,8 +48,8 @@ script FactionWarUI extends Logic
         if not isvalid(player) or not isvalid(entry) or not isvalid(hud) or not isvalid(choice) then return end
         if #self._T.bindings == 0 then
             self:Bind("LobbyEntry", function() self:Open() end)
-            self:Bind("FactionChoice/Window/Red", function() self:Request("RED") end)
-            self:Bind("FactionChoice/Window/Blue", function() self:Request("BLUE") end)
+            self:Bind("FactionChoice/Window/A", function() self:Request("A") end)
+            self:Bind("FactionChoice/Window/B", function() self:Request("B") end)
             self:Bind("FactionChoice/Window/Close", function() if not self._T.pending then choice:SetEnable(false) end end)
             self:Bind("AttackPanel/Window/Close", function() self:CloseAttack() end)
             self:Bind("AttackPanel/Window/Row1/Option", function() self:Attack(1) end)
@@ -169,7 +169,7 @@ script FactionWarUI extends Logic
     @ExecSpace("ClientOnly")
     method void ShowEntryControls(string message, boolean choosing)
         self:Ui("FactionChoice/Window/Status").TextGUIRendererComponent.Text = message
-        for _, id in ipairs({ "Red", "Blue" }) do
+        for _, id in ipairs({ "A", "B" }) do
             local button = self:Ui("FactionChoice/Window/" .. id)
             button:SetEnable(choosing)
             button.ButtonComponent.Enable = not self._T.pending

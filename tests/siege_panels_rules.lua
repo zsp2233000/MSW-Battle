@@ -12,13 +12,13 @@ DateTime = { UtcNow = { Elapsed = 1000 } }
 _WorldInstanceService = { WorldInstanceId = "instance" }
 _RoomService = { IsInstanceRoom = function() return false end }
 
--- A board: Zuoying (RED) is attacked from, Gushan (BLUE) is hurt, Nanzih and Yancheng are the capitals.
+-- A board: Zuoying (A) is attacked from, Gushan (B) is hurt, Nanzih and Yancheng are the capitals.
 local board = doc:InitialTowns()
 board.gushan.strength = 55
 local gates = { ["zuoying>nanzih"] = true, ["zuoying>gushan"] = true, ["gushan>zuoying"] = true, ["gushan>yancheng"] = true }
 local reads = 0
 doc.Read = function(_, complete) reads = reads + 1; complete(board) end
-local factions = { red = "RED", blue = "BLUE" }
+local factions = { red = "A", blue = "B" }
 local players = {}
 local function player(id, profile, town) players[id] = { CurrentMapName = town, PlayerComponent = { UserId = id, ProfileCode = profile } } return players[id] end
 _UserService = { GetUserEntityByUserId = function(_, id) return players[id] end }
@@ -30,15 +30,15 @@ _FactionWar = {
 }
 
 -- #117: the answer to the NPC carries every target's strength and capital flag and the departure town, from one board read.
-local list = attack:Targets("zuoying", "RED", board)
+local list = attack:Targets("zuoying", "A", board)
 check(#list == 1 and list[1].town == "gushan", "only an adjacent enemy town is a target")
-check(list[1].strength == 55 and list[1].owner == "BLUE" and list[1].capital == false and list[1].name == "鼓山", "a target carries its strength, owner and name")
+check(list[1].strength == 55 and list[1].owner == "B" and list[1].capital == false and list[1].name == "鼓山", "a target carries its strength, owner and name")
 local taken = doc:InitialTowns()
-taken.gushan.owner = "RED"
-local capitalTargets = attack:Targets("gushan", "RED", taken)
+taken.gushan.owner = "A"
+local capitalTargets = attack:Targets("gushan", "A", taken)
 check(#capitalTargets == 1 and capitalTargets[1].town == "yancheng" and capitalTargets[1].capital == true and capitalTargets[1].strength == 100, "a capital target is flagged")
-local header = attack:Header("zuoying", "RED", board)
-check(header.town == "zuoying" and header.name == "左營" and header.strength == 100 and header.owner == "RED" and header.faction == "RED" and header.capital == false, "the departure town header")
+local header = attack:Header("zuoying", "A", board)
+check(header.town == "zuoying" and header.name == "左營" and header.strength == 100 and header.owner == "A" and header.faction == "A" and header.capital == false, "the departure town header")
 
 local answers = {}
 function attack:ReceiveOptions(town, options, status, head, userId) table.insert(answers, { town = town, options = options, status = status, header = head, userId = userId }) end
@@ -65,13 +65,13 @@ watched = {}
 factions.red = nil
 attack:OptionsFor("red-user")
 check(answers[#answers].status == "UNAVAILABLE" and next(answers[#answers].header) == nil and next(watched) == nil, "an unreadable answer is not watched")
-factions.red = "RED"
+factions.red = "A"
 engaged = false
-board.zuoying.owner = "BLUE"
+board.zuoying.owner = "B"
 _FactionWarLanding = { Judge = function() return false end }
 attack:OptionsFor("red-user")
 check(answers[#answers].status == "NOT_OWNED" and next(watched) == nil, "a fallen departure town gets no live panel")
-board.zuoying.owner = "RED"
+board.zuoying.owner = "A"
 
 _FactionWarMap.WatchPanel = realWatch
 -- #117: the panel's viewers get the strengths when a board change arrives; the map's own viewers are untouched.
@@ -95,7 +95,7 @@ map:BoardChanged("room")
 check(reads == 1 and #panelSent == 1 and panelSent[1].userId == "red-user" and #mapSent == 0, "a change with only the panel open still reads once and pushes to the panel alone")
 local pushed = {}
 for _, town in ipairs(panelSent[1].towns) do pushed[town.id] = town end
-check(pushed.gushan.strength == 55 and pushed.zuoying.owner == "RED" and pushed.nanzih.capital == true, "the pushed board holds owner and strength per town")
+check(pushed.gushan.strength == 55 and pushed.zuoying.owner == "A" and pushed.nanzih.capital == true, "the pushed board holds owner and strength per town")
 map:BoardChanged("room")
 check(#panelSent == 1, "an unchanged board is not pushed again")
 board.gushan.strength = 35
@@ -225,7 +225,7 @@ check(map._T.siegeViewers["red-user"] == players["red-user"] and next(map._T.vie
 check(reads == 1 and #siegeSent == 1 and siegeSent[1].userId == "red-user" and #panelSent == 0 and #mapSent == 0, "opening reads the board once and answers the opener alone")
 local seen = {}
 for _, town in ipairs(siegeSent[1].towns) do seen[town.id] = town end
-check(seen.gushan.strength == 55 and seen.zuoying.owner == "RED" and seen.nanzih.capital == true, "owner and strength per town reach the siege panel")
+check(seen.gushan.strength == 55 and seen.zuoying.owner == "A" and seen.nanzih.capital == true, "owner and strength per town reach the siege panel")
 siegeSent = {}
 reads = 0
 board.gushan.strength = 35
@@ -296,10 +296,10 @@ end
 -- #123: the card keeps the board it heard, and forgets it when it hides.
 ui._T.siegeStrengths = nil
 ui._T.siegeShown = false
-ui:ShowSiegeBoard({ { id = "zuoying", owner = "RED", strength = 70 }, { id = "gushan", owner = "BLUE", strength = 40 } })
+ui:ShowSiegeBoard({ { id = "zuoying", owner = "A", strength = 70 }, { id = "gushan", owner = "B", strength = 40 } })
 check(ui._T.siegeStrengths == nil, "a board that arrives after the card hid is stale")
 ui._T.siegeShown = true
-ui:ShowSiegeBoard({ { id = "zuoying", owner = "RED", strength = 70 }, { id = "gushan", owner = "BLUE", strength = 40 } })
+ui:ShowSiegeBoard({ { id = "zuoying", owner = "A", strength = 70 }, { id = "gushan", owner = "B", strength = 40 } })
 check(ui._T.siegeStrengths.zuoying == 70 and ui._T.siegeStrengths.gushan == 40, "a pushed board is kept by town")
 -- Following: ask when the card starts to show, again only while nothing has arrived, tell the server when it hides.
 local asks, closes = 0, 0

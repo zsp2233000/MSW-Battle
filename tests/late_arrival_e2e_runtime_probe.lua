@@ -1,7 +1,7 @@
 -- Maker end-to-end for #121 / ADR 0017: a side that arrives after the fight began is a participant, not a spectator. Two players, added in a fresh Play:
---   add_virtual_player -profile_code wp2601 -nickname LateA        (A, RED, Zuoying, 3 tanks, on time)
---   add_virtual_player -profile_code wp2602 -nickname LateB        (B, BLUE, Gushan, 1 tank, late)
--- Set B_PROFILE to the ProfileCode of the real Maker client to read the late player's screen (STEP 5, client); the real client then plays BLUE
+--   add_virtual_player -profile_code wp2601 -nickname LateA        (A, Zuoying, 3 tanks, on time)
+--   add_virtual_player -profile_code wp2602 -nickname LateB        (B, Gushan, 1 tank, late)
+-- Set B_PROFILE to the ProfileCode of the real Maker client to read the late player's screen (STEP 5, client); the real client then plays B
 -- with an isolated formation key, and "wp2602" is not needed.
 -- Steps (server_main unless it says otherwise; wait for each terminal line before the next):
 --   1 SETUP    prepares both players (about 40 s, "SETUP PASS").
@@ -69,7 +69,7 @@ local ok, reason = pcall(function()
         local written = false
         _FactionWarTownDocument:WriteTowns(_FactionWarTownDocument:InitialTowns(), function(saved) written = saved == true end)
         assert(await(function() return written end, 100), "the town table is reset")
-        for user, value in pairs({ [a] = "RED", [b] = "BLUE" }) do
+        for user, value in pairs({ [a] = "A", [b] = "B" }) do
             -- A stored faction (a real client has one) is replaced against its current value; a failed write must not pass silently.
             local profile, saved, current = user.PlayerComponent.ProfileCode, false, nil
             _FormationStorage:Read(profile, _FactionWar.FactionKey, function(code, _, raw) current = (code == 0 and raw ~= nil) and raw or "" end)
@@ -142,7 +142,7 @@ local ok, reason = pcall(function()
         local towns, done = nil, false
         _FactionWarTownDocument:Read(function(result) towns, done = result, true end)
         assert(await(function() return done end), "towns read")
-        assert(towns.gushan.strength == 80 and towns.zuoying.strength == 100 and towns.gushan.owner == "BLUE", "Gushan 100 -> 80 once")
+        assert(towns.gushan.strength == 80 and towns.zuoying.strength == 100 and towns.gushan.owner == "B", "Gushan 100 -> 80 once")
         assert(#(towns.settled or {}) == 1, "the result was written exactly once")
         local afterB = progressOf(b ~= nil and b.PlayerComponent.ProfileCode or B_PROFILE)
         assert(afterB.settled == BASE_SETTLED + 1 and (afterB.level > BASE_LEVEL or afterB.experience > BASE_EXP), "B's experience was settled exactly once")

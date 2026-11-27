@@ -1,8 +1,8 @@
 @Logic
 script FactionWarMapUI extends Logic
 
-    property Color RedColor = Color(0.84, 0.29, 0.24, 1)
-    property Color BlueColor = Color(0.27, 0.5, 0.88, 1)
+    property Color FactionAColor = Color(0.84, 0.29, 0.24, 1)
+    property Color FactionBColor = Color(0.27, 0.5, 0.88, 1)
     property Color NeutralColor = Color(0.62, 0.6, 0.56, 1)
     property number DistrictAlpha = 0.55
     property number LinkThickness = 3
@@ -301,18 +301,16 @@ script FactionWarMapUI extends Logic
 
     @ExecSpace("ClientOnly")
     method Color OwnerColor(string owner)
-        -- Faction colour shared by the districts, crests and bars.
-        if owner == "RED" then return self.RedColor end
-        if owner == "BLUE" then return self.BlueColor end
+        -- Faction colour shared by the districts, crests and bars. Until the relative stance colours (#130) it still follows the faction, not the viewer.
+        if owner == "A" then return self.FactionAColor end
+        if owner == "B" then return self.FactionBColor end
         return self.NeutralColor
     end
 
     @ExecSpace("ClientOnly")
     method string OwnerName(string owner)
         -- The faction as players read it.
-        if owner == "RED" then return "紅方" end
-        if owner == "BLUE" then return "藍方" end
-        return "未知"
+        return _FactionWarTownDocument:FactionName(owner)
     end
 
     @ExecSpace("ClientOnly")
@@ -356,7 +354,7 @@ script FactionWarMapUI extends Logic
     method void ShowTown(table town)
         -- One town on the map and in the side list.
         local color = self:OwnerColor(town.owner)
-        local known = town.owner == "RED" or town.owner == "BLUE"
+        local known = _FactionWarTownDocument:IsFaction(town.owner)
         local district = self:Ui(self.ViewPath .. "/Content/Districts/" .. town.id)
         if isvalid(district) then district.SpriteGUIRendererComponent.Color = Color(color.r, color.g, color.b, known and self.DistrictAlpha or 0.25) end
         local node = self.ViewPath .. "/Content/Towns/" .. town.id
@@ -429,10 +427,11 @@ script FactionWarMapUI extends Logic
         local label = self:Ui("Overlay/Window/Side/Faction")
         if not isvalid(label) then return end
         local text = "尚未加入陣營"
-        if faction == "RED" or faction == "BLUE" then text = self:OwnerName(faction)
+        local isFaction = _FactionWarTownDocument:IsFaction(faction)
+        if isFaction then text = self:OwnerName(faction)
         elseif faction == "UNREADABLE" then text = "讀取失敗" end
         label.TextGUIRendererComponent.Text = text
-        label.TextGUIRendererComponent.FontColor = (faction == "RED" or faction == "BLUE") and self:OwnerColor(faction) or Color(0.93, 0.78, 0.56, 1)
+        label.TextGUIRendererComponent.FontColor = isFaction and self:OwnerColor(faction) or Color(0.93, 0.78, 0.56, 1)
         log("[VRF][FactionWarMap] ui faction=" .. faction)
     end
 
