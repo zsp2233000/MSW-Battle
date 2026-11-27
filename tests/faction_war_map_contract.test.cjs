@@ -110,7 +110,8 @@ test('every stored settlement announces the change; the client closes outside to
   assert.match(body(text, 'OnUpdate'), /if self\._T\.open and not available then self:Close\(\) end/);
   assert.match(body(text, 'HandleKey'), /KeyboardKey\.M/);
   assert.match(body(text, 'Close'), /_FactionWarMap:RequestClose\(\)/);
-  assert.match(body(text, 'ShowBoard'), /_FactionWarUI:ShowTownStatus/, 'the town HUD follows the pushed board');
+  assert.match(body(text, 'ApplyBoard'), /_FactionWarUI:ShowTownStatus/, 'the town HUD follows the pushed board');
+  assert.match(body(text, 'ShowBoard'), /self:ApplyBoard\(towns, links\)/, 'a pushed board is applied');
   assert.match(body(text, 'ShowLinks'), /ZRotation = math\.deg\(math\.atan\(dy, dx\)\)/);
   const declared = [...text.matchAll(/\n((?:    @[^\n]+\n)*)    method \w+ (\w+)\(/g)];
   assert.ok(declared.length >= 15, 'every method was found');

@@ -1,5 +1,6 @@
--- Attack panel (#117) and team preview (#118) rules: run through siege_panels_local.cjs. Fakes only; the production bodies run unchanged.
-local doc, attack, map, team, ui = _FactionWarTownDocument, _FactionWarAttack, _FactionWarMap, _FactionWarTeam, _FactionWarUI
+-- Team preview (#118) and siege panel (#123) rules: run through siege_panels_local.cjs. Fakes only; the production bodies run unchanged.
+-- (The attack panel's rules of #117 are gone with the panel: the target selection of #124 is in target_select_rules.lua.)
+local doc, map, team, ui = _FactionWarTownDocument, _FactionWarMap, _FactionWarTeam, _FactionWarUI
 local checks = 0
 local function check(condition, message)
     checks = checks + 1
@@ -29,118 +30,27 @@ _FactionWar = {
     ReadFaction = function(_, profile, complete) complete(factions[profile]) end,
 }
 
--- #117: the answer to the NPC carries every target's strength and capital flag and the departure town, from one board read.
-local list = attack:Targets("zuoying", "A", board)
-check(#list == 1 and list[1].town == "gushan", "only an adjacent enemy town is a target")
-check(list[1].strength == 55 and list[1].owner == "B" and list[1].capital == false and list[1].name == "鼓山", "a target carries its strength, owner and name")
-local taken = doc:InitialTowns()
-taken.gushan.owner = "A"
-local capitalTargets = attack:Targets("gushan", "A", taken)
-check(#capitalTargets == 1 and capitalTargets[1].town == "yancheng" and capitalTargets[1].capital == true and capitalTargets[1].strength == 100, "a capital target is flagged")
-local header = attack:Header("zuoying", "A", board)
-check(header.town == "zuoying" and header.name == "左營" and header.strength == 100 and header.owner == "A" and header.faction == "A" and header.capital == false, "the departure town header")
-
-local answers = {}
-function attack:ReceiveOptions(town, options, status, head, userId) table.insert(answers, { town = town, options = options, status = status, header = head, userId = userId }) end
-local watched = {}
-local realWatch = _FactionWarMap.WatchPanel
-_FactionWarMap.WatchPanel = function(_, userId, user) watched[userId] = user end
-local engaged, target = false, ""
-_MatchFlow = { StateForUser = function() return engaged and "QUEUED" or "IDLE" end, TargetForUser = function() return target end }
-_FormationHandoff = { IsLockedForUser = function() return false end }
-attack._T.reading = {}
 local red = player("red-user", "red", "zuoying")
-reads = 0
-attack:OptionsFor("red-user")
-local answer = answers[#answers]
-check(reads == 1, "one board read answers the whole panel; the header and the strengths add none")
-check(answer.status == "READY" and #answer.options == 1 and answer.header.strength == 100 and answer.options[1].strength == 55, "the options reply carries the numbers")
-check(answer.header.target == nil and watched["red-user"] == red, "a ready panel is followed for board pushes")
-engaged, target = true, "gushan"
-attack:OptionsFor("red-user")
-answer = answers[#answers]
-check(answer.status == "ENGAGED" and answer.header.target == "gushan" and #answer.options == 1, "a queued player's panel names the town being attacked")
-check(reads == 2, "still one read per answer")
-watched = {}
-factions.red = nil
-attack:OptionsFor("red-user")
-check(answers[#answers].status == "UNAVAILABLE" and next(answers[#answers].header) == nil and next(watched) == nil, "an unreadable answer is not watched")
-factions.red = "A"
-engaged = false
-board.zuoying.owner = "B"
-_FactionWarLanding = { Judge = function() return false end }
-attack:OptionsFor("red-user")
-check(answers[#answers].status == "NOT_OWNED" and next(watched) == nil, "a fallen departure town gets no live panel")
-board.zuoying.owner = "A"
-
-_FactionWarMap.WatchPanel = realWatch
--- #117: the panel's viewers get the strengths when a board change arrives; the map's own viewers are untouched.
-local mapSent, panelSent = {}, {}
+local blue = player("blue-user", "blue", "gushan")
+-- The world map's viewers (the siege panel is a kind of its own, below). The target selection that registers a map viewer is in target_select_rules.lua (#124).
+local mapSent = {}
 function map:ReceiveBoard(towns, links, userId) table.insert(mapSent, userId) end
-function map:ReceivePanelBoard(towns, userId) table.insert(panelSent, { userId = userId, towns = towns }) end
 function map:ReceiveFaction() end
 function map:ReceiveUnavailable() end
 local function freshMap()
-    map._T = { viewers = {}, panelViewers = {}, siegeViewers = {}, waiting = {}, reading = false, readStarted = 0, inflight = {}, again = false, signature = "", links = nil }
-    mapSent, panelSent = {}, {}
+    map._T = { viewers = {}, siegeViewers = {}, waiting = {}, reading = false, readStarted = 0, inflight = {}, again = false, signature = "", links = nil }
+    mapSent = {}
 end
 freshMap()
-local blue = player("blue-user", "blue", "gushan")
-map:WatchPanel("red-user", red)
-check(map._T.panelViewers["red-user"] == red and next(map._T.viewers) == nil, "the panel viewer is not a map viewer")
-map:WatchPanel("nobody", { CurrentMapName = "zuoying", PlayerComponent = {} })
-check(map._T.panelViewers["nobody"] == nil, "a player the server does not know is not watched")
-reads = 0
-map:BoardChanged("room")
-check(reads == 1 and #panelSent == 1 and panelSent[1].userId == "red-user" and #mapSent == 0, "a change with only the panel open still reads once and pushes to the panel alone")
-local pushed = {}
-for _, town in ipairs(panelSent[1].towns) do pushed[town.id] = town end
-check(pushed.gushan.strength == 55 and pushed.zuoying.owner == "A" and pushed.nanzih.capital == true, "the pushed board holds owner and strength per town")
-map:BoardChanged("room")
-check(#panelSent == 1, "an unchanged board is not pushed again")
-board.gushan.strength = 35
-map:BoardChanged("room")
-check(#panelSent == 2, "a changed strength is pushed")
-local latest = {}
-for _, town in ipairs(panelSent[#panelSent].towns) do latest[town.id] = town end
-check(latest.gushan.strength == 35, "the new strength arrives")
-players["red-user"].CurrentMapName = "formationlobby"
-board.gushan.strength = 15
-map:BoardChanged("room")
-check(map._T.panelViewers["red-user"] == nil and #panelSent == 2, "a player who left the town is dropped, nothing is pushed to them")
-players["red-user"].CurrentMapName = "zuoying"
-map:WatchPanel("red-user", red)
-senderUserId = "red-user"
-map:RequestPanelClose()
-check(map._T.panelViewers["red-user"] == nil, "closing the panel ends the push")
-map:WatchPanel("red-user", red)
-map:HandleUserLeaveEvent({ UserId = "red-user" })
-check(map._T.panelViewers["red-user"] == nil, "leaving the room ends it too")
-check(next(map._T.panelViewers) == nil, "nothing is left subscribed")
--- Map viewers keep their old behaviour.
-freshMap()
 map._T.viewers["red-user"] = red
-map._T.panelViewers["blue-user"] = blue
 board.gushan.strength = 45
 map:BoardChanged("room")
-check(#mapSent == 1 and mapSent[1] == "red-user" and #panelSent == 1 and panelSent[1].userId == "blue-user", "both kinds of viewers get their own kind of push")
+check(#mapSent == 1 and mapSent[1] == "red-user", "a map viewer still gets the map board")
 freshMap()
 reads = 0
 map:BoardChanged("room")
 check(reads == 0, "nobody looking means nothing to read")
-
--- #117: the client panel's words and bars.
-check(ui:StrengthText(80) == "兵力 80 / 100" and ui:StrengthText(nil) == "兵力 —", "the strength line")
-check(ui:StrengthRatio(80) == 0.8 and ui:StrengthRatio(250) == 1 and ui:StrengthRatio(-3) == 0 and ui:StrengthRatio(nil) == 0, "the bar fill is clamped")
 function ui:HighlightedTownName(town) return "<c>" .. doc.TownNames[town] .. "</c>" end
-check(ui:AttackStatusText("READY", {}, 2) == "選擇要進攻的城鎮", "ready")
-check(ui:AttackStatusText("READY", {}, 0) == "目前沒有可進攻的相鄰敵城", "no adjacent enemy town")
-check(ui:AttackStatusText("ENGAGED", { target = "gushan" }, 2) == "目前正在進攻 <c>鼓山</c>，要改變目標請先取消配對", "a queued player is told which town is being attacked")
-check(ui:AttackStatusText("ENGAGED", {}, 2) == "已在配對中，請先取消目前的配對", "queued without a known target")
-check(ui:AttackStatusText("NOT_OWNED", {}, 0) == "這座城已不屬於你的陣營" and ui:AttackStatusText("UNAVAILABLE", {}, 0) == "暫時無法讀取國戰資料，請再試一次", "the failure lines")
-for _, text in ipairs({ ui:AttackStatusText("ENGAGED", { target = "gushan" }, 2), ui:AttackStatusText("READY", {}, 2) }) do
-    check(not string.find(text, "編隊", 1, true), "the glossary says 隊伍, never 編隊")
-end
 
 -- #118: the team preview. Server side: the ticket's frozen team, never the current one.
 local roster = nil
@@ -210,7 +120,7 @@ local minX, maxX = math.huge, -math.huge
 for _, place in ipairs(layout.places) do minX, maxX = math.min(minX, place.x), math.max(maxX, place.x) end
 check(math.abs(minX + maxX) < 0.001 and maxX - minX <= 740 - team.FieldPadX + 0.001, "centered and inside the field")
 
--- #123: the siege panel follows the board for as long as it shows, as a viewer of its own kind (never the attack panel's, never the map's).
+-- #123: the siege panel follows the board for as long as it shows, as a viewer of its own kind (never the map's).
 freshMap()
 local siegeSent = {}
 function map:ReceiveSiegeBoard(towns, userId) table.insert(siegeSent, { userId = userId, towns = towns }) end
@@ -221,8 +131,8 @@ senderUserId = "red-user"
 reads = 0
 board.gushan.strength = 55
 map:RequestSiegeOpen()
-check(map._T.siegeViewers["red-user"] == players["red-user"] and next(map._T.viewers) == nil and next(map._T.panelViewers) == nil, "the siege viewer is its own kind")
-check(reads == 1 and #siegeSent == 1 and siegeSent[1].userId == "red-user" and #panelSent == 0 and #mapSent == 0, "opening reads the board once and answers the opener alone")
+check(map._T.siegeViewers["red-user"] == players["red-user"] and next(map._T.viewers) == nil, "the siege viewer is its own kind")
+check(reads == 1 and #siegeSent == 1 and siegeSent[1].userId == "red-user" and #mapSent == 0, "opening reads the board once and answers the opener alone")
 local seen = {}
 for _, town in ipairs(siegeSent[1].towns) do seen[town.id] = town end
 check(seen.gushan.strength == 55 and seen.zuoying.owner == "A" and seen.nanzih.capital == true, "owner and strength per town reach the siege panel")
@@ -230,7 +140,7 @@ siegeSent = {}
 reads = 0
 board.gushan.strength = 35
 map:BoardChanged("room")
-check(reads == 1 and #siegeSent == 1 and #panelSent == 0 and #mapSent == 0, "a change with only the siege panel showing reads once and pushes to it alone")
+check(reads == 1 and #siegeSent == 1 and #mapSent == 0, "a change with only the siege panel showing reads once and pushes to it alone")
 map:BoardChanged("room")
 check(#siegeSent == 1, "an unchanged board is not pushed again")
 players["red-user"].CurrentMapName = "formationlobby"
@@ -248,16 +158,6 @@ freshMap()
 reads = 0
 map:BoardChanged("room")
 check(reads == 0, "nobody looking at all means nothing to read")
--- The attack panel and the siege panel are open at the same time for a queued player; closing one keeps the other.
-freshMap()
-map._T.panelViewers["red-user"] = red
-map._T.siegeViewers["red-user"] = red
-map:RequestPanelClose()
-check(map._T.siegeViewers["red-user"] == red, "closing the attack panel keeps the siege panel following")
-map._T.panelViewers["red-user"] = red
-map:RequestSiegeClose()
-check(map._T.panelViewers["red-user"] == red, "closing the siege panel keeps the attack panel following")
-
 -- #123: what the siege card says, from the same pre-battle rules as the lobby.
 local clock = 500000
 local function queued(fields)
@@ -401,4 +301,4 @@ avatar.Visible = false
 check(ui:KeepAvatarVisible(avatar, "formationlobby") == false and not avatar.Visible, "the lobby hides it on purpose")
 check(ui:KeepAvatarVisible(avatar, "matchprobe") == false and not avatar.Visible, "so does a battle room")
 
-print("[VRF][SiegePanels] attack panel, siege panel and team preview rules PASS checks=" .. tostring(checks))
+print("[VRF][SiegePanels] siege panel and team preview rules PASS checks=" .. tostring(checks))

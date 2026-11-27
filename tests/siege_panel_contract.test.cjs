@@ -25,10 +25,10 @@ test('the siege panel is a Cardgame card at the top centre with both towns, the 
   assert.ok(size.x >= 88 && size.y >= 88, 'a touch-sized button');
 });
 
-test('the siege panel is drawn under the dialogs and above the town HUD', () => {
+test('the siege panel is drawn under the team preview and above the town HUD', () => {
   const war = UIBuilder.read('ui/FactionWarGroup.ui');
   const order = name => war.find(name).jsonString.displayOrder;
-  for (const dialog of ['AttackPanel', 'TeamPreview']) assert.ok(order('SiegePanel') < order(dialog), `${dialog} covers the siege panel`);
+  assert.ok(order('SiegePanel') < order('TeamPreview'), 'the team preview covers the siege panel');
   assert.ok(order('SiegePanel') > order('TownHUD'), 'the siege panel covers the town HUD');
 });
 
@@ -63,8 +63,8 @@ test('the siege subscription is a Server RPC that trusts only the sender and nev
   }
   assert.match(map, /@ExecSpace\("Client"\)\n    method void ReceiveSiegeBoard\(table towns\)/, 'the push carries towns only');
   assert.match(body(map, 'ReceiveSiegeBoard'), /_FactionWarUI:ShowSiegeBoard\(towns\)/);
-  assert.match(body(map, 'Deliver'), /PushStrengths\("siege"/, 'a board change reaches the siege viewers');
-  assert.match(body(map, 'PushStrengths'), /siegeViewers/, 'from their own set');
+  assert.match(body(map, 'Deliver'), /self:PushSiegeBoard\(board, changed, answering\)/, 'a board change reaches the siege viewers');
+  assert.match(body(map, 'PushSiegeBoard'), /siegeViewers/, 'from their own set');
   assert.match(body(map, 'BoardChanged'), /siegeViewers/, 'a siege viewer alone is reason enough to read the board');
   assert.match(map, /handler HandleUserLeaveEvent[^]*siegeViewers\[event\.UserId\] = nil/, 'leaving the room ends the subscription');
 });
