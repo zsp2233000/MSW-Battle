@@ -7,6 +7,7 @@ const path = require('node:path');
 const { UIBuilder } = require('../../.agents/skills/msw-ui-system/scripts/msw_ui_builder.cjs');
 const layout = require('./layout.json');
 const { geo } = require('./fullscreen_ui.cjs');
+const art = require('./ruids.json');
 const MAP = 'Overlay/Window/Map/Content';
 const SIDE = 'Overlay/Window/Side';
 const LEGEND_LABEL = '拔河條';
@@ -16,9 +17,10 @@ const NEUTRAL = '#9E998F';
 const LEGEND_WIDTH = 48;
 const LEGEND_LABEL_POS = [LEGEND_WIDTH + 8, 0];
 
+// The bars are flat rectangles: a solid white square drawn Simple, not the rounded skin (its ends look pointed on a thin bar).
 function addSegments(b, parent, width) {
   for (const [name, anchor, pivot] of [['First', 'middle-left', 0], ['Second', 'middle-right', 1]]) {
-    b.sprite(`${parent}/${name}`, { anchor, pivot: [pivot, 0.5], rect_size: [width / 2, HEIGHT], color: NEUTRAL, sprite_type: 1 });
+    b.sprite(`${parent}/${name}`, { anchor, pivot: [pivot, 0.5], rect_size: [width / 2, HEIGHT], color: NEUTRAL, image_ruid: art.solid, sprite_type: 0 });
   }
   // A full build is already in order. On delta import, Maker also reads file order, so display_order alone
   // cannot put the appended segments back under the crests and the legend label.
