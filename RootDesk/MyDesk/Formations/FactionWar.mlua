@@ -39,11 +39,12 @@ script FactionWar extends Logic
 
     @ExecSpace("ServerOnly")
     method string FindFrontline(string faction, table towns)
-        -- Search from the opposing end so a faction with two borders starts furthest from home.
+        -- Search from the opposing end so a faction with two borders starts furthest from home:
+        -- the faction whose capital is the first town scans from the last town, the other faction from the first.
         local order = _FactionWarTownDocument.TownOrder
-        local fromEnd = _FactionWarTownDocument:CapitalOf(faction) == order[1]
+        local capitalIsFirst = _FactionWarTownDocument:CapitalOf(faction) == order[1]
         for index = 1, #order do
-            local id = order[fromEnd and #order - index + 1 or index]
+            local id = order[capitalIsFirst and #order - index + 1 or index]
             if towns[id].owner == faction then
                 for _, enemy in ipairs(order) do
                     if towns[enemy].owner ~= faction and isvalid(self:FindGate(id, enemy)) then return id end
@@ -68,13 +69,13 @@ script FactionWar extends Logic
     end
 
     @ExecSpace("ServerOnly")
-    method void ReadProfileKey(string profile, string storageKey, any accepts, any complete)
-        -- One small per-profile value: "" when nothing was stored yet, the value itself when accepts(raw) says it is one, nil when storage failed or holds something else.
+    method void ReadProfileKey(string profile, string storageKey, any read, any complete)
+        -- One small per-profile value: "" when nothing was stored yet, read(raw) when storage returned a value (read gives the value to deliver, or nil for something that is not one), nil when storage failed.
         _FormationStorage:Read(profile, storageKey, function(code, stored, raw)
             if self:IsMissing(code, raw) then
                 complete("")
-            elseif code == 0 and accepts(raw) then
-                complete(raw)
+            elseif code == 0 then
+                complete(read(raw))
             else
                 complete(nil)
             end
@@ -85,15 +86,13 @@ script FactionWar extends Logic
     method void ReadFaction(string profile, any complete)
         -- The player's faction as A / B (a stored retired colour id is converted, ADR 0018): "" when none was chosen yet, nil when storage failed or holds something that is no faction.
         local document = _FactionWarTownDocument
-        self:ReadProfileKey(profile, self.FactionKey, function(raw) return document:NormalizeFaction(raw) ~= nil end, function(value)
-            complete(value == "" and "" or document:NormalizeFaction(value))
-        end)
+        self:ReadProfileKey(profile, self.FactionKey, function(raw) return document:NormalizeFaction(raw) end, complete)
     end
 
     @ExecSpace("ServerOnly")
     method void ReadTown(string profile, any complete)
         -- The last town the player stood in: "" when none was stored yet, nil when storage failed or holds something that is no town.
-        self:ReadProfileKey(profile, self.TownKey, function(raw) return self:IsTown(raw) end, complete)
+        self:ReadProfileKey(profile, self.TownKey, function(raw) return self:IsTown(raw) and raw or nil end, complete)
     end
 
     @ExecSpace("ServerOnly")

@@ -26,7 +26,7 @@
 
 - 轉換函式是 `FactionWarTownDocument:NormalizeFaction`，`FactionNames` 的鍵就是有效陣營（`IsFaction`、`FactionName` 在同一模組）。讀取點：玩家陣營（`FactionWar:ReadFaction`）、城鎮文件各城的 `owner`（`DecodeTowns`）、結算戰果的 `o`（`OutcomeFrom`）、缺席戰果的 `war.newOwner`（`AbsentResult:Decode`）。字面值 `"RED"`／`"BLUE"` 只在這個函式裡，`tests/faction_id_contract.test.cjs` 把關。
 - 結算寫入時，複製進新文件的歷史紀錄其 `o` 一併轉成新值，所以舊文件經過下一次結算就整份是 `A`／`B`；比較寫入仍以讀出當下的原始位元組為準。玩家已存的舊陣營沒有寫入點，保持原樣、讀取時轉換；只有新的選擇才寫入 `A`／`B`。
-- 無效值各自的處理：城鎮文件裡的城主不是陣營，整份文件讀不出來（與以往相同）；結算紀錄的 `o` 不是陣營，視為沒有奪城；缺席戰果的 `newOwner` 不是陣營，丟掉該欄位，戰果其餘照常顯示。加入陣營的選擇是呼叫參數而不是存檔值，只接受空字串、`A`、`B`，不接受舊值。
+- 無效值各自的處理：城鎮文件裡的城主不是陣營，整份文件讀不出來（與以往相同）；結算紀錄的 `o` 不是陣營，視為沒有奪城（結算寫入時，複製進新文件的那筆歷史也把它寫成空字串，與讀取一致）；缺席戰果的 `newOwner` 不是陣營，丟掉該欄位，戰果其餘照常顯示。加入陣營的選擇是呼叫參數而不是存檔值，只接受空字串、`A`、`B`，不接受舊值。
 - 名稱：顏色屬性改為 `FactionAColor`／`FactionBColor`（目前仍依陣營上色；相對立場色 #130 上線時改為依立場，屆時再換名）；節點 `FactionChoice/Window/A`／`B` 與圖例 `Legend/A`／`B`。選陣營按鈕的外觀不動，由 #126 處理。
 - `FactionWar:FindFrontline` 不再以陣營字面值決定從哪一端找起，改看該陣營的主城是不是城鎮順序的起點，行為不變。
 - 驗證與兩項已知缺口的紀錄在 `tests/README.md` 的「Faction ids A and B」。

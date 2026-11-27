@@ -48,12 +48,11 @@ test('the last town is one small per-profile key written through the storage bou
   // The faction and the last town are the same kind of small per-profile value, so one reader serves both.
   assert.ok(methods(text).includes('ReadProfileKey') && methods(text).includes('IsMissing'), 'one reader of a per-profile key and one rule for "nothing stored yet"');
   assert.equal(tag(text, 'IsMissing'), '', 'the missing-value rule is pure');
-  assert.match(body(text, 'ReadTown'), /self:ReadProfileKey\(profile, self\.TownKey, function\(raw\) return self:IsTown\(raw\) end, complete\)/, 'it reads through the same boundary as the faction');
-  assert.match(body(text, 'ReadFaction'), /self:ReadProfileKey\(profile, self\.FactionKey, function\(raw\) return document:NormalizeFaction\(raw\) ~= nil end, function\(value\)/, 'the faction is the same reader and accepts exactly what the one converter recognizes (ADR 0018)');
-  assert.match(body(text, 'ReadFaction'), /complete\(value == "" and "" or document:NormalizeFaction\(value\)\)/, 'a stored retired colour id is delivered as A / B');
+  assert.match(body(text, 'ReadTown'), /self:ReadProfileKey\(profile, self\.TownKey, function\(raw\) return self:IsTown\(raw\) and raw or nil end, complete\)/, 'it reads through the same boundary as the faction, delivering a stored value only when it is a town');
+  assert.match(body(text, 'ReadFaction'), /self:ReadProfileKey\(profile, self\.FactionKey, function\(raw\) return document:NormalizeFaction\(raw\) end, complete\)/, 'the faction is the same reader and delivers what the one converter makes of the stored value: A / B as they are, a stored retired colour id as A / B, anything else as nil (ADR 0018)');
   const reader = body(text, 'ReadProfileKey');
   assert.match(reader, /_FormationStorage:Read\(profile, storageKey/, 'it reads through FormationStorage');
-  assert.match(reader, /complete\(""\)[^]*complete\(raw\)[^]*complete\(nil\)/, 'nothing stored reads as "", a value that is accepted as itself, a storage error or any other value as unreadable, never as a guess');
+  assert.match(reader, /complete\(""\)[^]*complete\(read\(raw\)\)[^]*complete\(nil\)/, 'nothing stored reads as "", a stored value as what read() makes of it (nil when it is not a value), a storage error as unreadable, never as a guess');
   assert.equal((text.match(/code == 0 and raw == nil/g) || []).length, 1, 'the "nothing stored yet" test is written once, in IsMissing');
   assert.match(body(text, 'IsMissing'), /code == 1000002 or \(code == 0 and raw == nil\)/);
   assert.match(body(text, 'StoreTown'), /self:IsMissing\(code, raw\)/, 'remembering a town uses the same missing-profile rule');
