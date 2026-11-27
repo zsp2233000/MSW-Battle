@@ -45,6 +45,20 @@ local function strengthText(value) return "兵力 " .. tostring(value) .. " / 10
 local function f(value) return string.format("%.1f", value) end
 local function anchored(id) return ui:Ui(ui.ViewPath .. "/Content/Towns/" .. id).UITransformComponent.anchoredPosition end
 local function viewPoint(id) return ui:TownViewPoint(anchored(id), ui._T.zoom, ui._T.mapOffset) end
+-- (#132) The viewport (1500 x 810 units, drawn at 1.2) is wider than the 740 x 810 map, so the edge clamp can stop a west-coast town short of the middle at 4x: the departure
+-- town is where the clamped offset puts it, and always inside the viewport.
+local function nearestToMiddle(id, zoom)
+    local rect = ui:Ui(ui.ViewPath).UITransformComponent.RectSize
+    local size = ui:Ui(ui.ViewPath .. "/Content").UITransformComponent.RectSize
+    local want = ui:CenterOffset(anchored(id), zoom)
+    local limitX, limitY = math.max(0, (size.x * zoom - rect.x) / 2), math.max(0, (size.y * zoom - rect.y) / 2)
+    local offset = Vector2(math.max(-limitX, math.min(limitX, want.x)), math.max(-limitY, math.min(limitY, want.y)))
+    return ui:TownViewPoint(anchored(id), zoom, offset), rect
+end
+local function onDeparture(centre)
+    local expected, rect = nearestToMiddle(ORIGIN, ui.SelectZoom)
+    return math.abs(centre.x - expected.x) < 1 and math.abs(centre.y - expected.y) < 1 and math.abs(centre.x) < rect.x / 2 and math.abs(centre.y) < rect.y / 2
+end
 -- Screen pixel of a point of the viewport (UI units): the linear inverse of ScreenToLocalUIPosition, found from the two corners of the screen.
 local function screenOf(localPoint)
     local transform = ui:Ui(ui.ViewPath).UITransformComponent
@@ -93,7 +107,7 @@ local ok, failure = pcall(function()
         assert(await(function() return ui._T.open and ui._T.mode == "select" and text(row(TARGET) .. "/Value") ~= "—" end, 100), "the server's answer opened the map in selection mode")
         assert(ui._T.zoom == ui.SelectZoom and ui:Ui(ui.ViewPath .. "/Content").UITransformComponent.UIScale.x == ui.SelectZoom, "the selection opens at " .. tostring(ui.SelectZoom) .. "x: zoom=" .. tostring(ui._T.zoom))
         local centre = viewPoint(ORIGIN)
-        assert(math.abs(centre.x) < 1 and math.abs(centre.y) < 1, "centred on the departure town: (" .. f(centre.x) .. "," .. f(centre.y) .. ")")
+        assert(onDeparture(centre), "centred on the departure town as far as the edge of the map allows: (" .. f(centre.x) .. "," .. f(centre.y) .. ")")
         assert(ui:Ui(ui.ViewPath .. "/Content/Towns/" .. ORIGIN .. "/Name").Visible, "at 4x the town names are shown")
         for _, id in ipairs(_FactionWarTownDocument.TownOrder) do
             local mark, frame = marks(id)
@@ -137,7 +151,7 @@ local ok, failure = pcall(function()
         touch(screenOf(viewPoint(ORIGIN)))
         log("[VRF][TargetClick] TAP_ORIGIN PASS tapped the dimmed " .. ORIGIN .. " crest; run CLICK_DIM")
     elseif STEP == "CLICK_DIM" then
-        -- The dimmed town is the departure town, at the middle of the viewport (its position is in the MARKERS lines).
+        -- The dimmed town is the departure town, at the middle of the viewport or as near as the edge clamp allows (its position is in the MARKERS lines).
         assert(noWindow() and ui._T.open, "a tap on the dimmed " .. ORIGIN .. " crest opened nothing")
         for _, id in ipairs(_FactionWarTownDocument.TownOrder) do
             local _, frame = marks(id)
@@ -161,7 +175,7 @@ local ok, failure = pcall(function()
     elseif STEP == "RECENTER" then
         ui:FocusOrigin(ORIGIN)
         local centre = viewPoint(ORIGIN)
-        assert(ui._T.zoom == ui.SelectZoom and math.abs(centre.x) < 1 and math.abs(centre.y) < 1, "back on the departure town")
+        assert(ui._T.zoom == ui.SelectZoom and onDeparture(centre), "back on the departure town")
         log("[VRF][TargetClick] RECENTER PASS")
     elseif STEP == "HIT_REACH" then
         -- The click handler itself (ClickMap) with screen points around the crest: 20 px always hits, and far outside the reach nothing does, at every zoom.

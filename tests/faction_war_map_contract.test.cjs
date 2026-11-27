@@ -81,18 +81,17 @@ test('the side panel explains the two-colour frontline without removing confirma
   for (const end of ['Origin', 'Target']) assert.ok(ui.find(`Confirm/Window/${end}`));
 });
 
-test('the original terrain and input fill the viewport and the window hides the scene behind it', () => {
+// #130 made the map window opaque with a backdrop under the window and an opaque sidebar; #132 replaced that: the mask itself is opaque and the sidebar floats, translucent
+// (tests/worldmap_fullscreen_contract.test.cjs). What stays from #130 is that the artwork is drawn at its painted size and the touch surface covers the viewport.
+test('the original terrain fills the map, the input fills the viewport, and the mask hides the scene behind the window', () => {
   const ui = UIBuilder.read('ui/WorldMapGroup.ui');
   const rect = path => ui.getComponent(path, 'MOD.Core.UITransformComponent').RectSize;
   const tint = path => ui.getComponent(path, 'MOD.Core.SpriteGUIRendererComponent').Color;
-  assert.deepEqual(rect(`${MAP}/Terrain`), rect(VIEW), 'terrain is not drawn at the 100×100 default size');
-  assert.deepEqual(rect(`${VIEW}/Input`), rect(VIEW), 'transparent input covers the same area as the terrain');
-  assert.deepEqual(rect('Overlay'), { x: 1920, y: 1080 }, 'the dimmer covers the reference canvas');
-  assert.equal(tint('Overlay/Backdrop').a, 1, 'solid backing behind the original window artwork');
-  assert.equal(tint('Overlay/Window/Side').a, 1, 'opaque town sidebar');
-  const paths = ui.listEntities().map(e => e.path);
-  const backing = paths.indexOf('/ui/WorldMapGroup/Overlay/Backdrop');
-  assert.ok(backing >= 0 && backing < paths.indexOf('/ui/WorldMapGroup/Overlay/Window'), 'backing renders before the window frame and content');
+  assert.deepEqual(rect(`${MAP}/Terrain`), rect(MAP), 'terrain is not drawn at the 100×100 default size');
+  assert.deepEqual(rect(`${VIEW}/Input`), rect(VIEW), 'transparent input covers the whole viewport');
+  assert.deepEqual(rect('Overlay'), { x: 1920, y: 1080 }, 'the mask covers the reference canvas');
+  assert.equal(tint('Overlay').a, 1, 'and is opaque');
+  assert.equal(ui.find('Overlay/Backdrop'), null, 'so it needs no backdrop');
 });
 
 test('the clipped map has 38 district names and a stationary input layer', () => {
@@ -102,7 +101,8 @@ test('the clipped map has 38 district names and a stationary input layer', () =>
   const xform = path => ui.getComponent(path, 'MOD.Core.UITransformComponent');
   assert.ok(ui.hasComponent(VIEW, 'MOD.Core.MaskComponent'));
   assert.deepEqual(xform(VIEW).Pivot, { x: 0.5, y: 0.5 });
-  assert.deepEqual(xform(VIEW).RectSize, xform(MAP).RectSize);
+  assert.equal(xform(VIEW).RectSize.y, xform(MAP).RectSize.y, 'the viewport is as tall as the map, which it holds centred at 1x');
+  assert.ok(xform(VIEW).RectSize.x > xform(MAP).RectSize.x, 'and wider (#132): the empty space beside the map is where the town list lies at 1x');
   assert.ok(ui.getComponent(`${VIEW}/Input`, 'MOD.Core.SpriteGUIRendererComponent').RaycastTarget);
   assert.ok(ui.hasComponent(`${VIEW}/Input`, 'MOD.Core.UITouchReceiveComponent'));
   assert.ok(ui.find('Overlay/Window/Side'), 'the war board is outside the pan/zoom layer');

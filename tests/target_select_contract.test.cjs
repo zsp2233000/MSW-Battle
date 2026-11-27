@@ -48,7 +48,7 @@ test('the confirmation window is a Cardgame dialog above the map: title, both st
   const order = name => file.find(name).jsonString.displayOrder;
   assert.ok(order('Confirm') > order('Overlay') && order('Confirm') > order('OpenButton'), 'drawn above the map window');
   const inFile = file.build().ContentProto.Entities.map(entity => entity.path.replace('/ui/WorldMapGroup/', ''));
-  assert.ok(inFile.indexOf('Confirm') > inFile.indexOf('Overlay/Window/Side/Hint'), 'and after it in the file: Maker takes render order from the order of the entities');
+  assert.ok(inFile.indexOf('Confirm') > inFile.indexOf('Overlay/Window/Hint'), 'and after it in the file: Maker takes render order from the order of the entities');
   assert.equal(file.getComponent('Confirm/Window', sprite).RaycastTarget, true, 'the window takes the click itself');
   assert.equal(file.getComponent('Confirm/Window/Frame', sprite).ImageRUID.DataId, BASE_FRAME, 'the hollow Base_4 frame');
   assert.equal(file.getComponent('Confirm/Window/Frame', sprite).FillCenter, false, 'it only draws the border');
@@ -172,7 +172,7 @@ test('the message window (#127) is a Cardgame dialog above the map and the confi
   assert.equal(file.getComponent('Message', sprite).RaycastTarget, true, 'the dimmer blocks everything behind it');
   assert.equal(file.hasComponent('Message', button), false, 'and has no handler: a click outside the window does nothing');
   const inFile = file.build().ContentProto.Entities.map(entity => entity.path.replace('/ui/WorldMapGroup/', ''));
-  assert.ok(inFile.indexOf('Message') > inFile.indexOf('Confirm/Window/No') && inFile.indexOf('Message') > inFile.indexOf('Overlay/Window/Side/Hint'), 'drawn after, so above, the confirmation window and the map');
+  assert.ok(inFile.indexOf('Message') > inFile.indexOf('Confirm/Window/No') && inFile.indexOf('Message') > inFile.indexOf('Overlay/Window/Hint'), 'drawn after, so above, the confirmation window and the map');
   assert.ok(file.find('Message').jsonString.displayOrder > file.find('Confirm').jsonString.displayOrder, 'with the display order to match');
   assert.equal(file.getComponent('Message/Window', sprite).RaycastTarget, true, 'the window takes the click itself');
   assert.equal(file.getComponent('Message/Window/Frame', sprite).ImageRUID.DataId, BASE_FRAME, 'the hollow Base_4 frame');
@@ -276,7 +276,7 @@ test('the side panel line (#128) is a text under the note and above the status, 
   assert.equal(file.getComponent(line, textComponent).Text, '', 'with no text');
   assert.equal(file.getComponent(line, sprite).RaycastTarget, false, 'it takes no click');
   const inFile = file.build().ContentProto.Entities.map(entity => entity.path.replace('/ui/WorldMapGroup/', ''));
-  assert.ok(inFile.indexOf(line) > inFile.indexOf('Overlay/Window/Side/Hint'), 'after the rest of the side panel');
+  assert.ok(inFile.indexOf(line) > inFile.indexOf('Overlay/Window/Side/Status'), 'after the rest of the side panel');
   assert.ok(inFile.indexOf(line) < inFile.indexOf('Confirm') && inFile.indexOf('Confirm') < inFile.indexOf('Message'), 'and before the confirmation and message windows, which stay above it');
   const top = path => file.getComponent(`Overlay/Window/Side/${path}`, 'MOD.Core.UITransformComponent').anchoredPosition.y;
   assert.ok(top('Notice') < top('Note') - 60, 'below the two-line note');

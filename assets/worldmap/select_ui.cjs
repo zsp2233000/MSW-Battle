@@ -17,7 +17,8 @@ const BASE_FRAME = 'ac319875b43f40ea86a069c468a1a26e'; // Base_4 panel frame (ho
 const OUTLINE = { outline: true, outline_color: { r: 0, g: 0, b: 0, a: 0.7 }, outline_width: 0.2, face_dilate: 0.2 };
 const GOLD = '#EEC78F';
 const BROWN_PANEL = { r: 0.12, g: 0.075, b: 0.04, a: 0.95 };
-const ROW = [460, 84];
+// The size of a row of the town list (#132: the list is narrower since it floats on the right of the map); the pick button and the veil cover the whole row.
+const { SIDE_ROW: ROW, geo } = require('./fullscreen_ui.cjs');
 const MAP = 'Overlay/Window/Map/Content';
 const art = require('./ruids.json');
 // Both marks are the crest sprite drawn larger behind the crest, so each shows as a rim around it: gold for a town that can be picked, bright cyan for the picked one.
@@ -73,11 +74,11 @@ function addMessageUi(b) {
   cardButton(b, 'Message/Window/Ok', '確定', { anchor: 'bottom-center', pos: [0, 32], rect_size: [240, 88], font_size: 32 });
 }
 
-// The side panel line (#128), under the note and above the status line (the side panel is 810 high; the note ends at -676, the status line starts about
-// 739 from the top). Text only: it takes no click. The builder appends a new entity to the file, and Maker takes render order from the order of the
+// The side panel line (#128), under the note and above the status line (the side panel is 800 high since #132; the note ends at -656, the status line starts
+// 750 from the top). Text only: it takes no click. The builder appends a new entity to the file, and Maker takes render order from the order of the
 // entities, so on a file that already has Confirm and Message the line is moved in front of them (same entity, nothing re-imported): the windows stay above it.
 function addNoticeUi(b) {
-  b.text('Overlay/Window/Side/Notice', '', { size: 22, color: '#FFD173', bold: true, ...OUTLINE, anchor: 'top-center', pos: [0, -684], rect_size: [460, 36], enable: false });
+  b.text('Overlay/Window/Side/Notice', '', { size: 22, color: '#FFD173', bold: true, ...OUTLINE, ...geo('Overlay/Window/Side/Notice'), enable: false });
   const at = path => b.entities.findIndex(entity => entity.path === `${b.root_path}/${path}`);
   const notice = at('Overlay/Window/Side/Notice');
   const confirm = at('Confirm');

@@ -1,5 +1,7 @@
 -- Maker client, in a town with the map open. No board or player data is written.
 -- Verify uploaded sprites, anchored wheel math, all 34 neutral labels and the drag event path.
+-- (#132) The viewport is 1500 x 810 units drawn at the base scale (1.2), wider than the 740 x 810 map: at low zoom the map is centred and cannot be panned sideways, and
+-- the artwork's edge clamp is the one it was (the content never shows blank space beyond its edge inside the viewport, and is centred where it is smaller than it).
 local ui = _FactionWarMapUI
 local function near(a, b) return math.abs(a - b) < 0.5 end
 local function visibleLabels()
@@ -18,15 +20,15 @@ local ok, reason = pcall(function()
     assert(isvalid(view.MaskComponent) and isvalid(input.UITouchReceiveComponent), "viewport clip and inputs loaded")
     local viewportSize = view.UITransformComponent.RectSize
     local terrainSize = ui:Ui(ui.ViewPath .. "/Content/Terrain").UITransformComponent.RectSize
+    local contentSize = content.RectSize
     local inputSize = input.UITransformComponent.RectSize
-    assert(near(terrainSize.x, viewportSize.x) and near(terrainSize.y, viewportSize.y), "original terrain fills the viewport")
-    assert(near(inputSize.x, viewportSize.x) and near(inputSize.y, viewportSize.y), "input fills the viewport")
-    local backdrop = ui:Ui("Overlay/Backdrop")
-    assert(isvalid(backdrop) and near(backdrop.SpriteGUIRendererComponent.Color.a * 100, 100), "window has an opaque backing")
-    assert(near(sideEntity.SpriteGUIRendererComponent.Color.a * 100, 100), "town sidebar is opaque")
-    local frame = ui:Ui("Overlay/Window").UITransformComponent
-    assert(_UILogic:GetSiblingIndex(backdrop.UITransformComponent) < _UILogic:GetSiblingIndex(frame), "opaque backing is behind the original frame")
-    log("[VRF][MapAppearance] PASS terrain=" .. tostring(terrainSize) .. " input=" .. tostring(inputSize) .. " opaque window and sidebar")
+    assert(near(terrainSize.x, contentSize.x) and near(terrainSize.y, contentSize.y), "original terrain fills the map")
+    assert(near(inputSize.x, viewportSize.x) and near(inputSize.y, viewportSize.y), "input fills the whole viewport")
+    local mask = ui:Ui("Overlay")
+    assert(near(mask.SpriteGUIRendererComponent.Color.a * 100, 100) and not isvalid(ui:Ui("Overlay/Backdrop")), "the mask is opaque by itself, with no backdrop under the window")
+    local sideAlpha = sideEntity.SpriteGUIRendererComponent.Color.a
+    assert(sideAlpha > 0.3 and sideAlpha < 0.95, "the town list is translucent")
+    log("[VRF][MapAppearance] PASS terrain=" .. tostring(terrainSize) .. " input=" .. tostring(inputSize) .. " opaque mask, translucent town list")
     for _, name in ipairs({ "Terrain", "Districts/nanzih", "Districts/zuoying", "Districts/gushan", "Districts/yancheng" }) do
         local entity = ui:Ui(ui.ViewPath .. "/Content/" .. name)
         local sprite = _ResourceService:LoadSpriteAndWait(entity.SpriteGUIRendererComponent.ImageRUID.DataId)
@@ -42,13 +44,16 @@ local ok, reason = pcall(function()
     assert(near(content.anchoredPosition.x, 0) and near(content.anchoredPosition.y, 0), "overview doesn't allow blank edges")
     local overview = visibleLabels()
     assert(overview > 0 and overview < 34, "overview declutters the label layer")
+    -- (#132) At 1x the viewport is wider than the map, so the clamp centres it and the point under the cursor cannot stay: look at it from 4x, where nothing is clamped.
     local cursor = Vector2(-165, -120)
+    ui:SetMapView(4, Vector2(0, 0))
     ui:ZoomMapAt(cursor, 0.2)
     local zoom = content.UIScale.x
     local offset = content.anchoredPosition
-    assert(zoom > 1.15 and zoom < 1.25, "a small wheel event should zoom by a noticeable step")
-    assert(near((cursor.x - offset.x) / zoom, cursor.x)
-        and near((cursor.y - offset.y) / zoom, cursor.y), "zoom fixes the point under the cursor")
+    assert(zoom > 4 * 1.15 and zoom < 4 * 1.25, "a small wheel event should zoom by a noticeable step")
+    -- The content point under the cursor was cursor / 4 at 4x and offset 0; it is still under the cursor after the step.
+    assert(near((cursor.x - offset.x) / zoom, cursor.x / 4)
+        and near((cursor.y - offset.y) / zoom, cursor.y / 4), "zoom fixes the point under the cursor")
     ui:ZoomMapAt(Vector2(view.UITransformComponent.RectSize.x, 0), 3)
     assert(content.UIScale.x == zoom, "wheel outside the viewport is ignored")
     for _ = 1, 20 do ui:ZoomMapAt(cursor, 3) end
@@ -70,7 +75,8 @@ local ok, reason = pcall(function()
     assert(near(side.anchoredPosition.x, sideStart.x) and near(side.anchoredPosition.y, sideStart.y), "war board is stationary")
     ui:SetMapView(2, Vector2(1e6, -1e6))
     local size = view.UITransformComponent.RectSize
-    assert(near(content.anchoredPosition.x, size.x / 2) and near(content.anchoredPosition.y, -size.y / 2), "drag/pan clamps to the artwork")
+    local limitX, limitY = math.max(0, (content.RectSize.x * 2 - size.x) / 2), math.max(0, (content.RectSize.y * 2 - size.y) / 2)
+    assert(near(content.anchoredPosition.x, limitX) and near(content.anchoredPosition.y, -limitY), "drag/pan clamps to the artwork: (" .. tostring(limitX) .. "," .. tostring(-limitY) .. ")")
     for _ = 1, 20 do ui:ZoomMapAt(cursor, -3) end
     assert(near(content.UIScale.x, 1) and near(content.anchoredPosition.x, 0)
         and near(content.anchoredPosition.y, 0), "zooming out restores overview")

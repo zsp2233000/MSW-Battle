@@ -195,6 +195,13 @@ local function node(path)
         nodes[path] = { Enable = false, SetEnable = function(self, value) self.Enable = value end,
             TextGUIRendererComponent = { Text = "" }, SpriteGUIRendererComponent = {}, ButtonComponent = { Enable = true },
             UITransformComponent = { RectSize = Vector2(740, 810), anchoredPosition = Vector2(at[1], at[2]), ZRotation = 0 } }
+        if path == "Overlay/Window/Side" then
+            -- (#132) The town list floats over the viewport: 420 x 800, its pivot at the middle of its right edge, which is on the screen at screenPivot. Here the view is
+            -- 740 wide and centred on the screen origin, so the list (screen x from 280 to 700) covers the right edge of it and reaches beyond.
+            nodes[path].UITransformComponent.RectSize = Vector2(420, 800)
+            nodes[path].UITransformComponent.Pivot = Vector2(1, 0.5)
+            nodes[path].UITransformComponent.screenPivot = Vector2(700, 0)
+        end
     end
     return nodes[path]
 end
@@ -202,10 +209,17 @@ end
 local unitsPerPixel = 1
 _UILogic = {
     ScreenWidth = 1920, ScreenHeight = 1080,
-    ScreenToLocalUIPosition = function(_, point) return Vector2(point.x * unitsPerPixel, point.y * unitsPerPixel) end,
+    -- A point as a transform sees it: measured from its pivot (the fake list has one on the screen, the others are at the screen origin).
+    ScreenToLocalUIPosition = function(_, point, transform)
+        local origin = transform ~= nil and transform.screenPivot or Vector2(0, 0)
+        -- (#132) in the units of the transform itself: one drawn at a scale (the viewport, at BaseScale) has that many screen pixels in a unit
+        local scale = transform ~= nil and transform.UIScale ~= nil and transform.UIScale.x or 1
+        return Vector2((point.x - origin.x) * unitsPerPixel / scale, (point.y - origin.y) * unitsPerPixel / scale)
+    end,
     ScreenToUIPosition = function(_, point) return Vector2(point.x * unitsPerPixel, point.y * unitsPerPixel) end,
 }
-_InputService.GetCursorPosition = function() return Vector2(0, 0) end
+local cursorAt = Vector2(0, 0)
+_InputService.GetCursorPosition = function() return cursorAt end
 _EntityService = { GetEntityByPath = function(_, path) return node((string.gsub(path, "^/ui/WorldMapGroup/", ""))) end }
 _UserService.LocalPlayer = { CurrentMapName = "zuoying" }
 _FormationLobby = { IsTownPanelOpen = function() return false end }
@@ -217,6 +231,8 @@ local function fresh()
     calls = { open = 0, close = 0, select = 0, attack = {} }
     ui:OnBeginPlay()
     ui._T.mapName = _UserService.LocalPlayer.CurrentMapName
+    -- (#132) The scenarios below were written for a viewport drawn at scale 1, where a screen pixel is a unit of the viewport; the one about the base scale sets it back.
+    ui.BaseScale = 1
 end
 map.RequestOpen = function() calls.open = calls.open + 1 end
 map.RequestClose = function() calls.close = calls.close + 1 end
@@ -868,11 +884,55 @@ local before = ui._T.mapOffset
 press(Vector2(0, 0))
 ui:DragMap({ TouchId = -1, TouchPoint = Vector2(30, -20) })
 release(Vector2(30, -20))
-check(near(ui._T.mapOffset.x, before.x + 30) and near(ui._T.mapOffset.y, before.y - 20), "a drag still pans the map at screen speed")
+check(near(ui._T.mapOffset.x, before.x + 30 / ui.BaseScale) and near(ui._T.mapOffset.y, before.y - 20 / ui.BaseScale), "a drag still pans the map at screen speed (a unit of the viewport is BaseScale screen pixels, #132)")
 ui:SetMapView(4, Vector2(1e6, 1e6))
 check(near(ui._T.mapOffset.x, (740 * 4 - 740) / 2) and near(ui._T.mapOffset.y, (810 * 4 - 810) / 2), "and the edges still clamp")
 for _ = 1, 10 do ui:HandleWheel({ ScrollDelta = -3 }) end
 check(ui._T.zoom == 1 and near(ui._T.mapOffset.x, 0) and near(ui._T.mapOffset.y, 0), "zooming out still restores the overview")
+
+-- (#132) The town list floats over part of the viewport and takes the touches that land on it: the wheel on it does nothing, beside it the wheel zooms as before.
+fresh()
+ready("zuoying", { gushan }, towns())
+local zoomOnOpen = ui._T.zoom
+cursorAt = Vector2(300, 0)
+check(ui:IsOverSidePanel(cursorAt) and not ui:IsOverSidePanel(Vector2(-200, 0)) and not ui:IsOverSidePanel(Vector2(300, 450)), "a point is on the list inside its rectangle, measured from its pivot")
+ui:HandleWheel({ ScrollDelta = 1 })
+check(ui._T.zoom == zoomOnOpen, "the wheel over the town list does nothing")
+cursorAt = Vector2(-200, 0)
+ui:HandleWheel({ ScrollDelta = 1 })
+check(near(ui._T.zoom, zoomOnOpen * ui.WheelZoomFactor), "and on the map beside it the wheel zooms")
+cursorAt = Vector2(0, 0)
+
+-- (#132) The viewport is drawn at the base scale: its own unit is that many canvas units, so a click reaches as many screen pixels as before.
+fresh()
+node(ui.ViewPath).UITransformComponent.UIScale = Vector3(1.2, 1.2, 1)
+check(near(ui:ScreenPixelsPerUnit(), 1.2), "a unit of the viewport is 1.2 screen pixels")
+check(near(ui:HitRadius(1, ui:ScreenPixelsPerUnit()) * ui:ScreenPixelsPerUnit(), ui.MinHitPx), "the minimum reach is still MinHitPx screen pixels")
+node(ui.ViewPath).UITransformComponent.UIScale = nil
+check(near(ui:ScreenPixelsPerUnit(), 1), "and an unscaled viewport is what it was")
+
+-- (#132) At the base scale every distance in the viewport is in its own units: 1.2 screen pixels to a unit. Opening the map draws the viewport at that scale, a drag
+-- of 30 screen pixels moves the map 25 units, and the reach of a click is the same number of screen pixels as before.
+fresh()
+ui.BaseScale = 1.2
+ready("zuoying", { gushan }, towns())
+check(near(node(ui.ViewPath).UITransformComponent.UIScale.x, 1.2) and near(node(ui.ViewPath).UITransformComponent.UIScale.y, 1.2), "opening the map draws the viewport at the base scale")
+check(near(ui:ScreenPixelsPerUnit(), 1.2), "so a unit of the viewport is 1.2 screen pixels")
+ui:SetMapView(4, ui:CenterOffset(anchored("zuoying"), 4))
+local scaledBefore = ui._T.mapOffset
+press(Vector2(0, 0))
+ui:DragMap({ TouchId = -1, TouchPoint = Vector2(30, -12) })
+release(Vector2(30, -12))
+check(near(ui._T.mapOffset.x, scaledBefore.x + 25) and near(ui._T.mapOffset.y, scaledBefore.y - 10), "a drag of 30 x 12 screen pixels moves the map 25 x 10 units")
+focus("gushan", 4)
+local crest = viewPointOf("gushan")
+local crestOnScreen = Vector2(crest.x * 1.2, crest.y * 1.2)
+click(Vector2(crestOnScreen.x - 20, crestOnScreen.y))
+check(ui._T.selected == "gushan", "a click 20 screen pixels from the crest picks it")
+ui:Decline()
+click(Vector2(crestOnScreen.x - 40, crestOnScreen.y))
+check(ui._T.selected == nil, "one 40 screen pixels away picks nothing")
+ui.BaseScale = 1
 
 -- A click on the selectable crest opens the same confirmation as the row, and nothing was asked of the server.
 fresh()

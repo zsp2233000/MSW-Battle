@@ -16,11 +16,12 @@ const layout = require('./layout.json');
 const art = require('./ruids.json');
 const { addSelectUi } = require('./select_ui.cjs');
 const { addFrontlines, addFrontlineLegend, LEGEND_LABEL, LEGEND_LABEL_POS, NOTE } = require('./build_frontline_ui.cjs');
+// The near-full-screen layout (#132): the window, the viewport and the town list take their rectangles from the module that build_fullscreen_ui.cjs lays an existing file out with.
+const { geo, addHint, plate, MASK_COLOR, SIDE_COLOR, WINDOW_FRAME } = require('./fullscreen_ui.cjs');
 
 // Cardgame theme parts (msw-ui-kit cardgame palette), as used by the rest of the game.
 const CARD_BUTTON = { normal: '9505617fb63c447c8ff9c15c18d88064', highlighted: '398dfdb46d534ea2a2373e4f5d29ae2a', pressed: '1016088c7aca43c78cdd06c01645ab1b' };
 const X_BUTTON = { normal: 'e01ef74a1ecf444bbb013c4313a8d0a9', highlighted: 'f24a6333e4df404795e922ec2966e997', pressed: '5952570d481245a9a4fbe562f3c030c5' };
-const PANEL_BG = 'd9b68fae16404c5c81228b6c45cf40a5';   // Panel_3 Background_1 (Sliced)
 const GAUGE = 'f0911af597259044aa624a11332c0595';      // HP gauge slice (Sliced fill, width-driven)
 const HERE_ARROW = '96392b1df6724d43abab0ec1988aa7c4'; // animationclip 20x36, downward marker (plays directly as ImageRUID)
 const OUTLINE = { outline: true, outline_color: { r: 0, g: 0, b: 0, a: 0.7 }, outline_width: 0.2, face_dilate: 0.2 };
@@ -41,7 +42,8 @@ function swap(b, entity, states) {
   });
 }
 
-const uiFile = path.join(ROOT, 'ui', 'WorldMapGroup.ui');
+// WORLDMAP_UI_OUT writes the build somewhere else (tests/worldmap_fullscreen_contract.test.cjs compares a full build with the committed file without touching it).
+const uiFile = process.env.WORLDMAP_UI_OUT || path.join(ROOT, 'ui', 'WorldMapGroup.ui');
 const b = new UIBuilder('WorldMapGroup', 9, true);
 b.patchComponent('/ui/WorldMapGroup', 'MOD.Core.UIGroupComponent', { GroupType: 1, GroupOrder: 9, DefaultShow: true });
 
@@ -51,20 +53,18 @@ b.button('OpenButton', '大地圖 (M)', { anchor: 'top-right', pos: [-24, -150],
 swap(b, 'OpenButton', CARD_BUTTON);
 b.patchComponent('OpenButton', 'MOD.Core.TextGUIRendererComponent', { OutlineColor: OUTLINE.outline_color, OutlineWidth: 0.2, FaceDilate: 0.2, FontStyle: 1 });
 
-// Full-screen dimmer + solid backing under the original window frame; the script toggles Overlay.
-// Stretch alone leaves the sprite's RectSize at 100×100 in Maker.
-b.sprite('Overlay', { anchor: 'stretch', rect_size: [1920, 1080], color: '#000000', alpha: 0.55, raycast: true, enable: false });
-b.sprite('Overlay/Backdrop', { rect_size: [1344, 944], color: '#241C14', sprite_type: 1 });
-b.sprite('Overlay/Window', { anchor: 'middle-center', rect_size: [1360, 960], image_ruid: PANEL_BG, color: '#FFFFFF', sprite_type: 1, raycast: true });
-b.text('Overlay/Window/Title', '國戰大地圖', { size: 32, color: '#FFFFFF', bold: true, ...OUTLINE, anchor: 'top-center', pos: [0, -30], rect_size: [600, 56] });
-b.button('Overlay/Window/Close', '', { anchor: 'top-right', pos: [-16, -12], rect_size: [88, 96], image_ruid: X_BUTTON.normal, bg_color: '#FFFFFF', sprite_type: 0 });
-swap(b, 'Overlay/Window/Close', X_BUTTON);
+// Full-screen mask in opaque deep brown (it covers the town, the HUD and the siege panel, so it needs no backdrop under the window); the script toggles Overlay.
+// Stretch alone leaves the sprite's RectSize at 100×100 in Maker. The window leaves 40 px on every side.
+b.sprite('Overlay', { anchor: 'stretch', rect_size: [1920, 1080], color: '#241C14', alpha: MASK_COLOR.a, raycast: true, enable: false });
+b.sprite('Overlay/Window', { ...geo('Overlay/Window'), image_ruid: WINDOW_FRAME, color: '#FFFFFF', sprite_type: 1, raycast: true });
+b.patchComponent('Overlay/Window', 'MOD.Core.SpriteGUIRendererComponent', { FillCenter: false });
 
-// The transparent input surface and the mask stay fixed. Only the content moves.
+// The transparent input surface and the mask stay fixed. Only the content moves. The viewport fills the window and FactionWarMapUI draws it at the base scale (1.2),
+// so the map (740 × 810 in its own units) is centred in it and as tall as the window at 1x.
 const VIEW = 'Overlay/Window/Map';
 const MAP = `${VIEW}/Content`;
 const size = [layout.size.w, layout.size.h];
-b.mask(VIEW, { anchor: 'middle-left', pivot: [0.5, 0.5], pos: [44 + size[0] / 2, -24], rect_size: size });
+b.mask(VIEW, geo(VIEW));
 b.empty(MAP, { rect_size: size });
 b.sprite(`${MAP}/Terrain`, { rect_size: size, image_ruid: art.terrain, color: '#FFFFFF', sprite_type: 0 });
 b.empty(`${MAP}/Districts`, { anchor: 'stretch' });
@@ -95,40 +95,48 @@ for (const id of TOWNS) {
 // No controls inside the moving map can intercept drag input. The fixed surface
 // receives mouse and touch from the entire visible rect, not the scaled terrain.
 const INPUT = `${VIEW}/Input`;
-b.sprite(INPUT, { rect_size: size, alpha: 0, raycast: true });
+b.sprite(INPUT, { ...geo(INPUT), alpha: 0, raycast: true });
 b.addComponent(INPUT, 'MOD.Core.UITouchReceiveComponent');
 
-b.text('Overlay/Window/MapHint', '高雄 38 區｜滾輪縮放・拖曳移動', { size: 22, color: '#E8DCC8', ...OUTLINE,
-  anchor: 'middle-left', pos: [44, -452], rect_size: [size[0], 30] });
-
-// --- side panel: own faction, strength list north to south, legend, status -------------------
+// --- the town list: own faction, strength list north to south, legend, status -------------------
+// It floats over the map (#132): translucent, in the empty space on the right of the map at 1x, and it takes the touches that land on it (raycast), so a drag on it
+// does not move the map under it. It is created after the map, so it is drawn above it.
 const SIDE = 'Overlay/Window/Side';
-b.sprite(SIDE, { anchor: 'middle-right', pos: [-44, -30], rect_size: [500, 810], color: { r: 0.12, g: 0.075, b: 0.04, a: 1 }, sprite_type: 1 });
-b.text(`${SIDE}/FactionLabel`, '你的陣營', { size: 22, color: GOLD, ...OUTLINE, anchor: 'top-center', pos: [0, -24], rect_size: [460, 30] });
-b.text(`${SIDE}/Faction`, '讀取中…', { size: 34, color: GOLD, bold: true, ...OUTLINE, anchor: 'top-center', pos: [0, -58], rect_size: [460, 44] });
-b.sprite(`${SIDE}/Divider`, { anchor: 'top-center', pos: [0, -118], rect_size: [440, 2], color: { r: 0.93, g: 0.78, b: 0.56, a: 0.5 }, sprite_type: 1 });
-b.text(`${SIDE}/Header`, '城鎮兵力（由北到南）', { size: 22, color: GOLD, ...OUTLINE, anchor: 'top-center', pos: [0, -134], rect_size: [460, 30] });
-b.empty(`${SIDE}/Rows`, { anchor: 'top-center', pos: [0, -176], rect_size: [460, 4 * 92] });
-TOWNS.forEach((id, n) => {
+b.sprite(SIDE, { ...geo(SIDE), color: SIDE_COLOR, alpha: SIDE_COLOR.a, sprite_type: 1, raycast: true });
+b.text(`${SIDE}/FactionLabel`, '你的陣營', { size: 22, color: GOLD, ...OUTLINE, ...geo(`${SIDE}/FactionLabel`) });
+b.text(`${SIDE}/Faction`, '讀取中…', { size: 34, color: GOLD, bold: true, ...OUTLINE, ...geo(`${SIDE}/Faction`) });
+b.sprite(`${SIDE}/Divider`, { ...geo(`${SIDE}/Divider`), color: { r: 0.93, g: 0.78, b: 0.56, a: 0.5 }, sprite_type: 1 });
+b.text(`${SIDE}/Header`, '城鎮兵力（由北到南）', { size: 22, color: GOLD, ...OUTLINE, ...geo(`${SIDE}/Header`) });
+b.empty(`${SIDE}/Rows`, geo(`${SIDE}/Rows`));
+TOWNS.forEach(id => {
   const row = `${SIDE}/Rows/${id}`;
-  b.sprite(row, { anchor: 'top-center', pos: [0, -n * 92], rect_size: [460, 84], color: { r: 0, g: 0, b: 0, a: 0.3 }, sprite_type: 1 });
-  b.text(`${row}/Name`, NAMES[id], { size: 26, color: '#FFFFFF', bold: true, ...OUTLINE, alignment: 3, anchor: 'middle-left', pos: [16, 14], rect_size: [100, 34] });
-  b.text(`${row}/Here`, '你在這裡', { size: 20, color: '#FACA33', bold: true, ...OUTLINE, alignment: 3, anchor: 'middle-left', pos: [16, -20], rect_size: [110, 26], enable: false });
-  b.text(`${row}/Owner`, '讀取中', { size: 22, color: '#DAD1C2', ...OUTLINE, alignment: 3, anchor: 'middle-left', pos: [124, 14], rect_size: [180, 30] });
-  b.text(`${row}/Value`, '—', { size: 24, color: '#FFFFFF', bold: true, ...OUTLINE, alignment: 5, anchor: 'middle-right', pos: [-16, 14], rect_size: [120, 30] });
-  b.sprite(`${row}/Bar`, { anchor: 'middle-right', pos: [-16, -20], rect_size: [280, 16], color: { r: 0.05, g: 0.035, b: 0.02, a: 0.85 }, sprite_type: 1 });
-  b.sprite(`${row}/Bar/Fill`, { anchor: 'middle-left', pos: [0, 0], rect_size: [280, 16], pivot: [0, 0.5], image_ruid: GAUGE, color: NEUTRAL, sprite_type: 1, enable: false });
+  b.sprite(row, { ...geo(row), color: { r: 0, g: 0, b: 0, a: 0.3 }, sprite_type: 1 });
+  b.text(`${row}/Name`, NAMES[id], { size: 26, color: '#FFFFFF', bold: true, ...OUTLINE, alignment: 3, ...geo(`${row}/Name`) });
+  b.text(`${row}/Here`, '你在這裡', { size: 20, color: '#FACA33', bold: true, ...OUTLINE, alignment: 3, ...geo(`${row}/Here`), enable: false });
+  b.text(`${row}/Owner`, '讀取中', { size: 22, color: '#DAD1C2', ...OUTLINE, alignment: 3, ...geo(`${row}/Owner`) });
+  b.text(`${row}/Value`, '—', { size: 24, color: '#FFFFFF', bold: true, ...OUTLINE, alignment: 5, ...geo(`${row}/Value`) });
+  b.sprite(`${row}/Bar`, { ...geo(`${row}/Bar`), color: { r: 0.05, g: 0.035, b: 0.02, a: 0.85 }, sprite_type: 1 });
+  b.sprite(`${row}/Bar/Fill`, { ...geo(`${row}/Bar/Fill`), image_ruid: GAUGE, color: NEUTRAL, sprite_type: 1, enable: false });
 });
-b.empty(`${SIDE}/Legend`, { anchor: 'top-center', pos: [0, -560], rect_size: [460, 40] });
-b.sprite(`${SIDE}/Legend/Ally`, { anchor: 'middle-left', pos: [20, 0], rect_size: [28, 28], color: NEUTRAL, sprite_type: 1 });
-b.text(`${SIDE}/Legend/Ally/Label`, '我方', { size: 22, color: '#FFFFFF', ...OUTLINE, alignment: 3, anchor: 'middle-left', pos: [36, 0], rect_size: [90, 30] });
-b.sprite(`${SIDE}/Legend/Enemy`, { anchor: 'middle-left', pos: [170, 0], rect_size: [28, 28], color: NEUTRAL, sprite_type: 1 });
-b.text(`${SIDE}/Legend/Enemy/Label`, '敵方', { size: 22, color: '#FFFFFF', ...OUTLINE, alignment: 3, anchor: 'middle-left', pos: [36, 0], rect_size: [90, 30] });
+b.empty(`${SIDE}/Legend`, geo(`${SIDE}/Legend`));
+b.sprite(`${SIDE}/Legend/Ally`, { ...geo(`${SIDE}/Legend/Ally`), color: NEUTRAL, sprite_type: 1 });
+b.text(`${SIDE}/Legend/Ally/Label`, '我方', { size: 22, color: '#FFFFFF', ...OUTLINE, alignment: 3, ...geo(`${SIDE}/Legend/Ally/Label`) });
+b.sprite(`${SIDE}/Legend/Enemy`, { ...geo(`${SIDE}/Legend/Enemy`), color: NEUTRAL, sprite_type: 1 });
+b.text(`${SIDE}/Legend/Enemy/Label`, '敵方', { size: 22, color: '#FFFFFF', ...OUTLINE, alignment: 3, ...geo(`${SIDE}/Legend/Enemy/Label`) });
 addFrontlineLegend(b);
+b.patch(`${SIDE}/Legend/Link`, geo(`${SIDE}/Legend/Link`));
 b.text(`${SIDE}/Legend/Link/Label`, LEGEND_LABEL, { size: 22, color: '#FFFFFF', ...OUTLINE, alignment: 3, anchor: 'middle-left', pos: LEGEND_LABEL_POS, rect_size: [90, 30] });
-b.text(`${SIDE}/Note`, NOTE, { size: 20, color: '#E8DCC8', ...OUTLINE, anchor: 'top-center', pos: [0, -612], rect_size: [460, 64] });
-b.text(`${SIDE}/Status`, '正在讀取戰況…', { size: 20, color: GOLD, ...OUTLINE, anchor: 'bottom-center', pos: [0, 56], rect_size: [460, 30] });
-b.text(`${SIDE}/Hint`, '按 M 鍵或右上角按鈕關閉', { size: 20, color: '#BCBBBB', ...OUTLINE, anchor: 'bottom-center', pos: [0, 20], rect_size: [460, 28] });
+b.text(`${SIDE}/Note`, NOTE, { size: 20, color: '#E8DCC8', ...OUTLINE, ...geo(`${SIDE}/Note`) });
+b.text(`${SIDE}/Status`, '正在讀取戰況…', { size: 20, color: GOLD, ...OUTLINE, ...geo(`${SIDE}/Status`) });
+
+// --- the corners of the window, above the map and the town list: the title, the close button, the zoom hint and the closing hint ---------
+b.text('Overlay/Window/Title', '國戰大地圖', { size: 32, color: '#FFFFFF', bold: true, ...OUTLINE, ...geo('Overlay/Window/Title') });
+plate(b, 'Overlay/Window/Title');
+b.button('Overlay/Window/Close', '', { ...geo('Overlay/Window/Close'), image_ruid: X_BUTTON.normal, bg_color: '#FFFFFF', sprite_type: 0 });
+swap(b, 'Overlay/Window/Close', X_BUTTON);
+b.text('Overlay/Window/MapHint', '高雄 38 區｜滾輪縮放・拖曳移動', { size: 22, color: '#E8DCC8', ...OUTLINE, ...geo('Overlay/Window/MapHint') });
+plate(b, 'Overlay/Window/MapHint');
+addHint(b, '按 M 鍵或右上角按鈕關閉');
 
 // The NPC's target selection (#124): a pick button and a veil on each row, and the confirmation window above the map.
 addSelectUi(b);
