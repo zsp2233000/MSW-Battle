@@ -44,6 +44,9 @@ script FactionWarMapUI extends Logic
         self._T.selected = nil
         self._T.pending = false
         self._T.note = nil
+        -- The one line under the side panel's note that says why a target (or every town) can no longer be picked; see SetNotice.
+        self._T.noticeKind = ""
+        self._T.noticeTown = ""
         -- True from a select request the open map made itself (INVALID, a changed owner) until its answer; see ShowSelect.
         self._T.relisting = false
         -- The NPC press is awaiting its answer (askedAt, in ms) / the message window is shown (its text and the town it answers for).
@@ -328,8 +331,9 @@ script FactionWarMapUI extends Logic
         self._T.dragId = nil
         local overlay = self:Ui("Overlay")
         if isvalid(overlay) then overlay:SetEnable(false) end
-        -- Closing the map drops the selection with it, the confirmation window included.
+        -- Closing the map drops the selection with it, the confirmation window included, and the line about a lost target.
         self:SetMode("view", {}, "")
+        self:SetNotice("", "")
         _FactionWarMap:RequestClose()
         log("[VRF][FactionWarMap] ui close")
     end
@@ -344,6 +348,7 @@ script FactionWarMapUI extends Logic
         self._T.wheelLogged = false
         self:SetMapView(1, Vector2(0, 0))
         self:SetMode(mode, {}, "")
+        self:SetNotice("", "")
     end
 
     @ExecSpace("ClientOnly")
@@ -392,6 +397,12 @@ script FactionWarMapUI extends Logic
         self._T.relisting = false
         self._T.asking = false
         if status ~= "READY" then
+            -- The map's own relist (a town changed hands) found nothing left to attack, or the departure town fell: the open map stays, with
+            -- everything dimmed and one line saying why, instead of closing under the player.
+            if relisted and wasOpen and self._T.mode == "select" and (status == "NOT_OWNED" or status == "NO_TARGETS") then
+                self:ShowNothingToPick(status)
+                return
+            end
             if self._T.open and self._T.mode == "select" then self:Close() end
             -- A relist answered after the player closed the map is not an answer to anything the player is waiting for.
             if relisted and not wasOpen then return end
@@ -408,7 +419,15 @@ script FactionWarMapUI extends Logic
         end
         if not showable then return end
         if not self._T.open then self:Reveal("select") end
+        -- A pick that the new list no longer has is dropped by SetMode; the line below says which town it was.
+        local picked = self._T.selected
         self:SetMode("select", targets, header.town)
+        if picked ~= nil and self._T.selected == nil then
+            self:SetNotice("TARGET", picked)
+        elseif self._T.noticeKind == "ORIGIN" or self._T.noticeKind == "NO_TARGETS" or (self._T.noticeKind == "TARGET" and self._T.targets[self._T.noticeTown]) then
+            -- A READY answer means the departure town is the player's again and something can be picked; a town that is a target again needs no line.
+            self:SetNotice("", "")
+        end
         self._T.unavailable = false
         self:ApplyBoard(board.towns, board.links)
         self:ShowFaction(header.faction)
@@ -417,6 +436,43 @@ script FactionWarMapUI extends Logic
         local names = {}
         for _, target in ipairs(targets) do table.insert(names, target.town) end
         log("[VRF][FactionWarMap] ui select open origin=" .. header.town .. " targets=" .. table.concat(names, ","))
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ShowNothingToPick(string status)
+        -- NOT_OWNED / NO_TARGETS answering the open map's relist: the confirmation window closes, no town can be picked, the map is redrawn dimmed.
+        local picked = self._T.selected
+        self:SetMode("select", {}, self._T.origin)
+        if status == "NOT_OWNED" then
+            self:SetNotice("ORIGIN", "")
+        elseif picked ~= nil then
+            self:SetNotice("TARGET", picked)
+        elseif self._T.noticeKind ~= "TARGET" then
+            self:SetNotice("NO_TARGETS", "")
+        end
+        if self._T.board ~= nil then self:Render() end
+        log("[VRF][FactionWarMap] ui select nothing to pick status=" .. status .. " notice=" .. self._T.noticeKind)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void SetNotice(string kind, string town)
+        -- The line in the side panel for a pick or the whole list that is gone: TARGET ("<town> 已不能進攻"), ORIGIN (the departure town fell),
+        -- NO_TARGETS; "" hides it. It stays until the next pick, a READY list that makes it untrue, or the map closing.
+        self._T.noticeKind = kind
+        self._T.noticeTown = town
+        local node = self:Ui("Overlay/Window/Side/Notice")
+        local line = ""
+        if kind == "TARGET" then
+            line = _FactionWarUI:HighlightedTownName(town) .. " 已不能進攻"
+        elseif kind == "ORIGIN" then
+            line = "這座城已不屬於你的陣營"
+        elseif kind == "NO_TARGETS" then
+            line = "目前沒有可進攻的相鄰敵城"
+        end
+        if not isvalid(node) then return end
+        node.TextGUIRendererComponent.Text = line
+        node:SetEnable(line ~= "")
+        if line ~= "" then log("[VRF][FactionWarMap] ui notice " .. line) end
     end
 
     @ExecSpace("ClientOnly")
@@ -468,6 +524,7 @@ script FactionWarMapUI extends Logic
         self._T.selected = id
         self._T.pending = false
         self._T.note = nil
+        self:SetNotice("", "")
         self:RenderConfirm()
         log("[VRF][FactionWarMap] ui pick " .. id)
     end
@@ -503,9 +560,12 @@ script FactionWarMapUI extends Logic
         if result == "QUEUING" then
             self:Close()
         elseif result == "INVALID" then
-            -- Ownership moved while the window was open: drop the pick and list the targets again.
+            -- Ownership moved while the window was open: drop the pick, say which town can no longer be attacked, and list the targets again.
+            -- (A relist answer that already dropped the pick left its line; there is nothing to add then.)
+            local dropped = self._T.selected
             self._T.selected = nil
             self._T.note = nil
+            if dropped ~= nil then self:SetNotice("TARGET", dropped) end
             self:RenderConfirm()
             self._T.relisting = true
             _FactionWarAttack:RequestSelect()

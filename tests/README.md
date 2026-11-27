@@ -247,6 +247,54 @@ The #124 steps run without its `PUSH`, so give its probe `PUSHED = 55` (its `PIC
 
 Verified in Maker on 2026-11-27, the whole sequence again on the final code after the review fixes (build 0 Error and 0 Warning, only the usual `LIA 1114/1115` Info lines; Node 283/283, all local fengari suites PASS): `Message/Window` has `Frame`, `Text`, `Ok` in Play after one refresh. Every step above reached its PASS line with the real `e` key (`maker_keyboard_input`): the key opened the map; a second tap with the map open asked nothing (no second `ui select status` line); the lobby NPC did not open its panel behind the map, and does open it when no window is open (control: `lobby panel open=true` with the map closed); after `是` the war NPC answered `ENGAGED` with 目前正在進攻 鼓山 (highlighted) and one 確定 button, a second tap changed nothing, 確定 closed it; with Gushan A's the answer was `NO_TARGETS` and the message 目前沒有可進攻的相鄰敵城. Not run in Maker: the `NOT_OWNED` and `UNAVAILABLE` messages (rules tests only; a fallen departure town sends the player away at once through the landing, and the town document cannot be made unreadable on purpose), the 5 s timeout, and a published world.
 
+## Target invalidation while the map is open (#128, ADR 0015)
+
+While the map is open in selection mode (with or without the confirmation window), a settlement result changes the town table and the server pushes the new board. The client follows it without deciding anything itself: what can be picked is always the server's list.
+
+| Change | What the client does |
+| --- | --- |
+| Strength only | The map, the rows and both numbers of the open confirmation window update at once (`ApplyBoard` redraws, `RenderConfirm` rewrites the window). The window stays open; no request, no line. |
+| A town changed owner | `ShowBoard` asks `FactionWarAttack:RequestSelect` again (`relisting`); the READY answer redraws rows, veils and districts from the server's targets. |
+| The picked target is no longer listed (taken by the player's own side, or no target left) | `SetMode` drops the pick, so the confirmation window closes, and `SetNotice("TARGET", town)` shows `<城名> 已不能進攻` in the new side panel line `Overlay/Window/Side/Notice`. The line stays while that town is not a target, and is cleared by the next pick, a READY list that has the town again, or closing the map. A relist answered `NO_TARGETS` keeps the map open the same way (`ShowNothingToPick`), everything dimmed, with the same line (or 目前沒有可進攻的相鄰敵城 when nothing was picked). |
+| The departure town fell (the relist is answered `NOT_OWNED`) | `ShowNothingToPick("NOT_OWNED")`: the window closes, no town can be picked (`Dim` on every row, no `Pick`), the line says 這座城已不屬於你的陣營. The map stays open (the landing check sends the player to the capital right after the answer); a later READY list clears the line. |
+| 是 pressed and the server answers `INVALID` | `pending` ends, the window closes, the line names the town, the list is asked for again. The player never waits at 正在加入配對…. (`ENGAGED` / `UNAVAILABLE` still keep the window with their sentence, as in #124.) |
+
+Only an answer to the **map's own relist** is handled in the open map. Answers to the NPC press still use the message window of #127, and a relist answered `ENGAGED` or `UNAVAILABLE` still closes the map with the message window. The new line is built by `node assets/worldmap/build_notice_ui.cjs` (UIBuilder `load`, one leaf under `Overlay/Window/Side`; `select_ui.cjs` `addNoticeUi` also adds it for a full rebuild and puts it in front of `Confirm` and `Message` in the file, because Maker takes render order from the order of the entities and the two windows must stay above it). Refresh once, then look for `/ui/WorldMapGroup/Overlay/Window/Side/Notice` in Play before running the probe.
+
+```sh
+set -o pipefail
+node tests/target_select_local.cjs | npm exec --yes --package=fengari-node-cli@0.1.0 -- fengari -
+node --test tests/target_select_contract.test.cjs
+```
+
+Expect `[VRF][TargetSelect] target selection rules PASS` (now also, with the production bodies against fakes: a strength change updating an open window without closing it or asking again; an owner change asking once; a READY relist that still lists the pick keeping the window; one that does not closing it with the line and redrawing rows, veils and districts; `NO_TARGETS` and `NOT_OWNED` to the map's own relist keeping the map open with everything dimmed and the right line, no message window and no `RequestClose`; the line cleared by a pick, a READY list that has the town again, closing and reopening; `INVALID` after 是 ending the waiting, closing the window and naming the town, also when a relist already dropped the pick or the QUEUING that was already on its way arrives; `UNAVAILABLE` unchanged; a relist answered `UNAVAILABLE` still closing with the message window; the server side of the relist: `NO_TARGETS` / `NOT_OWNED` with a lost departure town judged) and the contract tests (the authored `Notice` text and its place in the file, the relist and line code paths, the probe's steps, README and ADR).
+
+### Maker client probe: board changes under the open map
+
+`tests/target_select_invalidate_client_runtime_probe.lua`, the **real local client** as A, standing in Gushan (A's) beside two B towns, Zuoying 55 and Yancheng 100. One fresh Play (`stop` → `refresh` → `play`), set `REAL` (its ProfileCode) by substitution, wait about 3 s after each `server_main` step. **No virtual player is needed:** the changes are written as real settlement results (`_FactionWarAttack:Settle`, the call the match room makes, with a made-up match key) and the real client is the only watcher. Nothing is queued; the one attack request (`REFUSED`) is refused on purpose. Run exactly these 17 steps, in this order:
+
+| Step | Context | What it does | Expected |
+| --- | --- | --- | --- |
+| 1 `SETUP` | `server_main` | faction A, fixture board (Nanzih A 100, Zuoying B 55, Gushan A 60, Yancheng B 100), no guard claim, player moved to Gushan | `[VRF][TargetInvalidate] SETUP PASS origin=gushan ...` |
+| 2 `SELECT_OPEN` | `client` | `RequestSelect`, the real round trip | `SELECT_OPEN PASS pickable=zuoying,yancheng`; Zuoying and Yancheng have pick buttons, the other two are veiled |
+| 3 `PICK` | `client` | click `Rows/zuoying/Pick` | `PICK PASS target=... 兵力 55 / 100`. Screenshot 1: the window |
+| 4 `STRENGTH` | `server_main` | a real HUMAN win Gushan over Zuoying: 55 → 35, no flip | `STRENGTH PASS zuoying 55 -> 35` |
+| 5 `STRENGTH_SEEN` | `client` | the window follows, stays open, no relist, no line | `STRENGTH_SEEN PASS 目標城 ... 兵力 35 / 100`. Screenshot 2 |
+| 6 `CAPTURE` | `server_main` | Zuoying silently to 20, then a real win: it flips to A and refills | `CAPTURE PASS zuoying is A's, announced` |
+| 7 `TARGET_GONE` | `client` | window closed, the line `<左營> 已不能進攻`, Yancheng the only pick, Zuoying dimmed with owner `A 方` | `TARGET_GONE PASS line=...`; client `[VRF][FactionWarMap] ui select relist`, `ui select open ...`, `ui notice ...`. Screenshot 3 |
+| 8 `PICK_OTHER` | `client` | pick Yancheng; the line goes away | `PICK_OTHER PASS` |
+| 9 `STALE` | `server_main` | Yancheng turns A's in the table, **not** announced: the open window is out of date | `STALE PASS` |
+| 10 `REFUSED` | `client` | click 是: waiting text, then the server's `INVALID` closes the window, names Yancheng, asks again (the answer is `NO_TARGETS`: everything dimmed, the line stays) | `REFUSED PASS line=...`; server `[VRF][FactionWarAttack] queue refused ... reason=INVALID`; client `ui attack result=INVALID`. Screenshot 4 |
+| 11 `RESTORE` | `server_main` | fixture board written and announced | `RESTORE PASS` |
+| 12 `LIST_BACK` | `client` | the relist lists both towns again and the line is gone | `LIST_BACK PASS pickable=zuoying,yancheng` |
+| 13 `PICK` | `client` | pick Zuoying again | `PICK PASS` |
+| 14 `ORIGIN_LOST` | `server_main` | Gushan owned by B in the table (written, not settled, see the note) and announced | `ORIGIN_LOST PASS` |
+| 15 `ORIGIN_SEEN` | `client` | window closed, line 這座城已不屬於你的陣營, every row veiled, map still open, no message window | `ORIGIN_SEEN PASS ...`; server `[VRF][FactionWarAttack]`/landing lines that move the player to Nanzih. Screenshot 5 |
+| 16 `CLOSE` | `client` | click the close button | `CLOSE PASS` |
+| 17 `CLEANUP` | `server_main` | no viewer left, guard clock back, town storage deleted | `CLEANUP PASS` |
+
+`ORIGIN_LOST` writes the board instead of settling a match because a real capture of the departure town also sweeps the player to the capital at once, and which of the two (the sweep, or the pushed board) reaches the client first is not deterministic; with the board written the server answers the relist `NOT_OWNED` first and the landing check moves the player after. Rules for the other order are the READY case above: the list is simply the capital's. Search the client console with `[VRF][TargetInvalidate]` and `[VRF][FactionWarMap]`, the server's with `[VRF][FactionWarAttack]`; any `FAIL` or runtime `Error` is a failure. Screenshots go to `docs/evidence/issue128/` (1 `PICK`, 2 `STRENGTH_SEEN`, 3 `TARGET_GONE`, 4 `REFUSED`, 5 `ORIGIN_SEEN`). Not run in Maker by the implementer (Maker is bound to the main workspace): the supervisor runs it. Not covered: a real mouse click, two real accounts, and the race where the sweep reaches the client before the board does (rules only).
+
 ## Siege panel replaces the queue bar (#123)
 
 `ui/FactionWarGroup.ui`: `SiegePanel` (top centre, under the town HUD and its notice; a Cardgame frame over the brown "tactical sandtable" fill) replaces `QueueBar`. First line `Origin` ` VS ` `Target` (each `<town name highlighted> 兵力 N`, the strengths live), second line `Status` (the lobby's pre-battle words) and the one `Cancel` button on the right (`取消配對` while waiting, `停止入場` after a failed entry, hidden otherwise, 210 x 88). The versus mark is the text `VS`: the UI font has no glyph for `⚔`, it rendered as an empty box in Maker. The panel is built by `assets/siege/build_siege_panel_ui.cjs` with the UIBuilder; unlike `build_siege_ui.cjs` it touches nothing else in the group (Maker imports a rebuilt subtree one level per refresh, see #117). Two things to know when it is rebuilt: Maker takes render order from the **order of the entities in the file**, not from the `displayOrder` numbers (the card stayed on top of the team preview until its subtree was moved in the array, which the script now does), and the new subtree needs two refreshes with a content change in between before all six children exist.
