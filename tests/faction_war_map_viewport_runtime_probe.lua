@@ -12,9 +12,21 @@ local ok, reason = pcall(function()
     local view = ui:Ui(ui.ViewPath)
     local content = ui:Ui(ui.ViewPath .. "/Content").UITransformComponent
     local input = ui:Ui(ui.ViewPath .. "/Input")
-    local side = ui:Ui("Overlay/Window/Side").UITransformComponent
+    local sideEntity = ui:Ui("Overlay/Window/Side")
+    local side = sideEntity.UITransformComponent
     local sideStart = side.anchoredPosition
     assert(isvalid(view.MaskComponent) and isvalid(input.UITouchReceiveComponent), "viewport clip and inputs loaded")
+    local viewportSize = view.UITransformComponent.RectSize
+    local terrainSize = ui:Ui(ui.ViewPath .. "/Content/Terrain").UITransformComponent.RectSize
+    local inputSize = input.UITransformComponent.RectSize
+    assert(near(terrainSize.x, viewportSize.x) and near(terrainSize.y, viewportSize.y), "original terrain fills the viewport")
+    assert(near(inputSize.x, viewportSize.x) and near(inputSize.y, viewportSize.y), "input fills the viewport")
+    local backdrop = ui:Ui("Overlay/Backdrop")
+    assert(isvalid(backdrop) and near(backdrop.SpriteGUIRendererComponent.Color.a * 100, 100), "window has an opaque backing")
+    assert(near(sideEntity.SpriteGUIRendererComponent.Color.a * 100, 100), "town sidebar is opaque")
+    local frame = ui:Ui("Overlay/Window").UITransformComponent
+    assert(_UILogic:GetSiblingIndex(backdrop.UITransformComponent) < _UILogic:GetSiblingIndex(frame), "opaque backing is behind the original frame")
+    log("[VRF][MapAppearance] PASS terrain=" .. tostring(terrainSize) .. " input=" .. tostring(inputSize) .. " opaque window and sidebar")
     for _, name in ipairs({ "Terrain", "Districts/nanzih", "Districts/zuoying", "Districts/gushan", "Districts/yancheng" }) do
         local entity = ui:Ui(ui.ViewPath .. "/Content/" .. name)
         local sprite = _ResourceService:LoadSpriteAndWait(entity.SpriteGUIRendererComponent.ImageRUID.DataId)

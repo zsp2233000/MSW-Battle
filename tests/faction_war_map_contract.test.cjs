@@ -60,6 +60,20 @@ test('the map uses the painted terrain, one tinted mask per district, three link
   assert.ok(y('nanzih') > y('zuoying') && y('zuoying') > y('gushan') && y('gushan') > y('yancheng'));
 });
 
+test('the original terrain and input fill the viewport and the window hides the scene behind it', () => {
+  const ui = UIBuilder.read('ui/WorldMapGroup.ui');
+  const rect = path => ui.getComponent(path, 'MOD.Core.UITransformComponent').RectSize;
+  const tint = path => ui.getComponent(path, 'MOD.Core.SpriteGUIRendererComponent').Color;
+  assert.deepEqual(rect(`${MAP}/Terrain`), rect(VIEW), 'terrain is not drawn at the 100×100 default size');
+  assert.deepEqual(rect(`${VIEW}/Input`), rect(VIEW), 'transparent input covers the same area as the terrain');
+  assert.deepEqual(rect('Overlay'), { x: 1920, y: 1080 }, 'the dimmer covers the reference canvas');
+  assert.equal(tint('Overlay/Backdrop').a, 1, 'solid backing behind the original window artwork');
+  assert.equal(tint('Overlay/Window/Side').a, 1, 'opaque town sidebar');
+  const paths = ui.listEntities().map(e => e.path);
+  const backing = paths.indexOf('/ui/WorldMapGroup/Overlay/Backdrop');
+  assert.ok(backing >= 0 && backing < paths.indexOf('/ui/WorldMapGroup/Overlay/Window'), 'backing renders before the window frame and content');
+});
+
 test('the clipped map has 38 district names and a stationary input layer', () => {
   const ui = UIBuilder.read('ui/WorldMapGroup.ui');
   const layout = JSON.parse(source('assets/worldmap/layout.json'));

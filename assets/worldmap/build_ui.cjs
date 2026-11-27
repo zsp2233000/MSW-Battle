@@ -50,8 +50,10 @@ b.button('OpenButton', '大地圖 (M)', { anchor: 'top-right', pos: [-24, -150],
 swap(b, 'OpenButton', CARD_BUTTON);
 b.patchComponent('OpenButton', 'MOD.Core.TextGUIRendererComponent', { OutlineColor: OUTLINE.outline_color, OutlineWidth: 0.2, FaceDilate: 0.2, FontStyle: 1 });
 
-// Full-screen dimmer + window; the script toggles Overlay.
-b.sprite('Overlay', { anchor: 'stretch', color: '#000000', alpha: 0.55, raycast: true, enable: false });
+// Full-screen dimmer + solid backing under the original window frame; the script toggles Overlay.
+// Stretch alone leaves the sprite's RectSize at 100×100 in Maker.
+b.sprite('Overlay', { anchor: 'stretch', rect_size: [1920, 1080], color: '#000000', alpha: 0.55, raycast: true, enable: false });
+b.sprite('Overlay/Backdrop', { rect_size: [1344, 944], color: '#241C14', sprite_type: 1 });
 b.sprite('Overlay/Window', { anchor: 'middle-center', rect_size: [1360, 960], image_ruid: PANEL_BG, color: '#FFFFFF', sprite_type: 1, raycast: true });
 b.text('Overlay/Window/Title', '國戰大地圖', { size: 32, color: '#FFFFFF', bold: true, ...OUTLINE, anchor: 'top-center', pos: [0, -30], rect_size: [600, 56] });
 b.button('Overlay/Window/Close', '', { anchor: 'top-right', pos: [-16, -12], rect_size: [88, 96], image_ruid: X_BUTTON.normal, bg_color: '#FFFFFF', sprite_type: 0 });
@@ -63,7 +65,7 @@ const MAP = `${VIEW}/Content`;
 const size = [layout.size.w, layout.size.h];
 b.mask(VIEW, { anchor: 'middle-left', pivot: [0.5, 0.5], pos: [44 + size[0] / 2, -24], rect_size: size });
 b.empty(MAP, { rect_size: size });
-b.sprite(`${MAP}/Terrain`, { anchor: 'stretch', image_ruid: art.terrain, color: '#FFFFFF', sprite_type: 0 });
+b.sprite(`${MAP}/Terrain`, { rect_size: size, image_ruid: art.terrain, color: '#FFFFFF', sprite_type: 0 });
 b.empty(`${MAP}/Districts`, { anchor: 'stretch' });
 for (const id of TOWNS) {
   const { x, y, w, h } = layout.towns[id].mask;
@@ -96,7 +98,7 @@ for (const id of TOWNS) {
 // No controls inside the moving map can intercept drag input. The fixed surface
 // receives mouse and touch from the entire visible rect, not the scaled terrain.
 const INPUT = `${VIEW}/Input`;
-b.sprite(INPUT, { anchor: 'stretch', alpha: 0, raycast: true });
+b.sprite(INPUT, { rect_size: size, alpha: 0, raycast: true });
 b.addComponent(INPUT, 'MOD.Core.UITouchReceiveComponent');
 
 b.text('Overlay/Window/MapHint', '高雄 38 區｜滾輪縮放・拖曳移動', { size: 22, color: '#E8DCC8', ...OUTLINE,
@@ -104,7 +106,7 @@ b.text('Overlay/Window/MapHint', '高雄 38 區｜滾輪縮放・拖曳移動', 
 
 // --- side panel: own faction, strength list north to south, legend, status -------------------
 const SIDE = 'Overlay/Window/Side';
-b.sprite(SIDE, { anchor: 'middle-right', pos: [-44, -30], rect_size: [500, 810], color: { r: 0.12, g: 0.075, b: 0.04, a: 0.88 }, sprite_type: 1 });
+b.sprite(SIDE, { anchor: 'middle-right', pos: [-44, -30], rect_size: [500, 810], color: { r: 0.12, g: 0.075, b: 0.04, a: 1 }, sprite_type: 1 });
 b.text(`${SIDE}/FactionLabel`, '你的陣營', { size: 22, color: GOLD, ...OUTLINE, anchor: 'top-center', pos: [0, -24], rect_size: [460, 30] });
 b.text(`${SIDE}/Faction`, '讀取中…', { size: 34, color: GOLD, bold: true, ...OUTLINE, anchor: 'top-center', pos: [0, -58], rect_size: [460, 44] });
 b.sprite(`${SIDE}/Divider`, { anchor: 'top-center', pos: [0, -118], rect_size: [440, 2], color: { r: 0.93, g: 0.78, b: 0.56, a: 0.5 }, sprite_type: 1 });
