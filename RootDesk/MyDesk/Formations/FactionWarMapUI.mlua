@@ -15,6 +15,8 @@ script FactionWarMapUI extends Logic
     property number ClickSlopPx = 10
     property number MinHitPx = 24
     property number CrestHitReach = 38
+    -- Target selection: the crest under the pointer is drawn this much larger (it is the one a click would pick).
+    property number HoverScale = 1.3
     property number WheelZoomFactor = 2.4
     property string ViewPath = "Overlay/Window/Map"
     -- The viewport is laid out in its own 1500 x 810 units and drawn at this scale (#132): the 740 x 810 map is then as tall as the window at 1x. It is set here and not
@@ -61,6 +63,7 @@ script FactionWarMapUI extends Logic
         self._T.noticeTown = ""
         -- How many select requests the open map made itself (INVALID, a changed owner) are still unanswered; see ShowSelect.
         self._T.relistsOutstanding = 0
+        self._T.hover = ""
         -- The NPC press is awaiting its answer (askedAt, in ms) / the message window is shown (its text and the town it answers for).
         self._T.asking = false
         self._T.askedAt = 0
@@ -361,7 +364,8 @@ script FactionWarMapUI extends Logic
             if isvalid(node) then
                 local transform = node.UITransformComponent
                 local pos = transform.anchoredPosition
-                transform.UIScale = Vector3(iconScale / zoom, iconScale / zoom, 1)
+                local size = iconScale / zoom * (self._T.hover == id and self.HoverScale or 1)
+                transform.UIScale = Vector3(size, size, 1)
                 local x = pos.x * zoom
                 local y = pos.y * zoom
                 local r = 27 * iconScale
@@ -434,6 +438,31 @@ script FactionWarMapUI extends Logic
         end
         if self._T.open and self._T.board ~= nil then self:ShowAge() end
         self:ExpireAsk()
+        self:UpdateHover()
+    end
+
+    @ExecSpace("ClientOnly")
+    method string HoverTownAt(Vector2 screenPoint)
+        -- The pickable crest under the pointer ("" for none): only in the selection, not behind a window, not over the town list or during a drag.
+        if not self._T.open or self._T.mode ~= "select" or self._T.selected ~= nil or self._T.message ~= nil or self._T.dragId ~= nil then return "" end
+        if self:IsOverTownList(screenPoint) then return "" end
+        local view = self:Ui(self.ViewPath)
+        if not isvalid(view) then return "" end
+        local point = _UILogic:ScreenToLocalUIPosition(screenPoint, view.UITransformComponent)
+        local rect = view.UITransformComponent.RectSize
+        if math.abs(point.x) > rect.x / 2 or math.abs(point.y) > rect.y / 2 then return "" end
+        local id = self:TownAt(point, self:TownViews(), self:HitRadius(self._T.zoom, self:ScreenPixelsPerUnit()))
+        if id ~= "" and self._T.targets[id] ~= true then return "" end
+        return id
+    end
+
+    @ExecSpace("ClientOnly")
+    method void UpdateHover()
+        -- Enlarge the crest the pointer is on (the one a click would pick); the size is re-applied only when the town under the pointer changes.
+        local id = self:HoverTownAt(_InputService:GetCursorPosition())
+        if id == self._T.hover then return end
+        self._T.hover = id
+        if self._T.open then self:ScaleMapLabels(self._T.zoom) end
     end
 
     @ExecSpace("ClientOnly")

@@ -903,6 +903,22 @@ ui:HandleWheel({ ScrollDelta = 1 })
 check(near(ui._T.zoom, zoomOnOpen * ui.WheelZoomFactor), "and on the map beside it the wheel zooms")
 cursorAt = Vector2(0, 0)
 
+-- Hover: the pickable crest under the pointer is drawn larger, nothing else is.
+fresh()
+ready("zuoying", { gushan }, towns())
+local function crestScale(id) return node("Overlay/Window/Map/Content/Towns/" .. id).UITransformComponent.UIScale.x end
+local baseSize = crestScale("gushan")
+cursorAt = ui:TownViewPoint(node("Overlay/Window/Map/Content/Towns/gushan").UITransformComponent.anchoredPosition, ui._T.zoom, ui._T.mapOffset)
+ui:UpdateHover()
+check(ui._T.hover == "gushan" and near(crestScale("gushan"), baseSize * ui.HoverScale), "the pickable crest under the pointer is enlarged")
+cursorAt = Vector2(-300, 300)
+ui:UpdateHover()
+check(ui._T.hover == "" and near(crestScale("gushan"), baseSize), "and back to its size when the pointer leaves")
+cursorAt = ui:TownViewPoint(node("Overlay/Window/Map/Content/Towns/zuoying").UITransformComponent.anchoredPosition, ui._T.zoom, ui._T.mapOffset)
+ui:UpdateHover()
+check(ui._T.hover == "", "a crest that cannot be picked is not enlarged")
+cursorAt = Vector2(0, 0)
+
 -- (#132) The viewport is drawn at the base scale: its own unit is that many canvas units, so a click reaches as many screen pixels as before.
 fresh()
 node(ui.ViewPath).UITransformComponent.UIScale = Vector3(1.2, 1.2, 1)
