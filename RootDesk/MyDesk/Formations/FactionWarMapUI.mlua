@@ -5,6 +5,9 @@ script FactionWarMapUI extends Logic
     property Color FactionBColor = Color(0.27, 0.5, 0.88, 1)
     property Color NeutralColor = Color(0.62, 0.6, 0.56, 1)
     property number DistrictAlpha = 0.55
+    -- Target selection: a town that cannot be picked is drawn dimmer than the ones that can.
+    property number DimDistrictAlpha = 0.2
+    property number DimCrestAlpha = 0.4
     property number LinkThickness = 3
     property number MaxZoom = 12
     property number WheelZoomFactor = 2.4
@@ -13,6 +16,8 @@ script FactionWarMapUI extends Logic
     property number BarWidth = 280
     property number ArrowBaseY = 60
     property table ArrowBob = { 9, 6, 3, 0 }
+    -- Seconds the NPC waits for the server's answer to a press before it accepts another press (the server drops a press it cannot answer).
+    property number AskTimeout = 5
 
     @ExecSpace("ClientOnly")
     method Entity Ui(string path)
@@ -32,6 +37,19 @@ script FactionWarMapUI extends Logic
         self._T.age = -1
         self._T.unavailable = false
         self._T.zoom = 0
+        -- "view" (button or M, read only) or "select" (the NPC press: pick an adjacent enemy town). Selection state exists only in "select".
+        self._T.mode = "view"
+        self._T.targets = {}
+        self._T.origin = ""
+        self._T.selected = nil
+        self._T.pending = false
+        self._T.note = nil
+        -- True from a select request the open map made itself (INVALID, a changed owner) until its answer; see ShowSelect.
+        self._T.relisting = false
+        -- The NPC press is awaiting its answer (askedAt, in ms) / the message window is shown (its text and the town it answers for).
+        self._T.asking = false
+        self._T.askedAt = 0
+        self._T.message = nil
         self._T.key = _InputService:ConnectEvent(KeyDownEvent, self.HandleKey)
         self._T.wheel = _InputService:ConnectEvent(MouseScrollEvent, self.HandleWheel)
     end
@@ -97,7 +115,7 @@ script FactionWarMapUI extends Logic
     @ExecSpace("ClientOnly")
     method void HandleWheel(MouseScrollEvent event)
         -- Zoom at the cursor, but only while the cursor is inside the viewport.
-        if not self._T.open or event.ScrollDelta == 0 then return end
+        if not self._T.open or self._T.selected ~= nil or self._T.message ~= nil or event.ScrollDelta == 0 then return end
         local view = self:Ui(self.ViewPath)
         if not isvalid(view) then return end
         local cursor = _UILogic:ScreenToLocalUIPosition(_InputService:GetCursorPosition(), view.UITransformComponent)
@@ -245,6 +263,12 @@ script FactionWarMapUI extends Logic
         if #self._T.bindings == 0 then
             self:Bind("OpenButton", function() self:Open() end)
             self:Bind("Overlay/Window/Close", function() self:Close() end)
+            for _, id in ipairs(_FactionWarTownDocument.TownOrder) do
+                self:Bind("Overlay/Window/Side/Rows/" .. id .. "/Pick", function() self:Pick(id) end)
+            end
+            self:Bind("Confirm/Window/Yes", function() self:ConfirmAttack() end)
+            self:Bind("Confirm/Window/No", function() self:Decline() end)
+            self:Bind("Message/Window/Ok", function() self:DismissMessage() end)
             self:BindArrows()
             self:BindViewport()
         end
@@ -256,12 +280,24 @@ script FactionWarMapUI extends Logic
             if self._T.open then self:ShowHere() end
         end
         if self._T.open and self._T.board ~= nil then self:ShowAge() end
+        self:ExpireAsk()
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ExpireAsk()
+        -- An answer that never came (the server drops a press it cannot answer) must not lock the NPCs for good.
+        if self._T.asking and DateTime.UtcNow.Elapsed - self._T.askedAt > self.AskTimeout * 1000 then
+            self._T.asking = false
+            log("[VRF][FactionWarMap] ui select answer timed out")
+        end
     end
 
     @ExecSpace("ClientOnly")
     method void HandleKey(KeyDownEvent event)
         -- M opens the map in a town and closes it anywhere.
         if event == nil or event.key ~= KeyboardKey.M then return end
+        -- The confirmation window and the message window own the screen until they are answered.
+        if self._T.selected ~= nil or self._T.message ~= nil then return end
         if self._T.open then
             self:Close()
         elseif self:CanOpen() then
@@ -273,11 +309,8 @@ script FactionWarMapUI extends Logic
     method void Open()
         -- Show the map at once with the last board (or neutral), then ask the server for the live one and to keep it coming.
         local overlay = self:Ui("Overlay")
-        if self._T.open or not isvalid(overlay) or not self:CanOpen() then return end
-        self._T.open = true
-        overlay:SetEnable(true)
-        self._T.wheelLogged = false
-        self:SetMapView(1, Vector2(0, 0))
+        if self._T.open or self._T.message ~= nil or not isvalid(overlay) or not self:CanOpen() then return end
+        self:Reveal("view")
         if self._T.board == nil then self:ShowNeutral() else self:Render() end
         self:ShowHere()
         self._T.unavailable = false
@@ -295,8 +328,234 @@ script FactionWarMapUI extends Logic
         self._T.dragId = nil
         local overlay = self:Ui("Overlay")
         if isvalid(overlay) then overlay:SetEnable(false) end
+        -- Closing the map drops the selection with it, the confirmation window included.
+        self:SetMode("view", {}, "")
         _FactionWarMap:RequestClose()
         log("[VRF][FactionWarMap] ui close")
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Reveal(string mode)
+        -- Show the map window at the full view, in the given mode ("view" or "select").
+        local overlay = self:Ui("Overlay")
+        if isvalid(overlay) then overlay:SetEnable(true) end
+        self._T.open = true
+        self._T.relisting = false
+        self._T.wheelLogged = false
+        self:SetMapView(1, Vector2(0, 0))
+        self:SetMode(mode, {}, "")
+    end
+
+    @ExecSpace("ClientOnly")
+    method boolean BlocksInteraction()
+        -- The map (and the confirmation window above it), a message window or an unanswered NPC press covers the town: the NPCs ignore
+        -- the interaction key meanwhile (an interaction event is not stopped by a UI mask, so each NPC asks).
+        return self._T.open == true or self._T.message ~= nil or self._T.asking == true
+    end
+
+    @ExecSpace("ClientOnly")
+    method void SetMode(string mode, table targets, string origin)
+        -- Switch between the read-only view and the target selection. A pick that is no longer listed (or any pick in "view") is dropped.
+        self._T.mode = mode
+        local picks = {}
+        for _, target in ipairs(targets) do picks[target.town] = true end
+        self._T.targets = picks
+        self._T.origin = origin
+        if mode ~= "select" or (self._T.selected ~= nil and not picks[self._T.selected]) then
+            self._T.selected = nil
+            self._T.pending = false
+            self._T.note = nil
+        end
+        local header = self:Ui("Overlay/Window/Side/Header")
+        if isvalid(header) then header.TextGUIRendererComponent.Text = mode == "select" and "選擇要進攻的相鄰敵城" or "城鎮兵力（由北到南）" end
+        self:RenderConfirm()
+    end
+
+    @ExecSpace("ClientOnly")
+    method void BeginSelect()
+        -- The NPC press: its answer is wanted even if an earlier relist of the map is still unanswered, and until it comes (or AskTimeout passes)
+        -- no other press is accepted.
+        self._T.relisting = false
+        self._T.asking = true
+        self._T.askedAt = DateTime.UtcNow.Elapsed
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ShowSelect(string town, string status, table header, table targets, table board)
+        -- The server's answer to the NPC press. READY opens (or switches) the map in target selection with the board and links of that answer;
+        -- any other status opens no map: it closes a selection that was already open and shows the message window of that status.
+        -- A READY that is not shown (the map was closed since the map's own relist asked, or the town cannot show it) has already made the server
+        -- count the player as a map viewer, so the player tells it they are not watching.
+        log("[VRF][FactionWarMap] ui select status=" .. status .. " town=" .. town .. " targets=" .. tostring(#targets))
+        local relisted = self._T.relisting == true
+        local wasOpen = self._T.open
+        self._T.relisting = false
+        self._T.asking = false
+        if status ~= "READY" then
+            if self._T.open and self._T.mode == "select" then self:Close() end
+            -- A relist answered after the player closed the map is not an answer to anything the player is waiting for.
+            if relisted and not wasOpen then return end
+            local here = _UserService.LocalPlayer
+            if isvalid(here) and here.CurrentMapName == town then self:ShowMessage(self:MessageFor(status, header)) end
+            return
+        end
+        local player = _UserService.LocalPlayer
+        local showable = isvalid(player) and player.CurrentMapName == town and self:CanOpen()
+        if not self._T.open and (relisted or not showable) then
+            _FactionWarMap:RequestClose()
+            log("[VRF][FactionWarMap] ui select unwatch")
+            return
+        end
+        if not showable then return end
+        if not self._T.open then self:Reveal("select") end
+        self:SetMode("select", targets, header.town)
+        self._T.unavailable = false
+        self:ApplyBoard(board.towns, board.links)
+        self:ShowFaction(header.faction)
+        self:ShowHere()
+        self:RenderConfirm()
+        local names = {}
+        for _, target in ipairs(targets) do table.insert(names, target.town) end
+        log("[VRF][FactionWarMap] ui select open origin=" .. header.town .. " targets=" .. table.concat(names, ","))
+    end
+
+    @ExecSpace("ClientOnly")
+    method string MessageFor(string status, table header)
+        -- The words of each answer that opens no map; "" for a status that has none. Town names carry the one highlight colour.
+        if status == "ENGAGED" then
+            local target = header.target
+            if type(target) == "string" and _FactionWarTownDocument:IsTown(target) then
+                return "目前正在進攻 " .. _FactionWarUI:HighlightedTownName(target) .. "，要改變目標請先取消配對（畫面上方的攻城面板可以取消）"
+            end
+            return "目前已在配對中，要改變目標請先取消配對（畫面上方的攻城面板可以取消）"
+        elseif status == "NOT_OWNED" then
+            return "這座城已不屬於你的陣營"
+        elseif status == "UNAVAILABLE" then
+            return "暫時無法讀取國戰資料，請再試一次"
+        elseif status == "NO_TARGETS" then
+            return "目前沒有可進攻的相鄰敵城"
+        end
+        return ""
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ShowMessage(string text)
+        -- The message window: one window, above the map, with the one 確定 button; it needs no map to be open. It stays until 確定, also when
+        -- the answer sends the player away (a fallen departure town lands the player in their capital).
+        if text == "" then return end
+        local window = self:Ui("Message")
+        if not isvalid(window) then return end
+        self._T.message = text
+        self:SetText("Message/Window/Text", text)
+        window:SetEnable(true)
+        log("[VRF][FactionWarMap] ui message " .. text)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void DismissMessage()
+        -- 確定: close the message window; the NPCs answer again.
+        if self._T.message == nil then return end
+        self._T.message = nil
+        local window = self:Ui("Message")
+        if isvalid(window) then window:SetEnable(false) end
+        log("[VRF][FactionWarMap] ui message dismissed")
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Pick(string id)
+        -- A press on a selectable row asks for the confirmation. Nothing happens for a town the server did not list, or while one is being confirmed.
+        if self._T.mode ~= "select" or not self._T.targets[id] or self._T.selected ~= nil then return end
+        self._T.selected = id
+        self._T.pending = false
+        self._T.note = nil
+        self:RenderConfirm()
+        log("[VRF][FactionWarMap] ui pick " .. id)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Decline()
+        -- No: close the window and clear the pick; the map stays open.
+        if self._T.selected == nil or self._T.pending then return end
+        self._T.selected = nil
+        self._T.note = nil
+        self:RenderConfirm()
+        log("[VRF][FactionWarMap] ui decline")
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ConfirmAttack()
+        -- Yes: send the attack request once and wait for the server.
+        if self._T.selected == nil or self._T.pending then return end
+        self._T.pending = true
+        self._T.note = nil
+        self:RenderConfirm()
+        log("[VRF][FactionWarMap] ui confirm target=" .. self._T.selected)
+        _FactionWarAttack:RequestAttack(self._T.selected)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ShowAttackResult(string result)
+        -- QUEUING closes the map and leaves the rest to the siege panel; any other answer keeps the window and says why.
+        log("[VRF][FactionWarMap] ui attack result=" .. result)
+        self._T.pending = false
+        -- The player closed the map before the answer came: there is no window to update, and nothing may reopen it.
+        if not self._T.open then return end
+        if result == "QUEUING" then
+            self:Close()
+        elseif result == "INVALID" then
+            -- Ownership moved while the window was open: drop the pick and list the targets again.
+            self._T.selected = nil
+            self._T.note = nil
+            self:RenderConfirm()
+            self._T.relisting = true
+            _FactionWarAttack:RequestSelect()
+        else
+            self._T.note = result == "ENGAGED" and "已在配對中，請先取消目前的配對" or "暫時無法配對，請再試一次"
+            self:RenderConfirm()
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method string StrengthText(any strength)
+        -- "兵力 80 / 100"; a town without a reading shows a dash.
+        if type(strength) ~= "number" then return "兵力 —" end
+        return "兵力 " .. string.format("%d", strength) .. " / " .. string.format("%d", _FactionWarTownDocument.FullStrength)
+    end
+
+    @ExecSpace("ClientOnly")
+    method any StrengthOf(string id)
+        -- The strength of one town on the board last shown; nil before any board arrived.
+        for _, town in ipairs(self._T.board or {}) do
+            if town.id == id then return town.strength end
+        end
+        return nil
+    end
+
+    @ExecSpace("ClientOnly")
+    method void SetText(string path, string text)
+        -- One text node of the confirmation window; a missing node is skipped rather than raising in the middle of a render.
+        local node = self:Ui(path)
+        if isvalid(node) then node.TextGUIRendererComponent.Text = text end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void RenderConfirm()
+        -- The confirmation window for the picked town: both strengths live from the board, the capital note, and the buttons.
+        local window = self:Ui("Confirm")
+        if not isvalid(window) then return end
+        local target = self._T.selected
+        window:SetEnable(target ~= nil)
+        if target == nil then return end
+        local capital = _FactionWarTownDocument:IsCapital(target)
+        self:SetText("Confirm/Window/Title", "進攻 " .. _FactionWarUI:HighlightedTownName(target) .. "？")
+        self:SetText("Confirm/Window/Origin", "出發城 " .. _FactionWarUI:HighlightedTownName(self._T.origin) .. "　" .. self:StrengthText(self:StrengthOf(self._T.origin)))
+        self:SetText("Confirm/Window/Target", "目標城 " .. _FactionWarUI:HighlightedTownName(target) .. "　" .. self:StrengthText(self:StrengthOf(target)))
+        self:SetText("Confirm/Window/Note", capital and "打贏不扣主城兵力" or "")
+        self:SetText("Confirm/Window/Status", self._T.pending and "正在加入配對…" or (self._T.note or ""))
+        for _, name in ipairs({ "Yes", "No" }) do
+            local button = self:Ui("Confirm/Window/" .. name)
+            if isvalid(button) then button.ButtonComponent.Enable = not self._T.pending end
+        end
     end
 
     @ExecSpace("ClientOnly")
@@ -324,7 +583,26 @@ script FactionWarMapUI extends Logic
 
     @ExecSpace("ClientOnly")
     method void ShowBoard(table towns, table links)
-        -- Paint the board the server pushed: districts, crests, rows and links. A board that lands after the map closed is kept for next time.
+        -- A board the server pushed. While a target is being selected, a town that changed hands changes who can be attacked: the server is asked again.
+        local relist = false
+        if self._T.mode == "select" and self._T.open then
+            local owners = {}
+            for _, town in ipairs(self._T.board or {}) do owners[town.id] = town.owner end
+            for _, town in ipairs(towns) do
+                if owners[town.id] ~= nil and owners[town.id] ~= town.owner then relist = true end
+            end
+        end
+        self:ApplyBoard(towns, links)
+        if relist then
+            log("[VRF][FactionWarMap] ui select relist")
+            self._T.relisting = true
+            _FactionWarAttack:RequestSelect()
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ApplyBoard(table towns, table links)
+        -- Paint a board: districts, crests, rows and links. A board that lands after the map closed is kept for next time.
         self._T.board = towns
         self._T.links = links
         self._T.receivedAt = DateTime.UtcNow.Elapsed
@@ -334,6 +612,7 @@ script FactionWarMapUI extends Logic
         local summary = {}
         for _, town in ipairs(towns) do table.insert(summary, town.id .. "=" .. town.owner .. "/" .. tostring(town.strength)) end
         self:Render()
+        self:RenderConfirm()
         self:ShowAge()
         -- The town HUD only rereads on entering a town; the pushed board keeps it in step while the map is open.
         for _, town in ipairs(towns) do
@@ -355,11 +634,15 @@ script FactionWarMapUI extends Logic
         -- One town on the map and in the side list.
         local color = self:OwnerColor(town.owner)
         local known = _FactionWarTownDocument:IsFaction(town.owner)
+        -- In target selection only the towns the server listed can be picked; the rest (own towns, far enemies, the departure town) are dimmed.
+        local selecting = self._T.mode == "select"
+        local selectable = selecting and self._T.targets[town.id] == true
+        local dimmed = selecting and not selectable
         local district = self:Ui(self.ViewPath .. "/Content/Districts/" .. town.id)
-        if isvalid(district) then district.SpriteGUIRendererComponent.Color = Color(color.r, color.g, color.b, known and self.DistrictAlpha or 0.25) end
+        if isvalid(district) then district.SpriteGUIRendererComponent.Color = Color(color.r, color.g, color.b, known and (dimmed and self.DimDistrictAlpha or self.DistrictAlpha) or 0.25) end
         local node = self.ViewPath .. "/Content/Towns/" .. town.id
         local crest = self:Ui(node .. "/Crest")
-        if isvalid(crest) then crest.SpriteGUIRendererComponent.Color = color end
+        if isvalid(crest) then crest.SpriteGUIRendererComponent.Color = dimmed and Color(color.r, color.g, color.b, self.DimCrestAlpha) or color end
         local fullStrength = _FactionWarTownDocument.FullStrength
         local strength = known and (tostring(town.strength) .. "/" .. tostring(fullStrength)) or "—"
         local label = self:Ui(node .. "/Strength")
@@ -367,6 +650,10 @@ script FactionWarMapUI extends Logic
         local capital = self:Ui(node .. "/Capital")
         if isvalid(capital) then capital:SetEnable(town.capital == true) end
         local row = "Overlay/Window/Side/Rows/" .. town.id
+        local pick = self:Ui(row .. "/Pick")
+        if isvalid(pick) then pick:SetEnable(selectable) end
+        local dim = self:Ui(row .. "/Dim")
+        if isvalid(dim) then dim:SetEnable(dimmed) end
         local owner = self:Ui(row .. "/Owner")
         if isvalid(owner) then
             owner.TextGUIRendererComponent.Text = known and (self:OwnerName(town.owner) .. (town.capital and "・主城" or "")) or "讀取中"

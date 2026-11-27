@@ -30,27 +30,21 @@ test('every town carries the same shared NPC on the town platform', () => {
   }
 });
 
-test('the attack panel and the siege panel are authored in the faction war UI', () => {
+test('the siege panel is authored in the faction war UI and the attack panel is gone (#124)', () => {
   const war = UIBuilder.read('ui/FactionWarGroup.ui');
-  assert.equal(war.find('AttackPanel').jsonString.enable, false);
-  for (const part of ['Title', 'Status']) assert.ok(war.hasComponent(`AttackPanel/Window/${part}`, 'MOD.Core.TextGUIRendererComponent'), part);
-  assert.ok(war.hasComponent('AttackPanel/Window/Close', 'MOD.Core.ButtonComponent'));
-  for (const row of [1, 2]) {
-    assert.ok(war.hasComponent(`AttackPanel/Window/Row${row}/Option`, 'MOD.Core.ButtonComponent'), `Row${row} option`);
-    assert.ok(war.hasComponent(`AttackPanel/Window/Row${row}/Note`, 'MOD.Core.TextGUIRendererComponent'), `Row${row} note`);
-  }
+  assert.equal(war.find('AttackPanel'), null, 'the world map\'s target selection replaced the attack panel');
   assert.equal(war.find('SiegePanel').jsonString.enable, false);
   for (const part of ['Origin', 'Versus', 'Target', 'Status']) assert.ok(war.hasComponent(`SiegePanel/${part}`, 'MOD.Core.TextGUIRendererComponent'), `SiegePanel/${part}`);
   assert.ok(war.hasComponent('SiegePanel/Cancel', 'MOD.Core.ButtonComponent'));
   assert.equal(war.find('QueueBar'), null, 'the queue bar is gone (#123)');
 });
 
-test('FactionWarAttack owns options, queueing, settlement and answers only authenticated callers', () => {
+test('FactionWarAttack owns the target selection, queueing, settlement and answers only authenticated callers', () => {
   const attack = source('RootDesk/MyDesk/Formations/FactionWarAttack.mlua');
-  for (const name of ['Targets', 'Settle', 'RequestOptions', 'RequestAttack', 'IsEngaged']) {
+  for (const name of ['Targets', 'Settle', 'RequestSelect', 'RequestAttack', 'IsEngaged']) {
     assert.ok(methods(attack).includes(name), `${name} exists`);
   }
-  for (const name of ['RequestOptions', 'RequestAttack']) {
+  for (const name of ['RequestSelect', 'RequestAttack']) {
     assert.match(attack, new RegExp(`@ExecSpace\\("Server"\\)\\n    method void ${name}\\(`), `${name} is the Server RPC`);
     assert.match(body(attack, name), /senderUserId/, `${name} identifies the caller on the server`);
   }

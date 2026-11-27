@@ -66,7 +66,7 @@ test('no property or node is named after a faction colour', () => {
 
 test('the choice buttons and the legend are authored as A and B', () => {
   const war = UIBuilder.read('ui/FactionWarGroup.ui');
-  for (const [node, text] of [['A', '加入 A 方'], ['B', '加入 B 方']]) {
+  for (const [node, text] of [['A', 'A 方'], ['B', 'B 方']]) {
     assert.ok(war.hasComponent(`FactionChoice/Window/${node}`, 'MOD.Core.ButtonComponent'), `${node} is a button`);
     assert.equal(war.getComponent(`FactionChoice/Window/${node}`, 'MOD.Core.TextGUIRendererComponent').Text, text);
   }

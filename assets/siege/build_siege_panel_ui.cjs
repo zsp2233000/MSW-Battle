@@ -3,7 +3,7 @@
 
 // Adds the siege panel (#123) to ui/FactionWarGroup.ui with the msw-ui-system UIBuilder and removes the queue bar it replaces.
 // Nothing else in the group is rebuilt: Maker imports a rebuilt subtree one level per refresh (tests/README.md, #117), so the
-// attack panel, the team preview and the rest keep their entities.
+// team preview and the rest keep their entities.
 //
 //   node assets/siege/build_siege_panel_ui.cjs
 //
@@ -57,7 +57,7 @@ b.patchComponent('SiegePanel/Cancel', 'MOD.Core.TextGUIRendererComponent', { Out
 const rootPath = '/ui/FactionWarGroup';
 const siblings = b.listEntities().filter(entity => entity.depth === 1).map(entity => entity.path.split('/').pop()).filter(name => name !== 'SiegePanel');
 const taken = new Set(siblings.map(name => b.find(name).jsonString.displayOrder));
-const dialogs = siblings.filter(name => name === 'AttackPanel' || name === 'TeamPreview');
+const dialogs = siblings.filter(name => name === 'TeamPreview');
 let place = dialogs.length > 0 ? Math.min(...dialogs.map(name => b.find(name).jsonString.displayOrder)) - 1 : Math.max(...taken) + 1;
 while (taken.has(place)) place -= 1;
 b.patch('SiegePanel', { display_order: place });

@@ -81,24 +81,24 @@ const probeText = name => source(`tests/${name}`);
 const luaFunction = (text, name) => text.match(new RegExp(`local function ${name}\\([^]*?\\n(?=local function |local ok, reason)`))?.[0] || '';
 const journey = () => probeText('faction_war_integration_journey_e2e_runtime_probe.lua');
 
-test('RequestEntry, RequestGate and OptionsFor read senderUserId, so the journey mirrors their bodies call for call', () => {
+test('RequestEntry, RequestGate and RequestSelect read senderUserId, so the journey mirrors their bodies call for call', () => {
   const entry = body(war(), 'RequestEntry');
   const gate = body(war(), 'RequestGate');
-  const options = body(attack(), 'OptionsFor');
+  const options = body(attack(), 'SelectFor');
   for (const [name, text] of [['RequestEntry', entry], ['RequestGate', gate]]) {
     assert.match(tag(war(), name), /@ExecSpace\("Server"\)/, `${name} is a Server method: a script cannot give it a sender`);
     assert.match(text, /senderUserId/, `${name} reads the sender`);
   }
-  assert.match(body(attack(), 'RequestOptions'), /OptionsFor\(senderUserId\)/, 'the NPC dialog hands the sender to OptionsFor, which a script can call');
+  assert.match(body(attack(), 'RequestSelect'), /SelectFor\(senderUserId\)/, 'the NPC press hands the sender to SelectFor, which a script can call');
   assert.match(body(attack(), 'RequestAttack'), /AttackFor\(senderUserId, target\)/, 'and the attack request is AttackFor, which a script calls as it is');
   // The production order, then the same order in the probe's helper.
   inOrder(entry, [/CanEnterFromLobby\(player, userId\)/, /self\._T\.pending\[userId\] = player/, /self:ReadFaction\(profile/, /_FormationStorage:Write\(profile, self\.FactionKey, "", choice/, /self:EnterFrontline\(userId, player, choice\)/], 'RequestEntry');
   inOrder(gate, [/self:FindGate\(origin, destination\)/, /self:NearGate\(player, gate\)/, /_FactionWarAttack:IsEngaged\(userId\)/, /self:ReadFaction\(/, /_FactionWarTownDocument:Read\(/, /_FactionWarTownDocument:CanPass\(faction, origin, destination, towns\)/, /_FactionWarLanding:Judge\(userId, \{ kind = "CHECK", town = origin, board = towns \}\)/, /self:Move\(player, destination\)/], 'RequestGate');
-  inOrder(options, [/self:Resolve\(/, /towns\[town\]\.owner ~= faction/, /"NOT_OWNED"/, /self:IsEngaged\(userId\)/, /self:Targets\(town, faction, towns\)/, /engaged and "ENGAGED" or "READY"/], 'OptionsFor');
+  inOrder(options, [/self:Resolve\(/, /towns\[town\]\.owner ~= faction/, /"NOT_OWNED"/, /self:IsEngaged\(userId\)/, /"ENGAGED"/, /local targets = self:Targets\(town, faction, towns\)/, /"NO_TARGETS"/, /"READY", self:Header\(town, faction, towns\), targets/], 'SelectFor');
   const text = journey();
   inOrder(luaFunction(text, 'entry'), [/CanEnterFromLobby\(user, userId\)/, /_T\.pending\[userId\] = user/, /readFaction\(profile\)/, /_FormationStorage:Write\(profile, _FactionWar\.FactionKey, "", choice/, /_FactionWar:EnterFrontline\(userId, user, faction\)/], 'the journey entry()');
   inOrder(luaFunction(text, 'gate'), [/_FactionWar:FindGate\(origin, destination\)/, /_FactionWar:NearGate\(user, door\)/, /_FactionWarAttack:IsEngaged\(userId\)/, /readFaction\(/, /readTowns\(\)/, /_FactionWarTownDocument:CanPass\(faction, origin, destination, towns\)/, /_FactionWarLanding:Judge\(userId, \{ kind = "CHECK", town = origin, board = towns \}\)/, /_FactionWar:Move\(user, destination\)/], 'the journey gate()');
-  inOrder(luaFunction(text, 'options'), [/towns\[town\]\.owner ~= faction/, /"NOT_OWNED"/, /_FactionWarAttack:IsEngaged\(id\(user\)\) and "ENGAGED" or "READY"/, /_FactionWarAttack:Targets\(town, faction, towns\)/], 'the journey options()');
+  inOrder(luaFunction(text, 'options'), [/towns\[town\]\.owner ~= faction/, /"NOT_OWNED"/, /_FactionWarAttack:IsEngaged\(id\(user\)\)/, /"ENGAGED"/, /local targets = _FactionWarAttack:Targets\(town, faction, towns\)/, /"NO_TARGETS"/, /"READY", targets/], 'the journey options()');
   // Everything a script can call, it calls as it is.
   for (const call of ['_FactionWarAttack:AttackFor(', '_MatchFlow:CancelForUser(', '_UserService:KickUser(', '_FactionWar:EnterFrontline(']) assert.ok(text.includes(call), `the journey calls ${call}`);
 });

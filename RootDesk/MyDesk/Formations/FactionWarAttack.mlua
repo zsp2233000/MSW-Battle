@@ -3,7 +3,7 @@ script FactionWarAttack extends Logic
 
     @ExecSpace("ServerOnly")
     method void OnBeginPlay()
-        -- Track pending option and attack reads in this room.
+        -- Track pending selection and attack reads in this room.
         self._T.reading = {}
         log("[VRF][FactionWarAttack] ready")
     end
@@ -15,7 +15,7 @@ script FactionWarAttack extends Logic
         if towns[origin] == nil or towns[origin].owner ~= faction then return list end
         for _, id in ipairs(_FactionWarTownDocument.TownOrder) do
             if towns[id].owner ~= faction and isvalid(_FactionWar:FindGate(origin, id)) then
-                -- The board was read once for the whole answer; the panel shows each target's strength from it.
+                -- The board was read once for the whole answer; each target carries its strength from it.
                 table.insert(list, { town = id, name = _FactionWarTownDocument.TownNames[id], capital = _FactionWarTownDocument:IsCapital(id),
                     strength = towns[id].strength, owner = towns[id].owner })
             end
@@ -25,7 +25,7 @@ script FactionWarAttack extends Logic
 
     @ExecSpace("ServerOnly")
     method table Header(string origin, string faction, table towns)
-        -- The departure town the panel shows above its targets: name, strength and owner from the same board read.
+        -- The departure town the confirmation shows: name, strength and owner from the same board read.
         local town = towns[origin]
         return { town = origin, name = _FactionWarTownDocument.TownNames[origin], capital = _FactionWarTownDocument:IsCapital(origin),
             strength = town.strength, owner = town.owner, faction = faction }
@@ -63,14 +63,18 @@ script FactionWarAttack extends Logic
     end
 
     @ExecSpace("Server")
-    method void RequestOptions()
-        -- The NPC dialog asks for the caller's own options; the caller identity comes from the server.
-        self:OptionsFor(senderUserId)
+    method void RequestSelect()
+        -- The NPC press asks for the caller's own target selection; the caller identity comes from the server.
+        self:SelectFor(senderUserId)
     end
 
     @ExecSpace("ServerOnly")
-    method void OptionsFor(string userId)
-        -- List the attackable towns for the player's current town; the dialog shows exactly this answer.
+    method void SelectFor(string userId)
+        -- One answer for the NPC press: the status, the departure town, the selectable targets and, only when the player can attack,
+        -- the board and links the world map draws. Only READY opens the map; ENGAGED, NOT_OWNED, UNAVAILABLE and NO_TARGETS (an owner with
+        -- no adjacent enemy town) are answered with the status alone (ENGAGED also names the town being attacked) and the client shows a message.
+        -- The town table and the faction are read once (Resolve); a READY player also becomes a map viewer without another read,
+        -- so later changes of the board are pushed to the open map.
         local player = _UserService:GetUserEntityByUserId(userId)
         if not isvalid(player) or not isvalid(player.PlayerComponent) then return end
         local town = player.CurrentMapName
@@ -78,19 +82,26 @@ script FactionWarAttack extends Logic
         self._T.reading[userId] = true
         self:Resolve(player, userId, town, function(faction, towns)
             if towns == nil or faction == nil or faction == "" then
-                self:ReceiveOptions(town, {}, "UNAVAILABLE", {}, userId)
+                self:ReceiveSelect(town, "UNAVAILABLE", {}, {}, {}, userId)
             elseif towns[town].owner ~= faction then
-                self:ReceiveOptions(town, {}, "NOT_OWNED", {}, userId)
+                self:ReceiveSelect(town, "NOT_OWNED", {}, {}, {}, userId)
                 -- A player standing in a town that fell is sent to their capital, whichever room delivered the news.
                 _FactionWarLanding:Judge(userId, { kind = "CHECK", town = town, board = towns })
+            elseif self:IsEngaged(userId) then
+                -- The message names the town the player is already attacking ("" for a player who is engaged without a war ticket).
+                self:ReceiveSelect(town, "ENGAGED", { target = _MatchFlow:TargetForUser(userId) }, {}, {}, userId)
             else
-                local engaged = self:IsEngaged(userId)
-                local header = self:Header(town, faction, towns)
-                -- Already queued: the panel says which town is being attacked right now.
-                if engaged then header.target = _MatchFlow:TargetForUser(userId) end
-                self:ReceiveOptions(town, self:Targets(town, faction, towns), engaged and "ENGAGED" or "READY", header, userId)
-                -- The open panel follows the board until it closes.
-                _FactionWarMap:WatchPanel(userId, player)
+                local targets = self:Targets(town, faction, towns)
+                if #targets == 0 then
+                    -- Nothing to pick: no map, no viewer; the client says so in a message.
+                    self:ReceiveSelect(town, "NO_TARGETS", {}, {}, {}, userId)
+                else
+                    local board = _FactionWarMap:Board(towns)
+                    self:ReceiveSelect(town, "READY", self:Header(town, faction, towns), targets,
+                        { towns = board.towns, links = board.links }, userId)
+                    -- The open map follows the board until it closes.
+                    _FactionWarMap:WatchMap(userId, player)
+                end
             end
         end)
     end
@@ -138,15 +149,15 @@ script FactionWarAttack extends Logic
     end
 
     @ExecSpace("Client")
-    method void ReceiveOptions(string town, table options, string status, table header)
-        -- Deliver the server's attack options and the departure town with its strength to the caller's panel.
-        _FactionWarUI:ShowAttackOptions(town, options, status, header)
+    method void ReceiveSelect(string town, string status, table header, table targets, table board)
+        -- Deliver the server's answer to the NPC press: only READY opens the world map in target-selection mode.
+        _FactionWarMapUI:ShowSelect(town, status, header, targets, board)
     end
 
     @ExecSpace("Client")
     method void ReceiveAttackResult(string result)
         -- Tell the caller whether the attack request was queued or why it was refused.
-        _FactionWarUI:ShowAttackResult(result)
+        _FactionWarMapUI:ShowAttackResult(result)
     end
 
     @ExecSpace("ServerOnly")

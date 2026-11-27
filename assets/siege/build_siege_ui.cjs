@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 'use strict';
 
-// Rebuilds the attack panel (#117) and adds the team button and team preview (#118) in ui/FactionWarGroup.ui with the msw-ui-system UIBuilder.
+// Rebuilds the team button and team preview (#118) in ui/FactionWarGroup.ui with the msw-ui-system UIBuilder, and drops the attack panel of #117, which the
+// world map's target selection replaced in #124 (assets/worldmap/select_ui.cjs; assets/siege/remove_attack_panel_ui.cjs removes it from an existing file).
 // Everything else in the group (faction choice, the siege panel of #123, town HUD, lobby buttons) is left as it is.
 //
 //   node assets/siege/build_siege_ui.cjs
@@ -18,14 +19,10 @@ const uiFile = path.join(ROOT, 'ui', 'FactionWarGroup.ui');
 const CARD_BUTTON = { normal: '9505617fb63c447c8ff9c15c18d88064', highlighted: '398dfdb46d534ea2a2373e4f5d29ae2a', pressed: '1016088c7aca43c78cdd06c01645ab1b' };
 const X_BUTTON = { normal: 'e01ef74a1ecf444bbb013c4313a8d0a9', highlighted: 'f24a6333e4df404795e922ec2966e997', pressed: '5952570d481245a9a4fbe562f3c030c5' };
 const BASE_FRAME = 'ac319875b43f40ea86a069c468a1a26e'; // Base_4 panel frame (hollow, 43 px slices)
-const GAUGE = 'f0911af597259044aa624a11332c0595';      // HP gauge slice (Sliced fill, width-driven)
 const OUTLINE = { outline: true, outline_color: { r: 0, g: 0, b: 0, a: 0.7 }, outline_width: 0.2, face_dilate: 0.2 };
 const GOLD = '#EEC78F';
 const BROWN_PANEL = { r: 0.12, g: 0.075, b: 0.04, a: 0.9 };
 const BROWN_FIELD = { r: 0.16, g: 0.11, b: 0.07, a: 0.63 };
-const ROW_SHADE = { r: 0, g: 0, b: 0, a: 0.3 };
-const BAR_BACK = { r: 0.05, g: 0.035, b: 0.02, a: 0.85 };
-const NEUTRAL = { r: 0.62, g: 0.6, b: 0.56, a: 1 };
 
 function swap(b, entity, states) {
   b.patchComponent(entity, 'MOD.Core.ButtonComponent', {
@@ -56,40 +53,8 @@ function frame(b, name, size) {
   b.patchComponent(name, 'MOD.Core.SpriteGUIRendererComponent', { FillCenter: false });
 }
 
-function bar(b, name, width, pos, anchor) {
-  b.sprite(name, { anchor, pos, rect_size: [width, 18], color: BAR_BACK, sprite_type: 1 });
-  b.sprite(`${name}/Fill`, { anchor: 'middle-left', pos: [0, 0], rect_size: [width, 18], pivot: [0, 0.5], image_ruid: GAUGE, color: NEUTRAL, sprite_type: 1, enable: false });
-}
-
 const b = UIBuilder.load(uiFile);
 for (const gone of ['AttackPanel', 'TeamButton', 'TeamPreview']) if (b.find(gone)) b.remove(gone);
-
-// --- attack panel (#117): the departure town and its strength above, one card per target ---------------------
-// A stretched entity needs its real size as RectSize: the engine insets the rect by (parent - RectSize) / 2 otherwise.
-b.sprite('AttackPanel', { anchor: 'stretch', rect_size: [1920, 1080], color: '#000000', alpha: 0.55, raycast: true, enable: false });
-b.sprite('AttackPanel/Window', { anchor: 'middle-center', rect_size: [800, 580], color: BROWN_PANEL, sprite_type: 1, raycast: true });
-frame(b, 'AttackPanel/Window/Frame', [800, 580]);
-b.text('AttackPanel/Window/Title', '進攻目標', { size: 38, color: '#FFFFFF', bold: true, ...OUTLINE, anchor: 'top-center', pos: [0, -30], rect_size: [600, 56] });
-xButton(b, 'AttackPanel/Window/Close');
-
-b.sprite('AttackPanel/Window/Origin', { anchor: 'top-center', pos: [0, -104], rect_size: [720, 112], color: ROW_SHADE, sprite_type: 1 });
-b.text('AttackPanel/Window/Origin/Label', '出發城', { size: 22, color: GOLD, ...OUTLINE, alignment: 3, anchor: 'top-left', pos: [20, -8], rect_size: [100, 26] });
-b.text('AttackPanel/Window/Origin/Name', '—', { size: 30, color: '#FFFFFF', bold: true, ...OUTLINE, alignment: 3, anchor: 'top-left', pos: [20, -34], rect_size: [240, 36] });
-b.text('AttackPanel/Window/Origin/Capital', '主城', { size: 22, color: '#FACA33', bold: true, ...OUTLINE, alignment: 3, anchor: 'top-left', pos: [270, -37], rect_size: [80, 30], enable: false });
-b.text('AttackPanel/Window/Origin/Value', '兵力 —', { size: 28, color: '#FFFFFF', bold: true, ...OUTLINE, alignment: 5, anchor: 'top-right', pos: [-20, -16], rect_size: [300, 36] });
-bar(b, 'AttackPanel/Window/Origin/Bar', 680, [20, 16], 'bottom-left');
-
-[1, 2].forEach((n, index) => {
-  const row = `AttackPanel/Window/Row${n}`;
-  b.sprite(row, { anchor: 'top-center', pos: [0, -232 - index * 132], rect_size: [720, 120], color: ROW_SHADE, sprite_type: 1, enable: false });
-  b.text(`${row}/Name`, '—', { size: 30, color: '#FFFFFF', bold: true, ...OUTLINE, alignment: 3, anchor: 'top-left', pos: [20, -12], rect_size: [230, 40] });
-  b.text(`${row}/Capital`, '主城', { size: 22, color: '#FACA33', bold: true, ...OUTLINE, alignment: 3, anchor: 'top-left', pos: [250, -17], rect_size: [80, 30], enable: false });
-  b.text(`${row}/Note`, '', { size: 20, color: '#FFD173', ...OUTLINE, alignment: 3, anchor: 'top-left', pos: [330, -17], rect_size: [190, 30] });
-  b.text(`${row}/Value`, '兵力 —', { size: 26, color: '#FFFFFF', bold: true, ...OUTLINE, alignment: 3, anchor: 'top-left', pos: [20, -56], rect_size: [300, 32] });
-  bar(b, `${row}/Bar`, 380, [20, 14], 'bottom-left');
-  cardButton(b, `${row}/Option`, '進攻', { anchor: 'middle-right', pos: [-20, 0], rect_size: [190, 88], font_size: 30 });
-});
-b.text('AttackPanel/Window/Status', '', { size: 24, color: GOLD, ...OUTLINE, anchor: 'bottom-center', pos: [0, 24], rect_size: [720, 40] });
 
 // --- team preview (#118): the "隊伍" button beside the world map button, and the read-only stance preview -----
 cardButton(b, 'TeamButton', '隊伍', { anchor: 'top-right', pos: [-246, -150], rect_size: [150, 88], font_size: 26, enable: false });

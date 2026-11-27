@@ -3,7 +3,7 @@
 --   Gushan fall (the queued player is cancelled, the idle ones are sent to their capital), the landing of conqueror and loser, a player who left before the fall
 --   and logs in after it (landing by the live owner), and the monster experience of both sides. It logs the observables the issue names with "ROW" lines
 --   (what the player can do, the opponent, the strength, the owner, the landing, the experience) and prints them as one table in STEP 11.
--- A script cannot call FactionWar:RequestEntry, FactionWar:RequestGate or FactionWarAttack:OptionsFor (Server methods that read senderUserId, which only a real
+-- A script cannot call FactionWar:RequestEntry, FactionWar:RequestGate or FactionWarAttack:RequestSelect (Server methods that read senderUserId, which only a real
 -- client call has). The helpers entry(), gate() and options() below repeat their bodies with the same production calls in the same order
 -- (CanEnterFromLobby, ReadFaction, the write of the choice, EnterFrontline; FindGate, NearGate, IsEngaged, CanPass, Enforce, Move; Targets, IsEngaged);
 -- tests/faction_war_integration_contract.test.cjs pins those bodies so the mirror cannot drift. AttackFor and CancelForUser run as they are.
@@ -159,14 +159,17 @@ local function gate(user, destination)
     assert(await(function() return user.CurrentMapName == destination end, 100), "arrived in " .. destination)
     return "PASSED"
 end
--- FactionWarAttack:OptionsFor without senderUserId: what the NPC dialog would be handed, as a status and a list.
+-- FactionWarAttack:SelectFor without the reply: what the NPC press would be handed, as a status and the list of targets (the map's board and links are left out).
 local function options(user)
     local town = user.CurrentMapName
     local faction = readFaction(user.PlayerComponent.ProfileCode)
     local towns = readTowns()
     if faction == nil or faction == "" then return "UNAVAILABLE", {} end
     if towns[town].owner ~= faction then return "NOT_OWNED", {} end
-    return _FactionWarAttack:IsEngaged(id(user)) and "ENGAGED" or "READY", _FactionWarAttack:Targets(town, faction, towns)
+    if _FactionWarAttack:IsEngaged(id(user)) then return "ENGAGED", {} end
+    local targets = _FactionWarAttack:Targets(town, faction, towns)
+    if #targets == 0 then return "NO_TARGETS", {} end
+    return "READY", targets
 end
 local function total(counts)
     local n = 0
@@ -262,7 +265,7 @@ local ok, reason = pcall(function()
         assert(r1.CurrentMapName == "zuoying", "a refused gate moves nobody")
         assert(gate(r1, "nanzih") == "PASSED", "the gate to friendly Nanzih opens")
         local status, list = options(r1)
-        assert(status == "READY" and #list == 0, "the capital has no enemy neighbour to attack, found " .. status .. " " .. names(list))
+        assert(status == "NO_TARGETS" and #list == 0, "the capital has no enemy neighbour to attack (the NPC answers with a message, not a map), found " .. status .. " " .. names(list))
         assert(await(function() return readTown(PROFILES.A1) == "nanzih" end, 80), "the last town follows the gate")
         assert(gate(r1, "zuoying") == "PASSED", "and back")
         assert(await(function() return readTown(PROFILES.A1) == "zuoying" end, 80), "the last town is Zuoying again")
