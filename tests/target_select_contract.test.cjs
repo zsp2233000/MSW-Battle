@@ -334,3 +334,143 @@ test('the #128 Maker client probe implements every step its header orders, uses 
   for (const word of ['補記（#128）', 'ShowNothingToPick', 'SetNotice', 'NO_TARGETS', 'NOT_OWNED']) assert.ok(adr.includes(word), `ADR 0015 records ${word}`);
   assert.ok(readme.includes('## Target invalidation while the map is open (#128'), 'the README has the section');
 });
+
+// #129: the selection opens zoomed on the departure town and a town is picked by clicking its crest. The rules run in target_select_local.cjs; these tests pin the authored
+// marks behind each crest, the click path from the touch surface to Pick, the builder scripts and the Maker probe.
+const MARKS = ['Frame', 'Mark'];
+const townNode = id => `Overlay/Window/Map/Content/Towns/${id}`;
+
+test('every town node has a hidden gold Mark and a hidden cyan Frame behind its crest, built from the crest sprite, taking no click', () => {
+  const file = ui();
+  const art = JSON.parse(source('assets/worldmap/ruids.json'));
+  const order = path => file.find(path).jsonString.displayOrder;
+  const inFile = file.build().ContentProto.Entities.map(entity => entity.path.replace('/ui/WorldMapGroup/', ''));
+  for (const id of TOWNS) {
+    const town = townNode(id);
+    for (const name of MARKS) {
+      const path = `${town}/${name}`;
+      assert.ok(file.find(path), `${path} exists`);
+      assert.equal(file.find(path).jsonString.enable, false, `${path} waits for the selection`);
+      assert.equal(file.getComponent(path, sprite).ImageRUID.DataId, art.crest, `${path} is the crest sprite drawn larger, a rim around the crest`);
+      assert.equal(file.getComponent(path, sprite).RaycastTarget, false, `${path} takes no click`);
+      assert.equal(file.hasComponent(path, button), false, `${path} is not a control`);
+    }
+    const size = name => file.getComponent(`${town}/${name}`, 'MOD.Core.UITransformComponent').RectSize.x;
+    assert.ok(size('Frame') > size('Mark') && size('Mark') > size('Crest'), `${id}: the frame is larger than the mark, the mark larger than the crest`);
+    const gold = file.getComponent(`${town}/Mark`, sprite).Color;
+    const cyan = file.getComponent(`${town}/Frame`, sprite).Color;
+    assert.ok(gold.r > 0.9 && gold.g > 0.7 && gold.b < 0.4, `${id}: the mark is gold`);
+    assert.ok(cyan.b > 0.9 && cyan.r < 0.6, `${id}: the frame is cyan, so it differs from the mark and from both faction colours`);
+    assert.ok(order(`${town}/Frame`) < order(`${town}/Mark`) && order(`${town}/Mark`) < order(`${town}/Crest`) && order(`${town}/Crest`) < order(`${town}/Name`), `${id}: drawn Frame, Mark, Crest, then the labels`);
+    assert.ok(inFile.indexOf(`${town}/Frame`) < inFile.indexOf(`${town}/Mark`) && inFile.indexOf(`${town}/Mark`) < inFile.indexOf(`${town}/Crest`), `${id}: and in that order in the file, which Maker takes the render order from`);
+    for (const label of ['Name', 'Strength', 'Capital', 'Arrow']) assert.ok(inFile.indexOf(`${town}/Crest`) < inFile.indexOf(`${town}/${label}`), `${id}: the crest is still before ${label}`);
+    const children = inFile.filter(path => path.startsWith(`${town}/`));
+    assert.deepEqual(children.map(path => order(path)), children.map((_, index) => index), `${id}: the children are numbered 0.. in file order`);
+  }
+  // The fixed input layer is still above the moving content and still receives the touch.
+  assert.ok(inFile.indexOf('Overlay/Window/Map/Input') > inFile.indexOf('Overlay/Window/Map/Content/Towns/yancheng/Arrow'), 'the input layer is above the content');
+  assert.ok(file.hasComponent('Overlay/Window/Map/Input', 'MOD.Core.UITouchReceiveComponent'), 'and still receives the touch');
+  const controls = file.listEntities().filter(node => node.path.includes('/Content/') && file.hasComponent(node.path, button));
+  assert.deepEqual(controls, [], 'no control inside the moving map can intercept the drag');
+});
+
+test('the click path: the touch surface decides click or drag by the screen distance, and a click goes through the hit test to the same Pick as the row', () => {
+  const text = mapClient();
+  assert.match(text, /property number MinHitPx = (\d+)/, 'the hit reach is a property');
+  assert.ok(Number(text.match(/property number MinHitPx = (\d+)/)[1]) >= 24, 'at least 24 screen pixels');
+  assert.match(text, /property number SelectZoom = 4\b/, 'the selection opens at 4x');
+  assert.match(text, /property number ClickSlopPx = \d+/, 'the click slop is a property');
+  assert.match(body(text, 'BeginMapDrag'), /self\._T\.dragStart = event\.TouchPoint[^]*self\._T\.dragTravel = 0/, 'the press remembers where it went down, in screen pixels');
+  assert.match(body(text, 'DragMap'), /self:MeasureTravel\(event\.TouchPoint\)/, 'every drag event measures the travel');
+  assert.match(body(text, 'EndMapDrag'), /self:MeasureTravel\(event\.TouchPoint\)[^]*if self:IsClick\(self\._T\.dragTravel\) then self:ClickMap\(event\.TouchPoint\) end/, 'the release is a click only when the pointer stayed within the slop');
+  assert.match(body(text, 'MeasureTravel'), /math\.max\(self\._T\.dragTravel or 0, math\.sqrt/, 'the travel is the farthest distance from the start, so a drag that returns is still a drag');
+  assert.match(body(text, 'IsClick'), /return travel <= self\.ClickSlopPx/);
+  const click = body(text, 'ClickMap');
+  assert.match(click, /self\._T\.mode ~= "select" or self\._T\.selected ~= nil or self\._T\.message ~= nil then return end/, 'a click does nothing in the view, behind the confirmation or behind a message');
+  assert.match(click, /_UILogic:ScreenToLocalUIPosition\(screenPoint, view\.UITransformComponent\)/, 'the point is converted with the same call the drag uses');
+  assert.match(click, /math\.abs\(point\.x\) > rect\.x \/ 2 or math\.abs\(point\.y\) > rect\.y \/ 2 then return end/, 'a release outside the viewport is not a click on the map');
+  assert.match(click, /self:HitRadius\(self\._T\.zoom, self:ScreenPixelsPerUnit\(\)\)/, 'the reach is measured in screen pixels');
+  assert.match(click, /self:Pick\(id\)/, 'the click ends in Pick, which refuses a town the server did not list');
+  assert.match(body(text, 'HitRadius'), /math\.max\(self\.CrestHitReach \* self:IconScale\(zoom\), self\.MinHitPx \/ pixelsPerUnit\)/, 'never smaller than 24 px, never smaller than the crest');
+  assert.match(body(text, 'ScaleMapLabels'), /local iconScale = self:IconScale\(zoom\)/, 'the hit test and the drawing use the same crest scale');
+  assert.match(body(text, 'TownViewPoint'), /offset\.x \+ position\.x \* zoom, offset\.y \+ position\.y \* zoom/, 'the content is scaled about its centre, then moved');
+  assert.match(body(text, 'FocusOrigin'), /self:SetMapView\(self\.SelectZoom, self:CenterOffset\(/, 'the focus uses the one view setter (the clamp and the labels stay in it)');
+  const select = body(text, 'ShowSelect');
+  assert.match(select, /local entering = not \(self\._T\.open and self\._T\.mode == "select"\)[^]*self:SetMode\("select", targets, header\.town\)[^]*if entering then self:FocusOrigin\(header\.town\) end/, 'the selection zooms when it opens or switches over from the view, not on a refreshed list');
+  assert.match(body(text, 'Open'), /self:Reveal\("view"\)/, 'the view still opens through Reveal at the full overview');
+  assert.match(body(text, 'Reveal'), /self:SetMapView\(1, Vector2\(0, 0\)\)/, 'which is the full overview');
+  assert.match(body(text, 'RenderConfirm'), /self:RenderMarks\(\)/, 'the marks follow every change of the selection');
+  assert.match(body(text, 'ShowTown'), /local state = self:CrestState\(town\.id\)/, 'the dimmed look and the pick buttons come from the same state as the marks');
+  const marks = body(text, 'RenderMarks');
+  assert.match(marks, /"\/Mark"[^]*SetEnable\(state == "selectable" or state == "selected"\)/);
+  assert.match(marks, /"\/Frame"[^]*SetEnable\(state == "selected"\)/);
+  for (const method of ['MeasureTravel', 'IsClick', 'IconScale', 'HitRadius', 'TownViewPoint', 'CenterOffset', 'TownAt', 'CrestState', 'ScreenPixelsPerUnit', 'TownViews', 'ClickMap', 'FocusOrigin', 'RenderMarks']) {
+    assert.match(annotation(text, method), /@ExecSpace\("ClientOnly"\)/, `${method} runs on the client only`);
+  }
+  const file = ui();
+  for (const name of MARKS) for (const id of TOWNS) assert.ok(file.find(`${townNode(id)}/${name}`), `${townNode(id)}/${name} exists for the script that shows it`);
+});
+
+test('the mark builder is a delta script, the full rebuild includes it, and both give the same children order', () => {
+  const selectSource = source('assets/worldmap/select_ui.cjs');
+  assert.match(source('assets/worldmap/build_mark_ui.cjs'), /UIBuilder\.load\(uiFile\)[^]*markPaths\(\)[^]*addMarkUi\(b\)/, 'a delta script replaces only the marks');
+  assert.match(selectSource, /function selectPaths\(\) \{\s+return \['Confirm', \.\.\.messagePaths\(\), \.\.\.noticePaths\(\), \.\.\.markPaths\(\)/, 'the selection delta script removes the marks before adding them again');
+  assert.match(selectSource, /addMarkUi\(b\);\n  addMessageUi\(b\);\n\}/, 'a full rebuild includes them, before the message window, which stays last');
+  const { addMarkUi, markPaths } = require('../assets/worldmap/select_ui.cjs');
+  const b = new UIBuilder('WorldMapGroup', 9, true);
+  for (const parent of ['Overlay', 'Overlay/Window', 'Overlay/Window/Map']) b.empty(parent, {});
+  b.empty('Overlay/Window/Map/Content', { rect_size: [740, 810] });
+  b.empty('Overlay/Window/Map/Content/Towns', {});
+  for (const id of TOWNS) {
+    b.empty(townNode(id), {});
+    for (const part of ['Crest', 'Name', 'Strength']) b.sprite(`${townNode(id)}/${part}`, {});
+  }
+  const quiet = console.log;
+  console.log = () => {};
+  try { addMarkUi(b); } finally { console.log = quiet; }
+  const paths = b.build().ContentProto.Entities.map(entity => entity.path);
+  for (const id of TOWNS) {
+    const children = paths.filter(path => path.startsWith(`/ui/WorldMapGroup/${townNode(id)}/`)).map(path => path.split('/').pop());
+    assert.deepEqual(children, ['Frame', 'Mark', 'Crest', 'Name', 'Strength'], `${id}: a build from nothing puts the marks behind the crest`);
+  }
+  assert.equal(markPaths().length, TOWNS.length * 2, 'two marks per town');
+  assert.equal(new Set(paths).size, paths.length, 'no entity is added twice');
+});
+
+test('the #129 Maker client probe implements every step its header orders, uses the real mouse, and the README and ADR name them', () => {
+  const probe = source('tests/target_select_click_client_runtime_probe.lua');
+  const readme = source('tests/README.md');
+  const order = probe.match(/^-- Order [^\n]*\n((?:--[^\n]*\n)+?)-- Regression/m)[1];
+  const header = [...order.matchAll(/(?<![#\d])\b(\d{1,2}) ([A-Z_]{4,})/g)].map(match => [Number(match[1]), match[2]]);
+  assert.deepEqual(header.map(step => step[0]), Array.from({ length: 11 }, (_, index) => index + 1), 'the header numbers 11 steps from 1 without gaps');
+  const implemented = [...probe.matchAll(/(?:if|elseif) STEP == "([A-Z_]+)" then/g)].map(match => match[1]);
+  for (const [, name] of header) {
+    assert.ok(implemented.includes(name), `${name} is implemented`);
+    assert.ok(probe.includes(`[VRF][TargetClick] ${name} PASS`), `${name} ends in a PASS line`);
+    assert.ok(readme.includes(`\`${name}\``), `the README names ${name}`);
+  }
+  assert.equal(implemented.length, header.length, 'and nothing else is implemented');
+  assert.match(probe, /maker_mouse_input/, 'the click and the drag are real mouse input');
+  assert.match(probe, /_UILogic:ScreenToLocalUIPosition\(Vector2\(0, 0\), transform\)/, 'the screen position of a crest is solved from the real conversion');
+  assert.match(probe, /touch down screen=/, 'the first real press logs where it landed, to tell the coordinate systems apart');
+  assert.match(probe, /ui:ClickMap\(/, 'the hit reach runs through the production click handler');
+  assert.match(probe, /if not ok then log_error\("\[VRF\]\[TargetClick\] " \.\. STEP \.\. " FAIL "/, 'a failed step reports itself');
+  assert.doesNotMatch(probe, /_FactionWarAttack\.\w+ = |_FactionWarMapUI\.\w+ = |ui\.\w+ = /, 'it never replaces a production method or property');
+  for (const shot of ['129-view-overview.png', '129-select-zoom.png', '129-click-confirm.png', '129-drag-no-pick.png']) assert.ok(probe.includes(shot) && readme.includes(shot), `the screenshot ${shot} is ordered and documented`);
+  const adr = source('docs/adr/0015-world-map-is-viewed-in-towns-and-pushed-by-settlement-events.md');
+  for (const word of ['補記（#129）', 'ClickMap', 'SelectZoom', 'MinHitPx', 'ClickSlopPx']) assert.ok(adr.includes(word), `ADR 0015 records ${word}`);
+});
+
+test('#128 and #129 together: one UI file holds the notice line and the crest marks, a full rebuild adds both, and each ticket keeps its README and ADR section', () => {
+  const file = ui();
+  assert.ok(file.find('Overlay/Window/Side/Notice'), 'the #128 notice line exists');
+  for (const id of TOWNS) for (const name of MARKS) assert.ok(file.find(`${townNode(id)}/${name}`), `the #129 ${id}/${name} exists`);
+  const selectSource = source('assets/worldmap/select_ui.cjs');
+  assert.match(selectSource, /function addSelectUi\(b\) \{\s+addNoticeUi\(b\);[^]*addMarkUi\(b\);\n  addMessageUi\(b\);/, 'a full rebuild adds the notice, the marks and the message window');
+  const { selectPaths } = require('../assets/worldmap/select_ui.cjs');
+  assert.ok(selectPaths().includes('Overlay/Window/Side/Notice') && selectPaths().includes(`${townNode('zuoying')}/Mark`), 'and removes both before adding them again');
+  const readme = source('tests/README.md');
+  assert.ok(readme.includes('## Target invalidation while the map is open (#128') && readme.includes('## Click a city crest to pick the target, zoomed on the departure town (#129'), 'the README has one section per ticket');
+  const adr = source('docs/adr/0015-world-map-is-viewed-in-towns-and-pushed-by-settlement-events.md');
+  for (const word of ['補記（#128）', '補記（#129）', '補記（#128 與 #129 合併）']) assert.equal(adr.split(word).length, 2, `ADR 0015 has ${word} once`);
+});

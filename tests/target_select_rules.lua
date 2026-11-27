@@ -186,14 +186,26 @@ engaged = false
 
 -- ---- the client: the world map in target selection --------------------------------------------------------------------------------
 local nodes = {}
+-- The town nodes sit where layout.json puts them (content units, the content is centred in the viewport).
+local TOWN_AT = { nanzih = { -211.5, -173.5 }, zuoying = { -210.5, -197.5 }, gushan = { -218.5, -218.5 }, yancheng = { -213.5, -241.5 } }
 local function node(path)
     if nodes[path] == nil then
+        local town = string.match(path, "Content/Towns/(%a+)$")
+        local at = TOWN_AT[town] or { 0, 0 }
         nodes[path] = { Enable = false, SetEnable = function(self, value) self.Enable = value end,
             TextGUIRendererComponent = { Text = "" }, SpriteGUIRendererComponent = {}, ButtonComponent = { Enable = true },
-            UITransformComponent = { RectSize = Vector2(740, 810), anchoredPosition = Vector2(0, 0), ZRotation = 0 } }
+            UITransformComponent = { RectSize = Vector2(740, 810), anchoredPosition = Vector2(at[1], at[2]), ZRotation = 0 } }
     end
     return nodes[path]
 end
+-- One screen pixel is unitsPerPixel UI units (0.5 on a screen twice as dense as the 1920 canvas); the view is centred on the screen origin here.
+local unitsPerPixel = 1
+_UILogic = {
+    ScreenWidth = 1920, ScreenHeight = 1080,
+    ScreenToLocalUIPosition = function(_, point) return Vector2(point.x * unitsPerPixel, point.y * unitsPerPixel) end,
+    ScreenToUIPosition = function(_, point) return Vector2(point.x * unitsPerPixel, point.y * unitsPerPixel) end,
+}
+_InputService.GetCursorPosition = function() return Vector2(0, 0) end
 _EntityService = { GetEntityByPath = function(_, path) return node((string.gsub(path, "^/ui/WorldMapGroup/", ""))) end }
 _UserService.LocalPlayer = { CurrentMapName = "zuoying" }
 _FormationLobby = { IsTownPanelOpen = function() return false end }
@@ -271,8 +283,9 @@ check(ui._T.selected == "gushan", "a second press while confirming changes nothi
 local hotkey = { key = KeyboardKey.M }
 ui:HandleKey(hotkey)
 check(ui._T.open and node("Confirm").Enable, "M does not close the map from behind the confirmation")
+local zoomBehind = ui._T.zoom
 ui:HandleWheel({ ScrollDelta = 1 })
-check(ui._T.zoom == 1, "the wheel does not zoom behind the confirmation")
+check(ui._T.zoom == zoomBehind, "the wheel does not zoom behind the confirmation")
 
 -- No: only the window closes and the pick is cleared; the map stays.
 ui:Decline()
@@ -289,7 +302,7 @@ ui:Decline()
 ui:Pick("gushan")
 check(#calls.attack == 1 and ui._T.selected == "gushan" and node("Confirm").Enable, "nothing else is accepted while waiting")
 ui:HandleWheel({ ScrollDelta = 1 })
-check(ui._T.zoom == 1, "still no zoom")
+check(ui._T.zoom == zoomBehind, "still no zoom")
 
 -- QUEUING closes the map and the window with it; the siege panel takes over.
 ui:ShowAttackResult("QUEUING")
@@ -674,5 +687,313 @@ judged = {}
 attack:SelectFor("red-user")
 check(answers[#answers].status == "NOT_OWNED" and judged[1] == "red-user:CHECK:zuoying", "server: a lost departure town is answered NOT_OWNED and judged")
 board.zuoying.owner = "A"
+
+-- ---- #129: the selection opens zoomed on the departure town, and a town is picked by clicking its crest -------------------------------------
+local function near(a, b) return math.abs(a - b) < 1e-6 end
+local TOWN = "Overlay/Window/Map/Content/Towns/"
+local function anchored(id) return node(TOWN .. id).UITransformComponent.anchoredPosition end
+local function viewPointOf(id) return ui:TownViewPoint(anchored(id), ui._T.zoom, ui._T.mapOffset) end
+local function screenOf(point) return Vector2(point.x / unitsPerPixel, point.y / unitsPerPixel) end
+local function press(point) ui:BeginMapDrag({ TouchId = -1, TouchPoint = point }) end
+local function release(point) ui:EndMapDrag({ TouchId = -1, TouchPoint = point }) end
+local function click(point) press(point) release(point) end
+local function markOn(id, name) return node(TOWN .. id .. "/" .. name).Enable end
+local function confirmTexts()
+    local parts = {}
+    for _, part in ipairs({ "Title", "Origin", "Target", "Note", "Status" }) do table.insert(parts, text("Confirm/Window/" .. part)) end
+    return table.concat(parts, "|")
+end
+local function focus(id, zoom) ui:SetMapView(zoom, ui:CenterOffset(anchored(id), zoom)) end
+local yanchengTarget = { town = "yancheng", name = "鹽埕", capital = true, strength = 100, owner = "B" }
+
+-- The pure decisions.
+check(ui.MinHitPx >= 24 and ui.SelectZoom == 4, "the hit reach is at least 24 screen pixels and the selection starts at 4x")
+check(ui:IsClick(0) and ui:IsClick(ui.ClickSlopPx) and not ui:IsClick(ui.ClickSlopPx + 1), "a press that stays within the slop is a click, one that travelled further is a drag")
+check(near(ui:IconScale(1), 0.25) and near(ui:IconScale(4), 0.64) and ui:IconScale(12) == 1, "the crest scale: small in the overview, full size from 7x")
+for _, zoom in ipairs({ 1, 2, 4, 8, 12 }) do
+    for _, pxPerUnit in ipairs({ 0.5, 1, 2, 4 }) do
+        local radius = ui:HitRadius(zoom, pxPerUnit)
+        check(radius * pxPerUnit >= ui.MinHitPx - 1e-9 and radius >= ui.CrestHitReach * ui:IconScale(zoom) - 1e-9, "the hit radius is at least 24 screen px and at least the crest at zoom " .. zoom .. " density " .. pxPerUnit)
+    end
+end
+local views = { nanzih = Vector2(0, 0), zuoying = Vector2(10, 0), gushan = Vector2(100, 0), yancheng = Vector2(300, 300) }
+check(ui:TownAt(Vector2(98, 0), views, 24) == "gushan" and ui:TownAt(Vector2(124, 0), views, 24) == "gushan", "a point within the radius (the edge included) is on the town")
+check(ui:TownAt(Vector2(125, 0), views, 24) == "" and ui:TownAt(Vector2(0, 50), views, 24) == "", "a point outside every radius is on no town")
+check(ui:TownAt(Vector2(7, 0), views, 24) == "zuoying" and ui:TownAt(Vector2(3, 0), views, 24) == "nanzih", "where two crests overlap the nearer one wins")
+check(ui:TownAt(Vector2(5, 0), views, 24) == "nanzih", "and a tie goes to the first town of the map order")
+check(ui:TownAt(Vector2(0, 0), {}, 24) == "", "no towns, no hit")
+local centre = ui:CenterOffset(Vector2(-210.5, -197.5), 4)
+check(near(centre.x, 842) and near(centre.y, 790), "centring on a town moves the content by minus its position times the zoom")
+local centred = ui:TownViewPoint(Vector2(-210.5, -197.5), 4, centre)
+check(near(centred.x, 0) and near(centred.y, 0), "and the town is then at the middle of the viewport")
+fresh()
+check(ui:CrestState("gushan") == "plain", "in the view no crest is marked")
+ready("zuoying", { gushan }, towns())
+check(ui:CrestState("gushan") == "selectable" and ui:CrestState("zuoying") == "dimmed" and ui:CrestState("nanzih") == "dimmed" and ui:CrestState("yancheng") == "dimmed", "in the selection only the listed town is selectable, the rest dimmed")
+ui:Pick("gushan")
+check(ui:CrestState("gushan") == "selected" and ui:CrestState("yancheng") == "dimmed", "the picked town is selected")
+
+-- The selection opens zoomed on the departure town; the view opens at the full overview.
+fresh()
+ready("zuoying", { gushan }, towns())
+check(ui._T.zoom == ui.SelectZoom and near(node("Overlay/Window/Map/Content").UITransformComponent.UIScale.x, 4), "the selection opens at 4x")
+local at = viewPointOf("zuoying")
+check(near(at.x, 0) and near(at.y, 0), "centred on the departure town")
+check(ui:Ui(TOWN .. "zuoying/Name").Visible == true, "at 4x the town names are shown")
+fresh()
+_UserService.LocalPlayer.CurrentMapName = "gushan"
+ui._T.mapName = "gushan"
+ui:ShowSelect("gushan", "READY", { town = "gushan", strength = 100, owner = "A", faction = "A" }, { yanchengTarget }, { towns = towns({}, { gushan = "A" }), links = links })
+at = viewPointOf("gushan")
+check(ui._T.zoom == 4 and near(at.x, 0) and near(at.y, 0), "the departure town is the one the answer names, whichever town it is")
+_UserService.LocalPlayer.CurrentMapName = "zuoying"
+fresh()
+ui:Open()
+check(ui._T.zoom == 1 and near(ui._T.mapOffset.x, 0) and near(ui._T.mapOffset.y, 0), "the view opens at the full overview")
+ui:ShowBoard(towns({ gushan = 40 }), links)
+check(ui._T.zoom == 1, "and a pushed board keeps it")
+ui:SetMapView(2, Vector2(30, 20))
+ui:ShowSelect("zuoying", "READY", header, { gushan }, { towns = towns(), links = links })
+at = viewPointOf("zuoying")
+check(ui._T.zoom == 4 and near(at.x, 0) and near(at.y, 0), "the NPC press while the view is open switches to the selection zoomed on the departure town")
+ui:SetMapView(2, Vector2(30, 20))
+ui:ShowSelect("zuoying", "READY", header, { gushan }, { towns = towns(), links = links })
+check(ui._T.zoom == 2 and near(ui._T.mapOffset.x, 30) and near(ui._T.mapOffset.y, 20), "a refreshed list while the selection is open does not take the view back")
+ui:Close()
+ready("zuoying", { gushan }, towns())
+check(ui._T.zoom == 4, "reopening the selection zooms again")
+
+-- Wheel zoom and drag pan are what they were.
+fresh()
+ready("zuoying", { gushan }, towns())
+ui:HandleWheel({ ScrollDelta = 1 })
+check(near(ui._T.zoom, 4 * ui.WheelZoomFactor), "the wheel still zooms in the selection")
+ui:SetMapView(4, ui:CenterOffset(anchored("zuoying"), 4))
+local before = ui._T.mapOffset
+press(Vector2(0, 0))
+ui:DragMap({ TouchId = -1, TouchPoint = Vector2(30, -20) })
+release(Vector2(30, -20))
+check(near(ui._T.mapOffset.x, before.x + 30) and near(ui._T.mapOffset.y, before.y - 20), "a drag still pans the map at screen speed")
+ui:SetMapView(4, Vector2(1e6, 1e6))
+check(near(ui._T.mapOffset.x, (740 * 4 - 740) / 2) and near(ui._T.mapOffset.y, (810 * 4 - 810) / 2), "and the edges still clamp")
+for _ = 1, 10 do ui:HandleWheel({ ScrollDelta = -3 }) end
+check(ui._T.zoom == 1 and near(ui._T.mapOffset.x, 0) and near(ui._T.mapOffset.y, 0), "zooming out still restores the overview")
+
+-- A click on the selectable crest opens the same confirmation as the row, and nothing was asked of the server.
+fresh()
+ready("zuoying", { gushan }, towns())
+ui:Pick("gushan")
+local rowTexts = confirmTexts()
+fresh()
+ready("zuoying", { gushan }, towns())
+local gushanAt = viewPointOf("gushan")
+click(gushanAt)
+check(ui._T.selected == "gushan" and node("Confirm").Enable, "a click on the selectable crest opens the confirmation")
+check(confirmTexts() == rowTexts and node("Confirm/Window/Yes").ButtonComponent.Enable, "with exactly the texts the row opens")
+check(calls.select == 0 and calls.open == 0 and #calls.attack == 0, "a click only opens the window: nothing is sent")
+ui:ConfirmAttack()
+check(#calls.attack == 1 and calls.attack[1] == "gushan", "and 是 sends the request as for the row")
+
+-- The hit reach holds at every zoom, on screens of every density, and a click far from a crest is nothing.
+for _, zoom in ipairs({ 1, 2, 4, 8, 12 }) do
+    fresh()
+    ready("zuoying", { gushan }, towns())
+    focus("gushan", zoom)
+    local p = viewPointOf("gushan")
+    click(Vector2(p.x - 20, p.y))
+    check(ui._T.selected == "gushan", "20 px from the crest picks it at " .. zoom .. "x")
+    ui:Decline()
+    click(Vector2(p.x - 60, p.y))
+    check(ui._T.selected == nil, "60 px from it picks nothing at " .. zoom .. "x")
+end
+for _, density in ipairs({ 0.5, 2 }) do
+    unitsPerPixel = density
+    fresh()
+    ready("zuoying", { gushan }, towns())
+    ui:SetMapView(1, Vector2(0, 0))
+    local p = viewPointOf("gushan")
+    local inside = ui.MinHitPx * density * 0.9
+    local outside = ui.MinHitPx * density * 1.3
+    click(screenOf(Vector2(p.x - inside, p.y)))
+    check(ui._T.selected == "gushan", "90% of 24 screen px picks it where one pixel is " .. density .. " units")
+    ui:Decline()
+    click(screenOf(Vector2(p.x - outside, p.y)))
+    check(ui._T.selected == nil, "130% of 24 screen px does not")
+end
+unitsPerPixel = 1
+
+-- A town that cannot be picked reacts to nothing.
+fresh()
+ready("zuoying", { gushan }, towns())
+for _, id in ipairs({ "zuoying", "nanzih", "yancheng" }) do
+    click(viewPointOf(id))
+    check(ui._T.selected == nil and not node("Confirm").Enable and #calls.attack == 0, id .. ": a click on a town the server did not list does nothing")
+end
+ready("zuoying", { gushan, yanchengTarget }, towns())
+click(viewPointOf("gushan"))
+click(viewPointOf("yancheng"))
+check(ui._T.selected == "gushan", "a second click cannot replace the town being confirmed")
+ui:Decline()
+click(viewPointOf("yancheng"))
+check(ui._T.selected == "yancheng", "a listed capital is picked like any other target")
+
+-- A drag is not a click, wherever it starts or ends.
+fresh()
+ready("zuoying", { gushan }, towns())
+local p = viewPointOf("gushan")
+local start = ui._T.mapOffset
+press(p)
+ui:DragMap({ TouchId = -1, TouchPoint = Vector2(p.x + 40, p.y) })
+release(Vector2(p.x + 40, p.y))
+check(ui._T.selected == nil and near(ui._T.mapOffset.x, start.x + 40), "a drag that starts on the crest picks nothing, and pans")
+p = viewPointOf("gushan")
+press(Vector2(p.x - 40, p.y))
+ui:DragMap({ TouchId = -1, TouchPoint = p })
+release(p)
+check(ui._T.selected == nil, "a drag that ends on the crest picks nothing")
+p = viewPointOf("gushan")
+press(p)
+ui:DragMap({ TouchId = -1, TouchPoint = Vector2(p.x + 50, p.y) })
+ui:DragMap({ TouchId = -1, TouchPoint = p })
+release(p)
+check(ui._T.selected == nil, "a drag that returns to where it started is still a drag")
+p = viewPointOf("gushan")
+press(p)
+ui:DragMap({ TouchId = -1, TouchPoint = Vector2(p.x + 6, p.y + 8) })
+release(Vector2(p.x + 6, p.y + 8))
+check(ui._T.selected == "gushan", "a press that moved exactly the slop (10 px) is still a click")
+ui:Decline()
+p = viewPointOf("gushan")
+press(p)
+ui:DragMap({ TouchId = -1, TouchPoint = Vector2(p.x + 8, p.y + 6) })
+ui:DragMap({ TouchId = -1, TouchPoint = Vector2(p.x + 7, p.y + 5) })
+release(Vector2(p.x + 7, p.y + 5))
+check(ui._T.selected == "gushan", "a jitter within the slop picks the crest under the pointer")
+ui:Decline()
+p = viewPointOf("gushan")
+press(p)
+ui:DragMap({ TouchId = -1, TouchPoint = Vector2(p.x + 7, p.y + 8) })
+release(Vector2(p.x + 7, p.y + 8))
+check(ui._T.selected == nil, "a press that moved 10.6 px is a drag")
+ui:EndMapDrag({ TouchId = 5, TouchPoint = p })
+check(ui._T.selected == nil, "a release of another pointer is nothing")
+
+-- No reaction where no selection is under way or the click is outside the map.
+fresh()
+ui:Open()
+focus("gushan", 4)
+click(viewPointOf("gushan"))
+check(ui._T.selected == nil and not node("Confirm").Enable, "the view cannot pick by clicking")
+fresh()
+ready("zuoying", { gushan }, towns())
+local mapView = node("Overlay/Window/Map").UITransformComponent
+mapView.RectSize = Vector2(100, 100)
+click(viewPointOf("gushan"))
+check(ui._T.selected == nil, "a click outside the viewport rectangle picks nothing (a crest scrolled out of sight stays out)")
+mapView.RectSize = Vector2(740, 810)
+ui._T.message = "text"
+click(viewPointOf("gushan"))
+check(ui._T.selected == nil, "behind a message window a click picks nothing")
+ui._T.message = nil
+ui:Close()
+click(viewPointOf("gushan"))
+check(ui._T.selected == nil and ui._T.dragId == nil, "a closed map takes no click")
+
+-- The look: a mark on every selectable crest, a frame on the selected one, nothing in the view.
+fresh()
+ready("zuoying", { gushan }, towns())
+for _, id in ipairs(doc.TownOrder) do
+    check(markOn(id, "Mark") == (id == "gushan") and not markOn(id, "Frame"), id .. ": only the selectable crest is marked, none is framed yet")
+end
+click(viewPointOf("gushan"))
+check(markOn("gushan", "Mark") and markOn("gushan", "Frame") and not markOn("zuoying", "Frame") and not markOn("yancheng", "Mark"), "the picked crest is framed and stays marked")
+ui:Decline()
+check(markOn("gushan", "Mark") and not markOn("gushan", "Frame"), "No takes the frame off")
+ui:Pick("gushan")
+ready("zuoying", {}, towns())
+check(not markOn("gushan", "Mark") and not markOn("gushan", "Frame"), "a refreshed list without the town takes both off")
+ready("zuoying", { gushan }, towns())
+ui:Pick("gushan")
+ui:Close()
+for _, id in ipairs(doc.TownOrder) do check(not markOn(id, "Mark") and not markOn(id, "Frame"), id .. ": closing the map clears the marks") end
+ui:Open()
+for _, id in ipairs(doc.TownOrder) do check(not markOn(id, "Mark") and not markOn(id, "Frame"), id .. ": the view has no marks") end
+for _, id in ipairs(doc.TownOrder) do
+    check(node(TOWN .. id .. "/Crest").SpriteGUIRendererComponent.Color.a == 1 and node("Overlay/Window/Map/Content/Districts/" .. id).SpriteGUIRendererComponent.Color.a == ui.DistrictAlpha, id .. ": and no town is dimmed")
+end
+
+-- ---- #128 with #129: the invalidation handling and the crest clicks share one state ------------------------------------------------------
+local function crestDim(id) return node(TOWN .. id .. "/Crest").SpriteGUIRendererComponent.Color.a == ui.DimCrestAlpha end
+local function allCrestsDim(label)
+    for _, id in ipairs(doc.TownOrder) do
+        check(ui:CrestState(id) == "dimmed" and crestDim(id) and not markOn(id, "Mark") and not markOn(id, "Frame"), label .. ": " .. id .. " is dimmed, unmarked and unframed")
+    end
+end
+local function openCrestConfirm()
+    fresh()
+    ready("zuoying", { gushan, yancheng }, towns())
+    focus("gushan", 4)
+    local p = viewPointOf("gushan")
+    click(p)
+    check(node("Confirm").Enable and ui._T.selected == "gushan" and markOn("gushan", "Frame") and markOn("yancheng", "Mark") and not crestDim("gushan"), "setup: a crest click is being confirmed, its crest framed")
+    return p
+end
+
+-- Ownership changes while a crest-clicked confirmation is open and the pick is gone: the window closes, the line names the town, the crest dims.
+local p = openCrestConfirm()
+local zoomBefore = ui._T.zoom
+ui:ShowBoard(towns({}, { gushan = "A" }), links)
+ready("zuoying", { yancheng }, towns({}, { gushan = "A" }))
+check(not node("Confirm").Enable and ui._T.selected == nil and notice() == TARGET_GONE, "an owner change closes the crest-clicked window and says why")
+check(ui:CrestState("gushan") == "dimmed" and crestDim("gushan") and not markOn("gushan", "Frame") and not markOn("gushan", "Mark"), "the town's crest dims and loses its frame and mark")
+check(ui:CrestState("yancheng") == "selectable" and markOn("yancheng", "Mark") and not crestDim("yancheng"), "the remaining target keeps its mark")
+check(ui._T.zoom == zoomBefore, "and the player's view is not pulled back")
+click(p)
+check(ui._T.selected == nil and not node("Confirm").Enable and #calls.attack == 0, "a click on the dimmed crest does nothing")
+click(viewPointOf("yancheng"))
+check(ui._T.selected == "yancheng" and notice() == nil and markOn("yancheng", "Frame"), "a click on the target that is left opens its window and clears the line")
+
+-- Strength only: the crest-clicked window follows the numbers, the crest keeps its frame.
+openCrestConfirm()
+ui:ShowBoard(towns({ gushan = 20 }), links)
+check(node("Confirm").Enable and markOn("gushan", "Frame") and text("Confirm/Window/Target") == "目標城 <c>鼓山</c>　兵力 20 / 100" and notice() == nil, "a strength change keeps the window, its numbers and the frame")
+
+-- The departure town falls (NOT_OWNED to the map's own relist): window closed, one line, every crest and row dimmed, nothing can be clicked.
+p = openCrestConfirm()
+ui._T.relisting = true
+ui:ShowSelect("zuoying", "NOT_OWNED", {}, {}, {})
+check(ui._T.open and not node("Confirm").Enable and notice() == ORIGIN_GONE and not node("Message").Enable, "the departure town falling closes the window and says so, the map stays")
+allCrestsDim("NOT_OWNED")
+everythingDim("NOT_OWNED")
+click(p)
+click(viewPointOf("yancheng"))
+check(ui._T.selected == nil and #calls.attack == 0 and not node("Confirm").Enable, "no crest reacts to a click")
+check(ui._T.zoom == 4, "the zoom stays")
+
+-- Nothing left to attack (NO_TARGETS) with a crest pick open: same state as above, with the town named.
+p = openCrestConfirm()
+ui._T.relisting = true
+ui:ShowSelect("zuoying", "NO_TARGETS", {}, {}, {})
+check(notice() == TARGET_GONE and not node("Confirm").Enable, "NO_TARGETS closes the crest-clicked window with the town named")
+allCrestsDim("NO_TARGETS")
+click(p)
+check(ui._T.selected == nil and #calls.attack == 0, "and the crest does not react")
+
+-- 是 on a crest-clicked window answered INVALID: the waiting ends, the frame goes, the list is asked for again.
+openCrestConfirm()
+ui:ConfirmAttack()
+check(ui._T.pending and calls.attack[1] == "gushan", "setup: the attack was sent for the crest's town")
+ui:ShowAttackResult("INVALID")
+check(not ui._T.pending and not node("Confirm").Enable and notice() == TARGET_GONE and calls.select == 1, "INVALID ends the waiting, closes the window and names the town")
+check(not markOn("gushan", "Frame"), "the frame is gone with it")
+ready("zuoying", { yancheng }, towns({}, { gushan = "A" }))
+check(ui:CrestState("gushan") == "dimmed" and crestDim("gushan") and ui:CrestState("yancheng") == "selectable", "the relisted answer dims the town's crest and leaves the other selectable")
+
+-- Closing the map clears the crest states and the line together.
+openCrestConfirm()
+ui._T.relisting = true
+ui:ShowSelect("zuoying", "NOT_OWNED", {}, {}, {})
+ui:Close()
+check(notice() == nil and ui._T.mode == "view" and not markOn("gushan", "Frame") and not markOn("yancheng", "Mark"), "closing the map clears the line, the marks and the frame")
 
 print("[VRF][TargetSelect] target selection rules PASS checks=" .. tostring(checks))
