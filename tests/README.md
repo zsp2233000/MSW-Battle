@@ -288,44 +288,52 @@ Expect `[VRF][TargetSelect] target selection rules PASS` (now also, with the pro
 | 3 `PICK` | `client` | click `Rows/zuoying/Pick` | `PICK PASS target=... 兵力 55 / 100`. Screenshot 1: the window |
 | 4 `STRENGTH` | `server_main` | a real HUMAN win Gushan over Zuoying: 55 → 35, no flip | `STRENGTH PASS zuoying 55 -> 35` |
 | 5 `STRENGTH_SEEN` | `client` | the window follows, stays open, no relist, no line | `STRENGTH_SEEN PASS 目標城 ... 兵力 35 / 100`. Screenshot 2 |
-| 6 `CAPTURE` | `server_main` | Zuoying silently to 20, then a real win: it flips to A and refills | `CAPTURE PASS zuoying is A's, announced` |
-| 7 `TARGET_GONE` | `client` | window closed, the line `<左營> 已不能進攻`, Yancheng the only pick, Zuoying dimmed with owner `A 方` | `TARGET_GONE PASS line=...`; client `[VRF][FactionWarMap] ui select relist`, `ui select open ...`, `ui notice ...`. Screenshot 3 |
-| 8 `PICK_OTHER` | `client` | pick Yancheng; the line goes away | `PICK_OTHER PASS` |
-| 9 `STALE` | `server_main` | Yancheng turns A's in the table, **not** announced: the open window is out of date | `STALE PASS` |
-| 10 `REFUSED` | `client` | click 是: waiting text, then the server's `INVALID` closes the window, names Yancheng, asks again (the answer is `NO_TARGETS`: everything dimmed, the line stays) | `REFUSED PASS line=...`; server `[VRF][FactionWarAttack] queue refused ... reason=INVALID`; client `ui attack result=INVALID`. Screenshot 4 |
-| 11 `RESTORE` | `server_main` | fixture board written and announced | `RESTORE PASS` |
-| 12 `LIST_BACK` | `client` | the relist lists both towns again and the line is gone | `LIST_BACK PASS pickable=zuoying,yancheng` |
-| 13 `PICK` | `client` | pick Zuoying again | `PICK PASS` |
-| 14 `ORIGIN_LOST` | `server_main` | Gushan owned by B in the table (written, not settled, see the note) and announced | `ORIGIN_LOST PASS` |
-| 15 `ORIGIN_SEEN` | `client` | window closed, line 這座城已不屬於你的陣營, every row veiled, map still open, no message window | `ORIGIN_SEEN PASS ...`; server `[VRF][FactionWarAttack]`/landing lines that move the player to Nanzih. Screenshot 5 |
-| 16 `CLOSE` | `client` | click the close button | `CLOSE PASS` |
-| 17 `CLEANUP` | `server_main` | no viewer left, guard clock back, town storage deleted | `CLEANUP PASS` |
+| 6 `STALE` | `server_main` | Zuoying turns A's in the table, **not** announced: the open window (Zuoying picked) is out of date. Not Yancheng: a board whose B capital is A's is unreadable by design, so the server would answer `UNAVAILABLE` | `STALE PASS` |
+| 7 `REFUSED` | `client` | click 是: waiting text, then the server's `INVALID` closes the window, names Zuoying, asks again (Yancheng stays the only pick) | `REFUSED PASS line=...`; server `[VRF][FactionWarAttack] queue refused ... reason=INVALID`; client `ui attack result=INVALID`. Screenshot 3 |
+| 8 `RESTORE` | `server_main` | fixture board written and announced | `RESTORE PASS` |
+| 9 `LIST_BACK` | `client` | the relist lists both towns again and the line is gone | `LIST_BACK PASS pickable=zuoying,yancheng` |
+| 10 `PICK` | `client` | pick Zuoying again | `PICK PASS` |
+| 11 `CAPTURE` | `server_main` | Zuoying silently to 20, then a real win: it flips to A and refills | `CAPTURE PASS zuoying is A's, announced` |
+| 12 `TARGET_GONE` | `client` | window closed, the line `<左營> 已不能進攻`, Yancheng the only pick, Zuoying dimmed with owner `A 方` | `TARGET_GONE PASS line=...`; client `[VRF][FactionWarMap] ui select relist`, `ui select open ...`, `ui notice ...`. Screenshot 4 |
+| 13 `RESTORE` | `server_main` | fixture board written and announced | `RESTORE PASS` |
+| 14 `LIST_BACK` | `client` | both towns listed again, the line gone | `LIST_BACK PASS` |
+| 15 `PICK` | `client` | pick Zuoying again | `PICK PASS` |
+| 16 `ORIGIN_LOST` | `server_main` | Gushan owned by B in the table (written, not settled, see the note) and announced | `ORIGIN_LOST PASS` |
+| 17 `ORIGIN_SEEN` | `client` | window closed, line 這座城已不屬於你的陣營, every row veiled, map still open, no message window | `ORIGIN_SEEN PASS ...`; server `[VRF][FactionWarAttack]`/landing lines that move the player to Nanzih. Screenshot 5 |
+| 18 `CLOSE` | `client` | click the close button | `CLOSE PASS` |
+| 19 `CLEANUP` | `server_main` | no viewer left, guard clock back, town storage deleted | `CLEANUP PASS` |
 
 `ORIGIN_LOST` writes the board instead of settling a match because a real capture of the departure town also sweeps the player to the capital at once, and which of the two (the sweep, or the pushed board) reaches the client first is not deterministic; with the board written the server answers the relist `NOT_OWNED` first and the landing check moves the player after. Rules for the other order are the READY case above: the list is simply the capital's. Search the client console with `[VRF][TargetInvalidate]` and `[VRF][FactionWarMap]`, the server's with `[VRF][FactionWarAttack]`; any `FAIL` or runtime `Error` is a failure. Screenshots go to `docs/evidence/issue128/` (1 `PICK`, 2 `STRENGTH_SEEN`, 3 `TARGET_GONE`, 4 `REFUSED`, 5 `ORIGIN_SEEN`). Not run in Maker by the implementer (Maker is bound to the main workspace): the supervisor runs it. Not covered: a real mouse click, two real accounts, and the race where the sweep reaches the client before the board does (rules only).
 
+Verified in Maker on 2026-11-27 (merged branch with #129, real client `6Y9NGB`; build 0 Error, the existing `IsPCPlatform` warning only; Node 291/291): all 19 steps reached their PASS line with 0 runtime errors, screenshots in `docs/evidence/issue128/`. Two things the first run taught: the probe's board must make Zuoying B's (the initial world has it A's), and the stale scenario must use Zuoying, not Yancheng: a board whose B capital is A's is unreadable by design, so the server answers `UNAVAILABLE` and not `INVALID`. Not verified in Maker: the `UNAVAILABLE` and `ENGAGED` answers to the map's own relist, and two players changing the board at once.
+
 For #129 the same line also covers (the click and drag decision with the slop edge, the hit radius at every zoom and density, nearest-crest and tie rules, the selection opening at 4x on the departure town whichever it is, the view at 1x, no zoom back on a refreshed list, wheel and drag unchanged, a click opening exactly the confirmation the row opens and sending nothing, unlisted towns doing nothing, a second click not replacing the open window, clicks ignored in the view, outside the viewport, behind a message and on a closed map, and the marks and frame following the state; with #128 merged, an owner change while a crest-clicked confirmation is open closing it and dimming that crest, and `NOT_OWNED` / `NO_TARGETS` leaving every crest dimmed with no mark and no click reaction) and the contract tests (the authored `Mark` / `Frame` nodes and their order, the click path from the touch surface to `Pick`, the builders and the probe).
 
-### Maker client probe: real mouse click and drag
+### Maker client probe: tap and drag on the map
 
-`tests/target_select_click_client_runtime_probe.lua` runs on the fixture of the #124 probe (its `SETUP` with `CAPITAL = false` and its `CLEANUP`, same `REAL`; the real profile is A in Zuoying, Gushan is B's with 55). The click and the drag are **real mouse input** (`maker_mouse_input`) on the map's touch surface; the buttons are pressed with `ButtonClickEvent`. Where a crest is on the screen is printed by `MARKERS` (`screen=(x,y)` in the touch events' coordinates and `topLeft=(x,y)` with y from the top edge, solved from the same `_UILogic:ScreenToLocalUIPosition` the click handler uses); the first real press logs `[VRF][TargetClick] touch down screen=(x,y)`, which tells which of the two the mouse tool needs. The map must be open in the selection for the mouse steps (steps 1-2 open it; the Maker tool may need the map's pointer to be inside the game view).
+`tests/target_select_click_client_runtime_probe.lua` runs on the fixture of the #124 probe (its `SETUP` with `CAPITAL = false` and `PUSHED = 55`, and its `CLEANUP`, same `REAL`; the real profile is A in Zuoying, Gushan is B's with 55). **`maker_mouse_input` does not reach the map's touch surface** (it is engine UI: a real press logged no touch event at all in the Maker run), so the tap and the drag are `UITouchDownEvent` / `UITouchDragEvent` / `UITouchUpEvent` sent to the real touch surface with screen points, through the production handlers, the way `faction_war_map_viewport_runtime_probe.lua` does; the buttons are pressed with `ButtonClickEvent`. Where a crest is on the screen is printed by `MARKERS`, solved from the same `_UILogic:ScreenToLocalUIPosition` the click handler uses.
 
 | Step | Context | What | Expect |
 | --- | --- | --- | --- |
 | #124 `SETUP` | `server_main` | fixture | `SETUP PASS` |
 | 1 `VIEW_OVERVIEW` | `client` | M opens the view | `VIEW_OVERVIEW PASS zoom=1 ...`. Screenshot `129-view-overview.png` (full overview, no marks) |
 | 2 `SELECT_ZOOM` | `client` | closes the view, makes the NPC's real request | `SELECT_ZOOM PASS zoom=4 origin=zuoying at the middle`; `ui select focus town=zuoying zoom=4`. Screenshot `129-select-zoom.png` (names shown, the Gushan crest with the gold mark, the others dimmed) |
-| 3 `MARKERS` | `client` | prints every crest's position and installs the touch logger | `MARKERS PASS click the gushan crest ... at screen=(x,y) or topLeft=(x,y)`. Then **M**: click the Gushan crest |
-| 4 `CLICK_OPENED` | `client` | the click picked Gushan | `CLICK_OPENED PASS title=進攻 ...鼓山...？`; `touch down`, `touch up`, `ui click town=gushan selectable=true`, `ui pick gushan`. Screenshot `129-click-confirm.png` (the window, the cyan frame on the crest) |
-| 5 `DECLINE` | `client` | `否` | `DECLINE PASS`. Then **M**: click the Zuoying crest (the departure town, at the middle) |
-| 6 `CLICK_DIM` | `client` | the dimmed crest did nothing | `CLICK_DIM PASS`; `ui click town=zuoying selectable=false`, no `ui pick` |
-| 7 `BASELINE` | `client` | records the view; prints where to press | `BASELINE PASS ...`. Then **M**: press on the Gushan crest, move 150 px to the right, release |
-| 8 `DRAG_NO_PICK` | `client` | the map panned, nothing picked | `DRAG_NO_PICK PASS panned (...)`; `drag offset=...`, no `ui click`. Screenshot `129-drag-no-pick.png` |
-| 9 `RECENTER` | `client` | back on the departure town | `RECENTER PASS` |
-| 10 `HIT_REACH` | `client` | the production click handler at 1x, 2x, 4x, 12x: 20 px from the crest picks it, 30 px beyond the reach does not | `HIT_REACH zoom=... radius=... px ok` x4, `HIT_REACH PASS` |
-| 11 `CLOSE` | `client` | removes the logger, closes the map | `CLOSE PASS` |
+| 3 `MARKERS` | `client` | prints every crest's position | `MARKERS PASS the gushan crest is at screen=(x,y)` |
+| 4 `TAP_TARGET` | `client` | down and up on the Gushan crest | `TAP_TARGET PASS` |
+| 5 `CLICK_OPENED` | `client` | the tap picked Gushan | `CLICK_OPENED PASS title=進攻 ...鼓山...？`; `ui click town=gushan selectable=true`, `ui pick gushan`. Screenshot `129-click-confirm.png` (the window, the cyan frame on the crest) |
+| 6 `DECLINE` | `client` | `否` | `DECLINE PASS` |
+| 7 `TAP_ORIGIN` | `client` | down and up on the Zuoying crest (the departure town, dimmed, at the middle) | `TAP_ORIGIN PASS` |
+| 8 `CLICK_DIM` | `client` | the dimmed crest did nothing | `CLICK_DIM PASS`; `ui click town=zuoying selectable=false`, no `ui pick` |
+| 9 `DRAG_TARGET` | `client` | records the view; press on the Gushan crest, move 150 px, release | `DRAG_TARGET PASS` |
+| 10 `DRAG_NO_PICK` | `client` | the map panned, nothing picked | `DRAG_NO_PICK PASS panned (...)`; `drag offset=...`, no `ui click`. Screenshot `129-drag-no-pick.png` |
+| 11 `RECENTER` | `client` | back on the departure town | `RECENTER PASS` |
+| 12 `HIT_REACH` | `client` | the production click handler at 1x, 2x, 4x, 12x: 20 px from the crest picks it, 30 px beyond the reach does not | `HIT_REACH zoom=... radius=... px ok` x4, `HIT_REACH PASS` |
+| 13 `CLOSE` | `client` | closes the map | `CLOSE PASS` |
 | #124 `CLEANUP` | `server_main` | storage deleted | `CLEANUP PASS` |
 
-After `CLOSE`, open the view (M) and dispatch `faction_war_map_viewport_runtime_probe.lua` as the regression of the wheel and the drag. Search the client console with `[VRF][TargetClick]` and `[VRF][FactionWarMap]`; any `FAIL` or runtime `Error` is a failure. Screenshots for the issue: `docs/evidence/issue129/`. Not run yet in Maker (the author had no Maker): the whole probe, a real touch layout, and the look of the halo (the marks are the crest sprite scaled behind the crest; if the rim reads badly in the screenshot, change `MARK` / `FRAME` in `select_ui.cjs` and re-run `build_mark_ui.cjs`).
+After `CLOSE`, open the view (M) and dispatch `faction_war_map_viewport_runtime_probe.lua` as the regression of the wheel and the drag. Search the client console with `[VRF][TargetClick]` and `[VRF][FactionWarMap]`; any `FAIL` or runtime `Error` is a failure. Screenshots for the issue: `docs/evidence/issue129/`.
+
+Verified in Maker on 2026-11-27 (merged branch with #128; build 0 Error, the existing `IsPCPlatform` warning only; Node 291/291, all local fengari suites PASS): every step above reached its PASS line with a runtime error count of 0. The view opened at 1x with no marks; the selection opened at 4x with Zuoying at the middle, the Gushan crest marked and the other three dimmed; a tap at the crest's computed screen point logged `ui click town=gushan selectable=true` and opened the same window the row opens (`進攻 鼓山？`, 兵力 100 / 100 and 55 / 100); a tap on the dimmed departure town logged `selectable=false` and opened nothing; a 150 px drag that started on the Gushan crest panned the map (`drag offset=...`) and picked nothing; the hit reach was 24.0 px at 1x and 2x, 24.3 px at 4x and 38.0 px at 12x. Not verified: the OS-level pointer (`maker_mouse_input` did not reach the touch surface: a real press logged no touch event, so the tap and the drag are touch events sent to it), a touch device, and the visual quality of the halo on a published world.
 
 ## Siege panel replaces the queue bar (#123)
 

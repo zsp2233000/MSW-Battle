@@ -8,27 +8,29 @@
 -- Buttons are pressed with ButtonClickEvent sent to the real UI entities (maker_mouse_input cannot click engine UI buttons), so the real bindings run.
 -- Board it builds (the real profile is A, standing in Gushan, which A owns): Nanzih A 100, Zuoying B 55, Gushan A 60, Yancheng B 100. Gushan borders both B towns.
 -- Run in a fresh Play (stop, refresh, play) with /ui/WorldMapGroup/Overlay/Window/Side/Notice present (node assets/worldmap/build_notice_ui.cjs, then refresh).
--- Order (wait about 3 s after each server_main step before the client step that follows it; run exactly these 17 steps, in this order):
+-- Order (wait about 3 s after each server_main step before the client step that follows it; run exactly these 19 steps, in this order):
 --   1 SETUP
 --   2 SELECT_OPEN
 --   3 PICK
 --   4 STRENGTH
 --   5 STRENGTH_SEEN
---   6 CAPTURE
---   7 TARGET_GONE
---   8 PICK_OTHER
---   9 STALE
---   10 REFUSED
---   11 RESTORE
---   12 LIST_BACK
---   13 PICK
---   14 ORIGIN_LOST
---   15 ORIGIN_SEEN
---   16 CLOSE
---   17 CLEANUP
+--   6 STALE
+--   7 REFUSED
+--   8 RESTORE
+--   9 LIST_BACK
+--   10 PICK
+--   11 CAPTURE
+--   12 TARGET_GONE
+--   13 RESTORE
+--   14 LIST_BACK
+--   15 PICK
+--   16 ORIGIN_LOST
+--   17 ORIGIN_SEEN
+--   18 CLOSE
+--   19 CLEANUP
 -- Screenshots for the issue (docs/evidence/issue128/): after PICK (1: the window, Zuoying 55), after STRENGTH_SEEN (2: the same window, Zuoying 35, nothing else changed),
--- after TARGET_GONE (3: window closed, the line "左營 已不能進攻", Yancheng still pickable, Zuoying dimmed), after REFUSED (4: window closed, the line "鹽埕 已不能進攻",
--- nothing pickable, no waiting window), after ORIGIN_SEEN (5: window closed, the line "這座城已不屬於你的陣營", every row dimmed, the map still open).
+-- after REFUSED (3: window closed, the line "左營 已不能進攻", no waiting window, Yancheng still pickable), after TARGET_GONE (4: window closed, the line "左營 已不能進攻",
+-- Zuoying dimmed with its new owner, Yancheng still pickable), after ORIGIN_SEEN (5: window closed, the line "這座城已不屬於你的陣營", every row dimmed, the map still open).
 -- Final lines: [VRF][TargetInvalidate] <STEP> PASS.
 local STEP = "SETUP"
 local REAL = "SET_ME"
@@ -52,6 +54,7 @@ end
 local function layout()
     -- The fixture board; every server step that needs it starts from here.
     local board = _FactionWarTownDocument:InitialTowns()
+    board[TARGET].owner = "B" -- the initial world has Zuoying as A's
     board[TARGET].strength = TARGET_START
     board[ORIGIN].owner = "A"
     board[ORIGIN].strength = ORIGIN_START
@@ -122,7 +125,7 @@ local ok, failure = pcall(function()
         assert(status == "SAVED" and outcome.strength == TARGET_START - 20 and not outcome.flipped, "a win takes 20: " .. tostring(status) .. "/" .. tostring(outcome.strength))
         log("[VRF][TargetInvalidate] STRENGTH PASS " .. TARGET .. " 55 -> " .. tostring(outcome.strength) .. "; run STRENGTH_SEEN on the client")
     elseif STEP == "CAPTURE" then
-        -- Zuoying is at 35; bring it to 20 silently (nothing is announced), then a real win takes it: it flips to A and refills.
+        -- Zuoying is B's again (RESTORE) with 55; bring it to 20 silently (nothing is announced), then a real win takes it: it flips to A and refills.
         local board = readBoard()
         board[TARGET].strength = 20
         saveBoard(board)
@@ -130,11 +133,13 @@ local ok, failure = pcall(function()
         assert(status == "SAVED" and outcome.flipped and outcome.owner == "A" and outcome.strength == 100, "Zuoying flipped to A: " .. tostring(status))
         log("[VRF][TargetInvalidate] CAPTURE PASS " .. TARGET .. " is A's, announced; run TARGET_GONE on the client")
     elseif STEP == "STALE" then
-        -- Yancheng turns A's WITHOUT an announcement: the open map still shows it as a target, the server no longer lists it.
+        -- Zuoying turns A's WITHOUT an announcement: the open map still shows it as the picked target, the server no longer lists it.
+        -- (Not Yancheng: a board whose B capital is A's is unreadable by design, so the server would answer UNAVAILABLE, not INVALID.)
         local board = readBoard()
-        board[OTHER].owner = "A"
+        board[TARGET].owner = "A"
+        board[TARGET].strength = 100
         saveBoard(board)
-        log("[VRF][TargetInvalidate] STALE PASS " .. OTHER .. " is A's in the table, nothing announced; run REFUSED on the client")
+        log("[VRF][TargetInvalidate] STALE PASS " .. TARGET .. " is A's in the table, nothing announced; run REFUSED on the client")
     elseif STEP == "RESTORE" then
         -- Back to the fixture board; the announcement makes the open map ask for its list again.
         saveBoard(layout())
@@ -165,8 +170,8 @@ local ok, failure = pcall(function()
         assert(noticeShown() == nil, "no line yet")
         assert(text(row(TARGET) .. "/Value") == tostring(TARGET_START) .. "/100", "Zuoying's strength: " .. text(row(TARGET) .. "/Value"))
         log("[VRF][TargetInvalidate] SELECT_OPEN PASS pickable=" .. TARGET .. "," .. OTHER)
-    elseif STEP == "PICK" or STEP == "PICK_OTHER" then
-        local id = STEP == "PICK" and TARGET or OTHER
+    elseif STEP == "PICK" then
+        local id = TARGET
         click(row(id) .. "/Pick")
         assert(ui._T.selected == id and ui:Ui("Confirm").Enable, "the pick opened the confirmation")
         assert(noticeShown() == nil, "a new pick shows no line")
@@ -190,21 +195,21 @@ local ok, failure = pcall(function()
         assert(text(row(TARGET) .. "/Owner") == "A 方" and text(row(TARGET) .. "/Value") == "100/100", "Zuoying's row shows the new owner and the refilled strength")
         log("[VRF][TargetInvalidate] TARGET_GONE PASS line=" .. noticeShown())
     elseif STEP == "REFUSED" then
-        -- The list on screen is stale (Yancheng is A's in the table, nothing announced): the server must refuse the attack.
-        assert(ui._T.selected == OTHER and ui:Ui("Confirm").Enable, "Yancheng is still picked")
+        -- The list on screen is stale (Zuoying is A's in the table, nothing announced): the server must refuse the attack.
+        assert(ui._T.selected == TARGET and ui:Ui("Confirm").Enable, "Zuoying is still picked")
         click("Confirm/Window/Yes")
         assert(ui._T.pending and text("Confirm/Window/Status") == "正在加入配對…", "the window waits: " .. text("Confirm/Window/Status"))
-        local line = name(OTHER) .. " 已不能進攻"
+        local line = name(TARGET) .. " 已不能進攻"
         assert(await(function() return noticeShown() == line end, 100), "the refusal closed the window and named the town: " .. tostring(noticeShown()))
         assert(not ui._T.pending and not ui:Ui("Confirm").Enable and ui._T.selected == nil, "nothing waits any more")
         assert(await(function() return not ui._T.relisting end, 100), "the list was asked for again and answered")
         assert(ui._T.open and not ui:Ui("Message").Enable, "the map stays open, no message window")
-        assert(noticeShown() == line, "the line stays while Yancheng is not a target")
-        onlyPickable({})
+        assert(noticeShown() == line, "the line stays while Zuoying is not a target")
+        onlyPickable({ OTHER })
         assert(ui._T.mapName == ORIGIN and not _FactionWarAttack:IsEngaged(real().PlayerComponent.UserId), "nothing was queued and the player did not move")
         log("[VRF][TargetInvalidate] REFUSED PASS line=" .. line .. "; the server logs queue refused ... reason=INVALID")
     elseif STEP == "LIST_BACK" then
-        assert(await(function() return noticeShown() == nil and ui:Ui(row(OTHER) .. "/Pick").Enable end, 100), "the restored board lists Yancheng again and the line is gone: " .. tostring(noticeShown()))
+        assert(await(function() return noticeShown() == nil and ui:Ui(row(TARGET) .. "/Pick").Enable end, 100), "the restored board lists Zuoying again and the line is gone: " .. tostring(noticeShown()))
         onlyPickable({ TARGET, OTHER })
         assert(text(row(TARGET) .. "/Value") == tostring(TARGET_START) .. "/100", "Zuoying is B's again with 55")
         log("[VRF][TargetInvalidate] LIST_BACK PASS pickable=" .. TARGET .. "," .. OTHER)

@@ -317,7 +317,7 @@ test('the #128 Maker client probe implements every step its header orders, uses 
   const readme = source('tests/README.md');
   const order = probe.match(/^-- Order [^\n]*\n((?:--   [^\n]*\n)+)/m)[1];
   const header = [...order.matchAll(/(\d+) ([A-Z_]+)/g)].map(match => [Number(match[1]), match[2]]);
-  assert.deepEqual(header.map(step => step[0]), Array.from({ length: 17 }, (_, index) => index + 1), 'the header numbers 17 steps from 1 without gaps');
+  assert.deepEqual(header.map(step => step[0]), Array.from({ length: 19 }, (_, index) => index + 1), 'the header numbers 19 steps from 1 without gaps');
   const implemented = [...probe.matchAll(/(?:if|elseif) STEP == "([A-Z_]+)"(?: or STEP == "([A-Z_]+)")? then/g)].flatMap(match => [match[1], match[2]]).filter(Boolean);
   for (const name of new Set(header.map(step => step[1]))) {
     assert.ok(implemented.includes(name), `${name} is implemented`);
@@ -437,12 +437,12 @@ test('the mark builder is a delta script, the full rebuild includes it, and both
   assert.equal(new Set(paths).size, paths.length, 'no entity is added twice');
 });
 
-test('the #129 Maker client probe implements every step its header orders, uses the real mouse, and the README and ADR name them', () => {
+test('the #129 Maker client probe implements every step its header orders, sends real touch events, and the README and ADR name them', () => {
   const probe = source('tests/target_select_click_client_runtime_probe.lua');
   const readme = source('tests/README.md');
   const order = probe.match(/^-- Order [^\n]*\n((?:--[^\n]*\n)+?)-- Regression/m)[1];
   const header = [...order.matchAll(/(?<![#\d])\b(\d{1,2}) ([A-Z_]{4,})/g)].map(match => [Number(match[1]), match[2]]);
-  assert.deepEqual(header.map(step => step[0]), Array.from({ length: 11 }, (_, index) => index + 1), 'the header numbers 11 steps from 1 without gaps');
+  assert.deepEqual(header.map(step => step[0]), Array.from({ length: 13 }, (_, index) => index + 1), 'the header numbers 13 steps from 1 without gaps');
   const implemented = [...probe.matchAll(/(?:if|elseif) STEP == "([A-Z_]+)" then/g)].map(match => match[1]);
   for (const [, name] of header) {
     assert.ok(implemented.includes(name), `${name} is implemented`);
@@ -450,9 +450,8 @@ test('the #129 Maker client probe implements every step its header orders, uses 
     assert.ok(readme.includes(`\`${name}\``), `the README names ${name}`);
   }
   assert.equal(implemented.length, header.length, 'and nothing else is implemented');
-  assert.match(probe, /maker_mouse_input/, 'the click and the drag are real mouse input');
+  assert.match(probe, /UITouchDownEvent\(input, -1, from\)[^]*UITouchDragEvent[^]*UITouchUpEvent/, 'the tap and the drag are touch events on the real touch surface (maker_mouse_input does not reach it)');
   assert.match(probe, /_UILogic:ScreenToLocalUIPosition\(Vector2\(0, 0\), transform\)/, 'the screen position of a crest is solved from the real conversion');
-  assert.match(probe, /touch down screen=/, 'the first real press logs where it landed, to tell the coordinate systems apart');
   assert.match(probe, /ui:ClickMap\(/, 'the hit reach runs through the production click handler');
   assert.match(probe, /if not ok then log_error\("\[VRF\]\[TargetClick\] " \.\. STEP \.\. " FAIL "/, 'a failed step reports itself');
   assert.doesNotMatch(probe, /_FactionWarAttack\.\w+ = |_FactionWarMapUI\.\w+ = |ui\.\w+ = /, 'it never replaces a production method or property');

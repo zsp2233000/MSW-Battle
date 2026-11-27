@@ -1,26 +1,26 @@
--- #129 Maker end-to-end with the REAL local client: the target selection opens zoomed on the departure town, a REAL mouse click on a city crest opens the same
+-- #129 Maker end-to-end with the REAL local client: the target selection opens zoomed on the departure town, a tap on a city crest opens the same
 -- confirmation as the side list, a REAL drag does not pick, a crest that cannot be picked reacts to nothing, and the view is still the full overview.
 -- This probe uses the fixture of tests/target_select_client_runtime_probe.lua (#124): run ITS SETUP (CAPITAL = false: the real profile is A in Zuoying, Gushan is
 -- B's with 55 left, Yancheng is B's capital and is not adjacent) and ITS CLEANUP unchanged, with the same REAL. Disposable save only; this probe writes nothing itself.
--- Edit STEP by substitution (client context for every step below). The mouse is the real one: maker_mouse_input (down/up for a click, down, move, up for a drag)
--- on the open map's viewport (the touch surface Overlay/Window/Map/Input); buttons are pressed with ButtonClickEvent (maker_mouse_input cannot click engine UI buttons).
+-- Edit STEP by substitution (client context for every step below). maker_mouse_input does NOT reach the map's touch surface (it is engine UI; the mouse tool
+-- logged no touch event at all in the Maker run), so a click and a drag are sent the way faction_war_map_viewport_runtime_probe.lua sends its drag: UITouchDownEvent /
+-- UITouchDragEvent / UITouchUpEvent on the real touch surface (Overlay/Window/Map/Input) with screen points, through the production handlers (BeginMapDrag, DragMap,
+-- EndMapDrag, IsClick, ClickMap). Buttons are pressed with ButtonClickEvent. Not exercised: the OS-level pointer.
 --
 -- WHERE A CREST IS ON THE SCREEN: MARKERS prints, for every town, the crest's position in the viewport (UI units) and on the screen in pixels, from the real conversion
--- _UILogic:ScreenToLocalUIPosition solved for the screen (the same conversion the click handler uses), as `screen=(x,y)` in the coordinates of the touch events and as
--- `topLeft=(x,y)` with y counted from the top edge. MARKERS also hooks a logger on the map's touch surface: the first real mouse press logs
--- `[VRF][TargetClick] touch down screen=(x,y)`. Compare it with the position the mouse tool was given: they are the same system (use screen=) or y is mirrored (use topLeft=).
--- A town's crest in the screenshot should sit at that position. Take the screenshots with the `screenshot` console command.
+-- _UILogic:ScreenToLocalUIPosition solved for the screen (the same conversion the click handler uses), and the TAP_ / DRAG_ steps use the same points.
+-- Take the screenshots with the `screenshot` console command.
 --
--- Order (M = one real mouse input, after the step before it; wait about 1 s after each M, then run the next step):
+-- Order (one step per run, in this order):
 --   #124 SETUP (server_main)
---   1 VIEW_OVERVIEW (screenshot 129-view-overview.png)  2 SELECT_ZOOM (screenshot 129-select-zoom.png)  3 MARKERS  [M: click the TARGET crest]
---   4 CLICK_OPENED (screenshot 129-click-confirm.png)  5 DECLINE  [M: click the ORIGIN crest, which is dimmed]  6 CLICK_DIM
---   7 BASELINE  [M: press on the TARGET crest, move 150 px to the right, release]  8 DRAG_NO_PICK (screenshot 129-drag-no-pick.png)
---   9 RECENTER  10 HIT_REACH  11 CLOSE
+--   1 VIEW_OVERVIEW (screenshot 129-view-overview.png)  2 SELECT_ZOOM (screenshot 129-select-zoom.png)  3 MARKERS  4 TAP_TARGET
+--   5 CLICK_OPENED (screenshot 129-click-confirm.png)  6 DECLINE  7 TAP_ORIGIN  8 CLICK_DIM
+--   9 DRAG_TARGET  10 DRAG_NO_PICK (screenshot 129-drag-no-pick.png)
+--   11 RECENTER  12 HIT_REACH  13 CLOSE
 --   #124 CLEANUP (server_main)
 -- Regression after CLOSE: open the view (M key) and dispatch tests/faction_war_map_viewport_runtime_probe.lua (the wheel and the drag are unchanged).
 -- Final lines: [VRF][TargetClick] <STEP> PASS. Any FAIL is a failure, and so is a missing `[VRF][FactionWarMap] ui click town=<id> selectable=<bool>` line after
--- a real click (gushan true after the click that follows step 3, zuoying false after the one that follows step 5) or one after the real drag (the drag must log `drag offset=` and no `ui click`).
+-- a tap (gushan true after TAP_TARGET, zuoying false after TAP_ORIGIN) or one after the drag (the drag must log `drag offset=` and no `ui click`).
 local STEP = "VIEW_OVERVIEW"
 local ORIGIN, TARGET, DIM_FAR = "zuoying", "gushan", "yancheng"
 local ORIGIN_START, TARGET_START = 100, 55
@@ -54,6 +54,19 @@ local function screenOf(localPoint)
     return Vector2((localPoint.x - a.x) / ((b.x - a.x) / width), (localPoint.y - a.y) / ((b.y - a.y) / height))
 end
 local function marks(id) return ui:Ui(ui.ViewPath .. "/Content/Towns/" .. id .. "/Mark").Enable, ui:Ui(ui.ViewPath .. "/Content/Towns/" .. id .. "/Frame").Enable end
+-- A tap or a drag on the touch surface, in screen pixels (the events carry screen points).
+local function touch(from, to)
+    local input = ui:Ui(ui.ViewPath .. "/Input")
+    assert(isvalid(input), "the map's touch surface exists")
+    input:SendEvent(UITouchDownEvent(input, -1, from))
+    if to ~= nil then
+        local steps = 6
+        for i = 1, steps do
+            input:SendEvent(UITouchDragEvent(input, Vector2(0, 0), -1, Vector2(from.x + (to.x - from.x) * i / steps, from.y + (to.y - from.y) * i / steps)))
+        end
+    end
+    input:SendEvent(UITouchUpEvent(input, -1, to or from))
+end
 local function noWindow() return not ui:Ui("Confirm").Enable and ui._T.selected == nil end
 
 local ok, failure = pcall(function()
@@ -97,17 +110,14 @@ local ok, failure = pcall(function()
             local screen = screenOf(point)
             log("[VRF][TargetClick] marker " .. id .. " view=(" .. f(point.x) .. "," .. f(point.y) .. ") screen=(" .. f(screen.x) .. "," .. f(screen.y) .. ") topLeft=(" .. f(screen.x) .. "," .. f(height - screen.y) .. ") selectable=" .. tostring(ui._T.targets[id] == true))
         end
-        local input = ui:Ui(ui.ViewPath .. "/Input")
-        if state.logger == nil and isvalid(input) then
-            state.logger = {
-                down = input:ConnectEvent(UITouchDownEvent, function(event) log("[VRF][TargetClick] touch down screen=(" .. f(event.TouchPoint.x) .. "," .. f(event.TouchPoint.y) .. ") id=" .. tostring(event.TouchId)) end),
-                up = input:ConnectEvent(UITouchUpEvent, function(event) log("[VRF][TargetClick] touch up screen=(" .. f(event.TouchPoint.x) .. "," .. f(event.TouchPoint.y) .. ") id=" .. tostring(event.TouchId)) end),
-            }
-        end
         local target = screenOf(viewPoint(TARGET))
-        log("[VRF][TargetClick] MARKERS PASS click the " .. TARGET .. " crest with maker_mouse_input at screen=(" .. f(target.x) .. "," .. f(target.y) .. ") or topLeft=(" .. f(target.x) .. "," .. f(height - target.y) .. ")")
+        log("[VRF][TargetClick] MARKERS PASS the " .. TARGET .. " crest is at screen=(" .. f(target.x) .. "," .. f(target.y) .. "); run TAP_TARGET")
+    elseif STEP == "TAP_TARGET" then
+        assert(ui._T.open and ui._T.mode == "select" and noWindow(), "the selection is open, no window")
+        touch(screenOf(viewPoint(TARGET)))
+        log("[VRF][TargetClick] TAP_TARGET PASS tapped the " .. TARGET .. " crest; run CLICK_OPENED")
     elseif STEP == "CLICK_OPENED" then
-        assert(await(function() return ui._T.selected == TARGET end, 30), "the real click on the crest picked " .. TARGET .. " (selected=" .. tostring(ui._T.selected) .. "; see the touch and ui click lines)")
+        assert(await(function() return ui._T.selected == TARGET end, 30), "the tap on the crest picked " .. TARGET .. " (selected=" .. tostring(ui._T.selected) .. "; see the ui click lines)")
         assert(ui:Ui("Confirm").Enable and not ui._T.pending, "the confirmation is open and nothing was sent")
         assert(text("Confirm/Window/Title") == "進攻 " .. name(TARGET) .. "？", "the title: " .. text("Confirm/Window/Title"))
         assert(text("Confirm/Window/Origin") == "出發城 " .. name(ORIGIN) .. "　" .. strengthText(ORIGIN_START), "the departure line: " .. text("Confirm/Window/Origin"))
@@ -122,9 +132,13 @@ local ok, failure = pcall(function()
         local mark, frame = marks(TARGET)
         assert(mark and not frame, "the crest is marked again, not framed")
         log("[VRF][TargetClick] DECLINE PASS")
+    elseif STEP == "TAP_ORIGIN" then
+        assert(ui._T.open and noWindow(), "the map is open, no window")
+        touch(screenOf(viewPoint(ORIGIN)))
+        log("[VRF][TargetClick] TAP_ORIGIN PASS tapped the dimmed " .. ORIGIN .. " crest; run CLICK_DIM")
     elseif STEP == "CLICK_DIM" then
         -- The dimmed town is the departure town, at the middle of the viewport (its position is in the MARKERS lines).
-        assert(noWindow() and ui._T.open, "a real click on the dimmed " .. ORIGIN .. " crest opened nothing")
+        assert(noWindow() and ui._T.open, "a tap on the dimmed " .. ORIGIN .. " crest opened nothing")
         for _, id in ipairs(_FactionWarTownDocument.TownOrder) do
             local _, frame = marks(id)
             assert(not frame, id .. ": no frame")
@@ -132,14 +146,14 @@ local ok, failure = pcall(function()
         local dim = ui:Ui(ui.ViewPath .. "/Content/Towns/" .. ORIGIN .. "/Crest").SpriteGUIRendererComponent.Color.a
         assert(math.abs(dim - ui.DimCrestAlpha) < 0.01, "the dimmed crest is drawn dimmer: " .. tostring(dim))
         log("[VRF][TargetClick] CLICK_DIM PASS the dimmed crest reacted to nothing")
-    elseif STEP == "BASELINE" then
+    elseif STEP == "DRAG_TARGET" then
         assert(ui._T.open and noWindow(), "the map is open, no window")
-        local height = _UILogic.ScreenHeight
         state.zoom, state.offset = ui._T.zoom, Vector2(ui._T.mapOffset.x, ui._T.mapOffset.y)
-        local target = screenOf(viewPoint(TARGET))
-        log("[VRF][TargetClick] BASELINE PASS zoom=" .. tostring(state.zoom) .. " offset=(" .. f(state.offset.x) .. "," .. f(state.offset.y) .. "); press on the " .. TARGET .. " crest at screen=(" .. f(target.x) .. "," .. f(target.y) .. ") topLeft=(" .. f(target.x) .. "," .. f(height - target.y) .. "), move " .. tostring(DRAG_PX) .. " px, release")
+        local from = screenOf(viewPoint(TARGET))
+        touch(from, Vector2(from.x + DRAG_PX, from.y))
+        log("[VRF][TargetClick] DRAG_TARGET PASS pressed on the " .. TARGET .. " crest, moved " .. tostring(DRAG_PX) .. " px, released; run DRAG_NO_PICK")
     elseif STEP == "DRAG_NO_PICK" then
-        assert(state.offset ~= nil, "run BASELINE first")
+        assert(state.offset ~= nil, "run DRAG_TARGET first")
         assert(noWindow() and ui._T.open, "the drag that started on the crest picked nothing (selected=" .. tostring(ui._T.selected) .. ")")
         local dx, dy = ui._T.mapOffset.x - state.offset.x, ui._T.mapOffset.y - state.offset.y
         assert(ui._T.zoom == state.zoom and math.sqrt(dx * dx + dy * dy) > 20, "and the map was panned: moved (" .. f(dx) .. "," .. f(dy) .. ")")
@@ -168,12 +182,6 @@ local ok, failure = pcall(function()
         ui:FocusOrigin(ORIGIN)
         log("[VRF][TargetClick] HIT_REACH PASS")
     elseif STEP == "CLOSE" then
-        local input = ui:Ui(ui.ViewPath .. "/Input")
-        if state.logger ~= nil and isvalid(input) then
-            input:DisconnectEvent(UITouchDownEvent, state.logger.down)
-            input:DisconnectEvent(UITouchUpEvent, state.logger.up)
-        end
-        state.logger = nil
         if ui._T.open then click("Overlay/Window/Close") end
         assert(not ui._T.open and noWindow() and not ui:Ui("Overlay").Enable, "the map is closed and nothing is selected")
         log("[VRF][TargetClick] CLOSE PASS")
