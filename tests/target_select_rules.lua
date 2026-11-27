@@ -526,4 +526,153 @@ check(not ui._T.open, "nor one for the town the player left")
 check(calls.close == 2, "which is also unwatched")
 _UserService.LocalPlayer.CurrentMapName = "zuoying"
 
+-- ---- #128: the town table changes while the map or the confirmation window is open ---------------------------------------------------
+local yancheng = { town = "yancheng", name = "鹽埕", capital = true, strength = 100, owner = "B" }
+local TARGET_GONE = "<c>鼓山</c> 已不能進攻"
+local ORIGIN_GONE = "這座城已不屬於你的陣營"
+local function notice() return node("Overlay/Window/Side/Notice").Enable and text("Overlay/Window/Side/Notice") or nil end
+local function openConfirm()
+    fresh()
+    ready("zuoying", { gushan, yancheng }, towns())
+    ui:Pick("gushan")
+    check(node("Confirm").Enable and ui._T.selected == "gushan" and notice() == nil, "setup: a pick is being confirmed and no line is shown")
+end
+local function everythingDim(label)
+    for _, id in ipairs(doc.TownOrder) do
+        check(not node(rowOf(id) .. "/Pick").Enable and node(rowOf(id) .. "/Dim").Enable, label .. ": " .. id .. " cannot be picked and is dimmed")
+    end
+end
+
+-- Only the strength moves: the window keeps both numbers current, stays open, and nothing else changes.
+openConfirm()
+ui:ShowBoard(towns({ gushan = 20, zuoying = 70 }), links)
+check(node("Confirm").Enable and ui._T.selected == "gushan" and not ui._T.pending, "a strength change keeps the confirmation window open")
+check(text("Confirm/Window/Origin") == "出發城 <c>左營</c>　兵力 70 / 100" and text("Confirm/Window/Target") == "目標城 <c>鼓山</c>　兵力 20 / 100", "and updates both numbers")
+check(text(rowOf("gushan") .. "/Value") == "20/100" and text("Overlay/Window/Map/Content/Towns/gushan/Strength") == "兵力 20/100", "the list and the map follow")
+check(calls.select == 0 and notice() == nil and node(rowOf("gushan") .. "/Pick").Enable, "no request, no line, the same pick buttons")
+
+-- A town changed hands but the picked one is still a target: the list is asked for again and the window stays.
+openConfirm()
+ui:ShowBoard(towns({}, { yancheng = "A" }), links)
+check(calls.select == 1 and ui._T.relisting, "a town that changed hands asks the server for the list")
+ready("zuoying", { gushan }, towns({}, { yancheng = "A" }))
+check(node("Confirm").Enable and ui._T.selected == "gushan" and notice() == nil and not ui._T.relisting, "a picked town that is still listed keeps its window and shows no line")
+
+-- The relisted answer redraws the list and the rows exactly as the server listed them.
+openConfirm()
+ui:ShowBoard(towns({}, { gushan = "A" }), links)
+ui:ShowSelect("zuoying", "READY", header, { yancheng }, { towns = towns({}, { gushan = "A" }), links = links })
+check(node(rowOf("yancheng") .. "/Pick").Enable and not node(rowOf("yancheng") .. "/Dim").Enable, "the new target can be picked")
+check(not node(rowOf("gushan") .. "/Pick").Enable and node(rowOf("gushan") .. "/Dim").Enable, "the town that is no longer listed cannot, and is dimmed")
+check(text(rowOf("gushan") .. "/Owner") == "A 方" and node("Overlay/Window/Map/Content/Districts/gushan").SpriteGUIRendererComponent.Color.a == ui.DimDistrictAlpha, "its row and district show the new owner, dimmed")
+
+-- The picked target can no longer be attacked (taken by the player's own side): the window closes and one line says so.
+openConfirm()
+ui:ShowBoard(towns({}, { gushan = "A" }), links)
+ready("zuoying", { yancheng }, towns({}, { gushan = "A" }))
+check(not node("Confirm").Enable and ui._T.selected == nil and ui._T.open and ui._T.mode == "select", "the confirmation window closes, the map stays in selection")
+check(notice() == TARGET_GONE, "the side panel says the town can no longer be attacked: " .. tostring(notice()))
+check(node(rowOf("yancheng") .. "/Pick").Enable and not node(rowOf("gushan") .. "/Pick").Enable, "and the list is redrawn")
+check(not node("Message").Enable and ui._T.message == nil and calls.close == 0, "no message window and the map is not closed")
+ui:Pick("yancheng")
+check(notice() == nil and ui._T.selected == "yancheng", "the line goes away on the next pick")
+-- Nothing is left to pick at all (the server answers NO_TARGETS): same line, everything dimmed, map still open.
+openConfirm()
+ui:ShowBoard(towns({}, { gushan = "A" }), links)
+ui:ShowSelect("zuoying", "NO_TARGETS", {}, {}, {})
+check(ui._T.open and ui._T.mode == "select" and not node("Confirm").Enable and ui._T.selected == nil, "NO_TARGETS to the map's own relist keeps the map and closes the window")
+check(notice() == TARGET_GONE and not node("Message").Enable and calls.close == 0, "with the same line and no message window")
+everythingDim("NO_TARGETS")
+-- Without a pick open the line names the cause.
+fresh()
+ready("zuoying", { gushan }, towns())
+ui:ShowBoard(towns({}, { gushan = "A" }), links)
+ui:ShowSelect("zuoying", "NO_TARGETS", {}, {}, {})
+check(ui._T.open and notice() == "目前沒有可進攻的相鄰敵城" and not node("Message").Enable, "no pick open: the line says there is no target left")
+everythingDim("no pick")
+
+-- The departure town fell: the window closes, nothing can be picked, the line says so; the map stays open.
+openConfirm()
+ui:ShowBoard(towns({}, { zuoying = "B" }), links)
+check(calls.select == 1, "the departure town changing hands asks the server")
+ui:ShowSelect("zuoying", "NOT_OWNED", {}, {}, {})
+check(ui._T.open and ui._T.mode == "select" and node("Overlay").Enable, "the map stays open")
+check(not node("Confirm").Enable and ui._T.selected == nil and not ui._T.pending, "the confirmation window closes")
+check(notice() == ORIGIN_GONE, "the side panel says the town is no longer the player's faction's: " .. tostring(notice()))
+everythingDim("NOT_OWNED")
+check(not node("Message").Enable and ui._T.message == nil and calls.close == 0, "no message window and the map is not closed")
+ui:Pick("gushan")
+check(ui._T.selected == nil and not node("Confirm").Enable, "nothing can be picked")
+check(ui:BlocksInteraction(), "the NPCs still ignore the key while the map is open")
+-- The player stands elsewhere now (sent to the capital) and a later change asks again: a READY answer ends that line.
+_UserService.LocalPlayer.CurrentMapName = "nanzih"
+ui._T.mapName = "nanzih"
+ui:ShowBoard(towns({}, { yancheng = "A" }), links)
+ui:ShowSelect("nanzih", "READY", { town = "nanzih", strength = 100, owner = "A", faction = "A" }, { gushan }, { towns = towns(), links = links })
+check(notice() == nil and node(rowOf("gushan") .. "/Pick").Enable, "a READY answer lists the targets again and clears the line")
+_UserService.LocalPlayer.CurrentMapName = "zuoying"
+ui._T.mapName = "zuoying"
+-- Closing and opening the map again never shows an old line.
+openConfirm()
+ui:ShowBoard(towns({}, { gushan = "A" }), links)
+ready("zuoying", { yancheng }, towns({}, { gushan = "A" }))
+check(notice() == TARGET_GONE, "setup: a line is shown")
+ui:Close()
+check(notice() == nil, "closing the map clears the line")
+ui:BeginSelect()
+ready("zuoying", { gushan }, towns())
+check(ui._T.open and notice() == nil, "and a map opened later starts without one")
+
+-- The server refuses the attack after 是: no stuck waiting window, the list is asked again and the line says why.
+openConfirm()
+ui:ConfirmAttack()
+check(ui._T.pending and text("Confirm/Window/Status") == "正在加入配對…", "setup: waiting for the server")
+ui:ShowAttackResult("INVALID")
+check(not ui._T.pending and not node("Confirm").Enable and ui._T.selected == nil and ui._T.open, "INVALID: the window is closed, nothing waits, the map stays")
+check(notice() == TARGET_GONE and calls.select == 1 and ui._T.relisting, "the line names the town and the list is asked for again")
+ready("zuoying", { yancheng }, towns({}, { gushan = "A" }))
+check(notice() == TARGET_GONE and node(rowOf("yancheng") .. "/Pick").Enable and not node(rowOf("gushan") .. "/Pick").Enable, "the relisted answer redraws the list and the line stays while the town is not listed")
+openConfirm()
+ui:ConfirmAttack()
+ui:ShowAttackResult("INVALID")
+ready("zuoying", { gushan }, towns())
+check(notice() == nil and node(rowOf("gushan") .. "/Pick").Enable, "a refusal that the new list does not confirm (the town is a target again) leaves no line")
+-- The map's own relist drops the pick while the request is on its way: the answer to it still closes the map for the siege panel.
+openConfirm()
+ui:ConfirmAttack()
+ui:ShowBoard(towns({}, { gushan = "A" }), links)
+ready("zuoying", { yancheng }, towns({}, { gushan = "A" }))
+check(not ui._T.pending and not node("Confirm").Enable and notice() == TARGET_GONE, "a relist answered while waiting also closes the window and says so")
+ui:ShowAttackResult("QUEUING")
+check(not ui._T.open and not node("Overlay").Enable and calls.close == 1, "and the QUEUING that was already on its way still closes the map")
+openConfirm()
+ui:ConfirmAttack()
+ui:ShowBoard(towns({}, { gushan = "A" }), links)
+ready("zuoying", { yancheng }, towns({}, { gushan = "A" }))
+ui:ShowAttackResult("INVALID")
+check(notice() == TARGET_GONE and not ui._T.pending and ui._T.open, "an INVALID after the relist already dropped the pick keeps the line and does not get stuck")
+-- The other refusals still keep the window (unchanged by #128), without a line.
+openConfirm()
+ui:ConfirmAttack()
+ui:ShowAttackResult("UNAVAILABLE")
+check(node("Confirm").Enable and notice() == nil and not ui._T.pending, "UNAVAILABLE keeps the window and shows no line")
+-- A relist answered ENGAGED / UNAVAILABLE still ends the selection with a message window (#127).
+openConfirm()
+ui:ShowBoard(towns({}, { gushan = "A" }), links)
+ui:ShowSelect("zuoying", "UNAVAILABLE", {}, {}, {})
+check(not ui._T.open and calls.close == 1 and shown() == "暫時無法讀取國戰資料，請再試一次" and notice() == nil, "UNAVAILABLE to a relist closes the map and says so in the message window")
+ui:DismissMessage()
+-- The server's side of the same relist: after a capture the answer is exactly the targets CanTarget accepts.
+board.gushan.owner = "A"
+local relistAnswers = #answers
+freshMap()
+attack:SelectFor("red-user")
+check(#answers == relistAnswers + 1 and answers[#answers].status == "NO_TARGETS" and next(map._T.viewers) == nil, "server: the departure town without an adjacent enemy is answered NO_TARGETS")
+board.gushan.owner = "B"
+board.zuoying.owner = "B"
+judged = {}
+attack:SelectFor("red-user")
+check(answers[#answers].status == "NOT_OWNED" and judged[1] == "red-user:CHECK:zuoying", "server: a lost departure town is answered NOT_OWNED and judged")
+board.zuoying.owner = "A"
+
 print("[VRF][TargetSelect] target selection rules PASS checks=" .. tostring(checks))

@@ -5,6 +5,7 @@
 //   - Overlay/Window/Side/Rows/<town>/Dim   a dark veil over the row of a town that cannot be picked in selection mode
 //   - Confirm                               the "進攻 <town>？" window (dimmer, frame, title, both strengths, capital note, status, 是 / 否)
 //   - Message                               (#127) the message window of an answer that opens no map: dimmer, frame, one text, one 確定 button
+//   - Overlay/Window/Side/Notice            (#128) one line in the side panel: a target or the whole list is gone ("<town> 已不能進攻", "這座城已不屬於你的陣營")
 // FactionWarMapUI.mlua finds every entity by path under /ui/WorldMapGroup, so keep the paths below in step with it.
 // The confirmation window is a root sibling after Overlay, so it is drawn above the map, and the message window after it, above everything
 // (Maker takes render order from the order in the file; the message window needs no map to be open).
@@ -40,9 +41,14 @@ function messagePaths() {
   return ['Message'];
 }
 
+// The paths the side panel line adds, so a rebuild of it alone (build_notice_ui.cjs) can remove them first.
+function noticePaths() {
+  return ['Overlay/Window/Side/Notice'];
+}
+
 // The paths this adds, so a rebuild can remove them first.
 function selectPaths() {
-  return ['Confirm', ...messagePaths(), ...TOWNS.flatMap(id => [`Overlay/Window/Side/Rows/${id}/Pick`, `Overlay/Window/Side/Rows/${id}/Dim`])];
+  return ['Confirm', ...messagePaths(), ...noticePaths(), ...TOWNS.flatMap(id => [`Overlay/Window/Side/Rows/${id}/Pick`, `Overlay/Window/Side/Rows/${id}/Dim`])];
 }
 
 // The message window (#127): shown for ENGAGED, NOT_OWNED, UNAVAILABLE and NO_TARGETS instead of the map. Like the confirmation window its dimmer takes
@@ -56,7 +62,19 @@ function addMessageUi(b) {
   cardButton(b, 'Message/Window/Ok', '確定', { anchor: 'bottom-center', pos: [0, 32], rect_size: [240, 88], font_size: 32 });
 }
 
+// The side panel line (#128), under the note and above the status line (the side panel is 810 high; the note ends at -676, the status line starts about
+// 739 from the top). Text only: it takes no click. The builder appends a new entity to the file, and Maker takes render order from the order of the
+// entities, so on a file that already has Confirm and Message the line is moved in front of them (same entity, nothing re-imported): the windows stay above it.
+function addNoticeUi(b) {
+  b.text('Overlay/Window/Side/Notice', '', { size: 22, color: '#FFD173', bold: true, ...OUTLINE, anchor: 'top-center', pos: [0, -684], rect_size: [460, 36], enable: false });
+  const at = path => b.entities.findIndex(entity => entity.path === `${b.root_path}/${path}`);
+  const notice = at('Overlay/Window/Side/Notice');
+  const confirm = at('Confirm');
+  if (confirm >= 0 && confirm < notice) b.entities.splice(confirm, 0, b.entities.splice(notice, 1)[0]);
+}
+
 function addSelectUi(b) {
+  addNoticeUi(b);
   for (const id of TOWNS) {
     const row = `Overlay/Window/Side/Rows/${id}`;
     // A faint Cardgame button over the whole row, 88 px high for a touch target (the rows are 92 px apart; stretch entities need their real size as RectSize); the highlighted and pressed
@@ -80,4 +98,4 @@ function addSelectUi(b) {
   addMessageUi(b);
 }
 
-module.exports = { addSelectUi, addMessageUi, selectPaths, messagePaths };
+module.exports = { addSelectUi, addMessageUi, addNoticeUi, selectPaths, messagePaths, noticePaths };

@@ -267,3 +267,70 @@ test('the Maker client probe implements every step its header orders, ends each 
   assert.match(probe, /SendEvent\(ButtonClickEvent\(entity\)\)/, 'and presses the real buttons');
   assert.doesNotMatch(probe, /_FactionWarAttack\.RequestAttack = /, 'it never replaces a production method');
 });
+
+test('the side panel line (#128) is a text under the note and above the status, takes no click, and sits in front of both windows in the file', () => {
+  const file = ui();
+  const line = 'Overlay/Window/Side/Notice';
+  assert.ok(file.hasComponent(line, textComponent), 'Notice is a text');
+  assert.equal(file.find(line).jsonString.enable, false, 'hidden until there is something to say');
+  assert.equal(file.getComponent(line, textComponent).Text, '', 'with no text');
+  assert.equal(file.getComponent(line, sprite).RaycastTarget, false, 'it takes no click');
+  const inFile = file.build().ContentProto.Entities.map(entity => entity.path.replace('/ui/WorldMapGroup/', ''));
+  assert.ok(inFile.indexOf(line) > inFile.indexOf('Overlay/Window/Side/Hint'), 'after the rest of the side panel');
+  assert.ok(inFile.indexOf(line) < inFile.indexOf('Confirm') && inFile.indexOf('Confirm') < inFile.indexOf('Message'), 'and before the confirmation and message windows, which stay above it');
+  const top = path => file.getComponent(`Overlay/Window/Side/${path}`, 'MOD.Core.UITransformComponent').anchoredPosition.y;
+  assert.ok(top('Notice') < top('Note') - 60, 'below the two-line note');
+  const select = source('assets/worldmap/select_ui.cjs');
+  assert.match(select, /function addSelectUi\(b\) \{\n  addNoticeUi\(b\);/, 'a full rebuild adds it first, before the windows');
+  assert.match(select, /noticePaths\(\)/, 'its path is listed for a rebuild');
+  assert.match(source('assets/worldmap/build_notice_ui.cjs'), /noticePaths\(\)[^]*addNoticeUi\(b\)/, 'a delta build script replaces only the line');
+});
+
+test('a changed town table (#128): ownership relists, a target that is gone closes the window with one line, the departure town that fell dims everything', () => {
+  const text = mapClient();
+  assert.match(body(text, 'ShowBoard'), /owners\[town\.id\] ~= nil and owners\[town\.id\] ~= town\.owner then relist = true[^]*_FactionWarAttack:RequestSelect\(\)/, 'a changed owner asks the server for the list again (the list is the server\'s)');
+  assert.doesNotMatch(body(text, 'ShowBoard'), /SetNotice|SetMode/, 'the client never decides what can be picked on its own');
+  const select = body(text, 'ShowSelect');
+  assert.match(select, /relisted and wasOpen and self\._T\.mode == "select" and \(status == "NOT_OWNED" or status == "NO_TARGETS"\) then\s+self:ShowNothingToPick\(status\)\s+return/, 'NOT_OWNED and NO_TARGETS answering the open map\'s own relist keep the map');
+  assert.match(select, /local picked = self\._T\.selected\s+self:SetMode\("select", targets, header\.town\)\s+if picked ~= nil and self\._T\.selected == nil then\s+self:SetNotice\("TARGET", picked\)/, 'a pick that the new list no longer has is named in the line');
+  const nothing = body(text, 'ShowNothingToPick');
+  assert.match(nothing, /self:SetMode\("select", \{\}, self\._T\.origin\)/, 'nothing can be picked: the window closes and every town is dimmed');
+  assert.match(nothing, /status == "NOT_OWNED" then\s+self:SetNotice\("ORIGIN", ""\)/, 'NOT_OWNED says the town is no longer the player\'s faction\'s');
+  assert.match(nothing, /self:Render\(\)/, 'and the map and rows are redrawn');
+  assert.doesNotMatch(nothing, /Close\(\)|ShowMessage|RequestClose/, 'the map is neither closed nor replaced by a message window');
+  const notice = body(text, 'SetNotice');
+  for (const words of ['" 已不能進攻"', '"這座城已不屬於你的陣營"', '"目前沒有可進攻的相鄰敵城"']) assert.ok(notice.includes(words), `the line can say ${words}`);
+  assert.match(notice, /_FactionWarUI:HighlightedTownName\(town\)/, 'the town name has the one highlight');
+  assert.match(notice, /self:Ui\("Overlay\/Window\/Side\/Notice"\)/, 'in the side panel');
+  const refused = body(text, 'ShowAttackResult');
+  assert.match(refused, /result == "INVALID" then[^]*local dropped = self\._T\.selected[^]*self:SetNotice\("TARGET", dropped\)[^]*self:RenderConfirm\(\)[^]*_FactionWarAttack:RequestSelect\(\)/, 'a refusal names the town, closes the window and asks for the list again');
+  assert.match(refused, /self\._T\.pending = false\n/, 'and nothing waits any more');
+  assert.match(body(text, 'Pick'), /self:SetNotice\("", ""\)/, 'a new pick clears the line');
+  assert.match(body(text, 'Close'), /self:SetNotice\("", ""\)/, 'closing the map clears it');
+  assert.match(body(text, 'Reveal'), /self:SetNotice\("", ""\)/, 'and a map that opens starts without one');
+  for (const method of ['ShowNothingToPick', 'SetNotice']) assert.match(annotation(text, method), /@ExecSpace\("ClientOnly"\)/, `${method} runs on the client only`);
+  assert.match(text, /self\._T\.noticeKind = ""/, 'the line starts empty');
+});
+
+test('the #128 Maker client probe implements every step its header orders, uses real settlements and the real button, and the README and ADR name them', () => {
+  const probe = source('tests/target_select_invalidate_client_runtime_probe.lua');
+  const readme = source('tests/README.md');
+  const order = probe.match(/^-- Order [^\n]*\n((?:--   [^\n]*\n)+)/m)[1];
+  const header = [...order.matchAll(/(\d+) ([A-Z_]+)/g)].map(match => [Number(match[1]), match[2]]);
+  assert.deepEqual(header.map(step => step[0]), Array.from({ length: 17 }, (_, index) => index + 1), 'the header numbers 17 steps from 1 without gaps');
+  const implemented = [...probe.matchAll(/(?:if|elseif) STEP == "([A-Z_]+)"(?: or STEP == "([A-Z_]+)")? then/g)].flatMap(match => [match[1], match[2]]).filter(Boolean);
+  for (const name of new Set(header.map(step => step[1]))) {
+    assert.ok(implemented.includes(name), `${name} is implemented`);
+    assert.ok(probe.includes(`[VRF][TargetInvalidate] ${name} PASS`) || probe.includes('"[VRF][TargetInvalidate] " .. STEP .. " PASS'), `${name} ends in a PASS line`);
+    assert.ok(readme.includes(`\`${name}\``), `the README names ${name}`);
+  }
+  assert.match(probe, /if not ok then log_error\("\[VRF\]\[TargetInvalidate\] " \.\. STEP \.\. " FAIL "/, 'a failed step reports itself');
+  assert.match(probe, /_FactionWarAttack:Settle\(/, 'the board changes through a real settlement result');
+  assert.match(probe, /SendEvent\(ButtonClickEvent\(entity\)\)/, 'and the buttons are pressed for real');
+  assert.doesNotMatch(probe, /_FactionWarAttack\.\w+ = |_FactionWarMapUI\.\w+ = /, 'it never replaces a production method');
+  for (const state of ['STALE', 'RESTORE', 'ORIGIN_LOST']) assert.match(probe, new RegExp(`STEP == "${state}"`), `${state} drives the board from the server`);
+  assert.match(probe, /docs\/evidence\/issue128\//, 'the header names where the screenshots go');
+  const adr = source('docs/adr/0015-world-map-is-viewed-in-towns-and-pushed-by-settlement-events.md');
+  for (const word of ['補記（#128）', 'ShowNothingToPick', 'SetNotice', 'NO_TARGETS', 'NOT_OWNED']) assert.ok(adr.includes(word), `ADR 0015 records ${word}`);
+  assert.ok(readme.includes('## Target invalidation while the map is open (#128'), 'the README has the section');
+});
