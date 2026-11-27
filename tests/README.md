@@ -38,6 +38,31 @@ Verified in Maker on 2026-11-27 (build 0 Error with the existing `IsPCPlatform` 
 
 Not verified: a published world, two real accounts, a real mouse click on the choice buttons (`maker_mouse_input` cannot click engine UI buttons, so the click was sent as an event and `canChoose` was staged, because the real profile already has a faction), a profile with no faction going through the choice window, and the two known gaps below. Known gaps (ADR 0018): while an old and a new world instance coexist during a publish, the old version reads `A` / `B` as invalid, so publish with no war in progress; and an absent result stored before the rename can still say `改為 紅方` in its already composed conclusion text, which is shown once and cleared.
 
+## Faction choice screen (#126)
+
+`ui/FactionWarGroup.ui` `FactionChoice`: a Cardgame window (dimmer, brown panel, `Window/Frame` border beneath the content, `Title`, `Status`, `Close`) with two colourless buttons `Window/A` and `Window/B`, text `A 方` / `B 方` only. They are the same Cardgame button (same art, size, no tint, same sprite swap); the script only enables them and sends `A` or `B`. Rebuilt in place (entity ids unchanged) by `assets/siege/build_faction_choice_ui.cjs`; it touches nothing else in the group. Maker takes draw order from the order of the entities in the file, so the script moves the window's children right after the window (frame first). Maker imports a new child of an existing subtree on the next refresh; after rebuilding, refresh and look at `/ui/FactionWarGroup/FactionChoice/Window` in Play (six children) before running the probe.
+
+```sh
+set -o pipefail
+node tests/faction_choice_local.cjs | npm exec --yes --package=fengari-node-cli@0.1.0 -- fengari -
+node --test tests/faction_choice_contract.test.cjs tests/faction_id_contract.test.cjs
+```
+
+Expect `[VRF][FactionChoice] faction choice screen rules PASS checks=19` (the production `FactionWarUI` entry methods against fake nodes: opening asks with no choice and shows no button, CHOOSE and SAVE_FAILED offer both buttons, `A` sends `A` and `B` sends `B`, both buttons are dead while a choice is pending, ENTERED / BLOCKED / UNAVAILABLE allow no choice) and the contract tests (texts, A and B identical except text and position, Cardgame art on buttons and frame, no default grey skin on a button, no node named after a colour, frame drawn beneath the content in file order).
+
+### Maker client probe: both buttons join (author-run only, not yet run in Maker)
+
+`faction_war_faction_choice_client_runtime_probe.lua` presses the real authored buttons (`ButtonClickEvent` on `FactionChoice/Window/A` and `/B`), so it covers the binding, `FactionWar:RequestEntry`, the save of the choice and the move to the front. One faction per profile, so it takes two fresh Plays and a wipe between them. Use a profile that may lose its faction (the server part deletes `CountryWarFactionV1` and the last-town key of `PROFILE`); `faction_war_*` probes' disposable profile codes work, or the real client's own profile if its faction may be reset. The player may start in any map (a town login is sent to the lobby first, the way the town NPC does it); a profile that is queued or engaged cannot be used.
+
+| Run | Maker context, fresh Play | Edit at the top of the file | Expect |
+| --- | --- | --- | --- |
+| 1 | `client` | `PART = "CLIENT"`, `CHOICE = "A"` | `[VRF][FactionChoice] client profile=<code> map=...`, `[VRF][FactionChoice] buttons A=[A 方] B=[B 方] art=9505617fb63c447c8ff9c15c18d88064 same on both`, `[VRF][FactionWar] front=zuoying faction=A` (server log), `[VRF][FactionChoice] CLIENT PASS choice=A town=zuoying profile=<code>` |
+| 2 | `server_main`, same Play | `PART = "SERVER"`, `CHOICE = "A"`, `PROFILE = "<code from run 1>"` | `[VRF][FactionChoice] SERVER PASS choice=A stored=A shown=A 方 profile=<code> wiped` |
+| 3 | `client`, Stop, then a fresh Play | `PART = "CLIENT"`, `CHOICE = "B"` | the same lines with `[VRF][FactionWar] front=gushan faction=B` and `CLIENT PASS choice=B town=gushan` |
+| 4 | `server_main`, same Play | `PART = "SERVER"`, `CHOICE = "B"`, `PROFILE = "<code>"` | `SERVER PASS choice=B stored=B shown=B 方 ... wiped` |
+
+Any `[VRF][FactionChoice] <PART> FAIL <reason>` is an error log with the failed assertion; the usual cause is a profile that already has a faction (run 1 then says it went straight to its front: run the SERVER part for that profile, which wipes it, and start a fresh Play). Take Maker screenshots (`screenshot`) of the open choice window between `buttons A=[A 方] B=[B 方]` and the press: that is the visual evidence for the acceptance criteria (two identical Cardgame buttons, no red or blue). After the press the player stands in Zuoying (A) or Gushan (B) and `[VRF][FactionWar] front=` is the server's proof that the click reached `RequestEntry`. Build log must show no Error before and after Play.
+
 ## Match status and cancellation (#116)
 
 **Maker verification of the integration branch is recorded at the end of this section.** The older cancellation results below are historical. From the merged checkout, run `node --test tests/*.test.cjs`, plus this Maker-free test of the unchanged production method bodies (use `set -o pipefail` in Bash):
