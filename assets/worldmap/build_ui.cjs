@@ -121,10 +121,10 @@ TOWNS.forEach((id, n) => {
   b.sprite(`${row}/Bar/Fill`, { anchor: 'middle-left', pos: [0, 0], rect_size: [280, 16], pivot: [0, 0.5], image_ruid: GAUGE, color: NEUTRAL, sprite_type: 1, enable: false });
 });
 b.empty(`${SIDE}/Legend`, { anchor: 'top-center', pos: [0, -560], rect_size: [460, 40] });
-b.sprite(`${SIDE}/Legend/A`, { anchor: 'middle-left', pos: [20, 0], rect_size: [28, 28], color: { r: 0.84, g: 0.29, b: 0.24, a: 1 }, sprite_type: 1 });
-b.text(`${SIDE}/Legend/A/Label`, 'A 方', { size: 22, color: '#FFFFFF', ...OUTLINE, alignment: 3, anchor: 'middle-left', pos: [36, 0], rect_size: [90, 30] });
-b.sprite(`${SIDE}/Legend/B`, { anchor: 'middle-left', pos: [170, 0], rect_size: [28, 28], color: { r: 0.27, g: 0.5, b: 0.88, a: 1 }, sprite_type: 1 });
-b.text(`${SIDE}/Legend/B/Label`, 'B 方', { size: 22, color: '#FFFFFF', ...OUTLINE, alignment: 3, anchor: 'middle-left', pos: [36, 0], rect_size: [90, 30] });
+b.sprite(`${SIDE}/Legend/Ally`, { anchor: 'middle-left', pos: [20, 0], rect_size: [28, 28], color: NEUTRAL, sprite_type: 1 });
+b.text(`${SIDE}/Legend/Ally/Label`, '我方', { size: 22, color: '#FFFFFF', ...OUTLINE, alignment: 3, anchor: 'middle-left', pos: [36, 0], rect_size: [90, 30] });
+b.sprite(`${SIDE}/Legend/Enemy`, { anchor: 'middle-left', pos: [170, 0], rect_size: [28, 28], color: NEUTRAL, sprite_type: 1 });
+b.text(`${SIDE}/Legend/Enemy/Label`, '敵方', { size: 22, color: '#FFFFFF', ...OUTLINE, alignment: 3, anchor: 'middle-left', pos: [36, 0], rect_size: [90, 30] });
 b.sprite(`${SIDE}/Legend/Link`, { anchor: 'middle-left', pos: [314, 0], rect_size: [40, 6], color: { r: 0.79, g: 0.64, b: 0.44, a: 1 }, sprite_type: 1 });
 b.text(`${SIDE}/Legend/Link/Label`, '相鄰', { size: 22, color: '#FFFFFF', ...OUTLINE, alignment: 3, anchor: 'middle-left', pos: [48, 0], rect_size: [90, 30] });
 b.text(`${SIDE}/Note`, '連線：以傳送門直接相連的相鄰城鎮\n主城永不易主，兵力恆為 100', { size: 20, color: '#E8DCC8', ...OUTLINE, anchor: 'top-center', pos: [0, -612], rect_size: [460, 64] });

@@ -52,9 +52,6 @@ test('no property or node is named after a faction colour', () => {
   for (const file of ownScripts().filter(path => /\/(Formations|Matchmaking|Combat)\//.test(path))) {
     assert.doesNotMatch(read(file), /\b(Red|Blue)[A-Za-z]*\b/, `${file} names nothing after a colour`);
   }
-  const map = read('RootDesk/MyDesk/Formations/FactionWarMapUI.mlua');
-  assert.match(map, /property Color FactionAColor = /);
-  assert.match(map, /property Color FactionBColor = /);
   const ui = read('RootDesk/MyDesk/Formations/FactionWarUI.mlua');
   assert.match(ui, /Bind\("FactionChoice\/Window\/A", function\(\) self:Request\("A"\) end\)/, 'the A button asks to join A');
   assert.match(ui, /Bind\("FactionChoice\/Window\/B", function\(\) self:Request\("B"\) end\)/, 'the B button asks to join B');
@@ -64,19 +61,19 @@ test('no property or node is named after a faction colour', () => {
   }
 });
 
-test('the choice buttons and the legend are authored as A and B', () => {
+test('the choice names the factions; the map legend names the relative stances', () => {
   const war = UIBuilder.read('ui/FactionWarGroup.ui');
   for (const [node, text] of [['A', 'A 方'], ['B', 'B 方']]) {
     assert.ok(war.hasComponent(`FactionChoice/Window/${node}`, 'MOD.Core.ButtonComponent'), `${node} is a button`);
     assert.equal(war.getComponent(`FactionChoice/Window/${node}`, 'MOD.Core.TextGUIRendererComponent').Text, text);
   }
   const map = UIBuilder.read('ui/WorldMapGroup.ui');
-  for (const [node, text] of [['A', 'A 方'], ['B', 'B 方']]) {
+  for (const [node, text] of [['Ally', '我方'], ['Enemy', '敵方']]) {
     assert.equal(map.getComponent(`Overlay/Window/Side/Legend/${node}/Label`, 'MOD.Core.TextGUIRendererComponent').Text, text, `legend ${node}`);
   }
   const build = read('assets/worldmap/build_ui.cjs');
-  assert.match(build, /Legend\/A\/Label`, 'A 方'/);
-  assert.match(build, /Legend\/B\/Label`, 'B 方'/);
+  assert.match(build, /Legend\/Ally\/Label`, '我方'/);
+  assert.match(build, /Legend\/Enemy\/Label`, '敵方'/);
 });
 
 test('every screen and settlement text names the factions A 方 / B 方, never by colour', () => {

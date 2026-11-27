@@ -127,7 +127,7 @@ local ok, failure = pcall(function()
         log("[VRF][Siege] SIEGE_PUSHED PASS")
     elseif STEP == "SIEGE_HIDDEN" then
         local card = _FactionWarUI:Ui("SiegePanel")
-        assert(await(function() return not card.Enable and not _FactionWarUI._T.siegeShown and _FactionWarUI._T.siegeStrengths == nil end, 100), "after the cancel the card hides and forgets the numbers")
+        assert(await(function() return not card.Enable and not _FactionWarUI._T.siegeShown and _FactionWarUI._T.siegeTowns == nil end, 100), "after the cancel the card hides and forgets the numbers")
         log("[VRF][Siege] SIEGE_HIDDEN PASS; run SIEGE_ENDED on the server")
     elseif STEP == "TEAM_AFTER" then
         _FactionWarTeam:Close()

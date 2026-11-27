@@ -1,9 +1,7 @@
 @Logic
 script FactionWarMapUI extends Logic
 
-    property Color FactionAColor = Color(0.84, 0.29, 0.24, 1)
-    property Color FactionBColor = Color(0.27, 0.5, 0.88, 1)
-    property Color NeutralColor = Color(0.62, 0.6, 0.56, 1)
+    property Color FactionLabelColor = Color(0.93, 0.78, 0.56, 1)
     property number DistrictAlpha = 0.55
     -- Target selection: a town that cannot be picked is drawn dimmer than the ones that can.
     property number DimDistrictAlpha = 0.2
@@ -36,6 +34,7 @@ script FactionWarMapUI extends Logic
         -- Closed until the player opens it from a town; M toggles it like the button.
         self._T.bindings = {}
         self._T.open = false
+        self._T.faction = ""
         self._T.board = nil
         self._T.links = {}
         self._T.mapName = ""
@@ -437,6 +436,7 @@ script FactionWarMapUI extends Logic
         -- Show the map at once with the last board (or neutral), then ask the server for the live one and to keep it coming.
         local overlay = self:Ui("Overlay")
         if self._T.open or self._T.message ~= nil or not isvalid(overlay) or not self:CanOpen() then return end
+        self:ShowFaction("LOADING")
         self:Reveal("view")
         if self._T.board == nil then self:ShowNeutral() else self:Render() end
         self:ShowHere()
@@ -464,7 +464,11 @@ script FactionWarMapUI extends Logic
 
     @ExecSpace("ClientOnly")
     method void Reveal(string mode)
-        -- Show the map window at the full view, in the given mode ("view" or "select").
+        -- Open the map in the given mode, using the same palette for the legend and towns.
+        local legend = "Overlay/Window/Side/Legend/"
+        local ally, enemy = self:Ui(legend .. "Ally"), self:Ui(legend .. "Enemy")
+        if isvalid(ally) then ally.SpriteGUIRendererComponent.Color = _FactionWarUI.AllyTownColor end
+        if isvalid(enemy) then enemy.SpriteGUIRendererComponent.Color = _FactionWarUI.EnemyTownColor end
         local overlay = self:Ui("Overlay")
         if isvalid(overlay) then overlay:SetEnable(true) end
         self._T.open = true
@@ -772,14 +776,6 @@ script FactionWarMapUI extends Logic
     end
 
     @ExecSpace("ClientOnly")
-    method Color OwnerColor(string owner)
-        -- Faction colour shared by the districts, crests and bars. Until the relative stance colours (#130) it still follows the faction, not the viewer.
-        if owner == "A" then return self.FactionAColor end
-        if owner == "B" then return self.FactionBColor end
-        return self.NeutralColor
-    end
-
-    @ExecSpace("ClientOnly")
     method string OwnerName(string owner)
         -- The faction as players read it.
         return _FactionWarTownDocument:FactionName(owner)
@@ -845,7 +841,7 @@ script FactionWarMapUI extends Logic
     @ExecSpace("ClientOnly")
     method void ShowTown(table town)
         -- One town on the map and in the side list.
-        local color = self:OwnerColor(town.owner)
+        local color = _FactionWarUI:TownColor(self._T.faction, town.owner)
         local known = _FactionWarTownDocument:IsFaction(town.owner)
         -- In target selection only the towns the server listed can be picked; the rest (own towns, far enemies, the departure town) are dimmed.
         local state = self:CrestState(town.id)
@@ -922,17 +918,29 @@ script FactionWarMapUI extends Logic
     end
 
     @ExecSpace("ClientOnly")
+    method void ReceiveViewFaction(string faction)
+        -- A view reply must not replace the faction from a newer NPC selection or a closed window.
+        if self._T.open and self._T.mode == "view" then self:ShowFaction(faction) end
+    end
+
+    @ExecSpace("ClientOnly")
     method void ShowFaction(string faction)
-        -- The player's own faction at the top of the side panel.
-        local label = self:Ui("Overlay/Window/Side/Faction")
-        if not isvalid(label) then return end
-        local text = "尚未加入陣營"
+        -- Save the viewer's stance and repaint if the board beat its faction reply. The identity line itself is always gold.
         local isFaction = _FactionWarTownDocument:IsFaction(faction)
-        if isFaction then text = self:OwnerName(faction)
-        elseif faction == "UNREADABLE" then text = "讀取失敗" end
-        label.TextGUIRendererComponent.Text = text
-        label.TextGUIRendererComponent.FontColor = isFaction and self:OwnerColor(faction) or Color(0.93, 0.78, 0.56, 1)
-        log("[VRF][FactionWarMap] ui faction=" .. faction)
+        local nextFaction = isFaction and faction or ""
+        local changed = self._T.faction ~= nextFaction
+        self._T.faction = nextFaction
+        local label = self:Ui("Overlay/Window/Side/Faction")
+        if isvalid(label) then
+            local text = "尚未加入陣營"
+            if isFaction then text = self:OwnerName(faction)
+            elseif faction == "UNREADABLE" then text = "讀取失敗"
+            elseif faction == "LOADING" then text = "讀取中…" end
+            label.TextGUIRendererComponent.Text = text
+            label.TextGUIRendererComponent.FontColor = self.FactionLabelColor
+        end
+        if changed and self._T.open and self._T.board ~= nil then self:Render() end
+        if faction ~= "LOADING" then log("[VRF][FactionWarMap] ui faction=" .. faction) end
     end
 
     @ExecSpace("ClientOnly")

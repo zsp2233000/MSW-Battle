@@ -13,6 +13,7 @@ const load = (name, folder = 'Formations') => read(`../RootDesk/MyDesk/${folder}
     `function _${name}:${method}(${params.replace(/\b\w+ (\w+)/g, '$1')})`)
   .replace(/\nend\s*$/, '\n');
 process.stdout.write(`local ok, failure = xpcall(function()
+Color = function(r, g, b, a) return { r = r, g = g, b = b, a = a } end
 ${['FactionWarTownDocument', 'FactionWarUI'].map(name => load(name)).join('\n')}
 do\n${read('faction_choice_rules.lua')}\nend
 end, debug.traceback)

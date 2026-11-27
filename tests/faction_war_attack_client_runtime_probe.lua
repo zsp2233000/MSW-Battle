@@ -20,10 +20,10 @@ local ok, reason = pcall(function()
     local button = ui:Ui("SiegePanel/Cancel")
     -- The card asks the server for the board by itself as soon as it shows; let that answer arrive before the synthetic boards.
     for _ = 1, 50 do
-        if ui._T.siegeStrengths ~= nil then break end
+        if ui._T.siegeTowns ~= nil then break end
         wait(0.1)
     end
-    assert(ui._T.siegeShown and ui._T.siegeStrengths ~= nil, "the card asked for the board and the server answered")
+    assert(ui._T.siegeShown and ui._T.siegeTowns ~= nil, "the card asked for the board and the server answered")
     ui:ShowSiegeBoard({ { id = town, owner = "A", strength = 80 }, { id = "yancheng", owner = "B", strength = 100 } })
     ui:RenderSiege(town)
     assert(bar.Enable and string.match(text("SiegePanel/Status"), "^配對中 · 倒數 %d+ 秒$"), "siege panel uses the real deadline: " .. text("SiegePanel/Status"))

@@ -30,9 +30,14 @@ local ok, reason = pcall(function()
     assert(text("Overlay/Window/Side/Rows/gushan/Value") == "70/100", "side row value")
     assert(text("Overlay/Window/Side/Rows/nanzih/Owner") == "A 方・主城", "capital row owner: " .. text("Overlay/Window/Side/Rows/nanzih/Owner"))
     assert(ui:Ui("Overlay/Window/Map/Content/Towns/nanzih/Capital").Enable and not ui:Ui("Overlay/Window/Map/Content/Towns/zuoying/Capital").Enable, "capital tags")
-    local red = ui:Ui("Overlay/Window/Map/Content/Districts/zuoying").SpriteGUIRendererComponent.Color
-    local blue = ui:Ui("Overlay/Window/Map/Content/Districts/gushan").SpriteGUIRendererComponent.Color
-    assert(red.r > red.b and blue.b > blue.r and math.abs(red.a - ui.DistrictAlpha) < 0.01, "districts tinted by owner")
+    assert(await(function() return text("Overlay/Window/Side/Faction") ~= "讀取中…" end, 5), "faction answered")
+    local faction = ui._T.faction
+    for id, owner in pairs({ zuoying = "A", gushan = "B" }) do
+        local actual = ui:Ui("Overlay/Window/Map/Content/Districts/" .. id).SpriteGUIRendererComponent.Color
+        local expected = _FactionWarUI:TownColor(faction, owner)
+        assert(math.abs(actual.r - expected.r) < 0.01 and math.abs(actual.b - expected.b) < 0.01
+            and math.abs(actual.a - ui.DistrictAlpha) < 0.01, "district tinted by the viewer's stance: " .. id)
+    end
     local fill = ui:Ui("Overlay/Window/Side/Rows/zuoying/Bar/Fill").UITransformComponent.RectSize.x
     assert(math.abs(fill - ui.BarWidth * 0.8) < 0.5, "bar width follows strength: " .. tostring(fill))
     for slot = 1, 3 do
@@ -59,7 +64,6 @@ local ok, reason = pcall(function()
     assert(frames > 4, "the arrow keeps animating past one pass: " .. tostring(frames) .. " frame changes in 4 s")
     assert(distinct >= 3, "the arrow bobs: " .. tostring(distinct) .. " heights seen")
     log("[VRF][MapProbe] arrow frames in 4 s=" .. tostring(frames) .. " heights=" .. tostring(distinct))
-    assert(await(function() return text("Overlay/Window/Side/Faction") ~= "讀取中…" end, 5), "faction answered")
     log("[VRF][MapProbe] CLIENT1 PASS here=" .. here .. " faction=" .. text("Overlay/Window/Side/Faction"))
 
     -- 2. A board change is pushed while the map is open; the town HUD follows the current town.

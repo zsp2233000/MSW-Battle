@@ -16,7 +16,7 @@ const load = (name, folder = 'Formations') => read(`../RootDesk/MyDesk/${folder}
   .replace(/\nend\s*$/, '\n');
 process.stdout.write(`local ok, failure = xpcall(function()
 Color = function(r, g, b, a) return { r = r, g = g, b = b, a = a } end
-${['FactionWarTownDocument', 'FactionWarAttack', 'FactionWarMap', 'FactionWarMapUI', 'FactionWarNpc', 'FactionWarLobbyNpc'].map(name => load(name)).join('\n')}
+${['FactionWarTownDocument', 'FactionWarAttack', 'FactionWarMap', 'FactionWarMapUI', 'FactionWarUI', 'FactionWarNpc', 'FactionWarLobbyNpc'].map(name => load(name)).join('\n')}
 do\n${read('target_select_rules.lua')}\nend
 end, debug.traceback)
 if not ok then io.stderr:write(failure, "\\n"); os.exit(1) end\n`);

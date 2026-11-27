@@ -13,6 +13,8 @@ const load = (name, folder = 'Formations') => read(`../RootDesk/MyDesk/${folder}
     `function _${name}:${method}(${params.replace(/\b\w+ (\w+)/g, '$1')})`)
   .replace(/\nend\s*$/, '\n');
 process.stdout.write(`local ok, failure = xpcall(function()
+Color = function(r, g, b, a) return { r = r, g = g, b = b, a = a } end
+Vector2 = function(x, y) return { x = x, y = y } end
 ${['FactionWarTownDocument', 'FactionWarMap', 'FactionWarTeam', 'FactionWarUI'].map(name => load(name)).concat(load('MatchFlowState', 'Matchmaking')).join('\n')}
 do\n${read('siege_panels_rules.lua')}\nend
 end, debug.traceback)

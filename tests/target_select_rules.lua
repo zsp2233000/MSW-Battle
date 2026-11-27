@@ -78,7 +78,7 @@ check(answer.header.town == "zuoying" and answer.header.strength == 100 and answ
 check(#answer.targets == 1 and answer.targets[1].town == "gushan", "the targets are the server's list")
 check(#answer.board.towns == 4 and answer.board.towns[1].id == "nanzih" and answer.board.towns[3].strength == 55 and answer.board.towns[1].capital == true, "the board: every town with owner, strength and capital flag")
 check(#answer.board.links == 3 and answer.board.links[1].a == "nanzih" and answer.board.links[1].b == "zuoying" and answer.board.links[3].b == "yancheng", "the links are the authored gates")
-check(map._T.viewers["red-user"] == red and next(map._T.siegeViewers) == nil, "a READY player is a map viewer, nothing else")
+check(map._T.viewers["red-user"] ~= nil and next(map._T.siegeViewers) == nil, "a READY player is a map viewer, nothing else")
 check(attack._T.reading["red-user"] == nil, "the read is released")
 
 -- Every other status answers with the status alone: no targets, no board, no viewer, no map.
@@ -159,7 +159,7 @@ check(map._T.viewers["red-user"] == nil and #mapSent == 0, "a player who left th
 players["red-user"].CurrentMapName = "zuoying"
 map:WatchMap("red-user", red)
 map:WatchMap("stranger", { CurrentMapName = "zuoying", PlayerComponent = {} })
-check(map._T.viewers["red-user"] == red and map._T.viewers["stranger"] == nil, "WatchMap registers only a player the server knows, in a town")
+check(map._T.viewers["red-user"] ~= nil and map._T.viewers["stranger"] == nil, "WatchMap registers only a player the server knows, in a town")
 map:HandleUserLeaveEvent({ UserId = "red-user" })
 check(next(map._T.viewers) == nil, "leaving the room ends it")
 freshMap()
@@ -209,7 +209,8 @@ _InputService.GetCursorPosition = function() return Vector2(0, 0) end
 _EntityService = { GetEntityByPath = function(_, path) return node((string.gsub(path, "^/ui/WorldMapGroup/", ""))) end }
 _UserService.LocalPlayer = { CurrentMapName = "zuoying" }
 _FormationLobby = { IsTownPanelOpen = function() return false end }
-_FactionWarUI = { HighlightedTownName = function(_, town) return "<c>" .. doc.TownNames[town] .. "</c>" end, ShowTownStatus = function() end }
+function _FactionWarUI:HighlightedTownName(town) return "<c>" .. doc.TownNames[town] .. "</c>" end
+function _FactionWarUI:ShowTownStatus() end
 local calls
 local function fresh()
     nodes = {}

@@ -28,6 +28,8 @@ Roadmap 原本把「國戰大地圖」放在 Backlog，呈現與操作形式待�
 
 補記（#128 與 #129 合併）：兩張票共用 `CrestState`。`ShowNothingToPick` 把可選清單設為空，所以出發城失守或沒有目標時，每個城徽都是 `dimmed`（城徽、地區變暗、不顯示 `Mark`，點了沒反應），與列上的遮罩一致；選取中的目標失效時 `SetMode` 丟掉選取，`Frame` 隨確認視窗一起消失，不論當初是點列還是點城徽選的。
 
+補記（#130）：地圖的查看模式與攻城面板訂閱都各自回覆玩家自己的陣營，分別走 `ReceiveFaction` 與 `ReceiveSiegeFaction`；戰況不等陣營讀完才回覆，後續推送也不重讀陣營。選目標模式沿用 `RequestSelect` 回覆的陣營。客戶端在各自的畫面保存陣營，`FactionWarUI:TownColor` 統一判斷立場：我方藍、敵方紅，未讀到或沒有陣營時用灰。城徽、區塊、城鎮列和攻城面板的兵力條都用此規則；「你的陣營」仍以金色顯示 A 方或 B 方，圖例改為「我方／敵方」。
+
 ## 決定三：戰果寫入後發事件，有觀看者的房間才重讀
 
 `FactionWarAttack:Finish` 在 `SAVED` 或 `DUPLICATE` 時呼叫 `FactionWarMap:AnnounceChange`：

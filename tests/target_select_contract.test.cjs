@@ -113,7 +113,7 @@ test('the attack panel, its request and the panel viewers are gone; the viewers 
   assert.match(text, /self\._T\.siegeViewers = \{\}/);
   assert.equal((text.match(/self\._T\.\w*[vV]iewers = \{\}/g) || []).length, 2, 'two kinds of viewer: the map and the siege panel');
   assert.match(annotation(text, 'WatchMap'), /@ExecSpace\("ServerOnly"\)/, 'a script can register a viewer, a client cannot');
-  assert.match(body(text, 'WatchMap'), /self:Watching\(userId, player\)[^]*self\._T\.viewers\[userId\] = player/, 'only a player standing in a town, as the server knows them');
+  assert.match(body(text, 'WatchMap'), /self:Watching\(userId, player\)[^]*self\._T\.viewers\[userId\] = \{ player = player \}/, 'only a player standing in a town, as the server knows them');
   assert.doesNotMatch(body(text, 'WatchMap'), /Refresh|Read\(/, 'it adds no read: the reply already carries the board');
   assert.match(body(text, 'BoardChanged'), /next\(self\._T\.viewers\) == nil and next\(self\._T\.siegeViewers\) == nil/, 'a room with neither kind reads nothing');
 });

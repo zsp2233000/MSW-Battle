@@ -30,19 +30,32 @@ _FactionWar = {
     ReadFaction = function(_, profile, complete) complete(factions[profile]) end,
 }
 
+-- #130: identical town ownership, opposite perspectives; unknown/missing ownership is grey.
+local function tint(faction, owner)
+    local color = ui:TownColor(faction, owner)
+    return string.format("%.2f/%.2f/%.2f", color.r, color.g, color.b)
+end
+check(tint("A", "A") == "0.27/0.50/0.88" and tint("A", "B") == "0.84/0.29/0.24", "A sees its own towns blue and B's towns red")
+check(tint("B", "A") == "0.84/0.29/0.24" and tint("B", "B") == "0.27/0.50/0.88", "B sees the same board in opposite colours")
+for _, unknown in ipairs({ "", "UNREADABLE" }) do
+    check(tint(unknown, "A") == "0.62/0.60/0.56" and tint(unknown, "B") == "0.62/0.60/0.56", "an unknown or unaligned viewer sees grey")
+end
+check(tint("A", "") == "0.62/0.60/0.56", "unknown town ownership is grey even for a known viewer")
+
 local red = player("red-user", "red", "zuoying")
 local blue = player("blue-user", "blue", "gushan")
 -- The world map's viewers (the siege panel is a kind of its own, below). The target selection that registers a map viewer is in target_select_rules.lua (#124).
-local mapSent = {}
+local mapSent, mapFactions, siegeFactions = {}, {}, {}
 function map:ReceiveBoard(towns, links, userId) table.insert(mapSent, userId) end
-function map:ReceiveFaction() end
+function map:ReceiveFaction(faction, userId) table.insert(mapFactions, { faction = faction, userId = userId }) end
+function map:ReceiveSiegeFaction(faction, userId) table.insert(siegeFactions, { faction = faction, userId = userId }) end
 function map:ReceiveUnavailable() end
 local function freshMap()
     map._T = { viewers = {}, siegeViewers = {}, waiting = {}, reading = false, readStarted = 0, inflight = {}, again = false, signature = "", links = nil }
     mapSent = {}
 end
 freshMap()
-map._T.viewers["red-user"] = red
+map:WatchMap("red-user", red)
 board.gushan.strength = 45
 map:BoardChanged("room")
 check(#mapSent == 1 and mapSent[1] == "red-user", "a map viewer still gets the map board")
@@ -131,7 +144,8 @@ senderUserId = "red-user"
 reads = 0
 board.gushan.strength = 55
 map:RequestSiegeOpen()
-check(map._T.siegeViewers["red-user"] == players["red-user"] and next(map._T.viewers) == nil, "the siege viewer is its own kind")
+check(next(map._T.siegeViewers) ~= nil and next(map._T.viewers) == nil, "the siege viewer is its own kind")
+check(#siegeFactions == 1 and siegeFactions[1].faction == "A" and siegeFactions[1].userId == "red-user" and #mapFactions == 0, "the siege subscription answers with the sender's own faction only")
 check(reads == 1 and #siegeSent == 1 and siegeSent[1].userId == "red-user" and #mapSent == 0, "opening reads the board once and answers the opener alone")
 local seen = {}
 for _, town in ipairs(siegeSent[1].towns) do seen[town.id] = town end
@@ -158,6 +172,26 @@ freshMap()
 reads = 0
 map:BoardChanged("room")
 check(reads == 0, "nobody looking at all means nothing to read")
+
+-- A delayed response from an earlier opening must not overwrite a newer subscription.
+local pendingReads = {}
+_FactionWar.ReadFaction = function(_, profile, complete) table.insert(pendingReads, complete) end
+senderUserId = "blue-user"
+map:RequestOpen()
+map:RequestClose()
+map:RequestOpen()
+pendingReads[2]("B")
+pendingReads[1](nil)
+check(#mapFactions == 1 and mapFactions[1].faction == "B" and mapFactions[1].userId == "blue-user", "only the latest map reply reaches B")
+siegeFactions = {}
+map:RequestSiegeOpen()
+map:RequestSiegeClose()
+pendingReads[3]("B")
+check(#siegeFactions == 0, "a closed siege subscription gets no late faction reply")
+map:RequestSiegeOpen()
+pendingReads[4]("")
+check(#siegeFactions == 1 and siegeFactions[1].faction == "" and siegeFactions[1].userId == "blue-user", "no faction is an explicit unaligned reply")
+
 -- #123: what the siege card says, from the same pre-battle rules as the lobby.
 local clock = 500000
 local function queued(fields)
@@ -168,7 +202,9 @@ local function queued(fields)
 end
 local figures = { zuoying = 80, gushan = 55 }
 local function card(fields, strengths, pendingAction)
-    return ui:SiegeView(queued(fields), { origin = "zuoying", now = clock, strengths = strengths or figures, pendingAction = pendingAction })
+    local towns = {}
+    for id, strength in pairs(strengths or figures) do towns[id] = { strength = strength } end
+    return ui:SiegeView(queued(fields), { origin = "zuoying", now = clock, towns = towns, pendingAction = pendingAction })
 end
 local queuing = card()
 check(queuing.origin == "<c>左營</c> 兵力 80" and queuing.target == "<c>鼓山</c> 兵力 55", "line one: each town with its strength")
@@ -194,18 +230,18 @@ for _, shown in ipairs({ queuing, fired, matched, failed, cancelling, waiting, c
 end
 
 -- #123: the card keeps the board it heard, and forgets it when it hides.
-ui._T.siegeStrengths = nil
+ui._T.siegeTowns = nil
 ui._T.siegeShown = false
 ui:ShowSiegeBoard({ { id = "zuoying", owner = "A", strength = 70 }, { id = "gushan", owner = "B", strength = 40 } })
-check(ui._T.siegeStrengths == nil, "a board that arrives after the card hid is stale")
+check(ui._T.siegeTowns == nil, "a board that arrives after the card hid is stale")
 ui._T.siegeShown = true
 ui:ShowSiegeBoard({ { id = "zuoying", owner = "A", strength = 70 }, { id = "gushan", owner = "B", strength = 40 } })
-check(ui._T.siegeStrengths.zuoying == 70 and ui._T.siegeStrengths.gushan == 40, "a pushed board is kept by town")
+check(ui._T.siegeTowns.zuoying.strength == 70 and ui._T.siegeTowns.gushan.owner == "B", "a pushed board keeps strength and owner by town")
 -- Following: ask when the card starts to show, again only while nothing has arrived, tell the server when it hides.
 local asks, closes = 0, 0
 _FactionWarMap = { RequestSiegeOpen = function() asks = asks + 1 end, RequestSiegeClose = function() closes = closes + 1 end }
 DateTime.UtcNow.Elapsed = 1000000
-ui._T.siegeShown, ui._T.siegeStrengths, ui._T.siegeAsked, ui._T.shownText = false, nil, 0, {}
+ui._T.siegeShown, ui._T.siegeTowns, ui._T.siegeAsked, ui._T.shownText = false, nil, 0, {}
 ui:FollowSiege(true)
 check(asks == 1 and ui._T.siegeShown, "showing the card asks the server for the board")
 ui:FollowSiege(true)
@@ -213,12 +249,12 @@ check(asks == 1, "once is enough while it is within ten seconds")
 DateTime.UtcNow.Elapsed = 1011000
 ui:FollowSiege(true)
 check(asks == 2, "no strength heard after ten seconds: ask again")
-ui._T.siegeStrengths = { zuoying = 80 }
+ui._T.siegeTowns = { zuoying = { strength = 80 } }
 DateTime.UtcNow.Elapsed = 1030000
 ui:FollowSiege(true)
 check(asks == 2, "a heard board needs no new ask")
 ui:FollowSiege(false)
-check(closes == 1 and not ui._T.siegeShown and ui._T.siegeStrengths == nil, "hiding the card ends the push and forgets the numbers")
+check(closes == 1 and not ui._T.siegeShown and ui._T.siegeTowns == nil, "hiding the card ends the push and forgets the numbers")
 ui:FollowSiege(false)
 check(closes == 1, "hiding twice tells the server once")
 
@@ -227,6 +263,8 @@ local nodes = {}
 local function fakeNode(path)
     if nodes[path] == nil then
         local entry = { Enable = false, writes = 0, ButtonComponent = { Enable = false }, SetEnable = function(self, value) self.Enable = value end }
+        entry.UITransformComponent = { RectSize = { x = 220, y = 10 } }
+        entry.SpriteGUIRendererComponent = {}
         local store = { Text = "" }
         entry.TextGUIRendererComponent = setmetatable({}, { __index = store, __newindex = function(_, key, value)
             if key == "Text" then entry.writes = entry.writes + 1 end
@@ -251,6 +289,18 @@ ui:RenderSiege("zuoying")
 local siege, cancel = fakeNode("SiegePanel"), fakeNode("SiegePanel/Cancel")
 check(siege.Enable and asks == 1, "a war pairing in a town shows the card and asks for the board")
 check(fakeNode("SiegePanel/Status").TextGUIRendererComponent.Text == "配對中 · 倒數 2 秒" and cancel.Enable and cancel.ButtonComponent.Enable, "the words and the button")
+local originFill, targetFill = fakeNode("SiegePanel/OriginBar/Fill"), fakeNode("SiegePanel/TargetBar/Fill")
+check(not originFill.Enable and not targetFill.Enable, "unknown strengths have no fill")
+ui:ShowSiegeBoard({ { id = "zuoying", strength = 70, owner = "A" }, { id = "gushan", strength = 40, owner = "B" } })
+ui:RenderSiege("zuoying")
+check(originFill.Enable and math.abs(originFill.UITransformComponent.RectSize.x - 154) < 0.01 and originFill.SpriteGUIRendererComponent.Color.r == 0.62
+    and targetFill.SpriteGUIRendererComponent.Color.r == 0.62, "board before faction paints both strengths grey")
+ui:ShowSiegeFaction("B")
+ui:RenderSiege("zuoying")
+check(originFill.SpriteGUIRendererComponent.Color.r == 0.84 and targetFill.SpriteGUIRendererComponent.Color.b == 0.88, "late faction repaints both siege bars")
+ui:ShowSiegeBoard({ { id = "zuoying", strength = 100, owner = "B" }, { id = "gushan", strength = 40, owner = "B" } })
+ui:RenderSiege("zuoying")
+check(originFill.UITransformComponent.RectSize.x == 220 and originFill.SpriteGUIRendererComponent.Color.b == 0.88, "a push follows changed strength and ownership")
 local writes = fakeNode("SiegePanel/Status").writes
 ui:RenderSiege("zuoying")
 check(fakeNode("SiegePanel/Status").writes == writes and asks == 1, "an unchanged frame writes nothing and asks nothing")

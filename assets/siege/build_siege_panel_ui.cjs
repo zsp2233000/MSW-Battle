@@ -5,7 +5,7 @@
 // Nothing else in the group is rebuilt: Maker imports a rebuilt subtree one level per refresh (tests/README.md, #117), so the
 // team preview and the rest keep their entities.
 //
-//   node assets/siege/build_siege_panel_ui.cjs
+//   node assets/siege/build_siege_panel_ui.cjs [--strength-bars-only]
 //
 // FactionWarUI.mlua finds every entity by path under /ui/FactionWarGroup and writes SiegePanel/Origin, Target, Status and the text of
 // SiegePanel/Cancel; the versus mark never changes.
@@ -24,8 +24,25 @@ const GOLD = '#EEC78F';
 const BROWN_PANEL = { r: 0.12, g: 0.075, b: 0.04, a: 0.9 };
 
 const CARD = [820, 170];
+const GAUGE = 'f0911af597259044aa624a11332c0595'; // same sliced fill as the world map
+const NEUTRAL = { r: 0.62, g: 0.6, b: 0.56, a: 1 };
+
+function addStrengthBars(b) {
+  for (const [side, x, labelX] of [['Origin', -155, -225], ['Target', 155, 225]]) {
+    b.patch(`SiegePanel/${side}`, { pos: [labelX, -10] });
+    const bar = `SiegePanel/${side}Bar`;
+    b.sprite(bar, { anchor: 'top-center', pos: [x, -56], rect_size: [220, 10], color: '#211A16', sprite_type: 1 });
+    b.sprite(`${bar}/Fill`, { anchor: 'middle-left', pivot: [0, 0.5], pos: [0, 0], rect_size: [220, 10],
+      image_ruid: GAUGE, color: NEUTRAL, sprite_type: 1, enable: false });
+  }
+}
 
 const b = UIBuilder.load(uiFile);
+if (process.argv.includes('--strength-bars-only')) {
+  addStrengthBars(b);
+  b.write(uiFile, { lint_verbose: true });
+  process.exit(0);
+}
 for (const gone of ['QueueBar', 'SiegePanel']) if (b.find(gone)) b.remove(gone);
 
 // A card at the top centre, under the town HUD and its notice. The first line is "<departure town> <strength> <versus> <target town> <strength>",
@@ -50,6 +67,7 @@ b.patchComponent('SiegePanel/Cancel', 'MOD.Core.ButtonComponent', {
   },
 });
 b.patchComponent('SiegePanel/Cancel', 'MOD.Core.TextGUIRendererComponent', { OutlineColor: OUTLINE.outline_color, OutlineWidth: 0.2, FaceDilate: 0.2, FontStyle: 1 });
+addStrengthBars(b);
 
 // Sibling order is render order, and Maker takes it from the order of the entities in the file (the displayOrder numbers alone did not
 // change it: the card stayed on top of the dialogs). The card was appended last, so its subtree moves to just before the first dialog

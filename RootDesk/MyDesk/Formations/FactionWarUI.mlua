@@ -3,6 +3,18 @@ script FactionWarUI extends Logic
 
     -- Cardgame cyan; use this same highlight for runtime town names on all war UI.
     property string TownNameHighlightHex = "#4DFEE7"
+    property Color AllyTownColor = Color(0.27, 0.5, 0.88, 1)
+    property Color EnemyTownColor = Color(0.84, 0.29, 0.24, 1)
+    property Color NeutralTownColor = Color(0.62, 0.6, 0.56, 1)
+
+    @ExecSpace("ClientOnly")
+    method Color TownColor(string faction, string owner)
+        -- Both the map and the siege panel tint towns from the local viewer's perspective.
+        if not _FactionWarTownDocument:IsFaction(faction) or not _FactionWarTownDocument:IsFaction(owner) then
+            return self.NeutralTownColor
+        end
+        return owner == faction and self.AllyTownColor or self.EnemyTownColor
+    end
 
     @ExecSpace("ClientOnly")
     method string HighlightedTownName(string town)
@@ -17,6 +29,7 @@ script FactionWarUI extends Logic
 
     @ExecSpace("ClientOnly")
     method void OnBeginPlay()
+        -- Initialize the local HUD, faction choice and siege panel state.
         self._T.bindings = {}
         self._T.mapName = ""
         self._T.pending = false
@@ -26,7 +39,9 @@ script FactionWarUI extends Logic
         self._T.siegeSequence = 0
         self._T.siegePendingAction = ""
         self._T.siegeShown = false
-        self._T.siegeStrengths = nil
+        self._T.siegeTowns = nil
+        self._T.siegeFaction = nil
+        self._T.siegeBars = nil
         self._T.siegeAsked = 0
         self._T.shownText = {}
         log("[VRF][WarUI] siege panel ready")
@@ -227,11 +242,13 @@ script FactionWarUI extends Logic
     @ExecSpace("ClientOnly")
     method table SiegeView(table snapshot, table context)
         -- The whole card from one pre-battle snapshot: both towns with their strengths on the first line, the lobby's status and
-        -- button below. context = { origin, now (ms), strengths (town -> number), pendingAction }. Nothing here says who the opponent is.
+        -- button below. context = { origin, now (ms), towns (by id), pendingAction }. Nothing here says who the opponent is.
         local pending = context.pendingAction or ""
         local match = _MatchFlowState:PresentMatch(snapshot, { now = context.now, pending = pending ~= "", pendingAction = pending })
-        local strengths = context.strengths or {}
-        return { origin = self:SiegeTown(context.origin, strengths[context.origin]), target = self:SiegeTown(snapshot.target, strengths[snapshot.target]),
+        local towns = context.towns or {}
+        local origin, target = towns[context.origin], towns[snapshot.target]
+        return { origin = self:SiegeTown(context.origin, origin and origin.strength), target = self:SiegeTown(snapshot.target, target and target.strength),
+            originTown = origin, targetTown = target, originId = context.origin, targetId = snapshot.target,
             status = match.text, label = match.label, action = match.action, enabled = match.enabled }
     end
 
@@ -241,18 +258,49 @@ script FactionWarUI extends Logic
         -- own pending command, and the board heard so far.
         local sameObservation = self._T.siegeSequenceKey == snapshot.sequenceKey and self._T.siegeSequence == snapshot.sequence
         local origin = (snapshot.origin or "") ~= "" and snapshot.origin or map
-        return self:SiegeView(snapshot, { origin = origin, now = DateTime.UtcNow.Elapsed, strengths = self._T.siegeStrengths,
+        return self:SiegeView(snapshot, { origin = origin, now = DateTime.UtcNow.Elapsed, towns = self._T.siegeTowns,
             pendingAction = sameObservation and self._T.siegePendingAction or "" })
     end
 
     @ExecSpace("ClientOnly")
     method void ShowSiegeBoard(table towns)
-        -- A pushed board while the card shows: the strengths follow at once. One that arrives after the card hid is stale and ignored.
+        -- Save both owner and strength so a board or a late faction reply can repaint the same bars.
         if not self._T.siegeShown then return end
-        local strengths = {}
-        for _, entry in ipairs(towns) do strengths[entry.id] = entry.strength end
-        self._T.siegeStrengths = strengths
-        log("[VRF][WarUI] siege board strengths=" .. tostring(#towns))
+        local byId = {}
+        for _, entry in ipairs(towns) do byId[entry.id] = entry end
+        self._T.siegeTowns = byId
+        self._T.siegeBars = nil
+        log("[VRF][WarUI] siege board towns=" .. tostring(#towns))
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ShowSiegeFaction(string faction)
+        -- Save the local faction for this subscription; no faction or a failed read leaves the bars grey.
+        if not self._T.siegeShown then return end
+        self._T.siegeFaction = faction
+        self._T.siegeBars = nil
+        log("[VRF][WarUI] siege faction=" .. faction)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void PaintSiegeBar(string path, any town)
+        -- Resize the sliced fill from its left edge; unknown strength has no fill, but known strengths can already be shown in grey.
+        local bar, fill = self:Ui(path), self:Ui(path .. "/Fill")
+        if not isvalid(bar) or not isvalid(fill) then return end
+        local ratio = town and math.max(0, math.min(1, town.strength / _FactionWarTownDocument.FullStrength)) or 0
+        fill:SetEnable(ratio > 0)
+        fill.UITransformComponent.RectSize = Vector2(bar.UITransformComponent.RectSize.x * ratio, fill.UITransformComponent.RectSize.y)
+        fill.SpriteGUIRendererComponent.Color = self:TownColor(self._T.siegeFaction or "", town and town.owner or "")
+    end
+
+    @ExecSpace("ClientOnly")
+    method void PaintSiegeBars(table view)
+        -- The card renders every frame, but its bars only change with the town pair, board, or faction.
+        local painted = self._T.siegeBars
+        if painted ~= nil and painted.origin == view.originId and painted.target == view.targetId then return end
+        self:PaintSiegeBar("SiegePanel/OriginBar", view.originTown)
+        self:PaintSiegeBar("SiegePanel/TargetBar", view.targetTown)
+        self._T.siegeBars = { origin = view.originId, target = view.targetId }
     end
 
     @ExecSpace("ClientOnly")
@@ -260,14 +308,16 @@ script FactionWarUI extends Logic
         -- Ask the server for the board when the card starts to show (again every 10 s while no strength has arrived); tell it when the card hides.
         if shown then
             local now = DateTime.UtcNow.Elapsed
-            if not self._T.siegeShown or (self._T.siegeStrengths == nil and now - self._T.siegeAsked >= 10000) then
+            if not self._T.siegeShown or (self._T.siegeTowns == nil and now - self._T.siegeAsked >= 10000) then
                 self._T.siegeShown = true
                 self._T.siegeAsked = now
                 _FactionWarMap:RequestSiegeOpen()
             end
         elseif self._T.siegeShown then
             self._T.siegeShown = false
-            self._T.siegeStrengths = nil
+            self._T.siegeTowns = nil
+            self._T.siegeFaction = nil
+            self._T.siegeBars = nil
             _FactionWarMap:RequestSiegeClose()
         end
     end
@@ -312,6 +362,7 @@ script FactionWarUI extends Logic
         self:SetTextIfChanged("SiegePanel/Origin", view.origin)
         self:SetTextIfChanged("SiegePanel/Target", view.target)
         self:SetTextIfChanged("SiegePanel/Status", view.status)
+        self:PaintSiegeBars(view)
         local button = self:Ui("SiegePanel/Cancel")
         if isvalid(button) then
             button:SetEnable(view.action ~= "")

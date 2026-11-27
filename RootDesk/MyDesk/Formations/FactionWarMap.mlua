@@ -7,7 +7,7 @@ script FactionWarMap extends Logic
     method void OnBeginPlay()
         -- The players looking at the world map in this room (opened as a view or from the NPC's target selection), and the one board read that answers them.
         self._T.viewers = {}
-        -- #123: players with the siege panel showing follow the board too, as a kind of their own; they get the strengths only, never the map's links or faction.
+        -- The siege panel has its own subscribers and does not need the map's links.
         self._T.siegeViewers = {}
         self._T.waiting = {}
         self._T.reading = false
@@ -34,21 +34,30 @@ script FactionWarMap extends Logic
             self:ReceiveUnavailable("NOT_IN_TOWN", userId)
             return
         end
-        self._T.viewers[userId] = player
         log("[VRF][FactionWarMap] open user=" .. userId .. " town=" .. player.CurrentMapName)
-        _FactionWar:ReadFaction(player.PlayerComponent.ProfileCode, function(faction)
-            if self._T.viewers[userId] ~= player then return end
-            -- "" is no faction chosen yet; a failed read is told apart from it.
-            self:ReceiveFaction(faction == nil and "UNREADABLE" or faction, userId)
-        end)
+        self:ReadViewerFaction(self._T.viewers, userId, player, false)
         self:Refresh(userId)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void ReadViewerFaction(table viewers, string userId, Entity player, boolean siege)
+        -- Reply independently of the board read. A fresh record makes an earlier open/close cycle's callback stale.
+        local subscription = { player = player }
+        viewers[userId] = subscription
+        _FactionWar:ReadFaction(player.PlayerComponent.ProfileCode, function(faction)
+            if viewers[userId] ~= subscription or not self:Watching(userId, player) then return end
+            -- "" means no faction was chosen; nil means the read failed.
+            local reply = faction == nil and "UNREADABLE" or faction
+            if siege then self:ReceiveSiegeFaction(reply, userId)
+            else self:ReceiveFaction(reply, userId) end
+        end)
     end
 
     @ExecSpace("ServerOnly")
     method void WatchMap(string userId, any player)
         -- The target selection was just answered with the board and links from a read, so it only needs the changes that come after; this adds no read.
         if not self:Watching(userId, player) then return end
-        self._T.viewers[userId] = player
+        self._T.viewers[userId] = { player = player }
         log("[VRF][FactionWarMap] select watch user=" .. userId)
     end
 
@@ -57,8 +66,8 @@ script FactionWarMap extends Logic
         -- The siege panel started to show for the sender: follow the board from now on and answer with it as it is. Asking again is harmless.
         local userId = senderUserId
         local player = _UserService:GetUserEntityByUserId(userId)
-        if not self:Watching(userId, player) then return end
-        self._T.siegeViewers[userId] = player
+        if not self:Watching(userId, player) or not isvalid(player.PlayerComponent) then return end
+        self:ReadViewerFaction(self._T.siegeViewers, userId, player, true)
         log("[VRF][FactionWarMap] siege watch user=" .. userId)
         self:Refresh(userId)
     end
@@ -145,8 +154,8 @@ script FactionWarMap extends Logic
     method integer PushSiegeBoard(any board, boolean changed, table answering)
         -- The viewers of the siege panel get owner and strength per town; one who left the town is dropped.
         local sent = 0
-        for userId, player in pairs(self._T.siegeViewers) do
-            if not self:Watching(userId, player) then
+        for userId, subscription in pairs(self._T.siegeViewers) do
+            if not self:Watching(userId, subscription.player) then
                 self._T.siegeViewers[userId] = nil
             elseif board ~= nil and (changed or answering[userId]) then
                 self:ReceiveSiegeBoard(board.towns, userId)
@@ -164,8 +173,8 @@ script FactionWarMap extends Logic
         local changed = board ~= nil and board.signature ~= self._T.signature
         if board ~= nil then self._T.signature = board.signature end
         local sent = self:PushSiegeBoard(board, changed, answering)
-        for userId, player in pairs(self._T.viewers) do
-            if not self:Watching(userId, player) then
+        for userId, subscription in pairs(self._T.viewers) do
+            if not self:Watching(userId, subscription.player) then
                 self._T.viewers[userId] = nil
             elseif board == nil then
                 if answering[userId] then self:ReceiveUnavailable("UNREADABLE", userId) end
@@ -228,6 +237,12 @@ script FactionWarMap extends Logic
     end
 
     @ExecSpace("Client")
+    method void ReceiveSiegeFaction(string faction)
+        -- The subscriber's faction, sent only to that client when the siege panel subscribes.
+        _FactionWarUI:ShowSiegeFaction(faction)
+    end
+
+    @ExecSpace("Client")
     method void ReceiveBoard(table towns, table links)
         -- The board for this client's open map.
         _FactionWarMapUI:ShowBoard(towns, links)
@@ -235,8 +250,8 @@ script FactionWarMap extends Logic
 
     @ExecSpace("Client")
     method void ReceiveFaction(string faction)
-        -- A, B, "" (none yet) or UNREADABLE.
-        _FactionWarMapUI:ShowFaction(faction)
+        -- A, B, "" (none yet) or UNREADABLE for the map's view mode.
+        _FactionWarMapUI:ReceiveViewFaction(faction)
     end
 
     @ExecSpace("Client")

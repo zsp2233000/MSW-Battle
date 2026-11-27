@@ -19,6 +19,12 @@ test('the siege panel is a Cardgame card at the top centre with both towns, the 
   for (const part of ['Origin', 'Versus', 'Target', 'Status']) {
     assert.ok(war.hasComponent(`SiegePanel/${part}`, 'MOD.Core.TextGUIRendererComponent'), `${part} is a text`);
   }
+  for (const bar of ['OriginBar', 'TargetBar']) {
+    const fill = `SiegePanel/${bar}/Fill`;
+    assert.equal(war.getComponent(fill, 'MOD.Core.SpriteGUIRendererComponent').Type, 1, `${bar} uses a sliced fill`);
+    assert.equal(war.getComponent(fill, 'MOD.Core.UITransformComponent').Pivot.x, 0, `${bar} grows from the left`);
+    assert.equal(war.find(fill).jsonString.enable, false, `${bar} starts empty`);
+  }
   assert.ok(war.hasComponent('SiegePanel/Cancel', 'MOD.Core.ButtonComponent'), 'one button');
   assert.ok(war.hasComponent('SiegePanel/Frame', 'MOD.Core.SpriteGUIRendererComponent'), 'the Cardgame frame');
   const size = war.getComponent('SiegePanel/Cancel', 'MOD.Core.UITransformComponent').RectSize;
@@ -55,7 +61,7 @@ test('the siege panel shows only in a town and only while a war pairing owns the
   assert.match(body(ui, 'RenderSiege'), /self:FollowSiege\(shown\)/, 'the board subscription follows what shows');
 });
 
-test('the siege subscription is a Server RPC that trusts only the sender and never leaks the map links or faction', () => {
+test('the siege subscription trusts only the sender and replies with the board and the subscriber’s own faction', () => {
   const map = source('RootDesk/MyDesk/Formations/FactionWarMap.mlua');
   for (const name of ['RequestSiegeOpen', 'RequestSiegeClose']) {
     assert.match(map, new RegExp(`@ExecSpace\\("Server"\\)\\n    method void ${name}\\(\\)`), `${name} is a Server RPC`);
@@ -63,6 +69,9 @@ test('the siege subscription is a Server RPC that trusts only the sender and nev
   }
   assert.match(map, /@ExecSpace\("Client"\)\n    method void ReceiveSiegeBoard\(table towns\)/, 'the push carries towns only');
   assert.match(body(map, 'ReceiveSiegeBoard'), /_FactionWarUI:ShowSiegeBoard\(towns\)/);
+  assert.match(map, /@ExecSpace\("Client"\)\n    method void ReceiveSiegeFaction\(string faction\)/);
+  assert.match(body(map, 'ReadViewerFaction'), /self:ReceiveSiegeFaction\(reply, userId\)/, 'faction reply goes only to the subscriber');
+  assert.match(body(map, 'ReceiveSiegeFaction'), /_FactionWarUI:ShowSiegeFaction\(faction\)/);
   assert.match(body(map, 'Deliver'), /self:PushSiegeBoard\(board, changed, answering\)/, 'a board change reaches the siege viewers');
   assert.match(body(map, 'PushSiegeBoard'), /siegeViewers/, 'from their own set');
   assert.match(body(map, 'BoardChanged'), /siegeViewers/, 'a siege viewer alone is reason enough to read the board');
