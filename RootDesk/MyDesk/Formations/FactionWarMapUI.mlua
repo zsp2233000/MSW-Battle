@@ -10,6 +10,12 @@ script FactionWarMapUI extends Logic
     property number DimCrestAlpha = 0.4
     property number LinkThickness = 3
     property number MaxZoom = 12
+    -- Target selection on the map (#129): it opens at SelectZoom on the departure town; a press that moves at most ClickSlopPx screen pixels is a
+    -- click, not a drag; a click picks the crest within MinHitPx screen pixels (or within CrestHitReach UI units at full scale, the halo's size).
+    property number SelectZoom = 4
+    property number ClickSlopPx = 10
+    property number MinHitPx = 24
+    property number CrestHitReach = 38
     property number WheelZoomFactor = 2.4
     property string ViewPath = "Overlay/Window/Map"
     property integer LinkSlots = 3
@@ -44,8 +50,11 @@ script FactionWarMapUI extends Logic
         self._T.selected = nil
         self._T.pending = false
         self._T.note = nil
-        -- True from a select request the open map made itself (INVALID, a changed owner) until its answer; see ShowSelect.
-        self._T.relisting = false
+        -- The one line under the side panel's note that says why a target (or every town) can no longer be picked; see SetNotice.
+        self._T.noticeKind = ""
+        self._T.noticeTown = ""
+        -- How many select requests the open map made itself (INVALID, a changed owner) are still unanswered; see ShowSelect.
+        self._T.relistsOutstanding = 0
         -- The NPC press is awaiting its answer (askedAt, in ms) / the message window is shown (its text and the town it answers for).
         self._T.asking = false
         self._T.askedAt = 0
@@ -150,12 +159,15 @@ script FactionWarMapUI extends Logic
         self._T.dragId = event.TouchId
         self._T.dragPoint = _UILogic:ScreenToLocalUIPosition(event.TouchPoint, view.UITransformComponent)
         self._T.dragMoved = false
+        self._T.dragStart = event.TouchPoint
+        self._T.dragTravel = 0
     end
 
     @ExecSpace("ClientOnly")
     method void DragMap(UITouchDragEvent event)
         -- Measure movement in viewport pixels, independent of the zoom and actual screen resolution.
         if not self._T.open or self._T.dragId ~= event.TouchId then return end
+        self:MeasureTravel(event.TouchPoint)
         local view = self:Ui(self.ViewPath)
         local point = _UILogic:ScreenToLocalUIPosition(event.TouchPoint, view.UITransformComponent)
         local previous = self._T.dragPoint
@@ -170,7 +182,122 @@ script FactionWarMapUI extends Logic
         -- Release the captured pointer, including when the pointer is outside the viewport.
         if self._T.dragId ~= event.TouchId then return end
         self._T.dragId = nil
+        self:MeasureTravel(event.TouchPoint)
         if self._T.dragMoved then log("[VRF][FactionWarMap] drag offset=" .. tostring(self._T.mapOffset)) end
+        if self:IsClick(self._T.dragTravel) then self:ClickMap(event.TouchPoint) end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void MeasureTravel(Vector2 screenPoint)
+        -- The farthest the pointer has been from where it went down, in screen pixels: a press that returns to its start was still a drag.
+        local start = self._T.dragStart
+        if start == nil then return end
+        local dx = screenPoint.x - start.x
+        local dy = screenPoint.y - start.y
+        self._T.dragTravel = math.max(self._T.dragTravel or 0, math.sqrt(dx * dx + dy * dy))
+    end
+
+    @ExecSpace("ClientOnly")
+    method boolean IsClick(number travel)
+        -- Click or drag: a press that stayed within ClickSlopPx screen pixels.
+        return travel <= self.ClickSlopPx
+    end
+
+    @ExecSpace("ClientOnly")
+    method number IconScale(number zoom)
+        -- Town icons grow slower than the map so the crests stay small in the overview and reach full size from about 7x.
+        return math.min(1, 0.12 + 0.13 * zoom)
+    end
+
+    @ExecSpace("ClientOnly")
+    method number HitRadius(number zoom, number pixelsPerUnit)
+        -- The click reach around a crest in UI units: at least MinHitPx screen pixels (any zoom, any screen density), never smaller than the drawn crest and its halo.
+        return math.max(self.CrestHitReach * self:IconScale(zoom), self.MinHitPx / pixelsPerUnit)
+    end
+
+    @ExecSpace("ClientOnly")
+    method Vector2 TownViewPoint(Vector2 position, number zoom, Vector2 offset)
+        -- Where a town (its position in the map content) is in the viewport: the content is scaled about its centre, then moved by the offset.
+        return Vector2(offset.x + position.x * zoom, offset.y + position.y * zoom)
+    end
+
+    @ExecSpace("ClientOnly")
+    method Vector2 CenterOffset(Vector2 position, number zoom)
+        -- The content offset that puts a town at the middle of the viewport (SetMapView clamps it to the artwork edges).
+        return Vector2(-position.x * zoom, -position.y * zoom)
+    end
+
+    @ExecSpace("ClientOnly")
+    method string TownAt(Vector2 point, table views, number radius)
+        -- The town whose crest is nearest to the point and within the radius ("" for none); views holds each town's viewport point. A tie goes to the earlier town of the map order.
+        local found = ""
+        local best = radius
+        for _, id in ipairs(_FactionWarTownDocument.TownOrder) do
+            local view = views[id]
+            if view ~= nil then
+                local dx = point.x - view.x
+                local dy = point.y - view.y
+                local distance = math.sqrt(dx * dx + dy * dy)
+                if distance <= best and (found == "" or distance < best) then
+                    found = id
+                    best = distance
+                end
+            end
+        end
+        return found
+    end
+
+    @ExecSpace("ClientOnly")
+    method string CrestState(string id)
+        -- How a crest looks and acts: "plain" in the view, "selected" for the picked town, "selectable" for a town the server listed, "dimmed" for the rest.
+        if self._T.mode ~= "select" then return "plain" end
+        if self._T.selected == id then return "selected" end
+        if self._T.targets[id] == true then return "selectable" end
+        return "dimmed"
+    end
+
+    @ExecSpace("ClientOnly")
+    method number ScreenPixelsPerUnit()
+        -- Screen pixels in one UI unit, from the full width of the screen in both measures.
+        local screenWidth = _UILogic.ScreenWidth
+        local span = math.abs(_UILogic:ScreenToUIPosition(Vector2(screenWidth, 0)).x - _UILogic:ScreenToUIPosition(Vector2(0, 0)).x)
+        if span <= 0 then return 1 end
+        return screenWidth / span
+    end
+
+    @ExecSpace("ClientOnly")
+    method table TownViews()
+        -- Each town's crest in viewport coordinates at the current zoom and offset.
+        local views = {}
+        for _, id in ipairs(_FactionWarTownDocument.TownOrder) do
+            local node = self:Ui(self.ViewPath .. "/Content/Towns/" .. id)
+            if isvalid(node) then views[id] = self:TownViewPoint(node.UITransformComponent.anchoredPosition, self._T.zoom, self._T.mapOffset) end
+        end
+        return views
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ClickMap(Vector2 screenPoint)
+        -- A click on the map while a target is being selected picks the crest under the pointer, like its row; a town that cannot be picked does nothing (Pick refuses it).
+        if not self._T.open or self._T.mode ~= "select" or self._T.selected ~= nil or self._T.message ~= nil then return end
+        local view = self:Ui(self.ViewPath)
+        if not isvalid(view) then return end
+        local point = _UILogic:ScreenToLocalUIPosition(screenPoint, view.UITransformComponent)
+        local rect = view.UITransformComponent.RectSize
+        if math.abs(point.x) > rect.x / 2 or math.abs(point.y) > rect.y / 2 then return end
+        local id = self:TownAt(point, self:TownViews(), self:HitRadius(self._T.zoom, self:ScreenPixelsPerUnit()))
+        if id == "" then return end
+        log("[VRF][FactionWarMap] ui click town=" .. id .. " selectable=" .. tostring(self._T.targets[id] == true))
+        self:Pick(id)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void FocusOrigin(string town)
+        -- The selection opens zoomed on the departure town, so the crests and names are legible at once; the wheel and the drag take over from there.
+        local node = self:Ui(self.ViewPath .. "/Content/Towns/" .. town)
+        if not isvalid(node) then return end
+        self:SetMapView(self.SelectZoom, self:CenterOffset(node.UITransformComponent.anchoredPosition, self.SelectZoom))
+        log("[VRF][FactionWarMap] ui select focus town=" .. town .. " zoom=" .. tostring(self._T.zoom))
     end
 
     @ExecSpace("ClientOnly")
@@ -199,7 +326,7 @@ script FactionWarMapUI extends Logic
     method void ScaleMapLabels(number zoom)
         -- Keep text legible and show the largest districts first when labels collide.
         local content = self.ViewPath .. "/Content"
-        local iconScale = math.min(1, 0.12 + 0.13 * zoom)
+        local iconScale = self:IconScale(zoom)
         local detail = zoom >= 4
         local boxes = {}
         for _, id in ipairs(_FactionWarTownDocument.TownOrder) do
@@ -328,8 +455,9 @@ script FactionWarMapUI extends Logic
         self._T.dragId = nil
         local overlay = self:Ui("Overlay")
         if isvalid(overlay) then overlay:SetEnable(false) end
-        -- Closing the map drops the selection with it, the confirmation window included.
+        -- Closing the map drops the selection with it, the confirmation window included, and the line about a lost target.
         self:SetMode("view", {}, "")
+        self:ClearNotice()
         _FactionWarMap:RequestClose()
         log("[VRF][FactionWarMap] ui close")
     end
@@ -340,10 +468,11 @@ script FactionWarMapUI extends Logic
         local overlay = self:Ui("Overlay")
         if isvalid(overlay) then overlay:SetEnable(true) end
         self._T.open = true
-        self._T.relisting = false
+        self._T.relistsOutstanding = 0
         self._T.wheelLogged = false
         self:SetMapView(1, Vector2(0, 0))
         self:SetMode(mode, {}, "")
+        self:ClearNotice()
     end
 
     @ExecSpace("ClientOnly")
@@ -375,7 +504,7 @@ script FactionWarMapUI extends Logic
     method void BeginSelect()
         -- The NPC press: its answer is wanted even if an earlier relist of the map is still unanswered, and until it comes (or AskTimeout passes)
         -- no other press is accepted.
-        self._T.relisting = false
+        self._T.relistsOutstanding = 0
         self._T.asking = true
         self._T.askedAt = DateTime.UtcNow.Elapsed
     end
@@ -387,11 +516,18 @@ script FactionWarMapUI extends Logic
         -- A READY that is not shown (the map was closed since the map's own relist asked, or the town cannot show it) has already made the server
         -- count the player as a map viewer, so the player tells it they are not watching.
         log("[VRF][FactionWarMap] ui select status=" .. status .. " town=" .. town .. " targets=" .. tostring(#targets))
-        local relisted = self._T.relisting == true
+        -- Every answer to one of the map's own relists is handled in the open map, however many were sent before the first answer came.
+        local relisted = self._T.relistsOutstanding > 0
         local wasOpen = self._T.open
-        self._T.relisting = false
+        if relisted then self._T.relistsOutstanding = self._T.relistsOutstanding - 1 end
         self._T.asking = false
         if status ~= "READY" then
+            -- The map's own relist (a town changed hands) found nothing left to attack, or the departure town fell: the open map stays, with
+            -- everything dimmed and one line saying why, instead of closing under the player.
+            if relisted and wasOpen and self._T.mode == "select" and (status == "NOT_OWNED" or status == "NO_TARGETS") then
+                self:ShowNothingToPick(status)
+                return
+            end
             if self._T.open and self._T.mode == "select" then self:Close() end
             -- A relist answered after the player closed the map is not an answer to anything the player is waiting for.
             if relisted and not wasOpen then return end
@@ -407,8 +543,22 @@ script FactionWarMapUI extends Logic
             return
         end
         if not showable then return end
+        -- A selection that is already open (a refreshed list) keeps the view the player has moved to.
+        local entering = not (self._T.open and self._T.mode == "select")
         if not self._T.open then self:Reveal("select") end
+        -- A pick that the new list no longer has is dropped by SetMode; the line below says which town it was.
+        local picked = self._T.selected
+        local previousOrigin = self._T.origin
         self:SetMode("select", targets, header.town)
+        if picked ~= nil and self._T.selected == nil then
+            self:SetNotice("TARGET", picked)
+        elseif self._T.noticeKind == "ORIGIN" or self._T.noticeKind == "NO_TARGETS" or (self._T.noticeKind == "TARGET" and self._T.targets[self._T.noticeTown]) then
+            -- A READY answer means the departure town is the player's again and something can be picked; a town that is a target again needs no line.
+            -- A REFUSED line is not in this list: the server said no to the player's 是, and that stays until a new pick, the map closing or a new mode.
+            self:ClearNotice()
+        end
+        -- A new departure town (the old one fell and the player was sent to the capital) is focused like an opening; the same one keeps the player's view.
+        if entering or previousOrigin ~= header.town then self:FocusOrigin(header.town) end
         self._T.unavailable = false
         self:ApplyBoard(board.towns, board.links)
         self:ShowFaction(header.faction)
@@ -417,6 +567,51 @@ script FactionWarMapUI extends Logic
         local names = {}
         for _, target in ipairs(targets) do table.insert(names, target.town) end
         log("[VRF][FactionWarMap] ui select open origin=" .. header.town .. " targets=" .. table.concat(names, ","))
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ShowNothingToPick(string status)
+        -- NOT_OWNED / NO_TARGETS answering the open map's relist: the confirmation window closes, no town can be picked, the map is redrawn dimmed.
+        local picked = self._T.selected
+        self:SetMode("select", {}, self._T.origin)
+        if status == "NOT_OWNED" then
+            self:SetNotice("ORIGIN", "")
+        elseif picked ~= nil then
+            self:SetNotice("TARGET", picked)
+        elseif self._T.noticeKind ~= "TARGET" and self._T.noticeKind ~= "REFUSED" then
+            self:SetNotice("NO_TARGETS", "")
+        end
+        if self._T.board ~= nil then self:Render() end
+        log("[VRF][FactionWarMap] ui select nothing to pick status=" .. status .. " notice=" .. self._T.noticeKind)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void SetNotice(string kind, string town)
+        -- The line in the side panel for a pick or the whole list that is gone: TARGET ("<town> 已不能進攻", the pick a new list no longer has),
+        -- REFUSED (the same words: the server refused the 是 for that town, and a list that still has it does not take the line away),
+        -- ORIGIN (the departure town fell), NO_TARGETS; "" hides it. It stays until the next pick, a READY list that makes it untrue
+        -- (never for REFUSED), or the map closing.
+        self._T.noticeKind = kind
+        self._T.noticeTown = town
+        local node = self:Ui("Overlay/Window/Side/Notice")
+        local line = ""
+        if kind == "TARGET" or kind == "REFUSED" then
+            line = _FactionWarUI:HighlightedTownName(town) .. " 已不能進攻"
+        elseif kind == "ORIGIN" then
+            line = "這座城已不屬於你的陣營"
+        elseif kind == "NO_TARGETS" then
+            line = "目前沒有可進攻的相鄰敵城"
+        end
+        if not isvalid(node) then return end
+        node.TextGUIRendererComponent.Text = line
+        node:SetEnable(line ~= "")
+        if line ~= "" then log("[VRF][FactionWarMap] ui notice " .. line) end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ClearNotice()
+        -- Hide the line in the side panel.
+        self:SetNotice("", "")
     end
 
     @ExecSpace("ClientOnly")
@@ -468,6 +663,7 @@ script FactionWarMapUI extends Logic
         self._T.selected = id
         self._T.pending = false
         self._T.note = nil
+        self:ClearNotice()
         self:RenderConfirm()
         log("[VRF][FactionWarMap] ui pick " .. id)
     end
@@ -503,11 +699,15 @@ script FactionWarMapUI extends Logic
         if result == "QUEUING" then
             self:Close()
         elseif result == "INVALID" then
-            -- Ownership moved while the window was open: drop the pick and list the targets again.
+            -- Ownership moved while the window was open: drop the pick, say which town can no longer be attacked, and list the targets again.
+            -- (A relist answer that already dropped the pick left its line; there is nothing to add then.) The line is REFUSED: the relist that
+            -- follows may still list the town, and the player still has to be told that the attack was refused.
+            local dropped = self._T.selected
             self._T.selected = nil
             self._T.note = nil
+            if dropped ~= nil then self:SetNotice("REFUSED", dropped) end
             self:RenderConfirm()
-            self._T.relisting = true
+            self._T.relistsOutstanding = self._T.relistsOutstanding + 1
             _FactionWarAttack:RequestSelect()
         else
             self._T.note = result == "ENGAGED" and "已在配對中，請先取消目前的配對" or "暫時無法配對，請再試一次"
@@ -540,7 +740,8 @@ script FactionWarMapUI extends Logic
 
     @ExecSpace("ClientOnly")
     method void RenderConfirm()
-        -- The confirmation window for the picked town: both strengths live from the board, the capital note, and the buttons.
+        -- The confirmation window for the picked town: both strengths live from the board, the capital note, and the buttons. The marks on the crests follow the same state.
+        self:RenderMarks()
         local window = self:Ui("Confirm")
         if not isvalid(window) then return end
         local target = self._T.selected
@@ -555,6 +756,18 @@ script FactionWarMapUI extends Logic
         for _, name in ipairs({ "Yes", "No" }) do
             local button = self:Ui("Confirm/Window/" .. name)
             if isvalid(button) then button.ButtonComponent.Enable = not self._T.pending end
+        end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void RenderMarks()
+        -- A halo behind every crest the player can pick, and a brighter frame behind the picked one; none in the view.
+        for _, id in ipairs(_FactionWarTownDocument.TownOrder) do
+            local state = self:CrestState(id)
+            local mark = self:Ui(self.ViewPath .. "/Content/Towns/" .. id .. "/Mark")
+            if isvalid(mark) then mark:SetEnable(state == "selectable" or state == "selected") end
+            local frame = self:Ui(self.ViewPath .. "/Content/Towns/" .. id .. "/Frame")
+            if isvalid(frame) then frame:SetEnable(state == "selected") end
         end
     end
 
@@ -595,7 +808,7 @@ script FactionWarMapUI extends Logic
         self:ApplyBoard(towns, links)
         if relist then
             log("[VRF][FactionWarMap] ui select relist")
-            self._T.relisting = true
+            self._T.relistsOutstanding = self._T.relistsOutstanding + 1
             _FactionWarAttack:RequestSelect()
         end
     end
@@ -635,9 +848,9 @@ script FactionWarMapUI extends Logic
         local color = self:OwnerColor(town.owner)
         local known = _FactionWarTownDocument:IsFaction(town.owner)
         -- In target selection only the towns the server listed can be picked; the rest (own towns, far enemies, the departure town) are dimmed.
-        local selecting = self._T.mode == "select"
-        local selectable = selecting and self._T.targets[town.id] == true
-        local dimmed = selecting and not selectable
+        local state = self:CrestState(town.id)
+        local selectable = state == "selectable" or state == "selected"
+        local dimmed = state == "dimmed"
         local district = self:Ui(self.ViewPath .. "/Content/Districts/" .. town.id)
         if isvalid(district) then district.SpriteGUIRendererComponent.Color = Color(color.r, color.g, color.b, known and (dimmed and self.DimDistrictAlpha or self.DistrictAlpha) or 0.25) end
         local node = self.ViewPath .. "/Content/Towns/" .. town.id
