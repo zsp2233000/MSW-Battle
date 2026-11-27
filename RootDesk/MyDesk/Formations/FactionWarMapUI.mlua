@@ -53,8 +53,8 @@ script FactionWarMapUI extends Logic
         -- The one line under the side panel's note that says why a target (or every town) can no longer be picked; see SetNotice.
         self._T.noticeKind = ""
         self._T.noticeTown = ""
-        -- True from a select request the open map made itself (INVALID, a changed owner) until its answer; see ShowSelect.
-        self._T.relisting = false
+        -- How many select requests the open map made itself (INVALID, a changed owner) are still unanswered; see ShowSelect.
+        self._T.relistsOutstanding = 0
         -- The NPC press is awaiting its answer (askedAt, in ms) / the message window is shown (its text and the town it answers for).
         self._T.asking = false
         self._T.askedAt = 0
@@ -457,7 +457,7 @@ script FactionWarMapUI extends Logic
         if isvalid(overlay) then overlay:SetEnable(false) end
         -- Closing the map drops the selection with it, the confirmation window included, and the line about a lost target.
         self:SetMode("view", {}, "")
-        self:SetNotice("", "")
+        self:ClearNotice()
         _FactionWarMap:RequestClose()
         log("[VRF][FactionWarMap] ui close")
     end
@@ -468,11 +468,11 @@ script FactionWarMapUI extends Logic
         local overlay = self:Ui("Overlay")
         if isvalid(overlay) then overlay:SetEnable(true) end
         self._T.open = true
-        self._T.relisting = false
+        self._T.relistsOutstanding = 0
         self._T.wheelLogged = false
         self:SetMapView(1, Vector2(0, 0))
         self:SetMode(mode, {}, "")
-        self:SetNotice("", "")
+        self:ClearNotice()
     end
 
     @ExecSpace("ClientOnly")
@@ -504,7 +504,7 @@ script FactionWarMapUI extends Logic
     method void BeginSelect()
         -- The NPC press: its answer is wanted even if an earlier relist of the map is still unanswered, and until it comes (or AskTimeout passes)
         -- no other press is accepted.
-        self._T.relisting = false
+        self._T.relistsOutstanding = 0
         self._T.asking = true
         self._T.askedAt = DateTime.UtcNow.Elapsed
     end
@@ -516,9 +516,10 @@ script FactionWarMapUI extends Logic
         -- A READY that is not shown (the map was closed since the map's own relist asked, or the town cannot show it) has already made the server
         -- count the player as a map viewer, so the player tells it they are not watching.
         log("[VRF][FactionWarMap] ui select status=" .. status .. " town=" .. town .. " targets=" .. tostring(#targets))
-        local relisted = self._T.relisting == true
+        -- Every answer to one of the map's own relists is handled in the open map, however many were sent before the first answer came.
+        local relisted = self._T.relistsOutstanding > 0
         local wasOpen = self._T.open
-        self._T.relisting = false
+        if relisted then self._T.relistsOutstanding = self._T.relistsOutstanding - 1 end
         self._T.asking = false
         if status ~= "READY" then
             -- The map's own relist (a town changed hands) found nothing left to attack, or the departure town fell: the open map stays, with
@@ -547,14 +548,17 @@ script FactionWarMapUI extends Logic
         if not self._T.open then self:Reveal("select") end
         -- A pick that the new list no longer has is dropped by SetMode; the line below says which town it was.
         local picked = self._T.selected
+        local previousOrigin = self._T.origin
         self:SetMode("select", targets, header.town)
         if picked ~= nil and self._T.selected == nil then
             self:SetNotice("TARGET", picked)
         elseif self._T.noticeKind == "ORIGIN" or self._T.noticeKind == "NO_TARGETS" or (self._T.noticeKind == "TARGET" and self._T.targets[self._T.noticeTown]) then
             -- A READY answer means the departure town is the player's again and something can be picked; a town that is a target again needs no line.
-            self:SetNotice("", "")
+            -- A REFUSED line is not in this list: the server said no to the player's 是, and that stays until a new pick, the map closing or a new mode.
+            self:ClearNotice()
         end
-        if entering then self:FocusOrigin(header.town) end
+        -- A new departure town (the old one fell and the player was sent to the capital) is focused like an opening; the same one keeps the player's view.
+        if entering or previousOrigin ~= header.town then self:FocusOrigin(header.town) end
         self._T.unavailable = false
         self:ApplyBoard(board.towns, board.links)
         self:ShowFaction(header.faction)
@@ -574,7 +578,7 @@ script FactionWarMapUI extends Logic
             self:SetNotice("ORIGIN", "")
         elseif picked ~= nil then
             self:SetNotice("TARGET", picked)
-        elseif self._T.noticeKind ~= "TARGET" then
+        elseif self._T.noticeKind ~= "TARGET" and self._T.noticeKind ~= "REFUSED" then
             self:SetNotice("NO_TARGETS", "")
         end
         if self._T.board ~= nil then self:Render() end
@@ -583,13 +587,15 @@ script FactionWarMapUI extends Logic
 
     @ExecSpace("ClientOnly")
     method void SetNotice(string kind, string town)
-        -- The line in the side panel for a pick or the whole list that is gone: TARGET ("<town> 已不能進攻"), ORIGIN (the departure town fell),
-        -- NO_TARGETS; "" hides it. It stays until the next pick, a READY list that makes it untrue, or the map closing.
+        -- The line in the side panel for a pick or the whole list that is gone: TARGET ("<town> 已不能進攻", the pick a new list no longer has),
+        -- REFUSED (the same words: the server refused the 是 for that town, and a list that still has it does not take the line away),
+        -- ORIGIN (the departure town fell), NO_TARGETS; "" hides it. It stays until the next pick, a READY list that makes it untrue
+        -- (never for REFUSED), or the map closing.
         self._T.noticeKind = kind
         self._T.noticeTown = town
         local node = self:Ui("Overlay/Window/Side/Notice")
         local line = ""
-        if kind == "TARGET" then
+        if kind == "TARGET" or kind == "REFUSED" then
             line = _FactionWarUI:HighlightedTownName(town) .. " 已不能進攻"
         elseif kind == "ORIGIN" then
             line = "這座城已不屬於你的陣營"
@@ -600,6 +606,12 @@ script FactionWarMapUI extends Logic
         node.TextGUIRendererComponent.Text = line
         node:SetEnable(line ~= "")
         if line ~= "" then log("[VRF][FactionWarMap] ui notice " .. line) end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ClearNotice()
+        -- Hide the line in the side panel.
+        self:SetNotice("", "")
     end
 
     @ExecSpace("ClientOnly")
@@ -651,7 +663,7 @@ script FactionWarMapUI extends Logic
         self._T.selected = id
         self._T.pending = false
         self._T.note = nil
-        self:SetNotice("", "")
+        self:ClearNotice()
         self:RenderConfirm()
         log("[VRF][FactionWarMap] ui pick " .. id)
     end
@@ -688,13 +700,14 @@ script FactionWarMapUI extends Logic
             self:Close()
         elseif result == "INVALID" then
             -- Ownership moved while the window was open: drop the pick, say which town can no longer be attacked, and list the targets again.
-            -- (A relist answer that already dropped the pick left its line; there is nothing to add then.)
+            -- (A relist answer that already dropped the pick left its line; there is nothing to add then.) The line is REFUSED: the relist that
+            -- follows may still list the town, and the player still has to be told that the attack was refused.
             local dropped = self._T.selected
             self._T.selected = nil
             self._T.note = nil
-            if dropped ~= nil then self:SetNotice("TARGET", dropped) end
+            if dropped ~= nil then self:SetNotice("REFUSED", dropped) end
             self:RenderConfirm()
-            self._T.relisting = true
+            self._T.relistsOutstanding = self._T.relistsOutstanding + 1
             _FactionWarAttack:RequestSelect()
         else
             self._T.note = result == "ENGAGED" and "已在配對中，請先取消目前的配對" or "暫時無法配對，請再試一次"
@@ -795,7 +808,7 @@ script FactionWarMapUI extends Logic
         self:ApplyBoard(towns, links)
         if relist then
             log("[VRF][FactionWarMap] ui select relist")
-            self._T.relisting = true
+            self._T.relistsOutstanding = self._T.relistsOutstanding + 1
             _FactionWarAttack:RequestSelect()
         end
     end

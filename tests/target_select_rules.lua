@@ -567,9 +567,9 @@ check(calls.select == 0 and notice() == nil and node(rowOf("gushan") .. "/Pick")
 -- A town changed hands but the picked one is still a target: the list is asked for again and the window stays.
 openConfirm()
 ui:ShowBoard(towns({}, { yancheng = "A" }), links)
-check(calls.select == 1 and ui._T.relisting, "a town that changed hands asks the server for the list")
+check(calls.select == 1 and ui._T.relistsOutstanding == 1, "a town that changed hands asks the server for the list")
 ready("zuoying", { gushan }, towns({}, { yancheng = "A" }))
-check(node("Confirm").Enable and ui._T.selected == "gushan" and notice() == nil and not ui._T.relisting, "a picked town that is still listed keeps its window and shows no line")
+check(node("Confirm").Enable and ui._T.selected == "gushan" and notice() == nil and ui._T.relistsOutstanding == 0, "a picked town that is still listed keeps its window and shows no line")
 
 -- The relisted answer redraws the list and the rows exactly as the server listed them.
 openConfirm()
@@ -642,14 +642,31 @@ ui:ConfirmAttack()
 check(ui._T.pending and text("Confirm/Window/Status") == "正在加入配對…", "setup: waiting for the server")
 ui:ShowAttackResult("INVALID")
 check(not ui._T.pending and not node("Confirm").Enable and ui._T.selected == nil and ui._T.open, "INVALID: the window is closed, nothing waits, the map stays")
-check(notice() == TARGET_GONE and calls.select == 1 and ui._T.relisting, "the line names the town and the list is asked for again")
+check(notice() == TARGET_GONE and calls.select == 1 and ui._T.relistsOutstanding == 1, "the line names the town and the list is asked for again")
 ready("zuoying", { yancheng }, towns({}, { gushan = "A" }))
 check(notice() == TARGET_GONE and node(rowOf("yancheng") .. "/Pick").Enable and not node(rowOf("gushan") .. "/Pick").Enable, "the relisted answer redraws the list and the line stays while the town is not listed")
 openConfirm()
 ui:ConfirmAttack()
 ui:ShowAttackResult("INVALID")
 ready("zuoying", { gushan }, towns())
-check(notice() == nil and node(rowOf("gushan") .. "/Pick").Enable, "a refusal that the new list does not confirm (the town is a target again) leaves no line")
+check(notice() == TARGET_GONE and node(rowOf("gushan") .. "/Pick").Enable and not node("Confirm").Enable, "a refusal's prompt stays when the new list still has the town: the player must be told the pick was refused")
+ui:Pick("gushan")
+check(notice() == nil and ui._T.selected == "gushan", "and goes with the next pick")
+openConfirm()
+ui:ConfirmAttack()
+ui:ShowAttackResult("INVALID")
+ready("zuoying", { gushan }, towns())
+ui:Close()
+check(notice() == nil, "or with closing the map")
+openConfirm()
+ui:ConfirmAttack()
+ui:ShowAttackResult("INVALID")
+ui:ShowSelect("zuoying", "NO_TARGETS", {}, {}, {})
+check(notice() == TARGET_GONE and ui._T.open, "a nothing-to-pick answer to the refusal's relist keeps the prompt")
+ready("zuoying", { gushan }, towns())
+ui:ShowBoard(towns({}, { yancheng = "A" }), links)
+ready("zuoying", { gushan }, towns({}, { yancheng = "A" }))
+check(notice() == TARGET_GONE and node(rowOf("gushan") .. "/Pick").Enable, "and so does another list that has the town")
 -- The map's own relist drops the pick while the request is on its way: the answer to it still closes the map for the siege panel.
 openConfirm()
 ui:ConfirmAttack()
@@ -687,6 +704,54 @@ judged = {}
 attack:SelectFor("red-user")
 check(answers[#answers].status == "NOT_OWNED" and judged[1] == "red-user:CHECK:zuoying", "server: a lost departure town is answered NOT_OWNED and judged")
 board.zuoying.owner = "A"
+
+-- Two owner changes in quick succession send two requests; every answer to them is the open map's own.
+fresh()
+ready("zuoying", { gushan, yancheng }, towns())
+ui:ShowBoard(towns({}, { yancheng = "A" }), links)
+ui:ShowBoard(towns({}, { yancheng = "A", gushan = "A" }), links)
+check(calls.select == 2 and ui._T.relistsOutstanding == 2, "two owner changes ask twice and are both outstanding")
+ready("zuoying", { gushan }, towns({}, { yancheng = "A" }))
+check(ui._T.relistsOutstanding == 1 and ui._T.open and not node("Message").Enable, "the first answer leaves one outstanding")
+ui:ShowSelect("zuoying", "NO_TARGETS", {}, {}, {})
+check(ui._T.open and ui._T.mode == "select" and not node("Message").Enable and ui._T.message == nil and calls.close == 0, "the second answer (NO_TARGETS) is handled in the open map: no message window, the map stays")
+check(ui._T.relistsOutstanding == 0 and notice() == "目前沒有可進攻的相鄰敵城", "nothing is outstanding and the line says no target is left")
+everythingDim("two relists")
+fresh()
+ready("zuoying", { gushan, yancheng }, towns())
+ui:ShowBoard(towns({}, { yancheng = "A" }), links)
+ui:ShowBoard(towns({}, { yancheng = "A", zuoying = "B" }), links)
+ready("zuoying", { gushan }, towns({}, { yancheng = "A" }))
+ui:ShowSelect("zuoying", "NOT_OWNED", {}, {}, {})
+check(ui._T.open and ui._T.mode == "select" and not node("Message").Enable and notice() == ORIGIN_GONE and calls.close == 0, "the second answer (NOT_OWNED) is handled in the open map too")
+-- An NPC press discards the outstanding relists: its answer is the one the player waits for.
+fresh()
+ready("zuoying", { gushan, yancheng }, towns())
+ui:ShowBoard(towns({}, { yancheng = "A" }), links)
+ui:ShowBoard(towns({}, { yancheng = "A", gushan = "A" }), links)
+ui:BeginSelect()
+check(ui._T.relistsOutstanding == 0, "a new NPC press forgets the earlier relists")
+ui:Close()
+check(ui._T.relistsOutstanding == 0, "and a closed map has none outstanding")
+
+-- The departure town fell and the player was moved to the capital: a later READY relist is for another town, and the view goes there; the
+-- same departure town keeps the player's own zoom and pan.
+fresh()
+ready("zuoying", { gushan }, towns())
+ui:ShowBoard(towns({}, { zuoying = "B" }), links)
+ui:ShowSelect("zuoying", "NOT_OWNED", {}, {}, {})
+check(ui._T.open and ui._T.origin == "zuoying", "setup: the open map shows the fallen departure town")
+_UserService.LocalPlayer.CurrentMapName = "nanzih"
+ui._T.mapName = "nanzih"
+ui:ShowBoard(towns({}, { yancheng = "A" }), links)
+ui:ShowSelect("nanzih", "READY", { town = "nanzih", strength = 100, owner = "A", faction = "A" }, { gushan }, { towns = towns(), links = links })
+local newOrigin = ui:TownViewPoint(node("Overlay/Window/Map/Content/Towns/nanzih").UITransformComponent.anchoredPosition, ui._T.zoom, ui._T.mapOffset)
+check(ui._T.origin == "nanzih" and ui._T.zoom == ui.SelectZoom and math.abs(newOrigin.x) < 1e-6 and math.abs(newOrigin.y) < 1e-6, "a READY relist for another town centres the view on it")
+ui:SetMapView(2, Vector2(30, 20))
+ui:ShowSelect("nanzih", "READY", { town = "nanzih", strength = 100, owner = "A", faction = "A" }, { gushan }, { towns = towns(), links = links })
+check(ui._T.zoom == 2 and ui._T.mapOffset.x == 30 and ui._T.mapOffset.y == 20, "and the same town afterwards keeps the player's view")
+_UserService.LocalPlayer.CurrentMapName = "zuoying"
+ui._T.mapName = "zuoying"
 
 -- ---- #129: the selection opens zoomed on the departure town, and a town is picked by clicking its crest -------------------------------------
 local function near(a, b) return math.abs(a - b) < 1e-6 end
@@ -960,7 +1025,7 @@ check(node("Confirm").Enable and markOn("gushan", "Frame") and text("Confirm/Win
 
 -- The departure town falls (NOT_OWNED to the map's own relist): window closed, one line, every crest and row dimmed, nothing can be clicked.
 p = openCrestConfirm()
-ui._T.relisting = true
+ui._T.relistsOutstanding = 1
 ui:ShowSelect("zuoying", "NOT_OWNED", {}, {}, {})
 check(ui._T.open and not node("Confirm").Enable and notice() == ORIGIN_GONE and not node("Message").Enable, "the departure town falling closes the window and says so, the map stays")
 allCrestsDim("NOT_OWNED")
@@ -972,7 +1037,7 @@ check(ui._T.zoom == 4, "the zoom stays")
 
 -- Nothing left to attack (NO_TARGETS) with a crest pick open: same state as above, with the town named.
 p = openCrestConfirm()
-ui._T.relisting = true
+ui._T.relistsOutstanding = 1
 ui:ShowSelect("zuoying", "NO_TARGETS", {}, {}, {})
 check(notice() == TARGET_GONE and not node("Confirm").Enable, "NO_TARGETS closes the crest-clicked window with the town named")
 allCrestsDim("NO_TARGETS")
@@ -991,7 +1056,7 @@ check(ui:CrestState("gushan") == "dimmed" and crestDim("gushan") and ui:CrestSta
 
 -- Closing the map clears the crest states and the line together.
 openCrestConfirm()
-ui._T.relisting = true
+ui._T.relistsOutstanding = 1
 ui:ShowSelect("zuoying", "NOT_OWNED", {}, {}, {})
 ui:Close()
 check(notice() == nil and ui._T.mode == "view" and not markOn("gushan", "Frame") and not markOn("yancheng", "Mark"), "closing the map clears the line, the marks and the frame")
