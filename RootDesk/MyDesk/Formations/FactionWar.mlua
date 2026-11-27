@@ -85,8 +85,7 @@ script FactionWar extends Logic
     @ExecSpace("ServerOnly")
     method void ReadFaction(string profile, any complete)
         -- The player's faction as A / B (a stored retired colour id is converted, ADR 0018): "" when none was chosen yet, nil when storage failed or holds something that is no faction.
-        local document = _FactionWarTownDocument
-        self:ReadProfileKey(profile, self.FactionKey, function(raw) return document:NormalizeFaction(raw) end, complete)
+        self:ReadProfileKey(profile, self.FactionKey, function(raw) return _FactionWarTownDocument:NormalizeFaction(raw) end, complete)
     end
 
     @ExecSpace("ServerOnly")
