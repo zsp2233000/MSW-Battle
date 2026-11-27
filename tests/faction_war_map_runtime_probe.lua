@@ -2,6 +2,8 @@
 -- faction_war_map_client_runtime_probe.lua in `client`; the two follow each other through the viewer list.
 -- Works on the isolated board CountryWarProbeMapV1 (deleted at the end); never writes the player's faction or last town.
 -- Final line: [VRF][MapProbe] SERVER PASS (the client prints CLIENT PASS).
+-- Also set CAPTURE on the client to leave time to take the before/after screenshots for #131.
+local CAPTURE = false
 local STORAGE = "CountryWarProbeMapV1"
 local original = _FactionWarTownDocument.TownStorageName
 local function await(predicate, seconds)
@@ -31,7 +33,7 @@ local ok, reason = pcall(function()
     for _, user in ipairs(_UserService.UserEntities.Values) do player = user end
     assert(isvalid(player), "the real player is in the room")
     _FactionWarTownDocument.TownStorageName = STORAGE
-    assert(call(function(done) _FactionWarTownDocument:WriteTowns(board(70), done) end) == true, "isolated board written")
+    assert(call(function(done) _FactionWarTownDocument:WriteTowns(board(80), done) end) == true, "isolated board written")
 
     -- Gate links come from the authored gates: the chain north to south and nothing else.
     local links = _FactionWarMap:Links()
@@ -49,12 +51,12 @@ local ok, reason = pcall(function()
     -- 1. The client opens the map: it becomes a viewer and gets the board.
     assert(await(function() return viewers() == 1 end, 25), "client opened the map")
     log("[VRF][MapProbe] viewer registered")
-    wait(2)
+    wait(CAPTURE and 12 or 5)
 
     -- 2. A settlement-like change is pushed without the client asking.
-    assert(call(function(done) _FactionWarTownDocument:WriteTowns(board(50), done) end) == true, "board changed")
+    assert(call(function(done) _FactionWarTownDocument:WriteTowns(board(20), done) end) == true, "board changed")
     _FactionWarMap:AnnounceChange()
-    log("[VRF][MapProbe] PUSH announced gushan=50")
+    log("[VRF][MapProbe] PUSH announced gushan=20")
     -- Observation, not an assertion: whether the all-instances event also reaches the sender's own instance in Maker.
     -- AnnounceChange's own event carries this instance's id and is ignored; this one pretends to come from elsewhere,
     -- so "[VRF][FactionWarMap] change received via=instance" appears only if the own instance receives it.

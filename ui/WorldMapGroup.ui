@@ -9081,7 +9081,7 @@
       {
         "id": "96ee169b-3a13-42c1-b8e7-a8f5da76eb1c",
         "path": "/ui/WorldMapGroup/Overlay/Window/Map/Content/Links/Link1",
-        "componentNames": "MOD.Core.UITransformComponent,MOD.Core.SpriteGUIRendererComponent",
+        "componentNames": "MOD.Core.UITransformComponent",
         "jsonString": {
           "name": "Link1",
           "path": "/ui/WorldMapGroup/Overlay/Window/Map/Content/Links/Link1",
@@ -9094,12 +9094,12 @@
           "revision": 0,
           "origin": {
             "type": "Model",
-            "entry_id": "UISprite",
+            "entry_id": "UIEmpty",
             "sub_entity_id": null,
             "root_entity_id": null,
             "replaced_model_id": null
           },
-          "modelId": "uisprite",
+          "modelId": "uiempty",
           "@components": [
             {
               "@type": "MOD.Core.UITransformComponent",
@@ -9116,11 +9116,11 @@
               "MobileOnly": false,
               "OffsetMax": {
                 "x": 50,
-                "y": 3
+                "y": 4
               },
               "OffsetMin": {
                 "x": -50,
-                "y": -3
+                "y": -4
               },
               "Pivot": {
                 "x": 0.5,
@@ -9128,7 +9128,92 @@
               },
               "RectSize": {
                 "x": 100,
-                "y": 6
+                "y": 8
+              },
+              "UIMode": 1,
+              "UIScale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "UIVersion": 2,
+              "anchoredPosition": {
+                "x": 0,
+                "y": 0
+              },
+              "Position": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "QuaternionRotation": {
+                "x": 0,
+                "y": 0,
+                "z": 0,
+                "w": 1
+              },
+              "Scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "Enable": true
+            }
+          ],
+          "@version": 1
+        }
+      },
+      {
+        "id": "51aa13c0-2e71-41e9-b5c7-e3316e94027c",
+        "path": "/ui/WorldMapGroup/Overlay/Window/Map/Content/Links/Link1/First",
+        "componentNames": "MOD.Core.UITransformComponent,MOD.Core.SpriteGUIRendererComponent",
+        "jsonString": {
+          "name": "First",
+          "path": "/ui/WorldMapGroup/Overlay/Window/Map/Content/Links/Link1/First",
+          "nameEditable": true,
+          "enable": true,
+          "visible": true,
+          "localize": true,
+          "displayOrder": 0,
+          "pathConstraints": "/////////",
+          "revision": 0,
+          "origin": {
+            "type": "Model",
+            "entry_id": "UISprite",
+            "sub_entity_id": null,
+            "root_entity_id": null,
+            "replaced_model_id": null
+          },
+          "modelId": "uisprite",
+          "@components": [
+            {
+              "@type": "MOD.Core.UITransformComponent",
+              "ActivePlatform": 255,
+              "AlignmentOption": 1,
+              "AnchorsMax": {
+                "x": 0,
+                "y": 0.5
+              },
+              "AnchorsMin": {
+                "x": 0,
+                "y": 0.5
+              },
+              "MobileOnly": false,
+              "OffsetMax": {
+                "x": 50,
+                "y": 4
+              },
+              "OffsetMin": {
+                "x": 0,
+                "y": -4
+              },
+              "Pivot": {
+                "x": 0,
+                "y": 0.5
+              },
+              "RectSize": {
+                "x": 50,
+                "y": 8
               },
               "UIMode": 1,
               "UIScale": {
@@ -9183,10 +9268,155 @@
               "SortingLayer": "UI",
               "StartFrameIndex": 0,
               "Color": {
-                "r": 0.29,
-                "g": 0.18,
-                "b": 0.09,
-                "a": 0.85
+                "r": 0.6196078431372549,
+                "g": 0.6,
+                "b": 0.5607843137254902,
+                "a": 1
+              },
+              "DropShadow": false,
+              "DropShadowAngle": 120,
+              "DropShadowColor": {
+                "r": 0,
+                "g": 0,
+                "b": 0,
+                "a": 0.72
+              },
+              "DropShadowDistance": 3,
+              "FillAmount": 1,
+              "FillCenter": true,
+              "FillClockWise": true,
+              "FillMethod": 0,
+              "FillOrigin": 0,
+              "FlipX": false,
+              "FlipY": false,
+              "FrameColumn": 1,
+              "FrameRate": 0,
+              "FrameRow": 1,
+              "Outline": false,
+              "OutlineColor": {
+                "r": 0,
+                "g": 0,
+                "b": 0,
+                "a": 1
+              },
+              "OutlineWidth": 3,
+              "RaycastTarget": false,
+              "Type": 1,
+              "Enable": true
+            }
+          ],
+          "@version": 1
+        }
+      },
+      {
+        "id": "2ced859e-3276-4618-94ea-30cc88f2a1f3",
+        "path": "/ui/WorldMapGroup/Overlay/Window/Map/Content/Links/Link1/Second",
+        "componentNames": "MOD.Core.UITransformComponent,MOD.Core.SpriteGUIRendererComponent",
+        "jsonString": {
+          "name": "Second",
+          "path": "/ui/WorldMapGroup/Overlay/Window/Map/Content/Links/Link1/Second",
+          "nameEditable": true,
+          "enable": true,
+          "visible": true,
+          "localize": true,
+          "displayOrder": 1,
+          "pathConstraints": "/////////",
+          "revision": 0,
+          "origin": {
+            "type": "Model",
+            "entry_id": "UISprite",
+            "sub_entity_id": null,
+            "root_entity_id": null,
+            "replaced_model_id": null
+          },
+          "modelId": "uisprite",
+          "@components": [
+            {
+              "@type": "MOD.Core.UITransformComponent",
+              "ActivePlatform": 255,
+              "AlignmentOption": 2,
+              "AnchorsMax": {
+                "x": 1,
+                "y": 0.5
+              },
+              "AnchorsMin": {
+                "x": 1,
+                "y": 0.5
+              },
+              "MobileOnly": false,
+              "OffsetMax": {
+                "x": 0,
+                "y": 4
+              },
+              "OffsetMin": {
+                "x": -50,
+                "y": -4
+              },
+              "Pivot": {
+                "x": 1,
+                "y": 0.5
+              },
+              "RectSize": {
+                "x": 50,
+                "y": 8
+              },
+              "UIMode": 1,
+              "UIScale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "UIVersion": 2,
+              "anchoredPosition": {
+                "x": 0,
+                "y": 0
+              },
+              "Position": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "QuaternionRotation": {
+                "x": 0,
+                "y": 0,
+                "z": 0,
+                "w": 1
+              },
+              "Scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "Enable": true
+            },
+            {
+              "@type": "MOD.Core.SpriteGUIRendererComponent",
+              "AnimClipPlayType": 0,
+              "EndFrameIndex": 2147483647,
+              "ImageRUID": {
+                "DataId": "2860136c06ab075439721c027de365af"
+              },
+              "IgnoreMapLayerCheck": false,
+              "LocalPosition": {
+                "x": 0,
+                "y": 0
+              },
+              "LocalScale": {
+                "x": 1,
+                "y": 1
+              },
+              "MaterialId": "",
+              "OrderInLayer": 0,
+              "OverrideSorting": false,
+              "PlayRate": 1,
+              "PreserveSprite": 0,
+              "SortingLayer": "UI",
+              "StartFrameIndex": 0,
+              "Color": {
+                "r": 0.6196078431372549,
+                "g": 0.6,
+                "b": 0.5607843137254902,
+                "a": 1
               },
               "DropShadow": false,
               "DropShadowAngle": 120,
@@ -9226,7 +9456,7 @@
       {
         "id": "e68d59e6-de75-40d5-ac58-2cede6d77128",
         "path": "/ui/WorldMapGroup/Overlay/Window/Map/Content/Links/Link2",
-        "componentNames": "MOD.Core.UITransformComponent,MOD.Core.SpriteGUIRendererComponent",
+        "componentNames": "MOD.Core.UITransformComponent",
         "jsonString": {
           "name": "Link2",
           "path": "/ui/WorldMapGroup/Overlay/Window/Map/Content/Links/Link2",
@@ -9239,12 +9469,12 @@
           "revision": 0,
           "origin": {
             "type": "Model",
-            "entry_id": "UISprite",
+            "entry_id": "UIEmpty",
             "sub_entity_id": null,
             "root_entity_id": null,
             "replaced_model_id": null
           },
-          "modelId": "uisprite",
+          "modelId": "uiempty",
           "@components": [
             {
               "@type": "MOD.Core.UITransformComponent",
@@ -9261,11 +9491,11 @@
               "MobileOnly": false,
               "OffsetMax": {
                 "x": 50,
-                "y": 3
+                "y": 4
               },
               "OffsetMin": {
                 "x": -50,
-                "y": -3
+                "y": -4
               },
               "Pivot": {
                 "x": 0.5,
@@ -9273,7 +9503,92 @@
               },
               "RectSize": {
                 "x": 100,
-                "y": 6
+                "y": 8
+              },
+              "UIMode": 1,
+              "UIScale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "UIVersion": 2,
+              "anchoredPosition": {
+                "x": 0,
+                "y": 0
+              },
+              "Position": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "QuaternionRotation": {
+                "x": 0,
+                "y": 0,
+                "z": 0,
+                "w": 1
+              },
+              "Scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "Enable": true
+            }
+          ],
+          "@version": 1
+        }
+      },
+      {
+        "id": "e5df3525-b0eb-4623-b3eb-55776967301f",
+        "path": "/ui/WorldMapGroup/Overlay/Window/Map/Content/Links/Link2/First",
+        "componentNames": "MOD.Core.UITransformComponent,MOD.Core.SpriteGUIRendererComponent",
+        "jsonString": {
+          "name": "First",
+          "path": "/ui/WorldMapGroup/Overlay/Window/Map/Content/Links/Link2/First",
+          "nameEditable": true,
+          "enable": true,
+          "visible": true,
+          "localize": true,
+          "displayOrder": 0,
+          "pathConstraints": "/////////",
+          "revision": 0,
+          "origin": {
+            "type": "Model",
+            "entry_id": "UISprite",
+            "sub_entity_id": null,
+            "root_entity_id": null,
+            "replaced_model_id": null
+          },
+          "modelId": "uisprite",
+          "@components": [
+            {
+              "@type": "MOD.Core.UITransformComponent",
+              "ActivePlatform": 255,
+              "AlignmentOption": 1,
+              "AnchorsMax": {
+                "x": 0,
+                "y": 0.5
+              },
+              "AnchorsMin": {
+                "x": 0,
+                "y": 0.5
+              },
+              "MobileOnly": false,
+              "OffsetMax": {
+                "x": 50,
+                "y": 4
+              },
+              "OffsetMin": {
+                "x": 0,
+                "y": -4
+              },
+              "Pivot": {
+                "x": 0,
+                "y": 0.5
+              },
+              "RectSize": {
+                "x": 50,
+                "y": 8
               },
               "UIMode": 1,
               "UIScale": {
@@ -9328,10 +9643,155 @@
               "SortingLayer": "UI",
               "StartFrameIndex": 0,
               "Color": {
-                "r": 0.29,
-                "g": 0.18,
-                "b": 0.09,
-                "a": 0.85
+                "r": 0.6196078431372549,
+                "g": 0.6,
+                "b": 0.5607843137254902,
+                "a": 1
+              },
+              "DropShadow": false,
+              "DropShadowAngle": 120,
+              "DropShadowColor": {
+                "r": 0,
+                "g": 0,
+                "b": 0,
+                "a": 0.72
+              },
+              "DropShadowDistance": 3,
+              "FillAmount": 1,
+              "FillCenter": true,
+              "FillClockWise": true,
+              "FillMethod": 0,
+              "FillOrigin": 0,
+              "FlipX": false,
+              "FlipY": false,
+              "FrameColumn": 1,
+              "FrameRate": 0,
+              "FrameRow": 1,
+              "Outline": false,
+              "OutlineColor": {
+                "r": 0,
+                "g": 0,
+                "b": 0,
+                "a": 1
+              },
+              "OutlineWidth": 3,
+              "RaycastTarget": false,
+              "Type": 1,
+              "Enable": true
+            }
+          ],
+          "@version": 1
+        }
+      },
+      {
+        "id": "a7e11851-6424-48d8-b034-5dc35aa94f10",
+        "path": "/ui/WorldMapGroup/Overlay/Window/Map/Content/Links/Link2/Second",
+        "componentNames": "MOD.Core.UITransformComponent,MOD.Core.SpriteGUIRendererComponent",
+        "jsonString": {
+          "name": "Second",
+          "path": "/ui/WorldMapGroup/Overlay/Window/Map/Content/Links/Link2/Second",
+          "nameEditable": true,
+          "enable": true,
+          "visible": true,
+          "localize": true,
+          "displayOrder": 1,
+          "pathConstraints": "/////////",
+          "revision": 0,
+          "origin": {
+            "type": "Model",
+            "entry_id": "UISprite",
+            "sub_entity_id": null,
+            "root_entity_id": null,
+            "replaced_model_id": null
+          },
+          "modelId": "uisprite",
+          "@components": [
+            {
+              "@type": "MOD.Core.UITransformComponent",
+              "ActivePlatform": 255,
+              "AlignmentOption": 2,
+              "AnchorsMax": {
+                "x": 1,
+                "y": 0.5
+              },
+              "AnchorsMin": {
+                "x": 1,
+                "y": 0.5
+              },
+              "MobileOnly": false,
+              "OffsetMax": {
+                "x": 0,
+                "y": 4
+              },
+              "OffsetMin": {
+                "x": -50,
+                "y": -4
+              },
+              "Pivot": {
+                "x": 1,
+                "y": 0.5
+              },
+              "RectSize": {
+                "x": 50,
+                "y": 8
+              },
+              "UIMode": 1,
+              "UIScale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "UIVersion": 2,
+              "anchoredPosition": {
+                "x": 0,
+                "y": 0
+              },
+              "Position": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "QuaternionRotation": {
+                "x": 0,
+                "y": 0,
+                "z": 0,
+                "w": 1
+              },
+              "Scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "Enable": true
+            },
+            {
+              "@type": "MOD.Core.SpriteGUIRendererComponent",
+              "AnimClipPlayType": 0,
+              "EndFrameIndex": 2147483647,
+              "ImageRUID": {
+                "DataId": "2860136c06ab075439721c027de365af"
+              },
+              "IgnoreMapLayerCheck": false,
+              "LocalPosition": {
+                "x": 0,
+                "y": 0
+              },
+              "LocalScale": {
+                "x": 1,
+                "y": 1
+              },
+              "MaterialId": "",
+              "OrderInLayer": 0,
+              "OverrideSorting": false,
+              "PlayRate": 1,
+              "PreserveSprite": 0,
+              "SortingLayer": "UI",
+              "StartFrameIndex": 0,
+              "Color": {
+                "r": 0.6196078431372549,
+                "g": 0.6,
+                "b": 0.5607843137254902,
+                "a": 1
               },
               "DropShadow": false,
               "DropShadowAngle": 120,
@@ -9371,7 +9831,7 @@
       {
         "id": "9b9a3f81-f5cd-4ad6-bc07-a0b15da46972",
         "path": "/ui/WorldMapGroup/Overlay/Window/Map/Content/Links/Link3",
-        "componentNames": "MOD.Core.UITransformComponent,MOD.Core.SpriteGUIRendererComponent",
+        "componentNames": "MOD.Core.UITransformComponent",
         "jsonString": {
           "name": "Link3",
           "path": "/ui/WorldMapGroup/Overlay/Window/Map/Content/Links/Link3",
@@ -9384,12 +9844,12 @@
           "revision": 0,
           "origin": {
             "type": "Model",
-            "entry_id": "UISprite",
+            "entry_id": "UIEmpty",
             "sub_entity_id": null,
             "root_entity_id": null,
             "replaced_model_id": null
           },
-          "modelId": "uisprite",
+          "modelId": "uiempty",
           "@components": [
             {
               "@type": "MOD.Core.UITransformComponent",
@@ -9406,11 +9866,11 @@
               "MobileOnly": false,
               "OffsetMax": {
                 "x": 50,
-                "y": 3
+                "y": 4
               },
               "OffsetMin": {
                 "x": -50,
-                "y": -3
+                "y": -4
               },
               "Pivot": {
                 "x": 0.5,
@@ -9418,7 +9878,92 @@
               },
               "RectSize": {
                 "x": 100,
-                "y": 6
+                "y": 8
+              },
+              "UIMode": 1,
+              "UIScale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "UIVersion": 2,
+              "anchoredPosition": {
+                "x": 0,
+                "y": 0
+              },
+              "Position": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "QuaternionRotation": {
+                "x": 0,
+                "y": 0,
+                "z": 0,
+                "w": 1
+              },
+              "Scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "Enable": true
+            }
+          ],
+          "@version": 1
+        }
+      },
+      {
+        "id": "e8ee9498-7f0a-4824-9035-c41a0321dcc3",
+        "path": "/ui/WorldMapGroup/Overlay/Window/Map/Content/Links/Link3/First",
+        "componentNames": "MOD.Core.UITransformComponent,MOD.Core.SpriteGUIRendererComponent",
+        "jsonString": {
+          "name": "First",
+          "path": "/ui/WorldMapGroup/Overlay/Window/Map/Content/Links/Link3/First",
+          "nameEditable": true,
+          "enable": true,
+          "visible": true,
+          "localize": true,
+          "displayOrder": 0,
+          "pathConstraints": "/////////",
+          "revision": 0,
+          "origin": {
+            "type": "Model",
+            "entry_id": "UISprite",
+            "sub_entity_id": null,
+            "root_entity_id": null,
+            "replaced_model_id": null
+          },
+          "modelId": "uisprite",
+          "@components": [
+            {
+              "@type": "MOD.Core.UITransformComponent",
+              "ActivePlatform": 255,
+              "AlignmentOption": 1,
+              "AnchorsMax": {
+                "x": 0,
+                "y": 0.5
+              },
+              "AnchorsMin": {
+                "x": 0,
+                "y": 0.5
+              },
+              "MobileOnly": false,
+              "OffsetMax": {
+                "x": 50,
+                "y": 4
+              },
+              "OffsetMin": {
+                "x": 0,
+                "y": -4
+              },
+              "Pivot": {
+                "x": 0,
+                "y": 0.5
+              },
+              "RectSize": {
+                "x": 50,
+                "y": 8
               },
               "UIMode": 1,
               "UIScale": {
@@ -9473,10 +10018,155 @@
               "SortingLayer": "UI",
               "StartFrameIndex": 0,
               "Color": {
-                "r": 0.29,
-                "g": 0.18,
-                "b": 0.09,
-                "a": 0.85
+                "r": 0.6196078431372549,
+                "g": 0.6,
+                "b": 0.5607843137254902,
+                "a": 1
+              },
+              "DropShadow": false,
+              "DropShadowAngle": 120,
+              "DropShadowColor": {
+                "r": 0,
+                "g": 0,
+                "b": 0,
+                "a": 0.72
+              },
+              "DropShadowDistance": 3,
+              "FillAmount": 1,
+              "FillCenter": true,
+              "FillClockWise": true,
+              "FillMethod": 0,
+              "FillOrigin": 0,
+              "FlipX": false,
+              "FlipY": false,
+              "FrameColumn": 1,
+              "FrameRate": 0,
+              "FrameRow": 1,
+              "Outline": false,
+              "OutlineColor": {
+                "r": 0,
+                "g": 0,
+                "b": 0,
+                "a": 1
+              },
+              "OutlineWidth": 3,
+              "RaycastTarget": false,
+              "Type": 1,
+              "Enable": true
+            }
+          ],
+          "@version": 1
+        }
+      },
+      {
+        "id": "bdcfb996-8192-47c5-a92a-3d06a752f5d4",
+        "path": "/ui/WorldMapGroup/Overlay/Window/Map/Content/Links/Link3/Second",
+        "componentNames": "MOD.Core.UITransformComponent,MOD.Core.SpriteGUIRendererComponent",
+        "jsonString": {
+          "name": "Second",
+          "path": "/ui/WorldMapGroup/Overlay/Window/Map/Content/Links/Link3/Second",
+          "nameEditable": true,
+          "enable": true,
+          "visible": true,
+          "localize": true,
+          "displayOrder": 1,
+          "pathConstraints": "/////////",
+          "revision": 0,
+          "origin": {
+            "type": "Model",
+            "entry_id": "UISprite",
+            "sub_entity_id": null,
+            "root_entity_id": null,
+            "replaced_model_id": null
+          },
+          "modelId": "uisprite",
+          "@components": [
+            {
+              "@type": "MOD.Core.UITransformComponent",
+              "ActivePlatform": 255,
+              "AlignmentOption": 2,
+              "AnchorsMax": {
+                "x": 1,
+                "y": 0.5
+              },
+              "AnchorsMin": {
+                "x": 1,
+                "y": 0.5
+              },
+              "MobileOnly": false,
+              "OffsetMax": {
+                "x": 0,
+                "y": 4
+              },
+              "OffsetMin": {
+                "x": -50,
+                "y": -4
+              },
+              "Pivot": {
+                "x": 1,
+                "y": 0.5
+              },
+              "RectSize": {
+                "x": 50,
+                "y": 8
+              },
+              "UIMode": 1,
+              "UIScale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "UIVersion": 2,
+              "anchoredPosition": {
+                "x": 0,
+                "y": 0
+              },
+              "Position": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "QuaternionRotation": {
+                "x": 0,
+                "y": 0,
+                "z": 0,
+                "w": 1
+              },
+              "Scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "Enable": true
+            },
+            {
+              "@type": "MOD.Core.SpriteGUIRendererComponent",
+              "AnimClipPlayType": 0,
+              "EndFrameIndex": 2147483647,
+              "ImageRUID": {
+                "DataId": "2860136c06ab075439721c027de365af"
+              },
+              "IgnoreMapLayerCheck": false,
+              "LocalPosition": {
+                "x": 0,
+                "y": 0
+              },
+              "LocalScale": {
+                "x": 1,
+                "y": 1
+              },
+              "MaterialId": "",
+              "OrderInLayer": 0,
+              "OverrideSorting": false,
+              "PlayRate": 1,
+              "PreserveSprite": 0,
+              "SortingLayer": "UI",
+              "StartFrameIndex": 0,
+              "Color": {
+                "r": 0.6196078431372549,
+                "g": 0.6,
+                "b": 0.5607843137254902,
+                "a": 1
               },
               "DropShadow": false,
               "DropShadowAngle": 120,
@@ -10308,195 +10998,6 @@
         }
       },
       {
-        "id": "0ff93b90-dc3a-4c70-bf9d-f146fdab5499",
-        "path": "/ui/WorldMapGroup/Overlay/Window/Map/Content/Towns/nanzih/Strength",
-        "componentNames": "MOD.Core.UITransformComponent,MOD.Core.SpriteGUIRendererComponent,MOD.Core.TextGUIRendererComponent",
-        "jsonString": {
-          "name": "Strength",
-          "path": "/ui/WorldMapGroup/Overlay/Window/Map/Content/Towns/nanzih/Strength",
-          "nameEditable": true,
-          "enable": true,
-          "visible": true,
-          "localize": true,
-          "displayOrder": 4,
-          "pathConstraints": "/////////",
-          "revision": 0,
-          "origin": {
-            "type": "Model",
-            "entry_id": "UITextGUIRenderer",
-            "sub_entity_id": null,
-            "root_entity_id": null,
-            "replaced_model_id": null
-          },
-          "modelId": "uitextguirenderer",
-          "@components": [
-            {
-              "@type": "MOD.Core.UITransformComponent",
-              "ActivePlatform": 255,
-              "AlignmentOption": 0,
-              "AnchorsMax": {
-                "x": 0.5,
-                "y": 0.5
-              },
-              "AnchorsMin": {
-                "x": 0.5,
-                "y": 0.5
-              },
-              "MobileOnly": false,
-              "OffsetMax": {
-                "x": -36,
-                "y": -2
-              },
-              "OffsetMin": {
-                "x": -176,
-                "y": -30
-              },
-              "Pivot": {
-                "x": 0.5,
-                "y": 0.5
-              },
-              "RectSize": {
-                "x": 140,
-                "y": 28
-              },
-              "UIMode": 1,
-              "UIScale": {
-                "x": 1,
-                "y": 1,
-                "z": 1
-              },
-              "UIVersion": 2,
-              "anchoredPosition": {
-                "x": -106,
-                "y": -16
-              },
-              "Position": {
-                "x": 0,
-                "y": 0,
-                "z": 0
-              },
-              "QuaternionRotation": {
-                "x": 0,
-                "y": 0,
-                "z": 0,
-                "w": 1
-              },
-              "Scale": {
-                "x": 1,
-                "y": 1,
-                "z": 1
-              },
-              "Enable": true
-            },
-            {
-              "@type": "MOD.Core.SpriteGUIRendererComponent",
-              "AnimClipPlayType": 0,
-              "EndFrameIndex": 2147483647,
-              "ImageRUID": {
-                "DataId": ""
-              },
-              "IgnoreMapLayerCheck": false,
-              "LocalPosition": {
-                "x": 0,
-                "y": 0
-              },
-              "LocalScale": {
-                "x": 1,
-                "y": 1
-              },
-              "MaterialId": "",
-              "OrderInLayer": 0,
-              "OverrideSorting": false,
-              "PlayRate": 1,
-              "PreserveSprite": 0,
-              "SortingLayer": "UI",
-              "StartFrameIndex": 0,
-              "Color": {
-                "r": 0.10196078431372549,
-                "g": 0.10196078431372549,
-                "b": 0.10196078431372549,
-                "a": 0
-              },
-              "DropShadow": false,
-              "DropShadowAngle": 120,
-              "DropShadowColor": {
-                "r": 0,
-                "g": 0,
-                "b": 0,
-                "a": 0.72
-              },
-              "DropShadowDistance": 3,
-              "FillAmount": 1,
-              "FillCenter": true,
-              "FillClockWise": true,
-              "FillMethod": 0,
-              "FillOrigin": 0,
-              "FlipX": false,
-              "FlipY": false,
-              "FrameColumn": 1,
-              "FrameRate": 0,
-              "FrameRow": 1,
-              "Outline": false,
-              "OutlineColor": {
-                "r": 0,
-                "g": 0,
-                "b": 0,
-                "a": 1
-              },
-              "OutlineWidth": 3,
-              "RaycastTarget": false,
-              "Type": 0,
-              "Enable": true
-            },
-            {
-              "@type": "MOD.Core.TextGUIRendererComponent",
-              "BestFit": false,
-              "ConstraintX": 100,
-              "ConstraintY": 100,
-              "FaceDilate": 0.2,
-              "Font": "Default",
-              "FontColor": {
-                "r": 1,
-                "g": 0.9490196078431372,
-                "b": 0.7843137254901961,
-                "a": 1
-              },
-              "FontSize": 21,
-              "FontStyle": 0,
-              "HorizontalAlignment": 4,
-              "IgnoreMapLayerCheck": false,
-              "MaxSize": 40,
-              "MinSize": 10,
-              "OrderInLayer": 0,
-              "OutlineColor": {
-                "r": 0,
-                "g": 0,
-                "b": 0,
-                "a": 0.7
-              },
-              "OutlineWidth": 0.2,
-              "Overflow": 0,
-              "OverrideSorting": false,
-              "Padding": {
-                "left": 0,
-                "right": 0,
-                "top": 0,
-                "bottom": 0
-              },
-              "SizeFit": false,
-              "SortingLayer": "UI",
-              "Text": "兵力 —",
-              "Underlay": false,
-              "UseConstraintX": false,
-              "UseConstraintY": false,
-              "VerticalAlignment": 512,
-              "Enable": true
-            }
-          ],
-          "@version": 1
-        }
-      },
-      {
         "id": "a4428273-475f-4af0-91c6-3ebad182b8da",
         "path": "/ui/WorldMapGroup/Overlay/Window/Map/Content/Towns/nanzih/Capital",
         "componentNames": "MOD.Core.UITransformComponent,MOD.Core.SpriteGUIRendererComponent,MOD.Core.TextGUIRendererComponent",
@@ -10507,7 +11008,7 @@
           "enable": false,
           "visible": true,
           "localize": true,
-          "displayOrder": 5,
+          "displayOrder": 4,
           "pathConstraints": "/////////",
           "revision": 0,
           "origin": {
@@ -10696,7 +11197,7 @@
           "enable": false,
           "visible": true,
           "localize": true,
-          "displayOrder": 6,
+          "displayOrder": 5,
           "pathConstraints": "/////////",
           "revision": 0,
           "origin": {
@@ -11540,195 +12041,6 @@
         }
       },
       {
-        "id": "bcbec968-0a5a-4ae3-9c12-6811571f394b",
-        "path": "/ui/WorldMapGroup/Overlay/Window/Map/Content/Towns/zuoying/Strength",
-        "componentNames": "MOD.Core.UITransformComponent,MOD.Core.SpriteGUIRendererComponent,MOD.Core.TextGUIRendererComponent",
-        "jsonString": {
-          "name": "Strength",
-          "path": "/ui/WorldMapGroup/Overlay/Window/Map/Content/Towns/zuoying/Strength",
-          "nameEditable": true,
-          "enable": true,
-          "visible": true,
-          "localize": true,
-          "displayOrder": 4,
-          "pathConstraints": "/////////",
-          "revision": 0,
-          "origin": {
-            "type": "Model",
-            "entry_id": "UITextGUIRenderer",
-            "sub_entity_id": null,
-            "root_entity_id": null,
-            "replaced_model_id": null
-          },
-          "modelId": "uitextguirenderer",
-          "@components": [
-            {
-              "@type": "MOD.Core.UITransformComponent",
-              "ActivePlatform": 255,
-              "AlignmentOption": 0,
-              "AnchorsMax": {
-                "x": 0.5,
-                "y": 0.5
-              },
-              "AnchorsMin": {
-                "x": 0.5,
-                "y": 0.5
-              },
-              "MobileOnly": false,
-              "OffsetMax": {
-                "x": -36,
-                "y": -2
-              },
-              "OffsetMin": {
-                "x": -176,
-                "y": -30
-              },
-              "Pivot": {
-                "x": 0.5,
-                "y": 0.5
-              },
-              "RectSize": {
-                "x": 140,
-                "y": 28
-              },
-              "UIMode": 1,
-              "UIScale": {
-                "x": 1,
-                "y": 1,
-                "z": 1
-              },
-              "UIVersion": 2,
-              "anchoredPosition": {
-                "x": -106,
-                "y": -16
-              },
-              "Position": {
-                "x": 0,
-                "y": 0,
-                "z": 0
-              },
-              "QuaternionRotation": {
-                "x": 0,
-                "y": 0,
-                "z": 0,
-                "w": 1
-              },
-              "Scale": {
-                "x": 1,
-                "y": 1,
-                "z": 1
-              },
-              "Enable": true
-            },
-            {
-              "@type": "MOD.Core.SpriteGUIRendererComponent",
-              "AnimClipPlayType": 0,
-              "EndFrameIndex": 2147483647,
-              "ImageRUID": {
-                "DataId": ""
-              },
-              "IgnoreMapLayerCheck": false,
-              "LocalPosition": {
-                "x": 0,
-                "y": 0
-              },
-              "LocalScale": {
-                "x": 1,
-                "y": 1
-              },
-              "MaterialId": "",
-              "OrderInLayer": 0,
-              "OverrideSorting": false,
-              "PlayRate": 1,
-              "PreserveSprite": 0,
-              "SortingLayer": "UI",
-              "StartFrameIndex": 0,
-              "Color": {
-                "r": 0.10196078431372549,
-                "g": 0.10196078431372549,
-                "b": 0.10196078431372549,
-                "a": 0
-              },
-              "DropShadow": false,
-              "DropShadowAngle": 120,
-              "DropShadowColor": {
-                "r": 0,
-                "g": 0,
-                "b": 0,
-                "a": 0.72
-              },
-              "DropShadowDistance": 3,
-              "FillAmount": 1,
-              "FillCenter": true,
-              "FillClockWise": true,
-              "FillMethod": 0,
-              "FillOrigin": 0,
-              "FlipX": false,
-              "FlipY": false,
-              "FrameColumn": 1,
-              "FrameRate": 0,
-              "FrameRow": 1,
-              "Outline": false,
-              "OutlineColor": {
-                "r": 0,
-                "g": 0,
-                "b": 0,
-                "a": 1
-              },
-              "OutlineWidth": 3,
-              "RaycastTarget": false,
-              "Type": 0,
-              "Enable": true
-            },
-            {
-              "@type": "MOD.Core.TextGUIRendererComponent",
-              "BestFit": false,
-              "ConstraintX": 100,
-              "ConstraintY": 100,
-              "FaceDilate": 0.2,
-              "Font": "Default",
-              "FontColor": {
-                "r": 1,
-                "g": 0.9490196078431372,
-                "b": 0.7843137254901961,
-                "a": 1
-              },
-              "FontSize": 21,
-              "FontStyle": 0,
-              "HorizontalAlignment": 4,
-              "IgnoreMapLayerCheck": false,
-              "MaxSize": 40,
-              "MinSize": 10,
-              "OrderInLayer": 0,
-              "OutlineColor": {
-                "r": 0,
-                "g": 0,
-                "b": 0,
-                "a": 0.7
-              },
-              "OutlineWidth": 0.2,
-              "Overflow": 0,
-              "OverrideSorting": false,
-              "Padding": {
-                "left": 0,
-                "right": 0,
-                "top": 0,
-                "bottom": 0
-              },
-              "SizeFit": false,
-              "SortingLayer": "UI",
-              "Text": "兵力 —",
-              "Underlay": false,
-              "UseConstraintX": false,
-              "UseConstraintY": false,
-              "VerticalAlignment": 512,
-              "Enable": true
-            }
-          ],
-          "@version": 1
-        }
-      },
-      {
         "id": "53f9a85d-4ffa-42bd-88bc-661efbcda36d",
         "path": "/ui/WorldMapGroup/Overlay/Window/Map/Content/Towns/zuoying/Capital",
         "componentNames": "MOD.Core.UITransformComponent,MOD.Core.SpriteGUIRendererComponent,MOD.Core.TextGUIRendererComponent",
@@ -11739,7 +12051,7 @@
           "enable": false,
           "visible": true,
           "localize": true,
-          "displayOrder": 5,
+          "displayOrder": 4,
           "pathConstraints": "/////////",
           "revision": 0,
           "origin": {
@@ -11928,7 +12240,7 @@
           "enable": false,
           "visible": true,
           "localize": true,
-          "displayOrder": 6,
+          "displayOrder": 5,
           "pathConstraints": "/////////",
           "revision": 0,
           "origin": {
@@ -12772,195 +13084,6 @@
         }
       },
       {
-        "id": "c584e84e-5305-4d99-8520-ce8e22e66fd7",
-        "path": "/ui/WorldMapGroup/Overlay/Window/Map/Content/Towns/gushan/Strength",
-        "componentNames": "MOD.Core.UITransformComponent,MOD.Core.SpriteGUIRendererComponent,MOD.Core.TextGUIRendererComponent",
-        "jsonString": {
-          "name": "Strength",
-          "path": "/ui/WorldMapGroup/Overlay/Window/Map/Content/Towns/gushan/Strength",
-          "nameEditable": true,
-          "enable": true,
-          "visible": true,
-          "localize": true,
-          "displayOrder": 4,
-          "pathConstraints": "/////////",
-          "revision": 0,
-          "origin": {
-            "type": "Model",
-            "entry_id": "UITextGUIRenderer",
-            "sub_entity_id": null,
-            "root_entity_id": null,
-            "replaced_model_id": null
-          },
-          "modelId": "uitextguirenderer",
-          "@components": [
-            {
-              "@type": "MOD.Core.UITransformComponent",
-              "ActivePlatform": 255,
-              "AlignmentOption": 0,
-              "AnchorsMax": {
-                "x": 0.5,
-                "y": 0.5
-              },
-              "AnchorsMin": {
-                "x": 0.5,
-                "y": 0.5
-              },
-              "MobileOnly": false,
-              "OffsetMax": {
-                "x": -36,
-                "y": -2
-              },
-              "OffsetMin": {
-                "x": -176,
-                "y": -30
-              },
-              "Pivot": {
-                "x": 0.5,
-                "y": 0.5
-              },
-              "RectSize": {
-                "x": 140,
-                "y": 28
-              },
-              "UIMode": 1,
-              "UIScale": {
-                "x": 1,
-                "y": 1,
-                "z": 1
-              },
-              "UIVersion": 2,
-              "anchoredPosition": {
-                "x": -106,
-                "y": -16
-              },
-              "Position": {
-                "x": 0,
-                "y": 0,
-                "z": 0
-              },
-              "QuaternionRotation": {
-                "x": 0,
-                "y": 0,
-                "z": 0,
-                "w": 1
-              },
-              "Scale": {
-                "x": 1,
-                "y": 1,
-                "z": 1
-              },
-              "Enable": true
-            },
-            {
-              "@type": "MOD.Core.SpriteGUIRendererComponent",
-              "AnimClipPlayType": 0,
-              "EndFrameIndex": 2147483647,
-              "ImageRUID": {
-                "DataId": ""
-              },
-              "IgnoreMapLayerCheck": false,
-              "LocalPosition": {
-                "x": 0,
-                "y": 0
-              },
-              "LocalScale": {
-                "x": 1,
-                "y": 1
-              },
-              "MaterialId": "",
-              "OrderInLayer": 0,
-              "OverrideSorting": false,
-              "PlayRate": 1,
-              "PreserveSprite": 0,
-              "SortingLayer": "UI",
-              "StartFrameIndex": 0,
-              "Color": {
-                "r": 0.10196078431372549,
-                "g": 0.10196078431372549,
-                "b": 0.10196078431372549,
-                "a": 0
-              },
-              "DropShadow": false,
-              "DropShadowAngle": 120,
-              "DropShadowColor": {
-                "r": 0,
-                "g": 0,
-                "b": 0,
-                "a": 0.72
-              },
-              "DropShadowDistance": 3,
-              "FillAmount": 1,
-              "FillCenter": true,
-              "FillClockWise": true,
-              "FillMethod": 0,
-              "FillOrigin": 0,
-              "FlipX": false,
-              "FlipY": false,
-              "FrameColumn": 1,
-              "FrameRate": 0,
-              "FrameRow": 1,
-              "Outline": false,
-              "OutlineColor": {
-                "r": 0,
-                "g": 0,
-                "b": 0,
-                "a": 1
-              },
-              "OutlineWidth": 3,
-              "RaycastTarget": false,
-              "Type": 0,
-              "Enable": true
-            },
-            {
-              "@type": "MOD.Core.TextGUIRendererComponent",
-              "BestFit": false,
-              "ConstraintX": 100,
-              "ConstraintY": 100,
-              "FaceDilate": 0.2,
-              "Font": "Default",
-              "FontColor": {
-                "r": 1,
-                "g": 0.9490196078431372,
-                "b": 0.7843137254901961,
-                "a": 1
-              },
-              "FontSize": 21,
-              "FontStyle": 0,
-              "HorizontalAlignment": 4,
-              "IgnoreMapLayerCheck": false,
-              "MaxSize": 40,
-              "MinSize": 10,
-              "OrderInLayer": 0,
-              "OutlineColor": {
-                "r": 0,
-                "g": 0,
-                "b": 0,
-                "a": 0.7
-              },
-              "OutlineWidth": 0.2,
-              "Overflow": 0,
-              "OverrideSorting": false,
-              "Padding": {
-                "left": 0,
-                "right": 0,
-                "top": 0,
-                "bottom": 0
-              },
-              "SizeFit": false,
-              "SortingLayer": "UI",
-              "Text": "兵力 —",
-              "Underlay": false,
-              "UseConstraintX": false,
-              "UseConstraintY": false,
-              "VerticalAlignment": 512,
-              "Enable": true
-            }
-          ],
-          "@version": 1
-        }
-      },
-      {
         "id": "16072493-380c-4e37-bf2b-1bc286ea0893",
         "path": "/ui/WorldMapGroup/Overlay/Window/Map/Content/Towns/gushan/Capital",
         "componentNames": "MOD.Core.UITransformComponent,MOD.Core.SpriteGUIRendererComponent,MOD.Core.TextGUIRendererComponent",
@@ -12971,7 +13094,7 @@
           "enable": false,
           "visible": true,
           "localize": true,
-          "displayOrder": 5,
+          "displayOrder": 4,
           "pathConstraints": "/////////",
           "revision": 0,
           "origin": {
@@ -13160,7 +13283,7 @@
           "enable": false,
           "visible": true,
           "localize": true,
-          "displayOrder": 6,
+          "displayOrder": 5,
           "pathConstraints": "/////////",
           "revision": 0,
           "origin": {
@@ -14004,195 +14127,6 @@
         }
       },
       {
-        "id": "751f6bb0-39c7-441b-9bf2-f9480eb3c8c9",
-        "path": "/ui/WorldMapGroup/Overlay/Window/Map/Content/Towns/yancheng/Strength",
-        "componentNames": "MOD.Core.UITransformComponent,MOD.Core.SpriteGUIRendererComponent,MOD.Core.TextGUIRendererComponent",
-        "jsonString": {
-          "name": "Strength",
-          "path": "/ui/WorldMapGroup/Overlay/Window/Map/Content/Towns/yancheng/Strength",
-          "nameEditable": true,
-          "enable": true,
-          "visible": true,
-          "localize": true,
-          "displayOrder": 4,
-          "pathConstraints": "/////////",
-          "revision": 0,
-          "origin": {
-            "type": "Model",
-            "entry_id": "UITextGUIRenderer",
-            "sub_entity_id": null,
-            "root_entity_id": null,
-            "replaced_model_id": null
-          },
-          "modelId": "uitextguirenderer",
-          "@components": [
-            {
-              "@type": "MOD.Core.UITransformComponent",
-              "ActivePlatform": 255,
-              "AlignmentOption": 0,
-              "AnchorsMax": {
-                "x": 0.5,
-                "y": 0.5
-              },
-              "AnchorsMin": {
-                "x": 0.5,
-                "y": 0.5
-              },
-              "MobileOnly": false,
-              "OffsetMax": {
-                "x": -36,
-                "y": -2
-              },
-              "OffsetMin": {
-                "x": -176,
-                "y": -30
-              },
-              "Pivot": {
-                "x": 0.5,
-                "y": 0.5
-              },
-              "RectSize": {
-                "x": 140,
-                "y": 28
-              },
-              "UIMode": 1,
-              "UIScale": {
-                "x": 1,
-                "y": 1,
-                "z": 1
-              },
-              "UIVersion": 2,
-              "anchoredPosition": {
-                "x": -106,
-                "y": -16
-              },
-              "Position": {
-                "x": 0,
-                "y": 0,
-                "z": 0
-              },
-              "QuaternionRotation": {
-                "x": 0,
-                "y": 0,
-                "z": 0,
-                "w": 1
-              },
-              "Scale": {
-                "x": 1,
-                "y": 1,
-                "z": 1
-              },
-              "Enable": true
-            },
-            {
-              "@type": "MOD.Core.SpriteGUIRendererComponent",
-              "AnimClipPlayType": 0,
-              "EndFrameIndex": 2147483647,
-              "ImageRUID": {
-                "DataId": ""
-              },
-              "IgnoreMapLayerCheck": false,
-              "LocalPosition": {
-                "x": 0,
-                "y": 0
-              },
-              "LocalScale": {
-                "x": 1,
-                "y": 1
-              },
-              "MaterialId": "",
-              "OrderInLayer": 0,
-              "OverrideSorting": false,
-              "PlayRate": 1,
-              "PreserveSprite": 0,
-              "SortingLayer": "UI",
-              "StartFrameIndex": 0,
-              "Color": {
-                "r": 0.10196078431372549,
-                "g": 0.10196078431372549,
-                "b": 0.10196078431372549,
-                "a": 0
-              },
-              "DropShadow": false,
-              "DropShadowAngle": 120,
-              "DropShadowColor": {
-                "r": 0,
-                "g": 0,
-                "b": 0,
-                "a": 0.72
-              },
-              "DropShadowDistance": 3,
-              "FillAmount": 1,
-              "FillCenter": true,
-              "FillClockWise": true,
-              "FillMethod": 0,
-              "FillOrigin": 0,
-              "FlipX": false,
-              "FlipY": false,
-              "FrameColumn": 1,
-              "FrameRate": 0,
-              "FrameRow": 1,
-              "Outline": false,
-              "OutlineColor": {
-                "r": 0,
-                "g": 0,
-                "b": 0,
-                "a": 1
-              },
-              "OutlineWidth": 3,
-              "RaycastTarget": false,
-              "Type": 0,
-              "Enable": true
-            },
-            {
-              "@type": "MOD.Core.TextGUIRendererComponent",
-              "BestFit": false,
-              "ConstraintX": 100,
-              "ConstraintY": 100,
-              "FaceDilate": 0.2,
-              "Font": "Default",
-              "FontColor": {
-                "r": 1,
-                "g": 0.9490196078431372,
-                "b": 0.7843137254901961,
-                "a": 1
-              },
-              "FontSize": 21,
-              "FontStyle": 0,
-              "HorizontalAlignment": 4,
-              "IgnoreMapLayerCheck": false,
-              "MaxSize": 40,
-              "MinSize": 10,
-              "OrderInLayer": 0,
-              "OutlineColor": {
-                "r": 0,
-                "g": 0,
-                "b": 0,
-                "a": 0.7
-              },
-              "OutlineWidth": 0.2,
-              "Overflow": 0,
-              "OverrideSorting": false,
-              "Padding": {
-                "left": 0,
-                "right": 0,
-                "top": 0,
-                "bottom": 0
-              },
-              "SizeFit": false,
-              "SortingLayer": "UI",
-              "Text": "兵力 —",
-              "Underlay": false,
-              "UseConstraintX": false,
-              "UseConstraintY": false,
-              "VerticalAlignment": 512,
-              "Enable": true
-            }
-          ],
-          "@version": 1
-        }
-      },
-      {
         "id": "16de875a-44a3-4a28-b171-10d1d1fbf208",
         "path": "/ui/WorldMapGroup/Overlay/Window/Map/Content/Towns/yancheng/Capital",
         "componentNames": "MOD.Core.UITransformComponent,MOD.Core.SpriteGUIRendererComponent,MOD.Core.TextGUIRendererComponent",
@@ -14203,7 +14137,7 @@
           "enable": false,
           "visible": true,
           "localize": true,
-          "displayOrder": 5,
+          "displayOrder": 4,
           "pathConstraints": "/////////",
           "revision": 0,
           "origin": {
@@ -14392,7 +14326,7 @@
           "enable": false,
           "visible": true,
           "localize": true,
-          "displayOrder": 6,
+          "displayOrder": 5,
           "pathConstraints": "/////////",
           "revision": 0,
           "origin": {
@@ -21326,7 +21260,7 @@
       {
         "id": "f3ede2ef-5d36-46e2-99bd-460c0f5083c1",
         "path": "/ui/WorldMapGroup/Overlay/Window/Side/Legend/Link",
-        "componentNames": "MOD.Core.UITransformComponent,MOD.Core.SpriteGUIRendererComponent",
+        "componentNames": "MOD.Core.UITransformComponent",
         "jsonString": {
           "name": "Link",
           "path": "/ui/WorldMapGroup/Overlay/Window/Side/Legend/Link",
@@ -21336,6 +21270,91 @@
           "localize": true,
           "displayOrder": 2,
           "pathConstraints": "///////",
+          "revision": 0,
+          "origin": {
+            "type": "Model",
+            "entry_id": "UIEmpty",
+            "sub_entity_id": null,
+            "root_entity_id": null,
+            "replaced_model_id": null
+          },
+          "modelId": "uiempty",
+          "@components": [
+            {
+              "@type": "MOD.Core.UITransformComponent",
+              "ActivePlatform": 255,
+              "AlignmentOption": 1,
+              "AnchorsMax": {
+                "x": 0,
+                "y": 0.5
+              },
+              "AnchorsMin": {
+                "x": 0,
+                "y": 0.5
+              },
+              "MobileOnly": false,
+              "OffsetMax": {
+                "x": 348,
+                "y": 4
+              },
+              "OffsetMin": {
+                "x": 300,
+                "y": -4
+              },
+              "Pivot": {
+                "x": 0,
+                "y": 0.5
+              },
+              "RectSize": {
+                "x": 48,
+                "y": 8
+              },
+              "UIMode": 1,
+              "UIScale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "UIVersion": 2,
+              "anchoredPosition": {
+                "x": 300,
+                "y": 0
+              },
+              "Position": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "QuaternionRotation": {
+                "x": 0,
+                "y": 0,
+                "z": 0,
+                "w": 1
+              },
+              "Scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "Enable": true
+            }
+          ],
+          "@version": 1
+        }
+      },
+      {
+        "id": "a1725294-3dc3-4e7b-87ca-7e271f058e22",
+        "path": "/ui/WorldMapGroup/Overlay/Window/Side/Legend/Link/First",
+        "componentNames": "MOD.Core.UITransformComponent,MOD.Core.SpriteGUIRendererComponent",
+        "jsonString": {
+          "name": "First",
+          "path": "/ui/WorldMapGroup/Overlay/Window/Side/Legend/Link/First",
+          "nameEditable": true,
+          "enable": true,
+          "visible": true,
+          "localize": true,
+          "displayOrder": 1,
+          "pathConstraints": "////////",
           "revision": 0,
           "origin": {
             "type": "Model",
@@ -21360,20 +21379,20 @@
               },
               "MobileOnly": false,
               "OffsetMax": {
-                "x": 354,
-                "y": 3
+                "x": 24,
+                "y": 4
               },
               "OffsetMin": {
-                "x": 314,
-                "y": -3
+                "x": 0,
+                "y": -4
               },
               "Pivot": {
                 "x": 0,
                 "y": 0.5
               },
               "RectSize": {
-                "x": 40,
-                "y": 6
+                "x": 24,
+                "y": 8
               },
               "UIMode": 1,
               "UIScale": {
@@ -21383,7 +21402,7 @@
               },
               "UIVersion": 2,
               "anchoredPosition": {
-                "x": 314,
+                "x": 0,
                 "y": 0
               },
               "Position": {
@@ -21428,9 +21447,154 @@
               "SortingLayer": "UI",
               "StartFrameIndex": 0,
               "Color": {
-                "r": 0.79,
-                "g": 0.64,
-                "b": 0.44,
+                "r": 0.6196078431372549,
+                "g": 0.6,
+                "b": 0.5607843137254902,
+                "a": 1
+              },
+              "DropShadow": false,
+              "DropShadowAngle": 120,
+              "DropShadowColor": {
+                "r": 0,
+                "g": 0,
+                "b": 0,
+                "a": 0.72
+              },
+              "DropShadowDistance": 3,
+              "FillAmount": 1,
+              "FillCenter": true,
+              "FillClockWise": true,
+              "FillMethod": 0,
+              "FillOrigin": 0,
+              "FlipX": false,
+              "FlipY": false,
+              "FrameColumn": 1,
+              "FrameRate": 0,
+              "FrameRow": 1,
+              "Outline": false,
+              "OutlineColor": {
+                "r": 0,
+                "g": 0,
+                "b": 0,
+                "a": 1
+              },
+              "OutlineWidth": 3,
+              "RaycastTarget": false,
+              "Type": 1,
+              "Enable": true
+            }
+          ],
+          "@version": 1
+        }
+      },
+      {
+        "id": "8d71cd78-c56a-4210-b09c-f56b0ab85790",
+        "path": "/ui/WorldMapGroup/Overlay/Window/Side/Legend/Link/Second",
+        "componentNames": "MOD.Core.UITransformComponent,MOD.Core.SpriteGUIRendererComponent",
+        "jsonString": {
+          "name": "Second",
+          "path": "/ui/WorldMapGroup/Overlay/Window/Side/Legend/Link/Second",
+          "nameEditable": true,
+          "enable": true,
+          "visible": true,
+          "localize": true,
+          "displayOrder": 2,
+          "pathConstraints": "////////",
+          "revision": 0,
+          "origin": {
+            "type": "Model",
+            "entry_id": "UISprite",
+            "sub_entity_id": null,
+            "root_entity_id": null,
+            "replaced_model_id": null
+          },
+          "modelId": "uisprite",
+          "@components": [
+            {
+              "@type": "MOD.Core.UITransformComponent",
+              "ActivePlatform": 255,
+              "AlignmentOption": 2,
+              "AnchorsMax": {
+                "x": 1,
+                "y": 0.5
+              },
+              "AnchorsMin": {
+                "x": 1,
+                "y": 0.5
+              },
+              "MobileOnly": false,
+              "OffsetMax": {
+                "x": 0,
+                "y": 4
+              },
+              "OffsetMin": {
+                "x": -24,
+                "y": -4
+              },
+              "Pivot": {
+                "x": 1,
+                "y": 0.5
+              },
+              "RectSize": {
+                "x": 24,
+                "y": 8
+              },
+              "UIMode": 1,
+              "UIScale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "UIVersion": 2,
+              "anchoredPosition": {
+                "x": 0,
+                "y": 0
+              },
+              "Position": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "QuaternionRotation": {
+                "x": 0,
+                "y": 0,
+                "z": 0,
+                "w": 1
+              },
+              "Scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "Enable": true
+            },
+            {
+              "@type": "MOD.Core.SpriteGUIRendererComponent",
+              "AnimClipPlayType": 0,
+              "EndFrameIndex": 2147483647,
+              "ImageRUID": {
+                "DataId": "2860136c06ab075439721c027de365af"
+              },
+              "IgnoreMapLayerCheck": false,
+              "LocalPosition": {
+                "x": 0,
+                "y": 0
+              },
+              "LocalScale": {
+                "x": 1,
+                "y": 1
+              },
+              "MaterialId": "",
+              "OrderInLayer": 0,
+              "OverrideSorting": false,
+              "PlayRate": 1,
+              "PreserveSprite": 0,
+              "SortingLayer": "UI",
+              "StartFrameIndex": 0,
+              "Color": {
+                "r": 0.6196078431372549,
+                "g": 0.6,
+                "b": 0.5607843137254902,
                 "a": 1
               },
               "DropShadow": false,
@@ -21505,11 +21669,11 @@
               },
               "MobileOnly": false,
               "OffsetMax": {
-                "x": 138,
+                "x": 146,
                 "y": 15
               },
               "OffsetMin": {
-                "x": 48,
+                "x": 56,
                 "y": -15
               },
               "Pivot": {
@@ -21528,7 +21692,7 @@
               },
               "UIVersion": 2,
               "anchoredPosition": {
-                "x": 48,
+                "x": 56,
                 "y": 0
               },
               "Position": {
@@ -21646,7 +21810,7 @@
               },
               "SizeFit": false,
               "SortingLayer": "UI",
-              "Text": "相鄰",
+              "Text": "拔河條",
               "Underlay": false,
               "UseConstraintX": false,
               "UseConstraintY": false,
@@ -21835,7 +21999,7 @@
               },
               "SizeFit": false,
               "SortingLayer": "UI",
-              "Text": "連線：以傳送門直接相連的相鄰城鎮\n主城永不易主，兵力恆為 100",
+              "Text": "傳送門相連｜兩色長度按兵力比例\n同立場為單色・主城兵力固定 100",
               "Underlay": false,
               "UseConstraintX": false,
               "UseConstraintY": false,

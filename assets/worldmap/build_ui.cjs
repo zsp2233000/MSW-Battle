@@ -15,6 +15,7 @@ const ROOT = path.join(__dirname, '..', '..');
 const layout = require('./layout.json');
 const art = require('./ruids.json');
 const { addSelectUi } = require('./select_ui.cjs');
+const { addFrontlines, addFrontlineLegend, LEGEND_LABEL, LEGEND_LABEL_POS, NOTE } = require('./build_frontline_ui.cjs');
 
 // Cardgame theme parts (msw-ui-kit cardgame palette), as used by the rest of the game.
 const CARD_BUTTON = { normal: '9505617fb63c447c8ff9c15c18d88064', highlighted: '398dfdb46d534ea2a2373e4f5d29ae2a', pressed: '1016088c7aca43c78cdd06c01645ab1b' };
@@ -77,10 +78,7 @@ layout.places.forEach(place => {
     pos: [place.x, place.y], rect_size: [84, 26] });
 });
 b.text(`${MAP}/Sea`, '台灣海峽', { size: 22, color: '#E6F1F3', pos: [-261, -270], rect_size: [120, 32] });
-b.empty(`${MAP}/Links`, { anchor: 'stretch' });
-for (let n = 1; n <= 3; n++) {
-  b.sprite(`${MAP}/Links/Link${n}`, { anchor: 'middle-center', rect_size: [100, 6], color: { r: 0.29, g: 0.18, b: 0.09, a: 0.85 }, sprite_type: 1, enable: false });
-}
+addFrontlines(b);
 b.empty(`${MAP}/Towns`, { anchor: 'stretch' });
 for (const id of TOWNS) {
   const node = layout.towns[id];
@@ -88,7 +86,6 @@ for (const id of TOWNS) {
   b.empty(town, { pos: [node.x, node.y], rect_size: [64, 64] });
   b.sprite(`${town}/Crest`, { rect_size: [60, 60], image_ruid: art.crest, color: NEUTRAL, sprite_type: 0 });
   b.text(`${town}/Name`, NAMES[id], { size: 26, color: '#FFFFFF', bold: true, ...OUTLINE, alignment: 5, pos: [-106, 12], rect_size: [140, 30] });
-  b.text(`${town}/Strength`, '兵力 —', { size: 21, color: '#FFF2C8', ...OUTLINE, alignment: 5, pos: [-106, -16], rect_size: [140, 28] });
   b.text(`${town}/Capital`, '主城', { size: 21, color: '#FACA33', bold: true, ...OUTLINE, alignment: 5, pos: [-96, 40], rect_size: [120, 28], enable: false });
   b.sprite(`${town}/Arrow`, { anchor: 'middle-center', pos: [0, 60], rect_size: [30, 54], image_ruid: HERE_ARROW, color: '#FFFFFF', sprite_type: 0, enable: false });
   // The arrow is a 4-frame animationclip; the builder's default AnimClipPlayType is Onetime (0), which would freeze it after one pass.
@@ -127,9 +124,9 @@ b.sprite(`${SIDE}/Legend/Ally`, { anchor: 'middle-left', pos: [20, 0], rect_size
 b.text(`${SIDE}/Legend/Ally/Label`, '我方', { size: 22, color: '#FFFFFF', ...OUTLINE, alignment: 3, anchor: 'middle-left', pos: [36, 0], rect_size: [90, 30] });
 b.sprite(`${SIDE}/Legend/Enemy`, { anchor: 'middle-left', pos: [170, 0], rect_size: [28, 28], color: NEUTRAL, sprite_type: 1 });
 b.text(`${SIDE}/Legend/Enemy/Label`, '敵方', { size: 22, color: '#FFFFFF', ...OUTLINE, alignment: 3, anchor: 'middle-left', pos: [36, 0], rect_size: [90, 30] });
-b.sprite(`${SIDE}/Legend/Link`, { anchor: 'middle-left', pos: [314, 0], rect_size: [40, 6], color: { r: 0.79, g: 0.64, b: 0.44, a: 1 }, sprite_type: 1 });
-b.text(`${SIDE}/Legend/Link/Label`, '相鄰', { size: 22, color: '#FFFFFF', ...OUTLINE, alignment: 3, anchor: 'middle-left', pos: [48, 0], rect_size: [90, 30] });
-b.text(`${SIDE}/Note`, '連線：以傳送門直接相連的相鄰城鎮\n主城永不易主，兵力恆為 100', { size: 20, color: '#E8DCC8', ...OUTLINE, anchor: 'top-center', pos: [0, -612], rect_size: [460, 64] });
+addFrontlineLegend(b);
+b.text(`${SIDE}/Legend/Link/Label`, LEGEND_LABEL, { size: 22, color: '#FFFFFF', ...OUTLINE, alignment: 3, anchor: 'middle-left', pos: LEGEND_LABEL_POS, rect_size: [90, 30] });
+b.text(`${SIDE}/Note`, NOTE, { size: 20, color: '#E8DCC8', ...OUTLINE, anchor: 'top-center', pos: [0, -612], rect_size: [460, 64] });
 b.text(`${SIDE}/Status`, '正在讀取戰況…', { size: 20, color: GOLD, ...OUTLINE, anchor: 'bottom-center', pos: [0, 56], rect_size: [460, 30] });
 b.text(`${SIDE}/Hint`, '按 M 鍵或右上角按鈕關閉', { size: 20, color: '#BCBBBB', ...OUTLINE, anchor: 'bottom-center', pos: [0, 20], rect_size: [460, 28] });
 

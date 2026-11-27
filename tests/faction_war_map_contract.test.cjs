@@ -44,7 +44,8 @@ test('the map uses the painted terrain, one tinted mask per district, three link
     assert.deepEqual(transform.anchoredPosition, { x, y }, `${id} cropped mask location`);
     assert.deepEqual(transform.RectSize, { x: w, y: h }, `${id} cropped mask size`);
     assert.equal(ruidOf(`${MAP}/Towns/${id}/Crest`), art.crest, `${id} crest`);
-    for (const part of ['Name', 'Strength', 'Capital', 'Arrow']) assert.ok(ui.find(`${MAP}/Towns/${id}/${part}`), `${id} ${part}`);
+    for (const part of ['Name', 'Capital', 'Arrow']) assert.ok(ui.find(`${MAP}/Towns/${id}/${part}`), `${id} ${part}`);
+    assert.equal(ui.find(`${MAP}/Towns/${id}/Strength`), null, `${id} strength is no longer printed on the map`);
     assert.equal(ui.find(`${MAP}/Towns/${id}/Here`), null, `${id} the arrow replaced the map chip`);
     assert.equal(ui.getComponent(`${MAP}/Towns/${id}/Arrow`, 'MOD.Core.SpriteGUIRendererComponent').AnimClipPlayType, 1, `${id} arrow loops`);
     assert.equal(ruidOf(`${MAP}/Towns/${id}/Arrow`), '96392b1df6724d43abab0ec1988aa7c4', `${id} here arrow`);
@@ -53,11 +54,31 @@ test('the map uses the painted terrain, one tinted mask per district, three link
     const node = ui.getComponent(`${MAP}/Towns/${id}`, 'MOD.Core.UITransformComponent').anchoredPosition;
     assert.ok(Math.abs(node.x) < layout.size.w / 2 && Math.abs(node.y) < layout.size.h / 2, `${id} node on the map`);
   }
-  for (let n = 1; n <= 3; n++) assert.equal(ui.find(`${MAP}/Links/Link${n}`).jsonString.enable, false, `link ${n} waits for the server`);
+  for (let n = 1; n <= 3; n++) {
+    const link = `${MAP}/Links/Link${n}`;
+    assert.equal(ui.find(link).jsonString.enable, false, `link ${n} waits for the server`);
+    for (const [part, x] of [['First', 0], ['Second', 1]]) {
+      const geo = ui.getComponent(`${link}/${part}`, 'MOD.Core.UITransformComponent');
+      assert.deepEqual(geo.Pivot, { x, y: 0.5 }, 'segments grow from opposite ends');
+      assert.deepEqual(geo.AnchorsMin, geo.Pivot);
+      assert.deepEqual(geo.AnchorsMax, geo.Pivot);
+      assert.equal(ui.getComponent(`${link}/${part}`, 'MOD.Core.SpriteGUIRendererComponent').RaycastTarget, false);
+    }
+  }
   assert.match(client(), /property integer LinkSlots = 3\b/, 'the client fills exactly the authored bars');
   // Real geography, north to south: Nanzih above Zuoying above Gushan above Yancheng.
   const y = id => layout.towns[id].y;
   assert.ok(y('nanzih') > y('zuoying') && y('zuoying') > y('gushan') && y('gushan') > y('yancheng'));
+});
+
+test('the side panel explains the two-colour frontline without removing confirmation values', () => {
+  const ui = UIBuilder.read('ui/WorldMapGroup.ui');
+  const text = path => ui.getComponent(path, 'MOD.Core.TextGUIRendererComponent').Text;
+  const side = 'Overlay/Window/Side';
+  assert.equal(text(`${side}/Legend/Link/Label`), '拔河條');
+  for (const part of ['First', 'Second']) assert.ok(ui.find(`${side}/Legend/Link/${part}`));
+  assert.match(text(`${side}/Note`), /傳送門相連.*兵力比例\n同立場為單色.*100/);
+  for (const end of ['Origin', 'Target']) assert.ok(ui.find(`Confirm/Window/${end}`));
 });
 
 test('the original terrain and input fill the viewport and the window hides the scene behind it', () => {

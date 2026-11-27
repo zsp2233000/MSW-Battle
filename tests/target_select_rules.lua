@@ -557,12 +557,41 @@ local function everythingDim(label)
     end
 end
 
--- Only the strength moves: the window keeps both numbers current, stays open, and nothing else changes.
+-- #131: the share starts from the first town. Use the canonical 100-strength capital from the map board.
+local capital = map:Board(doc:InitialTowns()).towns[1]
+check(capital.capital and capital.strength == 100, "canonical capital arrives at full strength")
+local function endOf(owner, strength) return { owner = owner, strength = strength } end
+local function split(faction, a, b, expected, label)
+    check(math.abs(ui:FrontlineSplit(faction, a, b) - expected) < 1e-9, label)
+end
+split("A", endOf("A", 80), endOf("B", 40), 2 / 3, "80 to 40 puts the seam two thirds from the first town")
+split("B", endOf("A", 80), endOf("B", 40), 2 / 3, "reversing the viewer does not move the seam")
+split("A", endOf("B", 40), endOf("A", 80), 1 / 3, "reversing the endpoints mirrors the seam")
+split("A", capital, endOf("B", 0), 1, "100-strength capital against zero fills the whole line")
+split("A", endOf("B", 0), capital, 0, "zero at the first endpoint leaves the line to the capital")
+split("A", capital, endOf("B", 100), 0.5, "full-strength opponents meet in the middle")
+split("A", endOf("A", 0), endOf("B", 0), 0.5, "two zero-strength opponents meet in the middle")
+split("A", endOf("A", 20), endOf("A", 80), 1, "two allies use a single segment regardless of strength")
+split("A", endOf("B", 20), endOf("B", 80), 1, "two enemies use a single segment regardless of strength")
+split("", endOf("A", 80), endOf("B", 40), 1, "without a viewer faction, show one neutral segment")
+
+fresh()
+ui:Open()
+ui:ShowBoard(towns({ zuoying = 100, gushan = 0 }), links)
+local tug = "Overlay/Window/Map/Content/Links/Link2"
+local first, second = node(tug .. "/First"), node(tug .. "/Second")
+check(first.Enable and not second.Enable and first.SpriteGUIRendererComponent.Color == _FactionWarUI.NeutralTownColor, "a board arriving before the faction paints a single grey bar")
+ui:ReceiveViewFaction("A")
+check(first.Enable and not second.Enable and first.SpriteGUIRendererComponent.Color == _FactionWarUI.AllyTownColor, "100 against 0 paints solely the ally's colour when the faction is read")
+ui:ShowBoard(towns({ zuoying = 0, gushan = 100 }), links)
+check(not first.Enable and second.Enable and second.SpriteGUIRendererComponent.Color == _FactionWarUI.EnemyTownColor, "0 against 100 paints solely the enemy's colour after the push")
+
+-- Only the strength moves: the window keeps both numbers current and stays open.
 openConfirm()
 ui:ShowBoard(towns({ gushan = 20, zuoying = 70 }), links)
 check(node("Confirm").Enable and ui._T.selected == "gushan" and not ui._T.pending, "a strength change keeps the confirmation window open")
 check(text("Confirm/Window/Origin") == "出發城 <c>左營</c>　兵力 70 / 100" and text("Confirm/Window/Target") == "目標城 <c>鼓山</c>　兵力 20 / 100", "and updates both numbers")
-check(text(rowOf("gushan") .. "/Value") == "20/100" and text("Overlay/Window/Map/Content/Towns/gushan/Strength") == "兵力 20/100", "the list and the map follow")
+check(text(rowOf("gushan") .. "/Value") == "20/100", "the side list still shows the strength")
 check(calls.select == 0 and notice() == nil and node(rowOf("gushan") .. "/Pick").Enable, "no request, no line, the same pick buttons")
 
 -- A town changed hands but the picked one is still a target: the list is asked for again and the window stays.

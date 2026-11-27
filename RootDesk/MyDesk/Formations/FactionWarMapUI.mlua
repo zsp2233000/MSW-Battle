@@ -6,7 +6,8 @@ script FactionWarMapUI extends Logic
     -- Target selection: a town that cannot be picked is drawn dimmer than the ones that can.
     property number DimDistrictAlpha = 0.2
     property number DimCrestAlpha = 0.4
-    property number LinkThickness = 3
+    property number LinkThickness = 8
+    property number LinkCrestInset = 24
     property number MaxZoom = 12
     -- Target selection on the map (#129): it opens at SelectZoom on the departure town; a press that moves at most ClickSlopPx screen pixels is a
     -- click, not a drag; a click picks the crest within MinHitPx screen pixels (or within CrestHitReach UI units at full scale, the halo's size).
@@ -339,7 +340,7 @@ script FactionWarMapUI extends Logic
                 local y = pos.y * zoom
                 local r = 27 * iconScale
                 table.insert(boxes, { x0 = x - r, x1 = x + r, y0 = y - r, y1 = y + r })
-                for _, part in ipairs({ "Name", "Strength", "Capital" }) do
+                for _, part in ipairs({ "Name", "Capital" }) do
                     local label = self:Ui(path .. "/" .. part)
                     if isvalid(label) then label.Visible = detail end
                 end
@@ -469,6 +470,10 @@ script FactionWarMapUI extends Logic
         local ally, enemy = self:Ui(legend .. "Ally"), self:Ui(legend .. "Enemy")
         if isvalid(ally) then ally.SpriteGUIRendererComponent.Color = _FactionWarUI.AllyTownColor end
         if isvalid(enemy) then enemy.SpriteGUIRendererComponent.Color = _FactionWarUI.EnemyTownColor end
+        local example = legend .. "Link/"
+        local first, second = self:Ui(example .. "First"), self:Ui(example .. "Second")
+        if isvalid(first) then first.SpriteGUIRendererComponent.Color = _FactionWarUI.AllyTownColor end
+        if isvalid(second) then second.SpriteGUIRendererComponent.Color = _FactionWarUI.EnemyTownColor end
         local overlay = self:Ui("Overlay")
         if isvalid(overlay) then overlay:SetEnable(true) end
         self._T.open = true
@@ -854,8 +859,6 @@ script FactionWarMapUI extends Logic
         if isvalid(crest) then crest.SpriteGUIRendererComponent.Color = dimmed and Color(color.r, color.g, color.b, self.DimCrestAlpha) or color end
         local fullStrength = _FactionWarTownDocument.FullStrength
         local strength = known and (tostring(town.strength) .. "/" .. tostring(fullStrength)) or "—"
-        local label = self:Ui(node .. "/Strength")
-        if isvalid(label) then label.TextGUIRendererComponent.Text = "兵力 " .. strength end
         local capital = self:Ui(node .. "/Capital")
         if isvalid(capital) then capital:SetEnable(town.capital == true) end
         local row = "Overlay/Window/Side/Rows/" .. town.id
@@ -880,27 +883,59 @@ script FactionWarMapUI extends Logic
     end
 
     @ExecSpace("ClientOnly")
+    method number FrontlineSplit(string faction, table first, table second)
+        -- Share measured from the first town. Equal stances (including unaligned grey) use one full segment.
+        local doc = _FactionWarTownDocument
+        if not doc:IsFaction(faction) or first.owner == second.owner then return 1 end
+        -- The town document already supplies full strength for capitals. Two zero values meet in the middle.
+        local total = first.strength + second.strength
+        return total > 0 and first.strength / total or 0.5
+    end
+
+    @ExecSpace("ClientOnly")
+    method void PaintLinkSegment(Entity segment, table town, number width, number height)
+        -- Each segment grows inward from its own endpoint. Zero strength leaves no sliver of that colour.
+        segment:SetEnable(width > 0)
+        segment.UITransformComponent.RectSize = Vector2(width, height)
+        segment.SpriteGUIRendererComponent.Color = _FactionWarUI:TownColor(self._T.faction, town.owner)
+    end
+
+    @ExecSpace("ClientOnly")
     method void ShowLinks(table links)
-        -- Draw each gate connection as a bar between the two crests; unused bars stay hidden.
+        -- Gate links are keyed by town id, not by the order of records in the pushed board.
+        local towns = {}
+        for _, town in ipairs(self._T.board or {}) do towns[town.id] = town end
+        local zoom = math.max(1, self._T.zoom)
+        local height = self.LinkThickness / zoom
+        local crestInset = self.LinkCrestInset * self:IconScale(zoom) / zoom
         for slot = 1, self.LinkSlots do
-            local bar = self:Ui(self.ViewPath .. "/Content/Links/Link" .. tostring(slot))
+            local path = self.ViewPath .. "/Content/Links/Link" .. tostring(slot)
+            local bar = self:Ui(path)
             local link = links[slot]
             if isvalid(bar) then
-                local from = link ~= nil and self:Ui(self.ViewPath .. "/Content/Towns/" .. link.a) or nil
-                local to = link ~= nil and self:Ui(self.ViewPath .. "/Content/Towns/" .. link.b) or nil
-                if isvalid(from) and isvalid(to) then
-                    local a = from.UITransformComponent.anchoredPosition
-                    local b = to.UITransformComponent.anchoredPosition
-                    local dx = b.x - a.x
-                    local dy = b.y - a.y
-                    local transform = bar.UITransformComponent
-                    transform.anchoredPosition = Vector2((a.x + b.x) / 2, (a.y + b.y) / 2)
-                    transform.RectSize = Vector2(math.sqrt(dx * dx + dy * dy), self.LinkThickness / math.max(1, self._T.zoom))
-                    transform.ZRotation = math.deg(math.atan(dy, dx))
-                    bar:SetEnable(true)
-                else
-                    bar:SetEnable(false)
+                local ready = false
+                if link ~= nil and towns[link.a] ~= nil and towns[link.b] ~= nil then
+                    local from = self:Ui(self.ViewPath .. "/Content/Towns/" .. link.a)
+                    local to = self:Ui(self.ViewPath .. "/Content/Towns/" .. link.b)
+                    local first, second = self:Ui(path .. "/First"), self:Ui(path .. "/Second")
+                    if isvalid(from) and isvalid(to) and isvalid(first) and isvalid(second) then
+                        local a = from.UITransformComponent.anchoredPosition
+                        local b = to.UITransformComponent.anchoredPosition
+                        local dx, dy = b.x - a.x, b.y - a.y
+                        local distance = math.sqrt(dx * dx + dy * dy)
+                        -- Split the visible span, not the bits hidden behind the crests. Keep a bar even if the crests are very close.
+                        local width = distance - 2 * math.min(crestInset, distance / 4)
+                        local transform = bar.UITransformComponent
+                        transform.anchoredPosition = Vector2((a.x + b.x) / 2, (a.y + b.y) / 2)
+                        transform.RectSize = Vector2(width, height)
+                        transform.ZRotation = math.deg(math.atan(dy, dx))
+                        local firstWidth = width * self:FrontlineSplit(self._T.faction, towns[link.a], towns[link.b])
+                        self:PaintLinkSegment(first, towns[link.a], firstWidth, height)
+                        self:PaintLinkSegment(second, towns[link.b], width - firstWidth, height)
+                        ready = true
+                    end
                 end
+                bar:SetEnable(ready)
             end
         end
         if #links > self.LinkSlots then log_warning("[VRF][FactionWarMap] more links than bars: " .. tostring(#links)) end

@@ -368,7 +368,7 @@ test('every town node has a hidden gold Mark and a hidden cyan Frame behind its 
     assert.ok(cyan.b > 0.9 && cyan.r < 0.6, `${id}: the frame is cyan, so it differs from the mark and from both faction colours`);
     assert.ok(order(`${town}/Frame`) < order(`${town}/Mark`) && order(`${town}/Mark`) < order(`${town}/Crest`) && order(`${town}/Crest`) < order(`${town}/Name`), `${id}: drawn Frame, Mark, Crest, then the labels`);
     assert.ok(inFile.indexOf(`${town}/Frame`) < inFile.indexOf(`${town}/Mark`) && inFile.indexOf(`${town}/Mark`) < inFile.indexOf(`${town}/Crest`), `${id}: and in that order in the file, which Maker takes the render order from`);
-    for (const label of ['Name', 'Strength', 'Capital', 'Arrow']) assert.ok(inFile.indexOf(`${town}/Crest`) < inFile.indexOf(`${town}/${label}`), `${id}: the crest is still before ${label}`);
+    for (const label of ['Name', 'Capital', 'Arrow']) assert.ok(inFile.indexOf(`${town}/Crest`) < inFile.indexOf(`${town}/${label}`), `${id}: the crest is still before ${label}`);
     const children = inFile.filter(path => path.startsWith(`${town}/`));
     assert.deepEqual(children.map(path => order(path)), children.map((_, index) => index), `${id}: the children are numbered 0.. in file order`);
   }
@@ -428,7 +428,7 @@ test('the mark builder is a delta script, the full rebuild includes it, and both
   b.empty('Overlay/Window/Map/Content/Towns', {});
   for (const id of TOWNS) {
     b.empty(townNode(id), {});
-    for (const part of ['Crest', 'Name', 'Strength']) b.sprite(`${townNode(id)}/${part}`, {});
+    for (const part of ['Crest', 'Name', 'Capital']) b.sprite(`${townNode(id)}/${part}`, {});
   }
   const quiet = console.log;
   console.log = () => {};
@@ -436,7 +436,7 @@ test('the mark builder is a delta script, the full rebuild includes it, and both
   const paths = b.build().ContentProto.Entities.map(entity => entity.path);
   for (const id of TOWNS) {
     const children = paths.filter(path => path.startsWith(`/ui/WorldMapGroup/${townNode(id)}/`)).map(path => path.split('/').pop());
-    assert.deepEqual(children, ['Frame', 'Mark', 'Crest', 'Name', 'Strength'], `${id}: a build from nothing puts the marks behind the crest`);
+    assert.deepEqual(children, ['Frame', 'Mark', 'Crest', 'Name', 'Capital'], `${id}: a build from nothing puts the marks behind the crest`);
   }
   assert.equal(markPaths().length, TOWNS.length * 2, 'two marks per town');
   assert.equal(new Set(paths).size, paths.length, 'no entity is added twice');
