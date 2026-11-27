@@ -14,6 +14,7 @@ const { UIBuilder } = require('../../.agents/skills/msw-ui-system/scripts/msw_ui
 const ROOT = path.join(__dirname, '..', '..');
 const layout = require('./layout.json');
 const art = require('./ruids.json');
+const { addSelectUi } = require('./select_ui.cjs');
 
 // Cardgame theme parts (msw-ui-kit cardgame palette), as used by the rest of the game.
 const CARD_BUTTON = { normal: '9505617fb63c447c8ff9c15c18d88064', highlighted: '398dfdb46d534ea2a2373e4f5d29ae2a', pressed: '1016088c7aca43c78cdd06c01645ab1b' };
@@ -129,5 +130,8 @@ b.text(`${SIDE}/Legend/Link/Label`, '相鄰', { size: 22, color: '#FFFFFF', ...O
 b.text(`${SIDE}/Note`, '連線：以傳送門直接相連的相鄰城鎮\n主城永不易主，兵力恆為 100', { size: 20, color: '#E8DCC8', ...OUTLINE, anchor: 'top-center', pos: [0, -612], rect_size: [460, 64] });
 b.text(`${SIDE}/Status`, '正在讀取戰況…', { size: 20, color: GOLD, ...OUTLINE, anchor: 'bottom-center', pos: [0, 56], rect_size: [460, 30] });
 b.text(`${SIDE}/Hint`, '按 M 鍵或右上角按鈕關閉', { size: 20, color: '#BCBBBB', ...OUTLINE, anchor: 'bottom-center', pos: [0, 20], rect_size: [460, 28] });
+
+// The NPC's target selection (#124): a pick button and a veil on each row, and the confirmation window above the map.
+addSelectUi(b);
 
 b.write(uiFile, { lint_verbose: true });

@@ -52,7 +52,7 @@ test('a fallen town is emptied in the static room: waiting tickets are cancelled
 
 test('a player who missed the announcement is moved the next time they act in a town they no longer own', () => {
   const text = war();
-  for (const [script, method] of [[text, 'RequestTownStatus'], [text, 'RequestGate'], [attack(), 'OptionsFor']]) {
+  for (const [script, method] of [[text, 'RequestTownStatus'], [text, 'RequestGate'], [attack(), 'SelectFor']]) {
     assert.match(body(script, method), /_FactionWarLanding:Judge\(userId, \{ kind = "CHECK"/);
   }
 });

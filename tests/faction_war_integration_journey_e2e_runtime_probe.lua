@@ -3,7 +3,7 @@
 --   Gushan fall (the queued player is cancelled, the idle ones are sent to their capital), the landing of conqueror and loser, a player who left before the fall
 --   and logs in after it (landing by the live owner), and the monster experience of both sides. It logs the observables the issue names with "ROW" lines
 --   (what the player can do, the opponent, the strength, the owner, the landing, the experience) and prints them as one table in STEP 11.
--- A script cannot call FactionWar:RequestEntry, FactionWar:RequestGate or FactionWarAttack:OptionsFor (Server methods that read senderUserId, which only a real
+-- A script cannot call FactionWar:RequestEntry, FactionWar:RequestGate or FactionWarAttack:RequestSelect (Server methods that read senderUserId, which only a real
 -- client call has). The helpers entry(), gate() and options() below repeat their bodies with the same production calls in the same order
 -- (CanEnterFromLobby, ReadFaction, the write of the choice, EnterFrontline; FindGate, NearGate, IsEngaged, CanPass, Enforce, Move; Targets, IsEngaged);
 -- tests/faction_war_integration_contract.test.cjs pins those bodies so the mirror cannot drift. AttackFor and CancelForUser run as they are.
@@ -159,14 +159,15 @@ local function gate(user, destination)
     assert(await(function() return user.CurrentMapName == destination end, 100), "arrived in " .. destination)
     return "PASSED"
 end
--- FactionWarAttack:OptionsFor without senderUserId: what the NPC dialog would be handed, as a status and a list.
+-- FactionWarAttack:SelectFor without the reply: what the NPC press would be handed, as a status and the list of targets (the map's board and links are left out).
 local function options(user)
     local town = user.CurrentMapName
     local faction = readFaction(user.PlayerComponent.ProfileCode)
     local towns = readTowns()
     if faction == nil or faction == "" then return "UNAVAILABLE", {} end
     if towns[town].owner ~= faction then return "NOT_OWNED", {} end
-    return _FactionWarAttack:IsEngaged(id(user)) and "ENGAGED" or "READY", _FactionWarAttack:Targets(town, faction, towns)
+    if _FactionWarAttack:IsEngaged(id(user)) then return "ENGAGED", {} end
+    return "READY", _FactionWarAttack:Targets(town, faction, towns)
 end
 local function total(counts)
     local n = 0
