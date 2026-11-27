@@ -572,11 +572,12 @@ script BattleUIController extends Logic
 		local ready = session.SessionGeneration > 0 and (phase == "DEPLOYMENT" or phase == "BATTLE" or phase == "RESULT")
 		local profile = isvalid(player.PlayerComponent) and player.PlayerComponent.ProfileCode or ""
 		if matched then
-			if profile ~= "" and session.AwayProfile == profile then
+			local side = profile ~= "" and session:ParticipantSide(profile) or ""
+			if side == "ENEMY" then
 				ownFaction = "ENEMY"
 				playerAlive, enemyAlive = enemyAlive, playerAlive
 				initialPlayer, initialEnemy = initialEnemy, initialPlayer
-			elseif profile == "" or session.HomeProfile ~= profile then
+			elseif side ~= "PLAYER" then
 				ready = false
 			end
 			if profile ~= "" then viewerResult = session:ResultForProfile(profile) end

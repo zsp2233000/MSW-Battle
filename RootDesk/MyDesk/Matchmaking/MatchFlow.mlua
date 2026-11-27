@@ -12,6 +12,9 @@ script MatchFlow extends Logic
     property integer VacateAttempts = 6
     property number VacateRetrySeconds = 0.5
     property number AbsentCheckSeconds = 3
+    -- A walk-in whose move failed is tried again this many times, this far apart, before the player is left to Stop Entry (ADR 0017).
+    property integer LateEntryRetries = 6
+    property number LateEntryRetrySeconds = 5
 
     @ExecSpace("ServerOnly")
     method void OnBeginPlay()
@@ -35,6 +38,8 @@ script MatchFlow extends Logic
         self._T.closedMatches = {}
         self._T.settledHint = {}
         self._T.absentChecked = {}
+        self._T.lateTimers = {}
+        self._T.lateRetries = {}
         self._T.ended = false
         -- Maker plays against an in-process FIFO; a published world uses the native matchmaking service.
         self._T.queue = Environment:IsMakerPlay() and _MatchQueueLocal or _MatchQueueNative
@@ -647,11 +652,11 @@ script MatchFlow extends Logic
             self._T.arrivalTimers[event.UserId] = nil
             if self._T.ended or self:Player(event.UserId) == nil then return end
             self:Recover(event.UserId)
-            -- A match that settled while this player was away is shown now (#122).
-            _AbsentResult:Deliver(event.UserId, false)
             self:AdvancePending()
             -- A login is judged once the ticket has had its say; a player a ticket still owns stays with it.
             self:PlaceAtLogin(event.UserId, "enter")
+            -- A match that settled while this player was away is shown after the landing (#122), so reading its record never delays where the player stands.
+            _AbsentResult:Deliver(event.UserId)
         end, 0.5)
     end
 
@@ -826,14 +831,9 @@ script MatchFlow extends Logic
             -- The adapter never held a guard match, so it has no opinion on one.
             local verdict = nil
             if not self:IsGuard(ticket) then verdict = self:QueueAdapter():Reclaim(userId, data, false) end
-            if self:SettledWithoutUs(userId, data) then
+            if self:AbsentResultEndsTicket(userId, data) then
                 -- #122: the match this ticket was sealed for already settled without this player, who gets its result as a window instead of waiting for the ticket to expire.
-                if self:Finish(userId, ticket, "RETURNING", function() return _FormationHandoff:BeginReturn(userId, ticket) end) then
-                    self:Report(userId, { code = "ABSENT_RESULT_SETTLED" })
-                    self:RestoreReturning(userId, ticket)
-                else
-                    self:Report(userId, { code = "RETURN_SAVE_FAILED" })
-                end
+                self:ReturnTicket(userId, ticket, "ABSENT_RESULT_SETTLED", "RETURN_SAVE_FAILED")
             elseif verdict == "RENEW" then
                 self._T.busy[userId] = nil
                 self:ResumeRenew(userId, ticket, "")
@@ -854,19 +854,9 @@ script MatchFlow extends Logic
                 end
             elseif verdict == "RETURN" then
                 -- The adapter lost the match this ticket was sealed for, so send the player back with their saved formation.
-                if self:Finish(userId, ticket, "RETURNING", function() return _FormationHandoff:BeginReturn(userId, ticket) end) then
-                    self:Report(userId, { code = "STALE_MATCH_RECOVERY" })
-                    self:RestoreReturning(userId, ticket)
-                else
-                    self:Report(userId, { code = "STALE_MATCH_RECOVERY_SAVE_FAILED" })
-                end
+                self:ReturnTicket(userId, ticket, "STALE_MATCH_RECOVERY", "STALE_MATCH_RECOVERY_SAVE_FAILED")
             elseif (data.state == "TRANSFER" or data.state == "COMMITTING") and data.expires <= DateTime.UtcNow.Elapsed and not _RoomService:IsInstanceRoom() then
-                if self:Finish(userId, ticket, "RETURNING", function() return _FormationHandoff:BeginReturn(userId, ticket) end) then
-                    self:Report(userId, { code = "TRANSFER_EXPIRED" })
-                    self:RestoreReturning(userId, ticket)
-                else
-                    self:Report(userId, { code = "RETURN_SAVE_FAILED" })
-                end
+                self:ReturnTicket(userId, ticket, "TRANSFER_EXPIRED", "RETURN_SAVE_FAILED")
             elseif (data.state == "COMMITTING" or data.state == "TRANSFER" or data.state == "IN_ROOM") and not _RoomService:IsInstanceRoom()
                 and (data.state ~= "IN_ROOM" or (current ~= nil and current.data ~= nil and current.data.attempt == data.attempt and self._T.failures[userId] ~= nil))
                 and _MatchFlowState:EntryFailed(self:StateSnapshot(userId, ""), DateTime.UtcNow.Elapsed) and not self:LateEntryOpen(userId, ticket) then
@@ -894,12 +884,9 @@ script MatchFlow extends Logic
                 -- The player's entity is gone (a real leave) but their match room may still run: go back into it, and let that room's own coordinator take over.
                 if self:Rejoin(userId, data) then
                     self:Report(userId, { code = "REJOIN_MATCH", details = { matchKey = data.matchKey } })
-                -- A prior Maker session or room exit left a durable ticket behind (or the room is gone); restore it in the lobby.
-                elseif self:Finish(userId, ticket, "RETURNING", function() return _FormationHandoff:BeginReturn(userId, ticket) end) then
-                    self:Report(userId, { code = "STALE_ROOM_RECOVERY" })
-                    self:RestoreReturning(userId, ticket)
                 else
-                    self:Report(userId, { code = "STALE_ROOM_RECOVERY_SAVE_FAILED" })
+                    -- A prior Maker session or room exit left a durable ticket behind (or the room is gone); restore it in the lobby.
+                    self:ReturnTicket(userId, ticket, "STALE_ROOM_RECOVERY", "STALE_ROOM_RECOVERY_SAVE_FAILED")
                 end
             elseif data.state == "IN_ROOM" then
                 -- A visible retry can send a stale room ticket back to a safe lobby before restoring it.
@@ -913,10 +900,49 @@ script MatchFlow extends Logic
         end
         self._T.busy[userId] = nil
         self:PublishState(userId, "STATUS")
+        self:RetryLateEntry(userId, ticket)
         if self._T.pendingRecover[userId] then
             self._T.pendingRecover[userId] = nil
             self._T.recoveryTimers[userId] = _TimerService:SetTimerOnce(function() self:Recover(userId) end, 0.1)
         end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void ReturnTicket(string userId, table ticket, string okCode, string failCode)
+        -- End a ticket nobody is going to finish: its sealed formation goes back to the owner, and the player lands by the origin rule (ADR 0016).
+        if self:Finish(userId, ticket, "RETURNING", function() return _FormationHandoff:BeginReturn(userId, ticket) end) then
+            self:Report(userId, { code = okCode })
+            self:RestoreReturning(userId, ticket)
+        else
+            self:Report(userId, { code = failCode })
+        end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void RetryLateEntry(string userId, any ticket)
+        -- ADR 0017: a walk-in whose move failed is tried again a few times, so a slow client gets into a fight that already runs without anybody pressing anything.
+        -- Stop Entry, a closed or gone room, a broken handoff, a newer attempt and LateEntryRetries tries end it; the status poll and a login still recover by themselves.
+        if self._T.ended or ticket == nil or ticket.data == nil or _RoomService:IsInstanceRoom() or self._T.lateTimers[userId] ~= nil then return end
+        local failure = self._T.failures[userId]
+        if failure == nil or failure.code ~= "ROOM_MOVE_FAILED" or failure.attempt ~= ticket.data.attempt then return end
+        if not self:LateEntryOpen(userId, ticket) then return end
+        local tries = self._T.lateRetries[userId]
+        if tries == nil or tries.attempt ~= ticket.data.attempt then
+            tries = { attempt = ticket.data.attempt, count = 0 }
+            self._T.lateRetries[userId] = tries
+        end
+        if tries.count >= self.LateEntryRetries then return end
+        tries.count = tries.count + 1
+        local attempt = ticket.data.attempt
+        self._T.lateTimers[userId] = _TimerService:SetTimerOnce(function()
+            self._T.lateTimers[userId] = nil
+            if self._T.ended or self:Player(userId) == nil then return end
+            -- A ticket that ended (Stop Entry, a return) or a newer attempt in the meantime is none of this retry's business.
+            local current = self._T.records[userId]
+            if current == nil or current.data == nil or current.data.attempt ~= attempt or current.entryFailed == true then return end
+            log("[VRF][MatchFlow] late entry retry user=" .. userId .. " try=" .. tostring(tries.count))
+            self:Recover(userId)
+        end, self.LateEntryRetrySeconds)
     end
 
     @ExecSpace("ServerOnly")
@@ -926,8 +952,8 @@ script MatchFlow extends Logic
     end
 
     @ExecSpace("ServerOnly")
-    method boolean SettledWithoutUs(string userId, table data)
-        -- #122: a ticket whose match is waiting in the player's absent-result record (written when the room settled without them) is over.
+    method boolean AbsentResultEndsTicket(string userId, table data)
+        -- #122: a ticket whose match is in the player's absent-result record (written when the room settled without them) is over.
         -- The record is read at most once per interval unless a fresh write hinted it, so a ticket that is merely waiting does not cost a read per recovery.
         if _RoomService:IsInstanceRoom() then return false end
         if data.state ~= "TRANSFER" and data.state ~= "COMMITTING" and data.state ~= "IN_ROOM" then return false end
@@ -937,7 +963,9 @@ script MatchFlow extends Logic
         local last = self._T.absentChecked[userId]
         if not hinted and last ~= nil and now - last < self.AbsentCheckSeconds * 1000 then return false end
         self._T.absentChecked[userId] = now
-        return _AbsentResult:IsPending(data.profile, data.matchKey or "")
+        local standing = _AbsentResult:Standing(data.profile, data.matchKey or "")
+        -- A record already seen or confirmed ends a ticket that never entered too (its return failed before the 確定); a ticket inside the room is the room's to end.
+        return standing == "PENDING" or (standing == "CLEARED" and data.state ~= "IN_ROOM")
     end
 
     @ExecSpace("ServerOnly")
@@ -949,7 +977,7 @@ script MatchFlow extends Logic
         if (data.matchKey or "") == "" or self._T.closedMatches[data.matchKey] then return false end
         local failure = self._T.failures[userId]
         local code = failure ~= nil and failure.attempt == data.attempt and failure.code or ""
-        if code == "HANDOFF_SAVE_FAILED" or code == "HANDOFF_SEAL_FAILED" or code == "ROOM_CREATE_FAILED" or code == "ADMISSION_SAVE_FAILED" then return false end
+        if _MatchFlowState:IsBrokenEntry(code) then return false end
         return self:TransferAdapter():FindRoom(data.matchKey) ~= nil
     end
 
@@ -1090,12 +1118,13 @@ script MatchFlow extends Logic
         -- reason is the leave reason for the log only: the leave handler passes the engine's, the disconnect handler "Disconnect", a probe "Probe" (older probes pass nothing).
         self._T.offline[userId] = true
         self._T.arrival[userId] = nil
-        for _, timers in ipairs({ self._T.arrivalTimers, self._T.recoveryTimers, self._T.queueTimers, self._T.guardTimers }) do
+        for _, timers in ipairs({ self._T.arrivalTimers, self._T.recoveryTimers, self._T.queueTimers, self._T.guardTimers, self._T.lateTimers }) do
             if timers[userId] ~= nil then _TimerService:ClearTimer(timers[userId]) timers[userId] = nil end
         end
         self._T.pendingRecover[userId] = nil
         self._T.settledHint[userId] = nil
         self._T.absentChecked[userId] = nil
+        self._T.lateRetries[userId] = nil
         self._T.failures[userId] = nil
         self:QueueAdapter():Withdraw(userId)
         self._T.queueCommands[userId] = nil
@@ -1403,6 +1432,7 @@ script MatchFlow extends Logic
         for _, timer in ipairs(self._T.notifyTimers or {}) do _TimerService:ClearTimer(timer) end
         for _, timer in pairs(self._T.queueTimers or {}) do _TimerService:ClearTimer(timer) end
         for _, timer in pairs(self._T.guardTimers or {}) do _TimerService:ClearTimer(timer) end
+        for _, timer in pairs(self._T.lateTimers or {}) do _TimerService:ClearTimer(timer) end
         for timer, _ in pairs(self._T.progressTimers or {}) do _TimerService:ClearTimer(timer) end
         log("[VRF][MatchCleanup] room=" .. _RoomService.RoomKey .. " timers=0")
     end

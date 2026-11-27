@@ -21,6 +21,7 @@ const matchedBattle = readFileSync(join(__dirname, '../RootDesk/MyDesk/Matchmaki
     `function matchedBattle:${name}(${params.replace(/\b\w+ (\w+)/g, '$1')})`)
   .replace(/\nend\s*$/, '');
 const receiptRules = readFileSync(join(__dirname, 'faction_war_result_receipt_rules.lua'), 'utf8');
+const { participantSideLua } = require('./participant_side_source.cjs');
 process.stdout.write(`local ok, failure = xpcall(function()\nlog = print\n${doc}\ndo\n${rules}\nend\n`);
 process.stdout.write(String.raw`
 -- Storage stand-in: encoded values are opaque bytes. A fresh serialization of the same table
@@ -213,7 +214,7 @@ end
 assert(#full.settled == 20 and compactSize(full) < 4000, "full strength snapshot history fits the storage limit")
 log("[VRF][FactionWarTownDocument] strength record budget PASS bytes=" .. tostring(compactSize(full)))
 `);
-process.stdout.write(`do\n${matchedBattle}\n${receiptRules}\nend\n`);
+process.stdout.write(`do\n${matchedBattle}\n${participantSideLua()}\n${receiptRules}\nend\n`);
 process.stdout.write(String.raw`
 end, debug.traceback)
 if not ok then

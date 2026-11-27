@@ -35,15 +35,19 @@ script MatchFlowState extends Logic
         return state == "SAVING" or state == "COMMITTING" or state == "TRANSFER" or state == "IN_ROOM" or state == "WAITING"
     end
 
+    method boolean IsBrokenEntry(string code)
+        -- A failure of the sealed handoff, the admission save or the room itself: no later attempt mends it, so it ends an entry for good (a failed move alone is not one, ADR 0017).
+        return code == "HANDOFF_SAVE_FAILED" or code == "HANDOFF_SEAL_FAILED" or code == "ROOM_CREATE_FAILED" or code == "ADMISSION_SAVE_FAILED"
+    end
+
     method boolean EntryFailed(table snapshot, number now)
         -- Readiness/diagnostic errors alone do not end an otherwise live admission.
         if snapshot.entryFailed or snapshot.state == "ENTRY_FAILED" or snapshot.state == "ABORTED" or snapshot.state == "ROOM_MISMATCH" then return true end
         -- ADR 0017: a room that is waiting for the absent side starts the match by itself, so the entry time no longer ends it.
         if snapshot.state == "WAITING" and (snapshot.waitDeadline or 0) > 0 then return false end
         if not snapshot.opponentFound and not self:IsEntering(snapshot.state) then return false end
-        local reason = snapshot.reasonCode
-        if reason == "HANDOFF_SAVE_FAILED" or reason == "HANDOFF_SEAL_FAILED" or reason == "ROOM_CREATE_FAILED"
-            or reason == "ADMISSION_SAVE_FAILED" or reason == "ROOM_MOVE_FAILED" then return true end
+        local reason = snapshot.reasonCode or ""
+        if self:IsBrokenEntry(reason) or reason == "ROOM_MOVE_FAILED" then return true end
         return (snapshot.entryDeadline or 0) > 0 and now >= snapshot.entryDeadline
     end
 

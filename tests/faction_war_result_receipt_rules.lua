@@ -51,9 +51,7 @@ local function exercise(kind)
         self.HomeProfile, self.AwayProfile, self.Phase = home, away, "BATTLE"
         return true
     end
-    function battle:ParticipantSide(profile)
-        return profile == self.HomeProfile and "PLAYER" or (profile == self.AwayProfile and "ENEMY" or "")
-    end
+    battle.ParticipantSide = ParticipantSideOf
     function battle:ResultForProfile(profile)
         return profile == self.HomeProfile and "WIN" or (profile == self.AwayProfile and "LOSE" or "")
     end
@@ -123,7 +121,11 @@ exercise("LOBBY")
 log("[VRF][WarResultReceipt] local room/transport cases PASS")
 
 -- #122: a side that was not in the room when the result settled is owed it as its latest absent result; a side that saw the result page is not.
-local function exerciseAbsent(kind, blueArrives)
+-- mode: nil writes at once; DURING_WRITE keeps the save of the absent record open while the side comes in; SILENT never answers the settlement; CLOSED ends the room before it answers.
+local function exerciseAbsent(kind, blueArrives, mode)
+    log_error = log_error or print
+    local firstTimer = timerId
+    local finishWrite = {}
     local match = { _T = {} }
     setmetatable(match, { __index = matchedBattle })
     local guard, war = kind == "GUARD", kind ~= "LOBBY"
@@ -160,7 +162,10 @@ local function exerciseAbsent(kind, blueArrives)
     end }
     _AbsentResult = {
         Compose = function(_, recordKind, matchKey, result, receipt) return { kind = recordKind, id = matchKey, result = result, war = receipt } end,
-        Write = function(_, profile, record, complete) written[profile] = record; complete(true) end,
+        Write = function(_, profile, record, complete)
+            written[profile] = record
+            if mode == "DURING_WRITE" then finishWrite[profile] = complete else complete(true) end
+        end,
         Announce = function(_, profile, matchKey) announced[profile] = matchKey end,
         Clear = function(_, profile, matchKey, complete) cleared[profile] = matchKey; complete(true) end,
     }
@@ -170,9 +175,7 @@ local function exerciseAbsent(kind, blueArrives)
         self.HomeProfile, self.AwayProfile, self.Phase = home, away, "BATTLE"
         return true
     end
-    function battle:ParticipantSide(profile)
-        return profile == self.HomeProfile and "PLAYER" or (profile == self.AwayProfile and "ENEMY" or "")
-    end
+    battle.ParticipantSide = ParticipantSideOf
     function battle:ResultForProfile(profile)
         return profile == self.HomeProfile and "WIN" or (profile == self.AwayProfile and "LOSE" or "")
     end
@@ -181,6 +184,31 @@ local function exerciseAbsent(kind, blueArrives)
     match:OnUpdate(1)
     battle.Phase = "RESULT"
     match:OnUpdate(1)
+    if mode == "SILENT" or mode == "CLOSED" then
+        assert(next(written) == nil, "nothing is written while the settlement is awaited")
+        local watch, watchId
+        for id = firstTimer + 1, timerId do
+            if timers[id] and timers[id].delay == match.SettlementWatchSeconds then watch, watchId = timers[id], id end
+        end
+        assert(watch, "a watch is set on the settlement")
+        if mode == "CLOSED" then
+            match:OnEndPlay()
+            assert(timers[watchId] == nil and next(written) == nil, "a room that closes clears its watch and writes nothing")
+            doc.Read = read
+            return
+        end
+        watch.fn()
+        local told = assert(written["blue-profile"], "the absent side is told although the settlement never answered")
+        assert(told.war.status == "FAILED" and told.war.conclusion == "戰果結算失敗，兵力未變動" and told.result == "LOSE", "with the settlement marked failed, as the result page says")
+        assert(announced["blue-profile"] == "absent-match" and written["red-profile"] == nil, "announced once, and only to the absent side")
+        settled()
+        match:OnUpdate(1)
+        local count = 0
+        for _ in pairs(written) do count = count + 1 end
+        assert(count == 1 and written["blue-profile"] == told, "an answer that comes later writes nothing more")
+        doc.Read = read
+        return
+    end
     if war then
         assert(next(written) == nil, "a war result waits for its settlement")
         settled()
@@ -194,6 +222,21 @@ local function exerciseAbsent(kind, blueArrives)
     end
     local record = assert(written["blue-profile"], "the absent side's result is written: " .. kind)
     assert(record.id == "absent-match" and record.result == "LOSE" and record.kind == (war and "WAR" or "LOBBY"), "kind and result of the record")
+    if mode == "DURING_WRITE" then
+        assert(announced["blue-profile"] == nil, "nothing is announced before the record is saved")
+        table.insert(users, blue)
+        match:OnUpdate(1)
+        assert(cleared["blue-profile"] == nil, "a record that is still being saved is not taken back yet")
+        finishWrite["blue-profile"](true)
+        assert(cleared["blue-profile"] == "absent-match", "a side that saw the result page while its record was saved takes it back once it stands")
+        assert(announced["blue-profile"] == nil, "and nobody is told about a record that is gone")
+        cleared["blue-profile"] = nil
+        match:OnUpdate(1)
+        match:OnUpdate(1)
+        assert(cleared["blue-profile"] == nil, "taken back once")
+        doc.Read = read
+        return
+    end
     assert(announced["blue-profile"] == "absent-match", "the absent side is announced once the record is written")
     if war then
         assert(record.war.origin == "gushan" and record.war.target == "zuoying" and record.war.status == "SAVED"
@@ -221,4 +264,8 @@ exerciseAbsent("HUMAN", true)
 exerciseAbsent("LOBBY", false)
 exerciseAbsent("LOBBY", true)
 exerciseAbsent("GUARD", false)
+exerciseAbsent("HUMAN", false, "DURING_WRITE")
+exerciseAbsent("LOBBY", false, "DURING_WRITE")
+exerciseAbsent("HUMAN", false, "SILENT")
+exerciseAbsent("HUMAN", false, "CLOSED")
 log("[VRF][AbsentResult] room writes only for sides that did not see the result PASS")

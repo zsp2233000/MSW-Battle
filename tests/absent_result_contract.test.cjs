@@ -67,6 +67,11 @@ test('the room writes the latest absent result for sides that did not see the re
   assert.match(body(text, 'WriteAbsentResults'), /_FactionWarTownDocument:Summarize\(side\.origin, side\.target, "", war\.outcome, nil\)/, 'the war block is the settled summary of the side\'s own towns');
   assert.match(body(text, 'WriteAbsentResults'), /_AbsentResult:Write\(profile, record[^]*_AbsentResult:Announce\(profile, matchKey\)/, 'announced once the record is saved');
   assert.match(body(text, 'TrackResultViewers'), /_AbsentResult:Clear\(profile, matchKey/, 'a late arrival who sees the result page takes its record back');
+  assert.match(body(text, 'TrackResultViewers'), /absentWritten\[profile\] == "WRITTEN"/, 'a record that is still being saved is left to its own save callback');
+  assert.match(body(text, 'WriteAbsentResults'), /elseif self\._T\.seen\[profile\] then[^]*_AbsentResult:Clear\(profile, matchKey/, 'which takes the record back when the save lands and the side was seen meanwhile');
+  assert.match(body(text, 'WatchSettlement'), /outcome = \{ status = "FAILED" \}/, 'a settlement that never answers does not leave the absent side without its window');
+  assert.match(body(text, 'WatchSettlement'), /self\.SettlementWatchSeconds/, 'after a configured time, not a literal');
+  assert.match(body(text, 'OnEndPlay'), /ClearTimer\(self\._T\.watchdog\)/, 'and the watch ends with the room');
   const update = body(text, 'OnUpdate');
   assert.match(update, /self:TrackResultViewers\(battle, users\)[^]*not self\._T\.published/, 'viewers are counted before the result is published');
   assert.match(update, /self:WriteAbsentResults\(battle, war\)/, 'a war match writes once its settlement is known');
@@ -75,14 +80,16 @@ test('the room writes the latest absent result for sides that did not see the re
 
 test('the static room delivers once per match, ends the ticket of the match first, and a login or a reconnect delivers too', () => {
   const text = absent();
-  assert.match(body(text, 'Deliver'), /_MatchFlow:HintSettled\(userId\)[^]*_MatchFlow:Recover\(userId\)/, 'the ticket of that match is recovered (and ended) before the window');
-  assert.match(body(text, 'Deliver'), /self\._T\.delivered\[userId\] == record\.id/, 'once per match');
-  assert.match(body(text, 'Deliver'), /IsInstanceRoom\(\)/, 'never in a match room');
-  assert.match(body(text, 'Settled'), /if _RoomService:IsInstanceRoom\(\) then return end/, 'only the static room holds an online absent player');
+  assert.match(body(text, 'RunDelivery'), /_MatchFlow:HintSettled\(userId\)[^]*_MatchFlow:Recover\(userId\)/, 'the ticket of that match is recovered (and ended) before the window');
+  assert.match(body(text, 'RunDelivery'), /self\._T\.delivered\[userId\] == record\.id/, 'once per match');
+  assert.match(body(text, 'RunDelivery'), /IsInstanceRoom\(\)/, 'never in a match room');
+  assert.match(body(text, 'Deliver'), /self:RunDelivery\(userId, false\)/, 'a login or a reconnect shows the record without ending anything');
+  assert.match(body(text, 'DeliverAfterSettle'), /self:RunDelivery\(userId, true\)/, 'a settlement ends the ticket first');
+  assert.match(body(text, 'Notify'), /if _RoomService:IsInstanceRoom\(\) then return end/, 'only the static room holds an online absent player');
   assert.match(text, /handler HandleRoomAbsentResult\(AbsentResultEvent event\)/, 'the match room reaches the static room');
   assert.match(text, /handler HandleInstanceAbsentResult\(AbsentResultEvent event\)/, 'and every other world instance');
-  assert.match(text, /handler HandleUserReconnectEvent\(UserReconnectEvent event\)[^]*self:Deliver\(event\.UserId, false\)/, 'a reconnect shows a waiting record again');
-  assert.match(body(flow(), 'OnBeginPlay') + flow(), /_AbsentResult:Deliver\(event\.UserId, false\)/, 'a login shows a waiting record after its ticket was recovered');
+  assert.match(text, /handler HandleUserReconnectEvent\(UserReconnectEvent event\)[^]*self:Deliver\(event\.UserId\)/, 'a reconnect shows a waiting record again');
+  assert.match(flow(), /self:PlaceAtLogin\(event\.UserId, "enter"\)\n\s+-- [^\n]*\n\s+_AbsentResult:Deliver\(event\.UserId\)/, 'a login shows a waiting record after its ticket was recovered and the player landed');
   assert.match(body(text, 'Clear'), /current\.id ~= matchKey then complete\(true\)/, 'a newer match is never cleared by an older acknowledgement');
   assert.match(body(text, 'Write'), /current\.id == record\.id then complete\(true\)/, 'writing the same match again changes nothing');
   assert.match(body(text, 'RequestAcknowledge'), /local userId = senderUserId/, 'the server derives the player from the sender, never from the client');
@@ -90,12 +97,14 @@ test('the static room delivers once per match, ends the ticket of the match firs
 
 test('a ticket whose match settled without the player ends at once, through the same return and landing as Stop Entry (ADR 0016)', () => {
   const recover = body(flow(), 'Recover');
-  assert.match(recover, /if self:SettledWithoutUs\(userId, data\) then[^]*BeginReturn\(userId, ticket\)[^]*ABSENT_RESULT_SETTLED[^]*self:RestoreReturning\(userId, ticket\)/,
-    'it returns and restores like any ended ticket, and RestoreReturning lands by the origin rule');
-  const settled = body(flow(), 'SettledWithoutUs');
+  assert.match(recover, /if self:AbsentResultEndsTicket\(userId, data\) then[^]*self:ReturnTicket\(userId, ticket, "ABSENT_RESULT_SETTLED", "RETURN_SAVE_FAILED"\)/,
+    'it returns and restores like any ended ticket');
+  assert.match(body(flow(), 'ReturnTicket'), /BeginReturn\(userId, ticket\)[^]*self:RestoreReturning\(userId, ticket\)/, 'and RestoreReturning lands by the origin rule');
+  const settled = body(flow(), 'AbsentResultEndsTicket');
   assert.match(settled, /data\.state ~= "TRANSFER" and data\.state ~= "COMMITTING" and data\.state ~= "IN_ROOM" then return false end/, 'only a match the player never finished');
   assert.match(settled, /AbsentCheckSeconds \* 1000 then return false end/, 'a waiting ticket does not read the record on every recovery');
-  assert.match(settled, /_AbsentResult:IsPending\(data\.profile, data\.matchKey/, 'the record of that very match decides');
+  assert.match(settled, /_AbsentResult:Standing\(data\.profile, data\.matchKey/, 'the record of that very match decides');
+  assert.match(settled, /standing == "CLEARED" and data\.state ~= "IN_ROOM"/, 'a confirmed record ends a ticket that never entered, never one inside the room');
 });
 
 test('the e2e probe, the runbook and ADR 0017 carry the absent result', () => {

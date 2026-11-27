@@ -71,6 +71,7 @@ script AbsentResult extends Logic
                     elseif code == 2000000 and attempt < self.WriteAttempts then
                         try()
                     else
+                        log_error("[VRF][AbsentResult] write failed profile=" .. profile .. " match=" .. record.id .. " code=" .. tostring(code) .. " attempts=" .. tostring(attempt))
                         complete(false)
                     end
                 end)
@@ -81,19 +82,31 @@ script AbsentResult extends Logic
 
     @ExecSpace("ServerOnly")
     method void Clear(string profile, string matchKey, any complete)
-        -- Only the record of this very match is cleared; a newer match that replaced it stays.
-        self:Read(profile, function(current, raw, readable)
-            if not readable then complete(false) return end
-            if current == nil or current.cleared == true or current.id ~= matchKey then complete(true) return end
-            _FormationStorage:Write(profile, self.StorageKey, raw, _HttpService:JSONEncode({ v = 1, id = matchKey, cleared = true }), function(code)
-                complete(code == 0)
+        -- Only the record of this very match is cleared; a newer match that replaced it stays. A lost race is read and tried again, like a write.
+        local attempt = 0
+        local function try()
+            attempt = attempt + 1
+            self:Read(profile, function(current, raw, readable)
+                if not readable then complete(false) return end
+                if current == nil or current.cleared == true or current.id ~= matchKey then complete(true) return end
+                _FormationStorage:Write(profile, self.StorageKey, raw, _HttpService:JSONEncode({ v = 1, id = matchKey, cleared = true }), function(code)
+                    if code == 0 then
+                        complete(true)
+                    elseif code == 2000000 and attempt < self.WriteAttempts then
+                        try()
+                    else
+                        log_error("[VRF][AbsentResult] clear failed profile=" .. profile .. " match=" .. matchKey .. " code=" .. tostring(code) .. " attempts=" .. tostring(attempt))
+                        complete(false)
+                    end
+                end)
             end)
-        end)
+        end
+        try()
     end
 
     @ExecSpace("ServerOnly")
-    method any PendingFor(string profile)
-        -- The unconfirmed record of this profile, or nil; waits a bounded time for storage.
+    method any RecordFor(string profile)
+        -- The stored record of this profile (a waiting one, or the marker of one already confirmed), or nil; waits a bounded time for storage.
         local box = { done = false }
         self:Read(profile, function(record)
             box.record = record
@@ -104,17 +117,25 @@ script AbsentResult extends Logic
             wait(0.1)
             waited = waited + 0.1
         end
-        local record = box.record
+        return box.record
+    end
+
+    @ExecSpace("ServerOnly")
+    method any PendingFor(string profile)
+        -- The unconfirmed record of this profile, or nil.
+        local record = self:RecordFor(profile)
         if record == nil or record.cleared == true then return nil end
         return record
     end
 
     @ExecSpace("ServerOnly")
-    method boolean IsPending(string profile, string matchKey)
-        -- True when this very match is waiting for the player to see it: the ticket of a match the player never entered ends because of it.
-        if profile == "" or (matchKey or "") == "" then return false end
-        local record = self:PendingFor(profile)
-        return record ~= nil and record.id == matchKey
+    method string Standing(string profile, string matchKey)
+        -- Where this very match stands in the player's record: PENDING (waiting to be seen), CLEARED (seen or confirmed), or "" (it is not the stored match).
+        -- The ticket of a match the player never entered ends because of the first, and of the second when nothing but the ticket is left.
+        if profile == "" or (matchKey or "") == "" then return "" end
+        local record = self:RecordFor(profile)
+        if record == nil or record.id ~= matchKey then return "" end
+        return record.cleared == true and "CLEARED" or "PENDING"
     end
 
     @ExecSpace("ServerOnly")
@@ -128,7 +149,7 @@ script AbsentResult extends Logic
                 log("[VRF][AbsentResult] announced room=" .. tostring(code == SendEventRequestResultCode.OK) .. " profile=" .. profile)
             end)
         else
-            self:Settled(profile, matchKey)
+            self:Notify(profile, matchKey)
         end
         local event = AbsentResultEvent()
         event.Profile = profile
@@ -142,30 +163,41 @@ script AbsentResult extends Logic
     @EventSender("Service", "RoomService")
     handler HandleRoomAbsentResult(AbsentResultEvent event)
         -- From a match room of this world instance.
-        self:Settled(event.Profile, event.MatchKey)
+        self:Notify(event.Profile, event.MatchKey)
     end
 
     @ExecSpace("ServerOnly")
     @EventSender("Service", "WorldInstanceService")
     handler HandleInstanceAbsentResult(AbsentResultEvent event)
         -- From another world instance (this instance's own announcement already arrived as a room event; delivering twice is harmless).
-        self:Settled(event.Profile, event.MatchKey)
+        self:Notify(event.Profile, event.MatchKey)
     end
 
     @ExecSpace("ServerOnly")
-    method void Settled(string profile, string matchKey)
+    method void Notify(string profile, string matchKey)
         -- A match this profile never saw has settled. Only the static room holds the towns and the lobby, where an online absent player stands.
         if _RoomService:IsInstanceRoom() then return end
         local ids = {}
         for _, user in ipairs(_UserService.UserEntities.Values) do
             if isvalid(user) and isvalid(user.PlayerComponent) and user.PlayerComponent.ProfileCode == profile then table.insert(ids, user.PlayerComponent.UserId) end
         end
-        for _, userId in ipairs(ids) do self:Deliver(userId, true) end
+        for _, userId in ipairs(ids) do self:DeliverAfterSettle(userId) end
     end
 
     @ExecSpace("ServerOnly")
-    method void Deliver(string userId, boolean recover)
-        -- End the ticket of the match this player never entered (Recover reads this very record), then show the window once.
+    method void Deliver(string userId)
+        -- A login or a reconnect: show the record that is waiting, once.
+        self:RunDelivery(userId, false)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void DeliverAfterSettle(string userId)
+        -- A match just settled without this player: its ticket ends first (Recover reads this very record), then the window shows once.
+        self:RunDelivery(userId, true)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void RunDelivery(string userId, boolean recover)
         local player = _MatchFlow:Player(userId)
         if player == nil or _RoomService:IsInstanceRoom() then return end
         if self._T.delivering[userId] then
@@ -192,7 +224,7 @@ script AbsentResult extends Logic
         if again ~= nil then
             self._T.again[userId] = nil
             log("[VRF][AbsentResult] deliver again user=" .. userId .. " recover=" .. tostring(again))
-            self:Deliver(userId, again)
+            self:RunDelivery(userId, again)
         end
     end
 
@@ -201,7 +233,7 @@ script AbsentResult extends Logic
     handler HandleUserReconnectEvent(UserReconnectEvent event)
         -- A reconnected client starts with no window, so a record still waiting is shown again.
         self._T.delivered[event.UserId] = nil
-        self:Deliver(event.UserId, false)
+        self:Deliver(event.UserId)
     end
 
     @ExecSpace("ServerOnly")

@@ -4,13 +4,19 @@ local id, profile, attempt = "requester", "a", "first"
 local instance, battle, held, outcome, ticket
 local cancels, closes, returns, moves, notices
 local cases = 0
--- #122: the absent-result record of the player's match; a ticket whose match is in it is over.
-local pendingAbsent = false
-_AbsentResult = { IsPending = function() return pendingAbsent end }
+-- #122: where the player's record stands for the ticket's match (PENDING, CLEARED or nothing); a ticket whose match is in it is over.
+local standing = ""
+_AbsentResult = { Standing = function() return standing end }
 local player = { PlayerComponent = { ProfileCode = profile } }
 local match = { key = "room", home = profile, away = "b", homeAttempt = attempt }
 DateTime = { UtcNow = { Elapsed = 1000 } }
 log = function() end
+-- Timers are recorded, never run, until a case fires one on purpose.
+local timers = {}
+_TimerService = {
+    SetTimerOnce = function(_, fn, delay) table.insert(timers, { fn = fn, delay = delay }); return #timers end,
+    ClearTimer = function(_, timerId) timers[timerId] = false end,
+}
 isvalid = function(value) return value ~= nil end
 _RoomService = { RoomKey = "room", IsInstanceRoom = function() return instance end }
 _UserService = { UserEntities = { Values = {} } }
@@ -33,8 +39,8 @@ local function reset(state)
     instance, battle, held, outcome = false, nil, nil, true
     DateTime.UtcNow.Elapsed = 1000
     ticket = { data = { state = state, attempt = attempt, profile = profile, matchKey = "room" } }
-    flow._T = { records = { [id] = ticket }, busy = {}, failures = {}, guardTimers = {}, moving = {}, closedMatches = {}, settledHint = {}, absentChecked = {} }
-    pendingAbsent = false
+    flow._T = { records = { [id] = ticket }, busy = {}, failures = {}, guardTimers = {}, moving = {}, closedMatches = {}, settledHint = {}, absentChecked = {}, lateTimers = {}, lateRetries = {} }
+    standing = ""
     flow._T.queue = { Lookup = function() return held end, Cancel = function() cancels = cancels + 1; return outcome end }
     cancels, closes, returns, moves, notices = 0, 0, 0, 0, {}
     senderUserId = id
@@ -127,25 +133,38 @@ for _, guard in ipairs({ false, true }) do
     stopEntry(nil, guard)
 end
 
--- ADR 0017 (#121): a side whose entry time ran out, or whose move failed, still walks into a room that lives; Stop Entry, a closed or gone room and a broken handoff are final.
-local function lateEntry(label, expectWalksIn, arrange)
-    reset("TRANSFER")
+-- Stand-ins for the methods Recover calls are put on the flow for one case and taken off again, so no case leaks a stub into the next.
+local function withStubs(stubs, run)
+    local saved = {}
+    for name in pairs(stubs) do saved[name] = rawget(flow, name) end
+    for name, stub in pairs(stubs) do flow[name] = stub end
+    local ok, failure = pcall(run)
+    for name in pairs(stubs) do flow[name] = saved[name] end
+    if not ok then error(failure, 0) end
+end
+local function openTicket(state)
+    reset(state)
+    timers = {}
     ticket.data.expires = 900000
     ticket.entryDeadline = 31000
     DateTime.UtcNow.Elapsed = 40000
-    local walkIns, room = 0, { alive = true }
-    flow.Recover, flow.Rendezvous, flow.Settled, flow.IsGuard, flow.Pairing, flow.Belongs, flow.NotifyReady =
-        realRecover, function() walkIns = walkIns + 1 end, function() return true end, function() return false end,
-        function() return match end, function() return true end, function() end
-    flow._T.pendingRecover, flow._T.arrival, flow._T.recoveryTimers = {}, {}, {}
+    flow._T.pendingRecover, flow._T.arrival, flow._T.recoveryTimers, flow._T.lateTimers, flow._T.lateRetries = {}, {}, {}, {}, {}
     flow._T.queue.Reclaim = function() return nil end
-    flow._T.transfer = { FindRoom = function() return room.alive and room or nil end }
     _FormationHandoff.OpenForUser = function() return ticket end
-    arrange(room)
-    flow:Recover(id)
+end
+
+-- ADR 0017 (#121): a side whose entry time ran out, or whose move failed, still walks into a room that lives; Stop Entry, a closed or gone room and a broken handoff are final.
+local function lateEntry(label, expectWalksIn, arrange)
+    openTicket("TRANSFER")
+    local walkIns, room = 0, { alive = true }
+    flow._T.transfer = { FindRoom = function() return room.alive and room or nil end }
+    withStubs({ Recover = realRecover, Rendezvous = function() walkIns = walkIns + 1 end, Settled = function() return true end, IsGuard = function() return false end,
+        Pairing = function() return match end, Belongs = function() return true end, NotifyReady = function() end }, function()
+        arrange(room)
+        flow:Recover(id)
+    end)
     assert((walkIns == 1) == expectWalksIn, "late entry: " .. label .. " walkIns=" .. tostring(walkIns))
     if not expectWalksIn then assert(notices[#notices - 1] == "ENTRY_FAILED" or notices[#notices] == "ENTRY_FAILED", "late entry: " .. label .. " stays failed") end
-    flow.Recover = function() end
 end
 lateEntry("entry time over", true, function() end)
 lateEntry("move failed, room alive", true, function() flow:Report(id, { code = "ROOM_MOVE_FAILED" }) end)
@@ -153,41 +172,99 @@ lateEntry("Stop Entry pressed", false, function() ticket.entryFailed = true end)
 lateEntry("closed room", false, function() flow._T.closedMatches["room"] = true end)
 lateEntry("room gone", false, function(room) room.alive = false end)
 lateEntry("sealed handoff failed", false, function() flow:Report(id, { code = "HANDOFF_SEAL_FAILED" }) end)
+lateEntry("room could not be created", false, function() flow:Report(id, { code = "ROOM_CREATE_FAILED" }) end)
+lateEntry("admission could not be saved", false, function() flow:Report(id, { code = "ADMISSION_SAVE_FAILED" }) end)
 
--- #122: a ticket whose match settled without the player (the record is waiting) ends at once and restores; a ticket that merely waits costs one record read per interval.
+-- A walk-in whose move failed is tried again by itself a bounded number of times; Stop Entry, a gone room and a broken handoff end it.
+local function lateRetry(label, arrange, run)
+    openTicket("TRANSFER")
+    local walkIns, room = 0, { alive = true }
+    flow._T.transfer = { FindRoom = function() return room.alive and room or nil end }
+    withStubs({ Recover = realRecover, Rendezvous = function() walkIns = walkIns + 1 end, Settled = function() return true end, IsGuard = function() return false end,
+        Pairing = function() return match end, Belongs = function() return true end, NotifyReady = function() end }, function()
+        flow:Report(id, { code = "ROOM_MOVE_FAILED" })
+        arrange(room)
+        flow:Recover(id)
+        run(function() return walkIns end, function() local pending = {} for _, timer in pairs(timers) do if timer then table.insert(pending, timer) end end return pending end)
+    end)
+end
+lateRetry("one retry is scheduled, spaced, and walks in again", function() end, function(walkIns, pending)
+    assert(walkIns() == 1 and #pending() == 1 and pending()[1].delay == flow.LateEntryRetrySeconds, "a failed move schedules one retry")
+    local timer = pending()[1]
+    timers = {}
+    timer.fn()
+    assert(walkIns() == 2, "the retry walks in again")
+    assert(#pending() == 1, "and the next retry is scheduled while the move keeps failing")
+end)
+lateRetry("retries are bounded", function() end, function(walkIns, pending)
+    for _ = 1, flow.LateEntryRetries + 3 do
+        local timer = pending()[1]
+        if timer == nil then break end
+        timers = {}
+        timer.fn()
+    end
+    assert(walkIns() == 1 + flow.LateEntryRetries and #pending() == 0, "no more than LateEntryRetries tries: walkIns=" .. tostring(walkIns()))
+end)
+lateRetry("a ticket that ended before the retry fires is left alone", function() end, function(walkIns, pending)
+    local timer = pending()[1]
+    timers = {}
+    flow._T.records[id] = nil
+    timer.fn()
+    assert(walkIns() == 1 and #pending() == 0, "a retry does not recover a ticket that is gone")
+end)
+lateRetry("Stop Entry pressed before the retry fires is final", function() end, function(walkIns, pending)
+    local timer = pending()[1]
+    timers = {}
+    ticket.entryFailed = true
+    timer.fn()
+    assert(walkIns() == 1 and #pending() == 0, "a stopped entry is not retried")
+end)
+lateRetry("Stop Entry leaves no retry", function() ticket.entryFailed = true end, function(walkIns, pending)
+    assert(walkIns() == 0 and #pending() == 0, "a stopped entry is not retried")
+end)
+lateRetry("a gone room leaves no retry", function(room) room.alive = false end, function(walkIns, pending)
+    assert(walkIns() == 0 and #pending() == 0, "a gone room is not retried")
+end)
+
+-- #122: a ticket whose match is in the absent-result record (the room settled without the player) ends at once and restores;
+-- a record that was already seen or confirmed ends a ticket that never entered too; a ticket that merely waits costs one record read per interval.
 local function absentRecord(label, state, expectEnds, arrange)
-    reset(state)
-    ticket.data.expires = 900000
-    ticket.entryDeadline = 31000
-    DateTime.UtcNow.Elapsed = 40000
+    openTicket(state)
     local restores, reads = 0, 0
-    flow.Recover, flow.RestoreReturning, flow.Settled, flow.IsGuard = realRecover, function() restores = restores + 1 end,
-        function() return true end, function() return false end
-    flow._T.pendingRecover, flow._T.arrival, flow._T.recoveryTimers = {}, {}, {}
-    flow._T.queue.Reclaim = function() return nil end
-    _FormationHandoff.OpenForUser = function() return ticket end
-    _AbsentResult.IsPending = function() reads = reads + 1; return pendingAbsent end
+    _AbsentResult.Standing = function() reads = reads + 1; return standing end
     flow._T.transfer = { FindRoom = function() return nil end }
-    arrange()
-    flow:Recover(id)
+    withStubs({ Recover = realRecover, RestoreReturning = function() restores = restores + 1 end, Settled = function() return true end, IsGuard = function() return false end }, function()
+        arrange()
+        flow:Recover(id)
+    end)
     assert((returns == 1 and restores == 1) == expectEnds, "absent result: " .. label .. " returns=" .. tostring(returns) .. " restores=" .. tostring(restores))
-    flow.Recover = function() end
     return reads
 end
-assert(absentRecord("waiting record ends a TRANSFER ticket", "TRANSFER", true, function() pendingAbsent = true end) == 1)
-assert(absentRecord("waiting record ends a COMMITTING ticket", "COMMITTING", true, function() pendingAbsent = true end) == 1)
-assert(absentRecord("waiting record ends an IN_ROOM ticket the static room still holds", "IN_ROOM", true, function() pendingAbsent = true end) == 1)
-assert(absentRecord("no record leaves the ticket alone", "TRANSFER", false, function() pendingAbsent = false end) == 1)
-assert(absentRecord("a state that never entered is not touched", "QUEUED", false, function() pendingAbsent = true end) == 0)
-assert(absentRecord("a recent check is not repeated", "TRANSFER", false, function() pendingAbsent = true; flow._T.absentChecked[id] = 39000 end) == 0)
-assert(absentRecord("a fresh write hints the check past the interval", "TRANSFER", true, function() pendingAbsent = true; flow._T.absentChecked[id] = 39000; flow:HintSettled(id) end) == 1)
-assert(absentRecord("an old check is repeated", "TRANSFER", true, function() pendingAbsent = true; flow._T.absentChecked[id] = 36000 end) == 1)
-pendingAbsent = false
+assert(absentRecord("waiting record ends a TRANSFER ticket", "TRANSFER", true, function() standing = "PENDING" end) == 1)
+assert(absentRecord("waiting record ends a COMMITTING ticket", "COMMITTING", true, function() standing = "PENDING" end) == 1)
+assert(absentRecord("waiting record ends an IN_ROOM ticket the static room still holds", "IN_ROOM", true, function() standing = "PENDING" end) == 1)
+assert(absentRecord("a confirmed record ends a TRANSFER ticket whose return had failed", "TRANSFER", true, function() standing = "CLEARED" end) == 1)
+assert(absentRecord("a confirmed record leaves an IN_ROOM ticket to its room", "IN_ROOM", false, function() standing = "CLEARED" end) == 1)
+assert(absentRecord("no record leaves the ticket alone", "TRANSFER", false, function() standing = "" end) == 1)
+assert(absentRecord("a state that never entered is not touched", "QUEUED", false, function() standing = "PENDING" end) == 0)
+assert(absentRecord("a recent check is not repeated", "TRANSFER", false, function() standing = "PENDING"; flow._T.absentChecked[id] = 39000 end) == 0)
+assert(absentRecord("a fresh write hints the check past the interval", "TRANSFER", true, function() standing = "PENDING"; flow._T.absentChecked[id] = 39000; flow:HintSettled(id) end) == 1)
+assert(absentRecord("an old check is repeated", "TRANSFER", true, function() standing = "PENDING"; flow._T.absentChecked[id] = 36000 end) == 1)
+standing = ""
+
+-- The shipped ParticipantSide: standing comes from the two sealed profiles of the match, never from the arrival.
+do
+    local sides = { MatchKey = "room", HomeProfile = "a", AwayProfile = "b", ParticipantSide = ParticipantSideOf }
+    assert(sides:ParticipantSide("a") == "PLAYER" and sides:ParticipantSide("b") == "ENEMY", "the two sealed profiles")
+    assert(sides:ParticipantSide("c") == "" and sides:ParticipantSide("") == "", "a stranger and an empty profile have no side")
+    sides.MatchKey = ""
+    assert(sides:ParticipantSide("a") == "", "no match, no side")
+end
 
 local function inRoom(phase)
     instance = true
     battle = { Phase = phase, MatchKey = "room", HomeProfile = profile, AwayProfile = "b",
-        ParticipantSide = function(self, who) return who == self.HomeProfile and "PLAYER" or (who == self.AwayProfile and "ENEMY" or "") end,
+        ParticipantSide = ParticipantSideOf,
         IsBattleActive = function(self) return self.Phase == "BATTLE" end,
         ResultForProfile = function() return "WIN" end }
 end

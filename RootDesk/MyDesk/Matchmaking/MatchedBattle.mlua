@@ -6,6 +6,8 @@ script MatchedBattle extends Component
     @Sync property number WaitDeadline = 0
     property number AdmissionTimeoutSeconds = 30
     property number AbsentLoadGraceSeconds = 10
+    -- How long the settlement of a war result may take before the absent sides are told without it (#122).
+    property number SettlementWatchSeconds = 30
     property table WarResultReceipt = {}
 
     @ExecSpace("ServerOnly")
@@ -19,8 +21,10 @@ script MatchedBattle extends Component
         self._T.started = false
         self._T.published = false
         self._T.seen = {}
+        -- Per profile: WRITING while its absent result is being saved, WRITTEN once it stands (and was announced).
         self._T.absentWritten = {}
         self._T.absentDone = false
+        self._T.watchdog = nil
         self._T.matchKey = _RoomService.RoomKey
         log("[VRF][MatchedBattle] room controller ready")
     end
@@ -77,19 +81,26 @@ script MatchedBattle extends Component
                     -- A side that never saw the result page is told about this settled result (#122).
                     self:WriteAbsentResults(battle, war)
                 end, self._T.epochs)
-                -- Without the settlement answer no absent result is written (#122); say so instead of leaving the absent side without a window in silence.
-                local matchKey = self._T.matchKey
-                _TimerService:SetTimerOnce(function()
-                    if isvalid(self.Entity) and not self._T.absentDone then
-                        log_error("[VRF][MatchedBattle] absent result NOT written: the settlement of match=" .. matchKey .. " has not answered after 30 s")
-                    end
-                end, 30)
+                self:WatchSettlement(battle, war)
                 if war.outcome == nil then self:RefreshWarResultBoard() end
             else
                 self:WriteAbsentResults(battle, nil)
             end
         end
         self:PublishWarReceipts()
+    end
+
+    @ExecSpace("ServerOnly")
+    method void WatchSettlement(any battle, table war)
+        -- A settlement that never answers must not leave the absent side waiting for its ticket to expire: after the watch time the result is written with the
+        -- settlement marked failed, which is what the result page says too (戰果結算失敗，兵力未變動). An answer that comes later changes nothing in the record.
+        if self._T.absentDone then return end
+        self._T.watchdog = _TimerService:SetTimerOnce(function()
+            self._T.watchdog = nil
+            if not isvalid(self.Entity) or self._T.absentDone or self._T.war ~= war then return end
+            log_error("[VRF][MatchedBattle] the settlement of match=" .. tostring(self._T.matchKey) .. " has not answered after " .. tostring(self.SettlementWatchSeconds) .. " s; the absent result is written without it")
+            self:WriteAbsentResults(battle, { profiles = war.profiles, outcome = { status = "FAILED" } })
+        end, self.SettlementWatchSeconds)
     end
 
     @ExecSpace("ServerOnly")
@@ -101,7 +112,8 @@ script MatchedBattle extends Component
                 local profile = user.PlayerComponent.ProfileCode
                 if battle:ParticipantSide(profile) ~= "" and not self._T.seen[profile] then
                     self._T.seen[profile] = true
-                    if self._T.absentWritten[profile] then
+                    -- A record still being saved is taken back by its own save callback, which sees this profile in seen.
+                    if self._T.absentWritten[profile] == "WRITTEN" then
                         self._T.absentWritten[profile] = nil
                         local matchKey = self._T.matchKey
                         _AbsentResult:Clear(profile, matchKey, function(cleared)
@@ -119,6 +131,7 @@ script MatchedBattle extends Component
         -- A war match waits for its settlement (the war block needs the settled figures); a lobby match writes at once. A guard has no profile storage.
         if self._T.absentDone then return end
         self._T.absentDone = true
+        if self._T.watchdog ~= nil then _TimerService:ClearTimer(self._T.watchdog) self._T.watchdog = nil end
         local matchKey = self._T.matchKey
         for _, profile in ipairs({ battle.HomeProfile, battle.AwayProfile }) do
             local result = profile ~= "" and battle:ResultForProfile(profile) or ""
@@ -127,12 +140,19 @@ script MatchedBattle extends Component
                 local side = war ~= nil and war.profiles[profile] or nil
                 if side ~= nil then receipt = _FactionWarTownDocument:Summarize(side.origin, side.target, "", war.outcome, nil) end
                 local record = _AbsentResult:Compose(side ~= nil and "WAR" or "LOBBY", matchKey, result, receipt)
-                self._T.absentWritten[profile] = true
+                self._T.absentWritten[profile] = "WRITING"
                 _AbsentResult:Write(profile, record, function(saved)
                     log("[VRF][MatchedBattle] absent result written profile=" .. profile .. " match=" .. matchKey .. " kind=" .. record.kind .. " result=" .. result .. " saved=" .. tostring(saved))
                     if not saved then
                         self._T.absentWritten[profile] = nil
-                    elseif self._T.absentWritten[profile] then
+                    elseif self._T.seen[profile] then
+                        -- The side came in and saw the result page while its record was being saved: it takes the record back now that it stands.
+                        self._T.absentWritten[profile] = nil
+                        _AbsentResult:Clear(profile, matchKey, function(cleared)
+                            log("[VRF][MatchedBattle] late arrival saw the result page during the save profile=" .. profile .. " absent result cleared=" .. tostring(cleared))
+                        end)
+                    else
+                        self._T.absentWritten[profile] = "WRITTEN"
                         _AbsentResult:Announce(profile, matchKey)
                     end
                 end)
@@ -271,6 +291,10 @@ script MatchedBattle extends Component
 
     @ExecSpace("ServerOnly")
     method void OnEndPlay()
+        if self._T.watchdog ~= nil then _TimerService:ClearTimer(self._T.watchdog) self._T.watchdog = nil end
+        if self._T.war ~= nil and not self._T.absentDone then
+            log_error("[VRF][MatchedBattle] the room closed before the settlement of match=" .. tostring(self._T.matchKey) .. " answered; no absent result was written")
+        end
         self._T.war = nil
     end
 

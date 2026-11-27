@@ -24,10 +24,7 @@ script BattleView extends Component
         if not isvalid(player) or player.CurrentMap ~= self.Entity or not isvalid(player.PlayerComponent) then return "" end
         if not self:HasParticipants() then return "" end
         local session = self.Entity:GetComponent("script.BattleSession")
-        local profile = player.PlayerComponent.ProfileCode
-        if profile == session.HomeProfile then return "PLAYER" end
-        if profile == session.AwayProfile then return "ENEMY" end
-        return ""
+        return session:ParticipantSide(player.PlayerComponent.ProfileCode)
     end
 
     @ExecSpace("ClientOnly")
@@ -224,7 +221,7 @@ script BattleView extends Component
         for _, player in ipairs(_UserService.UserEntities.Values) do
             if isvalid(player) and player.CurrentMap == self.Entity and isvalid(player.PlayerComponent) then
                 local profile = player.PlayerComponent.ProfileCode
-                if (profile == session.HomeProfile or profile == session.AwayProfile) and self._T.hiddenPlayers[player.Id] == nil then
+                if session:ParticipantSide(profile) ~= "" and self._T.hiddenPlayers[player.Id] == nil then
                     self._T.hiddenPlayers[player.Id] = { entity = player, visible = player.Visible }
                     player:SetVisible(false, false, false)
                     log("[VRF][BattleView] HIDE_PLAYER " .. player.Name)

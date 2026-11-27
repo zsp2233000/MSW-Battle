@@ -21,20 +21,21 @@
 ## 實作（#121）
 
 - **晚到者（#121）是一般參戰者。** 一方的身分由這場配對封存的兩個 ProfileCode 決定（`BattleSession:ParticipantSide`，`PLAYER` 或 `ENEMY`，否則空字串），不看何時進房、有沒有在房內：結果頁、經驗收據、戰果收據、入場授權與返回都用同一個函式，所以戰鬥開始後才到的人和準時的人看到同樣的畫面。之後加入戰鬥中的操作時，也用它判斷誰可以操作。
-- **「入場失敗」不再擋住進房。** 原本入場時限過了（或一次移動失敗）之後，`MatchFlow:Recover` 為了讓「停止入場」穩定可用，不再重試移動；缺席方晚到時就卡在城鎮。現在只要房間還在（`LateEntryOpen`：票券仍是 `TRANSFER`／`COMMITTING`、沒有按過「停止入場」、不是已知關閉的房、不是封存或存檔失敗、`FindRoom` 找得到），復原照常讓他進房。進房由既有觸發啟動：登入、進度請求、就緒通知。比賽房是否已開戰不影響這個判斷。
-- 戰鬥與結算仍各只發生一次（結算以比賽識別碼去重，晚到者的進房不觸發任何寫入）。晚到者在結果出來之後才到，也由房內的復原、收據重送讀到同一個結果頁。
+- **「入場失敗」不再擋住進房。** 原本入場時限過了（或一次移動失敗）之後，`MatchFlow:Recover` 為了讓「停止入場」穩定可用，不再重試移動；缺席方晚到時就卡在城鎮。現在只要房間還在（`LateEntryOpen`：票券仍是 `TRANSFER`／`COMMITTING`、沒有按過「停止入場」、不是已知關閉的房、不是封存或存檔失敗、`FindRoom` 找得到），復原照常讓他進房。進房由既有觸發啟動：登入、進度請求、就緒通知；移動失敗（`ROOM_MOVE_FAILED`）之後另有自動重試，最多 `LateEntryRetries`（6）次、每 `LateEntryRetrySeconds`（5）秒一次，所以慢的客戶端不必有人按任何東西就能進到已經在跑的戰鬥。按「停止入場」、房間已關閉、封存或存檔失敗仍是終局，重試也隨之停止。比賽房是否已開戰不影響這個判斷。
+- 戰鬥與結算仍各只發生一次（結算以比賽識別碼去重，晚到者的進房不觸發任何寫入）。結果出來「之後」才到的人不再是晚到進場：他的票券在結算當下結束，並依 #122 收到「上一場戰果」視窗（見下）；在結果出來「之前」進房的人讀到同一個結果頁，房內的復原與收據重送也會讓重連的人讀到它。
 - 探針：`tests/late_arrival_e2e_runtime_probe.lua`（缺席方在開戰後 36 秒放行，戰鬥進行中進房，然後各自返回）。
 
 ## 實作（#122）
 
 - **最近一場缺席戰果（#122）** 存在每位玩家自己的個人存檔（`AbsentResultV1`，`AbsentResult` 邏輯）：`{ v, id（比賽識別碼）, kind（WAR／LOBBY）, result（WIN／LOSE／DRAW）, war（戰果區塊）}`，只保留最近一場，新的覆蓋舊的；按「確定」後寫成「已清除」標記，同一場不會再出現。內容不含經驗。
 - **誰會收到。** 比賽房（`MatchedBattle`）在結算時，對「沒有在房內看到結果頁」的真人參戰者寫入：結果出現時人在房內的人（`TrackResultViewers`）不寫；守衛沒有個人存檔；晚到者若在結果出來時已在房內也不寫。國戰要等戰果結算完成才寫（戰果區塊用 `FactionWarTownDocument:Summarize` 的結算數字，缺席者以自己的出發城和目標城為準），大廳對戰結果一出來就寫。寫完才通知；寫入後才進房、看到結果頁的人會把自己的記錄收回。
-- **在線上立刻跳出，同時處理票券。** 比賽房對靜態房送出 `AbsentResultEvent`（也對所有世界實例送一份）；靜態房對該玩家先跑一次 `Recover`，再推送視窗。`Recover` 新增一條：票券還是 `TRANSFER`／`COMMITTING`／`IN_ROOM`、而他的缺席戰果記錄就是這張票券的那場比賽（`MatchFlow:SettledWithoutUs`）時，票券立刻結束，走和「停止入場」相同的 `BeginReturn` → `RestoreReturning`，落點依 ADR 0016（出發城失守則回主城），不必等逾期。沒有記錄的票券不受影響；為了不讓一張只是在等的票券每次復原都讀一次存檔，這個檢查每位玩家每 3 秒最多讀一次，剛寫入記錄時（事件推送）不受間隔限制。
+- **在線上立刻跳出，同時處理票券。** 比賽房對靜態房送出 `AbsentResultEvent`（也對所有世界實例送一份）；靜態房對該玩家先跑一次 `Recover`，再推送視窗。`Recover` 新增一條：票券還是 `TRANSFER`／`COMMITTING`／`IN_ROOM`、而他的缺席戰果記錄就是這張票券的那場比賽（`MatchFlow:AbsentResultEndsTicket`）時，票券立刻結束，走和「停止入場」相同的 `BeginReturn` → `RestoreReturning`，落點依 ADR 0016（出發城失守則回主城），不必等逾期。沒有記錄的票券不受影響；為了不讓一張只是在等的票券每次復原都讀一次存檔，這個檢查每位玩家每 3 秒最多讀一次，剛寫入記錄時（事件推送）不受間隔限制。
 - **離線的人下次登入跳出。** 進入事件在復原完票券後呼叫 `AbsentResult:Deliver`；斷線重連也會重新送出還沒確認的記錄。晚到者若在結果出來時還沒進房，他的票券會因為上面那條在結算當下結束（所以那之後他不能再進房，而是看到視窗）；在結果出來之前進房的人看過結果頁，不會有記錄。
 - **視窗。** 單獨一個 UIGroup（`ui/AbsentResultGroup.ui`，由 `assets/siege/build_absent_result_ui.cjs` 以 UIBuilder 建立，Cardgame 素材與戰術沙盤風格），顯示順序最高，蓋住城鎮 HUD、大廳與大地圖。國戰：標題「上一場戰果」，勝敗、兩城兵力之前 → 之後與歸屬結論；大廳：標題「上一場對戰結果」，只有勝敗。城鎮名稱沿用同一個高亮色（`FactionWarUI.TownNameHighlightHex`）。
 - 探針：`tests/absent_result_e2e_runtime_probe.lua`（`ONLINE` 在線推送、`RELOGIN` 離線後重新登入、`LOBBY` 大廳版本）。
 - 程式審查後補的：`AbsentResult:Deliver` 進行中又收到推送時不丟掉，讀完後再跑一輪（帶原本要的 Recover）；`MatchFlow:Depart` 一併清掉 `settledHint` 與 `absentChecked`；戰果結算 30 秒沒回應時 `MatchedBattle` 印出 `absent result NOT written` 錯誤，不再靜默少一個視窗。
-- 已知限制（沒改）：`SettledWithoutUs` 在 `Recover` 裡用 `PendingFor` 最多等 5 秒的讀取（每 3 秒最多一次，且只對 TRANSFER／COMMITTING／IN_ROOM 的票）；`LateEntryOpen` 在 `ROOM_MOVE_FAILED` 後每次 `Recover` 都重試、沒有次數上限，也沒看房間自己的 `AdmissionFailed`；結算沒回來或寫入三次都失敗時，缺席方只有等票券逾期；`BattleView` 的顯示層仍自己比對 `HomeProfile`／`AwayProfile`，`ParticipantSide` 是伺服器端所有判斷的唯一來源。
+- 已知限制：`AbsentResultEndsTicket` 在 `Recover` 裡讀記錄最多等 5 秒（每 3 秒最多一次，且只對 TRANSFER／COMMITTING／IN_ROOM 的票）；`LateEntryOpen` 沒看房間自己的 `AdmissionFailed`（靜態房讀不到別的房間的狀態），入場失敗的房間仍會被放行，進去的人會立刻看到「入場失敗」並可返回；比賽房在結算回應前就關閉（所有真人離開）時不寫缺席戰果，只留 `log_error`，缺席方等票券逾期；寫入三次都失敗時同樣只有 `log_error`。
+- 審查後第二輪補的：寫入還在進行時進房看到結果頁的人，在寫入完成的那一刻收回記錄（`absentWritten` 的 `WRITING`／`WRITTEN`，不再先收回再被寫入蓋過）；收回與寫入一樣在 CAS 衝突時重讀重試，最終失敗都有 `log_error`；結算 `SettlementWatchSeconds`（30 秒）沒回應時，缺席戰果改以「戰果結算失敗，兵力未變動」寫入，不再什麼都不寫（之後才到的結算結果不改記錄；結算本身有自己約 20 秒的重試預算並會回報失敗，所以這個 30 秒的看門狗只在回呼遺失時才觸發，此時城鎮可能其實已寫入，缺席者看到的「兵力未變動」與結果頁可能不同，這是罕見退路下接受的差異）；記錄已被確認（`CLEARED`）而票券還沒結束時，`Recover` 仍會結束票券（房內的 IN_ROOM 票除外）；登入時的視窗在落點之後才送，讀記錄不再拖慢落點；客戶端的 `BattleView`／`BattleUIController` 也改用 `ParticipantSide`（`HasParticipants` 只說明比賽已成立，不判斷身分）。
 
 ## 後果
 

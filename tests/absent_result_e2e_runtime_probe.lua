@@ -196,7 +196,7 @@ local ok, reason = pcall(function()
         assert(await(function() return _AbsentResult:PendingFor(B_PROFILE) == nil end, 100), "the record is cleared")
         local _, now = find()
         if isvalid(now) then
-            _AbsentResult:Deliver(now.PlayerComponent.UserId, false)
+            _AbsentResult:Deliver(now.PlayerComponent.UserId)
             wait(1)
             assert(_AbsentResult:PendingFor(B_PROFILE) == nil, "and is not shown again")
         end

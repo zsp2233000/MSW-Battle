@@ -26,8 +26,8 @@ _FormationStorage = {
         local slot = owner .. "/" .. key
         if conflicts > 0 then
             conflicts = conflicts - 1
-            -- Somebody else wrote in between: the stored bytes are no longer the expected ones.
-            store[slot] = raw .. "-other"
+            -- Somebody else wrote in between: the same content, but not the bytes that were expected.
+            store[slot] = store[slot] ~= nil and _HttpService:JSONEncode(_HttpService:JSONDecode(store[slot])) or raw
             complete(2000000)
             return
         end
@@ -98,9 +98,26 @@ doc:Clear("red", "other", function(cleared) done = cleared end)
 check(done == true and storedRecord().kind == "WAR", "another match's clear leaves the record")
 doc:Clear("red", "m1", function(cleared) done = cleared end)
 check(done == true and storedRecord().cleared == true, "the confirmed record is cleared")
-check(doc:PendingFor("red") == nil and not doc:IsPending("red", "m1"), "a cleared record is no longer pending")
+check(doc:PendingFor("red") == nil and doc:Standing("red", "m1") == "CLEARED", "a cleared record is no longer pending, and is known to be that match's")
 doc:Write("red", lobby, function() end)
-check(doc:IsPending("red", "m2") and not doc:IsPending("red", "m1") and not doc:IsPending("red", "") and not doc:IsPending("", "m2"), "pending is per match and needs both names")
+check(doc:Standing("red", "m2") == "PENDING" and doc:Standing("red", "m1") == "" and doc:Standing("red", "") == "" and doc:Standing("", "m2") == "", "standing is per match and needs both names")
+doc:Write("red", war, function() end)
+doc:Clear("red", "m1", function() end)
+doc:Write("red", lobby, function() end)
+check(doc:Standing("red", "m1") == "", "a newer match replaced the cleared one")
+store[key] = nil
+doc:Write("red", war, function() end)
+conflicts = 1
+doc:Clear("red", "m1", function(cleared) done = cleared end)
+check(done == true and storedRecord().cleared == true, "a clear that lost a race reads again and clears")
+store[key] = nil
+doc:Write("red", war, function() end)
+conflicts = 5
+doc:Clear("red", "m1", function(cleared) done = cleared end)
+check(done == false and storedRecord().cleared == nil, "clear attempts are bounded")
+conflicts = 0
+store[key] = nil
+doc:Write("red", lobby, function() end)
 check(doc:PendingFor("blue") == nil, "another player has none")
 failReads = true
 check(doc:PendingFor("red") == nil, "an unreadable record is nothing")
@@ -140,14 +157,14 @@ _MatchFlow = {
 function doc:ReceiveAbsentResult(record, userId) table.insert(pushed, { record = record, userId = userId }) end
 doc:OnBeginPlay()
 doc:Write("red", war, function() end)
-doc:Settled("red", "m1")
+doc:Notify("red", "m1")
 check(#pushed == 1 and pushed[1].userId == "red-user" and pushed[1].record.id == "m1", "an online absent player gets the window")
 check(recovered[1] == "red-user" and hinted[1] == "red-user", "the ticket of that match is recovered (and ended) first, past the check interval")
-doc:Settled("red", "m1")
+doc:Notify("red", "m1")
 check(#pushed == 1, "the same match is not pushed twice")
 doc:HandleUserReconnectEvent({ UserId = "red-user" })
 check(#pushed == 2, "a reconnected client gets the window again")
-doc:Settled("blue", "m1")
+doc:Notify("blue", "m1")
 check(#pushed == 2, "another profile is not delivered")
 instance = true
 doc:HandleUserReconnectEvent({ UserId = "red-user" })
@@ -158,10 +175,10 @@ doc:HandleUserReconnectEvent({ UserId = "red-user" })
 check(#pushed == 2, "a confirmed record is not delivered again")
 doc:Write("red", lobby, function() end)
 local recoveries = #recovered
-doc:Deliver("red-user", false)
+doc:Deliver("red-user")
 check(#pushed == 3 and pushed[3].record.id == "m2" and #recovered == recoveries, "a newer match is delivered; a login delivery does not recover again")
 users[1] = nil
-doc:Settled("red", "m2")
+doc:Notify("red", "m2")
 check(#pushed == 3, "nobody online: the record waits for the next login")
 users[1] = player
 
@@ -198,13 +215,13 @@ local realPending, nested = doc.PendingFor, true
 doc.PendingFor = function(self, profile)
     if nested then
         nested = false
-        doc:Deliver("red-user", true)
+        doc:DeliverAfterSettle("red-user")
     end
     return realPending(self, profile)
 end
 doc._T.delivered = {}
 local recoveredBefore, pushedBefore = #recovered, #pushed
-doc:Deliver("red-user", false)
+doc:Deliver("red-user")
 doc.PendingFor = realPending
 check(#recovered == recoveredBefore + 1, "the hint that came during the read ran its recovery after the read")
 check(#pushed == pushedBefore + 1, "and the window is still shown once")
