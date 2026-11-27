@@ -292,7 +292,7 @@ test('a changed town table (#128): ownership relists, a target that is gone clos
   assert.doesNotMatch(body(text, 'ShowBoard'), /SetNotice|SetMode/, 'the client never decides what can be picked on its own');
   const select = body(text, 'ShowSelect');
   assert.match(select, /relisted and wasOpen and self\._T\.mode == "select" and \(status == "NOT_OWNED" or status == "NO_TARGETS"\) then\s+self:ShowNothingToPick\(status\)\s+return/, 'NOT_OWNED and NO_TARGETS answering the open map\'s own relist keep the map');
-  assert.match(select, /local picked = self\._T\.selected\s+self:SetMode\("select", targets, header\.town\)\s+if picked ~= nil and self\._T\.selected == nil then\s+self:SetNotice\("TARGET", picked\)/, 'a pick that the new list no longer has is named in the line');
+  assert.match(select, /local picked = self\._T\.selected\s+local previousOrigin = self\._T\.origin\s+self:SetMode\("select", targets, header\.town\)\s+if picked ~= nil and self\._T\.selected == nil then\s+self:SetNotice\("TARGET", picked\)/, 'a pick that the new list no longer has is named in the line');
   const nothing = body(text, 'ShowNothingToPick');
   assert.match(nothing, /self:SetMode\("select", \{\}, self\._T\.origin\)/, 'nothing can be picked: the window closes and every town is dimmed');
   assert.match(nothing, /status == "NOT_OWNED" then\s+self:SetNotice\("ORIGIN", ""\)/, 'NOT_OWNED says the town is no longer the player\'s faction\'s');
@@ -303,12 +303,17 @@ test('a changed town table (#128): ownership relists, a target that is gone clos
   assert.match(notice, /_FactionWarUI:HighlightedTownName\(town\)/, 'the town name has the one highlight');
   assert.match(notice, /self:Ui\("Overlay\/Window\/Side\/Notice"\)/, 'in the side panel');
   const refused = body(text, 'ShowAttackResult');
-  assert.match(refused, /result == "INVALID" then[^]*local dropped = self\._T\.selected[^]*self:SetNotice\("TARGET", dropped\)[^]*self:RenderConfirm\(\)[^]*_FactionWarAttack:RequestSelect\(\)/, 'a refusal names the town, closes the window and asks for the list again');
+  assert.match(refused, /result == "INVALID" then[^]*local dropped = self\._T\.selected[^]*self:SetNotice\("REFUSED", dropped\)[^]*self:RenderConfirm\(\)[^]*relistsOutstanding \+ 1[^]*_FactionWarAttack:RequestSelect\(\)/, 'a refusal names the town (a line a list that still has the town does not take away), closes the window and asks for the list again');
   assert.match(refused, /self\._T\.pending = false\n/, 'and nothing waits any more');
-  assert.match(body(text, 'Pick'), /self:SetNotice\("", ""\)/, 'a new pick clears the line');
-  assert.match(body(text, 'Close'), /self:SetNotice\("", ""\)/, 'closing the map clears it');
-  assert.match(body(text, 'Reveal'), /self:SetNotice\("", ""\)/, 'and a map that opens starts without one');
-  for (const method of ['ShowNothingToPick', 'SetNotice']) assert.match(annotation(text, method), /@ExecSpace\("ClientOnly"\)/, `${method} runs on the client only`);
+  assert.match(body(text, 'Pick'), /self:ClearNotice\(\)/, 'a new pick clears the line');
+  assert.match(body(text, 'Close'), /self:ClearNotice\(\)/, 'closing the map clears it');
+  assert.match(body(text, 'Reveal'), /self:ClearNotice\(\)/, 'and a map that opens starts without one');
+  assert.match(body(text, 'ClearNotice'), /self:SetNotice\("", ""\)/, 'one helper hides the line');
+  assert.equal([...text.matchAll(/SetNotice\("", ""\)/g)].length, 1, 'and nothing else spells the empty line out');
+  assert.match(select, /self\._T\.noticeKind == "ORIGIN" or self\._T\.noticeKind == "NO_TARGETS" or \(self\._T\.noticeKind == "TARGET" and/, 'a READY list takes back every line but the refusal\'s');
+  assert.match(select, /local relisted = self\._T\.relistsOutstanding > 0[^]*relistsOutstanding - 1/, 'each answer to the map\'s own relists is counted off, however many are outstanding');
+  assert.doesNotMatch(text, /_T\.relisting/, 'there is no single relisting flag');
+  for (const method of ['ShowNothingToPick', 'SetNotice', 'ClearNotice']) assert.match(annotation(text, method), /@ExecSpace\("ClientOnly"\)/, `${method} runs on the client only`);
   assert.match(text, /self\._T\.noticeKind = ""/, 'the line starts empty');
 });
 
@@ -396,7 +401,7 @@ test('the click path: the touch surface decides click or drag by the screen dist
   assert.match(body(text, 'TownViewPoint'), /offset\.x \+ position\.x \* zoom, offset\.y \+ position\.y \* zoom/, 'the content is scaled about its centre, then moved');
   assert.match(body(text, 'FocusOrigin'), /self:SetMapView\(self\.SelectZoom, self:CenterOffset\(/, 'the focus uses the one view setter (the clamp and the labels stay in it)');
   const select = body(text, 'ShowSelect');
-  assert.match(select, /local entering = not \(self\._T\.open and self\._T\.mode == "select"\)[^]*self:SetMode\("select", targets, header\.town\)[^]*if entering then self:FocusOrigin\(header\.town\) end/, 'the selection zooms when it opens or switches over from the view, not on a refreshed list');
+  assert.match(select, /local entering = not \(self\._T\.open and self\._T\.mode == "select"\)[^]*local previousOrigin = self\._T\.origin[^]*self:SetMode\("select", targets, header\.town\)[^]*if entering or previousOrigin ~= header\.town then self:FocusOrigin\(header\.town\) end/, 'the selection zooms when it opens or switches over from the view, not on a refreshed list');
   assert.match(body(text, 'Open'), /self:Reveal\("view"\)/, 'the view still opens through Reveal at the full overview');
   assert.match(body(text, 'Reveal'), /self:SetMapView\(1, Vector2\(0, 0\)\)/, 'which is the full overview');
   assert.match(body(text, 'RenderConfirm'), /self:RenderMarks\(\)/, 'the marks follow every change of the selection');
