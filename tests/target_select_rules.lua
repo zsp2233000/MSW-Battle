@@ -818,7 +818,7 @@ local function focus(id, zoom) ui:SetMapView(zoom, ui:CenterOffset(anchored(id),
 local yanchengTarget = { town = "yancheng", name = "鹽埕", capital = true, strength = 100, owner = "B" }
 
 -- The pure decisions.
-check(ui.MinHitPx >= 24 and ui.SelectZoom == 4, "the hit reach is at least 24 screen pixels and the selection starts at 4x")
+check(ui.MinHitPx >= 24 and ui.SelectZoom >= 4, "the hit reach is at least 24 screen pixels and the selection starts at 4x")
 check(ui:IsClick(0) and ui:IsClick(ui.ClickSlopPx) and not ui:IsClick(ui.ClickSlopPx + 1), "a press that stays within the slop is a click, one that travelled further is a drag")
 check(near(ui:IconScale(1), 0.25) and near(ui:IconScale(4), 0.64) and ui:IconScale(12) == 1, "the crest scale: small in the overview, full size from 7x")
 for _, zoom in ipairs({ 1, 2, 4, 8, 12 }) do
@@ -847,7 +847,7 @@ check(ui:CrestState("gushan") == "selected" and ui:CrestState("yancheng") == "di
 -- The selection opens zoomed on the departure town; the view opens at the full overview.
 fresh()
 ready("zuoying", { gushan }, towns())
-check(ui._T.zoom == ui.SelectZoom and near(node("Overlay/Window/Map/Content").UITransformComponent.UIScale.x, 4), "the selection opens at 4x")
+check(ui._T.zoom == ui.SelectZoom and near(node("Overlay/Window/Map/Content").UITransformComponent.UIScale.x, ui.SelectZoom), "the selection opens at 4x")
 local at = viewPointOf("zuoying")
 check(near(at.x, 0) and near(at.y, 0), "centred on the departure town")
 check(ui:Ui(TOWN .. "zuoying/Name").Visible == true, "at 4x the town names are shown")
@@ -856,7 +856,7 @@ _UserService.LocalPlayer.CurrentMapName = "gushan"
 ui._T.mapName = "gushan"
 ui:ShowSelect("gushan", "READY", { town = "gushan", strength = 100, owner = "A", faction = "A" }, { yanchengTarget }, { towns = towns({}, { gushan = "A" }), links = links })
 at = viewPointOf("gushan")
-check(ui._T.zoom == 4 and near(at.x, 0) and near(at.y, 0), "the departure town is the one the answer names, whichever town it is")
+check(ui._T.zoom == ui.SelectZoom and near(at.x, 0) and near(at.y, 0), "the departure town is the one the answer names, whichever town it is")
 _UserService.LocalPlayer.CurrentMapName = "zuoying"
 fresh()
 ui:Open()
@@ -866,19 +866,19 @@ check(ui._T.zoom == 1, "and a pushed board keeps it")
 ui:SetMapView(2, Vector2(30, 20))
 ui:ShowSelect("zuoying", "READY", header, { gushan }, { towns = towns(), links = links })
 at = viewPointOf("zuoying")
-check(ui._T.zoom == 4 and near(at.x, 0) and near(at.y, 0), "the NPC press while the view is open switches to the selection zoomed on the departure town")
+check(ui._T.zoom == ui.SelectZoom and near(at.x, 0) and near(at.y, 0), "the NPC press while the view is open switches to the selection zoomed on the departure town")
 ui:SetMapView(2, Vector2(30, 20))
 ui:ShowSelect("zuoying", "READY", header, { gushan }, { towns = towns(), links = links })
 check(ui._T.zoom == 2 and near(ui._T.mapOffset.x, 30) and near(ui._T.mapOffset.y, 20), "a refreshed list while the selection is open does not take the view back")
 ui:Close()
 ready("zuoying", { gushan }, towns())
-check(ui._T.zoom == 4, "reopening the selection zooms again")
+check(ui._T.zoom == ui.SelectZoom, "reopening the selection zooms again")
 
 -- Wheel zoom and drag pan are what they were.
 fresh()
 ready("zuoying", { gushan }, towns())
 ui:HandleWheel({ ScrollDelta = 1 })
-check(near(ui._T.zoom, 4 * ui.WheelZoomFactor), "the wheel still zooms in the selection")
+check(near(ui._T.zoom, ui.SelectZoom * ui.WheelZoomFactor), "the wheel still zooms in the selection")
 ui:SetMapView(4, ui:CenterOffset(anchored("zuoying"), 4))
 local before = ui._T.mapOffset
 press(Vector2(0, 0))

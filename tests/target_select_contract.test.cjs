@@ -383,7 +383,7 @@ test('the click path: the touch surface decides click or drag by the screen dist
   const text = mapClient();
   assert.match(text, /property number MinHitPx = (\d+)/, 'the hit reach is a property');
   assert.ok(Number(text.match(/property number MinHitPx = (\d+)/)[1]) >= 24, 'at least 24 screen pixels');
-  assert.match(text, /property number SelectZoom = 4\b/, 'the selection opens at 4x');
+  assert.match(text, /property number SelectZoom = 8\b/, "the selection opens at 8x");
   assert.match(text, /property number ClickSlopPx = \d+/, 'the click slop is a property');
   assert.match(body(text, 'BeginMapDrag'), /self\._T\.dragStart = event\.TouchPoint[^]*self\._T\.dragTravel = 0/, 'the press remembers where it went down, in screen pixels');
   assert.match(body(text, 'DragMap'), /self:MeasureTravel\(event\.TouchPoint\)/, 'every drag event measures the travel');

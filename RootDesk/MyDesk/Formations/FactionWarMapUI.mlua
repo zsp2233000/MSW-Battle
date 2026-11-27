@@ -11,7 +11,7 @@ script FactionWarMapUI extends Logic
     property number MaxZoom = 24
     -- Target selection on the map (#129): it opens at SelectZoom on the departure town; a press that moves at most ClickSlopPx screen pixels is a
     -- click, not a drag; a click picks the crest within MinHitPx screen pixels (or within CrestHitReach UI units at full scale, the halo's size).
-    property number SelectZoom = 4
+    property number SelectZoom = 8
     property number ClickSlopPx = 10
     property number MinHitPx = 24
     property number CrestHitReach = 38
