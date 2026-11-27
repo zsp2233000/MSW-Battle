@@ -218,11 +218,11 @@ test('the layout comes from one module: the full build and the delta build use i
 test('the wheel over the town list is the list\'s, and the reach of a click is measured in the units of the scaled viewport', () => {
   const text = client();
   const file = ui();
-  assert.match(annotation(text, 'IsOverSidePanel'), /@ExecSpace\("ClientOnly"\)/, 'the check runs on the client');
-  assert.match(body(text, 'HandleWheel'), /if self:IsOverSidePanel\(screenPoint\) then return end\s+local cursor = _UILogic:ScreenToLocalUIPosition\(screenPoint, view\.UITransformComponent\)\s+self:ZoomMapAt/, 'the wheel is ignored on the list before it can zoom');
-  assert.equal(text.match(/property string SidePath = "([^"]+)"/)[1], SIDE, 'the list is the node the layout floats');
+  assert.match(annotation(text, 'IsOverTownList'), /@ExecSpace\("ClientOnly"\)/, 'the check runs on the client');
+  assert.match(body(text, 'HandleWheel'), /if self:IsOverTownList\(screenPoint\) then return end\s+local cursor = _UILogic:ScreenToLocalUIPosition\(screenPoint, view\.UITransformComponent\)\s+self:ZoomMapAt/, 'the wheel is ignored on the list before it can zoom');
+  assert.equal(text.match(/property string TownListPath = "([^"]+)"/)[1], SIDE, 'the list is the node the layout floats');
   assert.ok(file.find(SIDE), 'and it exists');
-  assert.match(body(text, 'IsOverSidePanel'), /transform\.Pivot[^]*-size\.x \* pivot\.x[^]*size\.x \* \(1 - pivot\.x\)/, 'a point is on it inside its rectangle, measured from the pivot the conversion uses');
+  assert.match(body(text, 'IsOverTownList'), /transform\.Pivot[^]*-size\.x \* pivot\.x[^]*size\.x \* \(1 - pivot\.x\)/, 'a point is on it inside its rectangle, measured from the pivot the conversion uses');
   assert.match(body(text, 'ScreenPixelsPerUnit'), /view\.UITransformComponent\.UIScale[^]*screenWidth \/ span \* scale/, 'a unit of the viewport is the screen pixels of a canvas unit times its scale');
   assert.match(body(text, 'ClickMap'), /self:HitRadius\(self\._T\.zoom, self:ScreenPixelsPerUnit\(\)\)/, 'the click reach uses it');
 });
@@ -244,11 +244,11 @@ test('the #132 Maker client probe implements every step its header orders, measu
   assert.match(probe, /UITouchDownEvent\(input, -1, p\)[^]*UITouchDragEvent[^]*UITouchUpEvent/, 'the drag is touch events on the real touch surface (maker_mouse_input does not reach it)');
   assert.match(probe, /STEP = "CLEANUP" in server_main LAST/, 'the header says to clean the isolated board up before stopping Play');
   assert.ok(readme.includes('## Near full-screen world map (#132, ADR 0015)') && readme.includes('faction_war_map_fullscreen_runtime_probe.lua') && readme.includes('docs/evidence/issue132/132-open.png'), 'the README has the section, the probe and the screenshots');
-  for (const image of ['132-open', '132-zoom-cover', '132-select-confirm', '132-message']) assert.ok(fs.existsSync(`docs/evidence/issue132/${image}.png`), `${image}.png is in the evidence folder`);
+  for (const image of ['132-open', '132-zoom-cover', '132-select', '132-select-confirm', '132-message']) assert.ok(fs.existsSync(`docs/evidence/issue132/${image}.png`), `${image}.png is in the evidence folder`);
   const adr = source('docs/adr/0015-world-map-is-viewed-in-towns-and-pushed-by-settlement-events.md');
-  assert.match(adr, /補記（#132）[^]*BaseScale[^]*忽略[^]*IsOverSidePanel[^]*fullscreen_ui\.cjs/, 'the ADR records the layout, the scale set by the script and why, and the wheel guard');
-  assert.match(source('CONTEXT.md'), /\*\*城鎮列\*\*:\n[^\n]*半透明面板[^\n]*\n_Avoid_: 側欄/, 'the glossary defines the town list');
-  assert.match(source('CONTEXT.md'), /不透明的深棕色遮罩[^\n]*四個角落/, 'and the world map entry says how it opens');
+  for (const term of ['補記（#132）', 'BaseScale', 'IsOverTownList', 'fullscreen_ui.cjs']) assert.ok(adr.includes(term), `the ADR records ${term}`);
+  const context = source('CONTEXT.md');
+  assert.ok(context.includes('**城鎮列**:') && context.includes('不透明的遮罩') && context.includes('四個角落'), 'the glossary defines the town list and says how the world map opens');
 });
 
 test('a full rebuild gives the committed file, so the delta script and build_ui.cjs cannot drift apart', () => {

@@ -24,7 +24,8 @@ const WINDOW_SIZE = [1840, 1000];
 const BASE_SCALE = 1.2;
 const VIEW_SIZE = [1500, 810];
 const SIDE_ROW = [380, 84];
-const BAR_WIDTH = 240;
+const BAR_WIDTH = 240;                                                              // FactionWarMapUI.BarWidth (a test holds them equal)
+const CLOSE_HINT = '按 M 鍵或右上角按鈕關閉';
 const SIDE = 'Overlay/Window/Side';
 const TOWNS = ['nanzih', 'zuoying', 'gushan', 'yancheng'];
 
@@ -55,7 +56,8 @@ const GEOMETRY = {
   [`${SIDE}/Legend/Ally/Label`]: at('middle-left', [36, 0], [60, 30]),
   [`${SIDE}/Legend/Enemy`]: at('middle-left', [116, 0], [28, 28]),
   [`${SIDE}/Legend/Enemy/Label`]: at('middle-left', [36, 0], [60, 30]),
-  [`${SIDE}/Legend/Link`]: at('middle-left', [224, 0], [48, 8]),
+  [`${SIDE}/Legend/Link`]: at('middle-left', [224, 0], [48, 8]),                     // 48 x 8: LEGEND_WIDTH x HEIGHT of build_frontline_ui.cjs
+  [`${SIDE}/Legend/Link/Label`]: at('middle-left', [56, 0], [90, 30]),
   [`${SIDE}/Note`]: at('top-center', [0, -592], [380, 64]),
   [`${SIDE}/Notice`]: at('top-center', [0, -664], [380, 36]),
   [`${SIDE}/Status`]: at('bottom-center', [0, 20], [380, 30]),
@@ -81,7 +83,6 @@ const geo = path => {
 const TRANSFORM = 'MOD.Core.UITransformComponent';
 const SPRITE = 'MOD.Core.SpriteGUIRendererComponent';
 const TEXT = 'MOD.Core.TextGUIRendererComponent';
-const GOLD = '#EEC78F';
 const OUTLINE = { outline: true, outline_color: { r: 0, g: 0, b: 0, a: 0.7 }, outline_width: 0.2, face_dilate: 0.2 };
 // The text enums of TextGUIRendererComponent (not the 0-8 index of text()): centred, middle.
 const CENTER = 2;
@@ -146,17 +147,16 @@ function applyFullscreenLayout(b) {
   place(b, 'Overlay/Window/MapHint');
   b.patchComponent('Overlay/Window/MapHint', TEXT, { HorizontalAlignment: CENTER, VerticalAlignment: MIDDLE });
   plate(b, 'Overlay/Window/MapHint');
-  const closing = b.find(`${SIDE}/Hint`) ? b.getComponent(`${SIDE}/Hint`, TEXT).Text : '按 M 鍵或右上角按鈕關閉';
   if (b.find(`${SIDE}/Hint`)) b.remove(`${SIDE}/Hint`);
-  addHint(b, closing);
+  addHint(b);
   moveAfter(b, 'Overlay/Window', WINDOW_ORDER.slice(WINDOW_ORDER.indexOf('Side') + 1), 'Side');
-  WINDOW_ORDER.forEach((name, index) => { b.find(`Overlay/Window/${name}`).jsonString.displayOrder = index; });
+  WINDOW_ORDER.forEach((name, index) => b.patch(`Overlay/Window/${name}`, { display_order: index }));
   return b;
 }
 
 // The closing hint at the bottom right corner of the window.
-function addHint(b, label) {
-  b.text('Overlay/Window/Hint', label, { size: 22, color: '#E8DCC8', ...OUTLINE, ...geo('Overlay/Window/Hint') });
+function addHint(b) {
+  b.text('Overlay/Window/Hint', CLOSE_HINT, { size: 22, color: '#E8DCC8', ...OUTLINE, ...geo('Overlay/Window/Hint') });
   plate(b, 'Overlay/Window/Hint');
 }
 
@@ -165,8 +165,4 @@ function plate(b, path) {
   b.patchComponent(path, SPRITE, { ImageRUID: { DataId: SKIN }, Type: 1, Color: LABEL_PLATE, RaycastTarget: false });
 }
 
-module.exports = {
-  GEOMETRY, STRETCHED, geo, applyFullscreenLayout, moveAfter, addHint, plate,
-  MASK_COLOR, SIDE_COLOR, WINDOW_FRAME, LABEL_PLATE, WINDOW_SIZE, VIEW_SIZE, BASE_SCALE, SIDE_ROW, BAR_WIDTH, WINDOW_ORDER, GOLD,
-  CENTER, MIDDLE,
-};
+module.exports = { geo, applyFullscreenLayout, addHint, plate, MASK_COLOR, SIDE_COLOR, WINDOW_FRAME, BASE_SCALE, SIDE_ROW };

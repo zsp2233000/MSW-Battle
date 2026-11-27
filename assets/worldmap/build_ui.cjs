@@ -15,7 +15,7 @@ const ROOT = path.join(__dirname, '..', '..');
 const layout = require('./layout.json');
 const art = require('./ruids.json');
 const { addSelectUi } = require('./select_ui.cjs');
-const { addFrontlines, addFrontlineLegend, LEGEND_LABEL, LEGEND_LABEL_POS, NOTE } = require('./build_frontline_ui.cjs');
+const { addFrontlines, addFrontlineLegend, LEGEND_LABEL, NOTE } = require('./build_frontline_ui.cjs');
 // The near-full-screen layout (#132): the window, the viewport and the town list take their rectangles from the module that build_fullscreen_ui.cjs lays an existing file out with.
 const { geo, addHint, plate, MASK_COLOR, SIDE_COLOR, WINDOW_FRAME } = require('./fullscreen_ui.cjs');
 
@@ -55,7 +55,7 @@ b.patchComponent('OpenButton', 'MOD.Core.TextGUIRendererComponent', { OutlineCol
 
 // Full-screen mask in opaque deep brown (it covers the town, the HUD and the siege panel, so it needs no backdrop under the window); the script toggles Overlay.
 // Stretch alone leaves the sprite's RectSize at 100×100 in Maker. The window leaves 40 px on every side.
-b.sprite('Overlay', { anchor: 'stretch', rect_size: [1920, 1080], color: '#241C14', alpha: MASK_COLOR.a, raycast: true, enable: false });
+b.sprite('Overlay', { anchor: 'stretch', rect_size: [1920, 1080], color: MASK_COLOR, raycast: true, enable: false });
 b.sprite('Overlay/Window', { ...geo('Overlay/Window'), image_ruid: WINDOW_FRAME, color: '#FFFFFF', sprite_type: 1, raycast: true });
 b.patchComponent('Overlay/Window', 'MOD.Core.SpriteGUIRendererComponent', { FillCenter: false });
 
@@ -102,7 +102,7 @@ b.addComponent(INPUT, 'MOD.Core.UITouchReceiveComponent');
 // It floats over the map (#132): translucent, in the empty space on the right of the map at 1x, and it takes the touches that land on it (raycast), so a drag on it
 // does not move the map under it. It is created after the map, so it is drawn above it.
 const SIDE = 'Overlay/Window/Side';
-b.sprite(SIDE, { ...geo(SIDE), color: SIDE_COLOR, alpha: SIDE_COLOR.a, sprite_type: 1, raycast: true });
+b.sprite(SIDE, { ...geo(SIDE), color: SIDE_COLOR, sprite_type: 1, raycast: true });
 b.text(`${SIDE}/FactionLabel`, '你的陣營', { size: 22, color: GOLD, ...OUTLINE, ...geo(`${SIDE}/FactionLabel`) });
 b.text(`${SIDE}/Faction`, '讀取中…', { size: 34, color: GOLD, bold: true, ...OUTLINE, ...geo(`${SIDE}/Faction`) });
 b.sprite(`${SIDE}/Divider`, { ...geo(`${SIDE}/Divider`), color: { r: 0.93, g: 0.78, b: 0.56, a: 0.5 }, sprite_type: 1 });
@@ -124,8 +124,7 @@ b.text(`${SIDE}/Legend/Ally/Label`, '我方', { size: 22, color: '#FFFFFF', ...O
 b.sprite(`${SIDE}/Legend/Enemy`, { ...geo(`${SIDE}/Legend/Enemy`), color: NEUTRAL, sprite_type: 1 });
 b.text(`${SIDE}/Legend/Enemy/Label`, '敵方', { size: 22, color: '#FFFFFF', ...OUTLINE, alignment: 3, ...geo(`${SIDE}/Legend/Enemy/Label`) });
 addFrontlineLegend(b);
-b.patch(`${SIDE}/Legend/Link`, geo(`${SIDE}/Legend/Link`));
-b.text(`${SIDE}/Legend/Link/Label`, LEGEND_LABEL, { size: 22, color: '#FFFFFF', ...OUTLINE, alignment: 3, anchor: 'middle-left', pos: LEGEND_LABEL_POS, rect_size: [90, 30] });
+b.text(`${SIDE}/Legend/Link/Label`, LEGEND_LABEL, { size: 22, color: '#FFFFFF', ...OUTLINE, alignment: 3, ...geo(`${SIDE}/Legend/Link/Label`) });
 b.text(`${SIDE}/Note`, NOTE, { size: 20, color: '#E8DCC8', ...OUTLINE, ...geo(`${SIDE}/Note`) });
 b.text(`${SIDE}/Status`, '正在讀取戰況…', { size: 20, color: GOLD, ...OUTLINE, ...geo(`${SIDE}/Status`) });
 
@@ -136,7 +135,7 @@ b.button('Overlay/Window/Close', '', { ...geo('Overlay/Window/Close'), image_rui
 swap(b, 'Overlay/Window/Close', X_BUTTON);
 b.text('Overlay/Window/MapHint', '高雄 38 區｜滾輪縮放・拖曳移動', { size: 22, color: '#E8DCC8', ...OUTLINE, ...geo('Overlay/Window/MapHint') });
 plate(b, 'Overlay/Window/MapHint');
-addHint(b, '按 M 鍵或右上角按鈕關閉');
+addHint(b);
 
 // The NPC's target selection (#124): a pick button and a veil on each row, and the confirmation window above the map.
 addSelectUi(b);

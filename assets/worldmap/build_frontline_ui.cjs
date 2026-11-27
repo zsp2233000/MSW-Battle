@@ -6,6 +6,7 @@
 const path = require('node:path');
 const { UIBuilder } = require('../../.agents/skills/msw-ui-system/scripts/msw_ui_builder.cjs');
 const layout = require('./layout.json');
+const { geo } = require('./fullscreen_ui.cjs');
 const MAP = 'Overlay/Window/Map/Content';
 const SIDE = 'Overlay/Window/Side';
 const LEGEND_LABEL = '拔河條';
@@ -39,7 +40,8 @@ function addFrontlines(b) {
 
 function addFrontlineLegend(b) {
   const example = `${SIDE}/Legend/Link`;
-  b.empty(example, { anchor: 'middle-left', pos: [300, 0], rect_size: [LEGEND_WIDTH, HEIGHT] });
+  // Where it stands in the (narrower) town list comes from the layout module (#132); its size is the bar's.
+  b.empty(example, { ...geo(example), rect_size: [LEGEND_WIDTH, HEIGHT] });
   addSegments(b, example, LEGEND_WIDTH);
 }
 

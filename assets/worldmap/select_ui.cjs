@@ -74,7 +74,7 @@ function addMessageUi(b) {
   cardButton(b, 'Message/Window/Ok', '確定', { anchor: 'bottom-center', pos: [0, 32], rect_size: [240, 88], font_size: 32 });
 }
 
-// The side panel line (#128), under the note and above the status line (the side panel is 800 high since #132; the note ends at -656, the status line starts
+// The town list line (#128), under the note and above the status line (the list is 800 high since #132; the note ends at -656, the status line starts
 // 750 from the top). Text only: it takes no click. The builder appends a new entity to the file, and Maker takes render order from the order of the
 // entities, so on a file that already has Confirm and Message the line is moved in front of them (same entity, nothing re-imported): the windows stay above it.
 function addNoticeUi(b) {

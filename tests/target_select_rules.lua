@@ -895,7 +895,7 @@ fresh()
 ready("zuoying", { gushan }, towns())
 local zoomOnOpen = ui._T.zoom
 cursorAt = Vector2(300, 0)
-check(ui:IsOverSidePanel(cursorAt) and not ui:IsOverSidePanel(Vector2(-200, 0)) and not ui:IsOverSidePanel(Vector2(300, 450)), "a point is on the list inside its rectangle, measured from its pivot")
+check(ui:IsOverTownList(cursorAt) and not ui:IsOverTownList(Vector2(-200, 0)) and not ui:IsOverTownList(Vector2(300, 450)), "a point is on the list inside its rectangle, measured from its pivot")
 ui:HandleWheel({ ScrollDelta = 1 })
 check(ui._T.zoom == zoomOnOpen, "the wheel over the town list does nothing")
 cursorAt = Vector2(-200, 0)

@@ -21,7 +21,7 @@ script FactionWarMapUI extends Logic
     -- in ui/WorldMapGroup.ui because Maker's import ignores a UIScale written in the file.
     property number BaseScale = 1.2
     -- The town list floats over the map (#132): a touch or the wheel that lands on it is not the map's.
-    property string SidePath = "Overlay/Window/Side"
+    property string TownListPath = "Overlay/Window/Side"
     property integer LinkSlots = 3
     -- The width of a strength bar in the town list (the Bar nodes of ui/WorldMapGroup.ui; the fill is this width times the share).
     property number BarWidth = 240
@@ -135,17 +135,17 @@ script FactionWarMapUI extends Logic
         if not isvalid(view) then return end
         local screenPoint = _InputService:GetCursorPosition()
         -- The town list lies over part of the viewport: scrolling on it does nothing, as the drag on it does not move the map.
-        if self:IsOverSidePanel(screenPoint) then return end
+        if self:IsOverTownList(screenPoint) then return end
         local cursor = _UILogic:ScreenToLocalUIPosition(screenPoint, view.UITransformComponent)
         self:ZoomMapAt(cursor, event.ScrollDelta)
     end
 
     @ExecSpace("ClientOnly")
-    method boolean IsOverSidePanel(Vector2 screenPoint)
-        -- Whether a screen point is on the town list. The local point is measured from the panel's pivot, so the panel's rectangle is the size on each side of it.
-        local side = self:Ui(self.SidePath)
-        if not isvalid(side) then return false end
-        local transform = side.UITransformComponent
+    method boolean IsOverTownList(Vector2 screenPoint)
+        -- Whether a screen point is on the town list. The local point is measured from the list's pivot, so its rectangle is its size on each side of it.
+        local list = self:Ui(self.TownListPath)
+        if not isvalid(list) then return false end
+        local transform = list.UITransformComponent
         local point = _UILogic:ScreenToLocalUIPosition(screenPoint, transform)
         local size = transform.RectSize
         local pivot = transform.Pivot or Vector2(0.5, 0.5)
@@ -286,7 +286,8 @@ script FactionWarMapUI extends Logic
         local span = math.abs(_UILogic:ScreenToUIPosition(Vector2(screenWidth, 0)).x - _UILogic:ScreenToUIPosition(Vector2(0, 0)).x)
         if span <= 0 then return 1 end
         local view = self:Ui(self.ViewPath)
-        local scale = isvalid(view) and view.UITransformComponent.UIScale ~= nil and view.UITransformComponent.UIScale.x or 1
+        local scale = 1
+        if isvalid(view) and view.UITransformComponent.UIScale ~= nil then scale = view.UITransformComponent.UIScale.x end
         return screenWidth / span * scale
     end
 
@@ -517,6 +518,7 @@ script FactionWarMapUI extends Logic
         local view = self:Ui(self.ViewPath)
         if not isvalid(view) then return end
         view.UITransformComponent.UIScale = Vector3(self.BaseScale, self.BaseScale, 1)
+        log("[VRF][FactionWarMap] ui base scale=" .. tostring(self.BaseScale))
     end
 
     @ExecSpace("ClientOnly")
