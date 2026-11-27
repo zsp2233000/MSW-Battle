@@ -7,6 +7,7 @@ script FactionWarNpc extends Component
         -- Only the player who pressed the interaction key asks for their own target selection, and not while the map already covers the town
         -- (an interaction event is not stopped by a UI mask).
         if event.InteractionEntity == _UserService.LocalPlayer and not _FactionWarMapUI:BlocksInteraction() then
+            _FactionWarMapUI:BeginSelect()
             _FactionWarAttack:RequestSelect()
         end
     end
