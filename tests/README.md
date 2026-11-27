@@ -198,6 +198,55 @@ Maker client probe, **run on the merged integration branch 2026-11-27: steps 1-1
 
 Client-only extra, from any town and without `SETUP`: `PENDING` (a synthetic selection with the window in its waiting state, no request sent; screenshot 4: `正在加入配對…`, both buttons disabled) then `PENDING_CLOSE`. Search the client console with `[VRF][TargetSelect]` and the server's with `[VRF][FactionWarMap]` / `[VRF][FactionWarAttack]`; any `FAIL` or runtime `Error` is a failure. Screenshots for the issue: `docs/evidence/issue124/` (1 the selection after `SELECT_OPEN`, 2 the window, 3 the siege panel). Maker steps 1-13 above were run on the merged integration branch. Screenshots 2b (the capital note, `CAPITAL = true` run) and 4 (the waiting window, `PENDING`) were not captured. The regression probes `faction_war_siege_panels_runtime_probe.lua`, `faction_war_attack_client_runtime_probe.lua` (fresh Play, in Nanzih), `faction_war_map_runtime_probe.lua` with `faction_war_map_client_runtime_probe.lua` and the `faction_war_integration_journey_e2e_runtime_probe.lua` `options()` steps were NOT run for this ticket; run them as the regression of the code it touched. The review fixes (a reply that arrives after the map was closed opens nothing, and a READY that cannot be shown tells the server nobody is watching, `FactionWarMapUI:BeginSelect` / `relisting`) are covered by the rules test only, not run in Maker. Not verified: a real mouse click (the probe sends `ButtonClickEvent`), a touch layout, and two real accounts.
 
+## Messages for the answers that cannot attack, and the NPC guard (#127, ADR 0015)
+
+Only `READY` opens the world map. The other answers to the town NPC press open the **message window** (`ui/WorldMapGroup.ui` `Message`: the last root child, so above the map and the confirmation window; dimmer, brown panel, `Window/Frame`, `Window/Text`, one Cardgame `Window/Ok` button `確定`; built by `assets/worldmap/build_message_ui.cjs`, which only replaces `Message`, and by `select_ui.cjs` for a full rebuild). Maker imports a new subtree one level per refresh (see the team preview section): after the script, refresh, bump a sibling's display order through the builder, refresh again, until `/ui/WorldMapGroup/Message/Window/Ok` exists in Play.
+
+| Answer | Server | Message |
+| --- | --- | --- |
+| `ENGAGED` | `ReceiveSelect(town, "ENGAGED", { target = _MatchFlow:TargetForUser(userId) }, ...)` | 目前正在進攻 `<城名>`，要改變目標請先取消配對（畫面上方的攻城面板可以取消） (a player engaged without a war ticket gets 目前已在配對中，… with no town name) |
+| `NOT_OWNED` | status alone; `FactionWarLanding:Judge` still decides the landing | 這座城已不屬於你的陣營 |
+| `UNAVAILABLE` | status alone | 暫時無法讀取國戰資料，請再試一次 |
+| `NO_TARGETS` (new: the player owns the departure town but no adjacent town is an enemy) | status alone, no viewer | 目前沒有可進攻的相鄰敵城 |
+
+Town names use `FactionWarUI:HighlightedTownName`, the one highlight colour. The guard is `FactionWarMapUI:BlocksInteraction`: the map (the confirmation window lives inside it), a message window, or a press that has not been answered yet (`BeginSelect` marks it; `AskTimeout` = 5 s without an answer ends it, the server drops presses it cannot answer). Both `FactionWarNpc` and `FactionWarLobbyNpc` ask it first, because an interaction event is not stopped by a UI mask. M, the map button and the wheel do nothing behind a message either, and a message closes when the player leaves its town. A non-`READY` answer to the map's own relist (target gone, owner changed) after the player closed the map shows nothing.
+
+```sh
+set -o pipefail
+node tests/target_select_local.cjs | npm exec --yes --package=fengari-node-cli@0.1.0 -- fengari -
+node --test tests/target_select_contract.test.cjs
+```
+
+Expect `[VRF][TargetSelect] target selection rules PASS` (now also the four messages and their exact words, no map and no further request for each, the highlight, `ExpireStale`, the press guard run through the real `FactionWarNpc` / `FactionWarLobbyNpc` handlers: one request per press, none behind the map, the confirmation window or a message, the timeout, and `NO_TARGETS` / `ENGAGED` on the server) and the contract tests (the authored `Message` window: Cardgame, one 確定 button, above `Confirm`; both NPC scripts ask `BlocksInteraction`; the words of each message; the probe's steps).
+
+### Maker client probe: the queued message and the key guard
+
+`tests/target_select_message_client_runtime_probe.lua` runs on the fixture of the #124 probe (run its `SETUP`, `PICK`, `CONFIRM`, `CANCEL` and `CLEANUP` unchanged with the same `REAL`; the real profile is A in Zuoying, Gushan is B's with 55). It presses the interaction key for real: `maker_keyboard_input` with `['e']` while the player stands beside the NPC (`STAND` teleports the player next to the real NPC entity of the town), so the real `InteractionEvent`, the NPC handlers and the server answer run. Wait about 2 s after each tap.
+
+| Step | Context | What | Expect |
+| --- | --- | --- | --- |
+| #124 `SETUP` | `server_main` | fixture | `SETUP PASS` |
+| 1 `STAND` (`NPC = "WAR"`) | `client` | beside the war NPC, then tap `e` | `[VRF][TargetMessage] STAND PASS beside the WAR NPC ...` |
+| 2 `MAP_BY_KEY` | `client` | the key opened the map in selection mode; tap `e` again | `MAP_BY_KEY PASS`; client `ui select status=READY` once. Screenshot: the map |
+| 3 `KEY_IGNORED_WAR` | `client` | nothing was asked, no window | `KEY_IGNORED_WAR PASS`; no second `ui select` line |
+| 4 `STAND` (`NPC = "LOBBY"`) | `client` | beside the lobby NPC, tap `e` with the map open | `STAND PASS beside the LOBBY NPC ...` |
+| 5 `KEY_IGNORED_LOBBY` | `client` | the lobby panel stayed closed | `KEY_IGNORED_LOBBY PASS` |
+| #124 `PICK`, `CONFIRM` | `client` | pick Gushan, 是: queued, the map closes | `CONFIRM PASS` |
+| 6 `STAND` (`NPC = "WAR"`) | `client` | beside the war NPC, tap `e` | `STAND PASS ...` |
+| 7 `MESSAGE_ENGAGED` | `client` | the message with the highlighted town name, no map, only 確定; tap `e` again | `MESSAGE_ENGAGED PASS 目前正在進攻 <color=...>鼓山</color>，...`; client `ui select status=ENGAGED`, `ui message ...`. Screenshot: the message window |
+| 8 `MESSAGE_KEY_IGNORED` | `client` | one window, no second request | `MESSAGE_KEY_IGNORED PASS` |
+| 9 `DISMISS` | `client` | click 確定 | `DISMISS PASS`; `ui message dismissed` |
+| #124 `CANCEL` | `server_main` | free the player | `CANCEL PASS` |
+| 10 `BOARD_NO_TARGETS` | `server_main` | Gushan becomes A's | `BOARD_NO_TARGETS PASS` |
+| 11 `STAND` (`NPC = "WAR"`), 12 `MESSAGE_NO_TARGETS` | `client` | tap `e`: 目前沒有可進攻的相鄰敵城, no map | `MESSAGE_NO_TARGETS PASS`. Screenshot |
+| 13 `DISMISS` | `client` | click 確定 | `DISMISS PASS` |
+| 14 `BOARD_RESTORE` | `server_main` | Gushan is B's again | `BOARD_RESTORE PASS` |
+| #124 `CLEANUP` | `server_main` | storage deleted | `CLEANUP PASS` |
+
+The #124 steps run without its `PUSH`, so give its probe `PUSHED = 55` (its `PICK` expects the target's strength after the push). Search the client console with `[VRF][TargetMessage]` and `[VRF][FactionWarMap]`; any `FAIL` or runtime `Error` is a failure. Screenshots for the issue are in `docs/evidence/issue127/` (1 the map the key opened, 2 the queued message with the highlighted town and 確定, 3 the no-target message).
+
+Verified in Maker on 2026-11-27 (build 0 Error, only the usual `LIA 1114/1115` Info lines; Node 283/283, all local fengari suites PASS): `Message/Window` has `Frame`, `Text`, `Ok` in Play after one refresh. Every step above reached its PASS line with the real `e` key (`maker_keyboard_input`): the key opened the map; a second tap with the map open asked nothing (no second `ui select status` line); the lobby NPC did not open its panel behind the map, and does open it when no window is open (control: `lobby panel open=true` with the map closed); after `是` the war NPC answered `ENGAGED` with 目前正在進攻 鼓山 (highlighted) and one 確定 button, a second tap changed nothing, 確定 closed it; with Gushan A's the answer was `NO_TARGETS` and the message 目前沒有可進攻的相鄰敵城. Not run in Maker: the `NOT_OWNED` and `UNAVAILABLE` messages (rules tests only; a fallen departure town sends the player away at once through the landing, and the town document cannot be made unreadable on purpose), the 5 s timeout, and a published world.
+
 ## Siege panel replaces the queue bar (#123)
 
 `ui/FactionWarGroup.ui`: `SiegePanel` (top centre, under the town HUD and its notice; a Cardgame frame over the brown "tactical sandtable" fill) replaces `QueueBar`. First line `Origin` ` VS ` `Target` (each `<town name highlighted> 兵力 N`, the strengths live), second line `Status` (the lobby's pre-battle words) and the one `Cancel` button on the right (`取消配對` while waiting, `停止入場` after a failed entry, hidden otherwise, 210 x 88). The versus mark is the text `VS`: the UI font has no glyph for `⚔`, it rendered as an empty box in Maker. The panel is built by `assets/siege/build_siege_panel_ui.cjs` with the UIBuilder; unlike `build_siege_ui.cjs` it touches nothing else in the group (Maker imports a rebuilt subtree one level per refresh, see #117). Two things to know when it is rebuilt: Maker takes render order from the **order of the entities in the file**, not from the `displayOrder` numbers (the card stayed on top of the team preview until its subtree was moved in the array, which the script now does), and the new subtree needs two refreshes with a content change in between before all six children exist.

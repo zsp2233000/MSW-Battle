@@ -16,6 +16,8 @@ script FactionWarMapUI extends Logic
     property number BarWidth = 280
     property number ArrowBaseY = 60
     property table ArrowBob = { 9, 6, 3, 0 }
+    -- Seconds the NPC waits for the server's answer to a press before it accepts another press (the server drops a press it cannot answer).
+    property number AskTimeout = 5
 
     @ExecSpace("ClientOnly")
     method Entity Ui(string path)
@@ -44,6 +46,11 @@ script FactionWarMapUI extends Logic
         self._T.note = nil
         -- True from a select request the open map made itself (INVALID, a changed owner) until its answer; see ShowSelect.
         self._T.relisting = false
+        -- The NPC press is awaiting its answer (askedAt, in ms) / the message window is shown (its text and the town it answers for).
+        self._T.asking = false
+        self._T.askedAt = 0
+        self._T.message = nil
+        self._T.messageTown = ""
         self._T.key = _InputService:ConnectEvent(KeyDownEvent, self.HandleKey)
         self._T.wheel = _InputService:ConnectEvent(MouseScrollEvent, self.HandleWheel)
     end
@@ -109,7 +116,7 @@ script FactionWarMapUI extends Logic
     @ExecSpace("ClientOnly")
     method void HandleWheel(MouseScrollEvent event)
         -- Zoom at the cursor, but only while the cursor is inside the viewport.
-        if not self._T.open or self._T.selected ~= nil or event.ScrollDelta == 0 then return end
+        if not self._T.open or self._T.selected ~= nil or self._T.message ~= nil or event.ScrollDelta == 0 then return end
         local view = self:Ui(self.ViewPath)
         if not isvalid(view) then return end
         local cursor = _UILogic:ScreenToLocalUIPosition(_InputService:GetCursorPosition(), view.UITransformComponent)
@@ -262,6 +269,7 @@ script FactionWarMapUI extends Logic
             end
             self:Bind("Confirm/Window/Yes", function() self:ConfirmAttack() end)
             self:Bind("Confirm/Window/No", function() self:Decline() end)
+            self:Bind("Message/Window/Ok", function() self:DismissMessage() end)
             self:BindArrows()
             self:BindViewport()
         end
@@ -273,14 +281,26 @@ script FactionWarMapUI extends Logic
             if self._T.open then self:ShowHere() end
         end
         if self._T.open and self._T.board ~= nil then self:ShowAge() end
+        self:ExpireStale()
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ExpireStale()
+        -- An answer that never came must not lock the NPCs, and a message belongs to the town it answered for.
+        if self._T.asking and DateTime.UtcNow.Elapsed - self._T.askedAt > self.AskTimeout * 1000 then
+            self._T.asking = false
+            log("[VRF][FactionWarMap] ui select answer timed out")
+        end
+        local player = _UserService.LocalPlayer
+        if self._T.message ~= nil and (not isvalid(player) or player.CurrentMapName ~= self._T.messageTown) then self:DismissMessage() end
     end
 
     @ExecSpace("ClientOnly")
     method void HandleKey(KeyDownEvent event)
         -- M opens the map in a town and closes it anywhere.
         if event == nil or event.key ~= KeyboardKey.M then return end
-        -- The confirmation window owns the screen until it is answered.
-        if self._T.selected ~= nil then return end
+        -- The confirmation window and the message window own the screen until they are answered.
+        if self._T.selected ~= nil or self._T.message ~= nil then return end
         if self._T.open then
             self:Close()
         elseif self:CanOpen() then
@@ -292,7 +312,7 @@ script FactionWarMapUI extends Logic
     method void Open()
         -- Show the map at once with the last board (or neutral), then ask the server for the live one and to keep it coming.
         local overlay = self:Ui("Overlay")
-        if self._T.open or not isvalid(overlay) or not self:CanOpen() then return end
+        if self._T.open or self._T.message ~= nil or not isvalid(overlay) or not self:CanOpen() then return end
         self:Reveal("view")
         if self._T.board == nil then self:ShowNeutral() else self:Render() end
         self:ShowHere()
@@ -331,8 +351,9 @@ script FactionWarMapUI extends Logic
 
     @ExecSpace("ClientOnly")
     method boolean BlocksInteraction()
-        -- The map (and the confirmation window above it) covers the town: the NPCs ignore the interaction key meanwhile.
-        return self._T.open == true
+        -- The map (and the confirmation window above it), a message window or an unanswered NPC press covers the town: the NPCs ignore
+        -- the interaction key meanwhile (an interaction event is not stopped by a UI mask, so each NPC asks).
+        return self._T.open == true or self._T.message ~= nil or self._T.asking == true
     end
 
     @ExecSpace("ClientOnly")
@@ -355,21 +376,30 @@ script FactionWarMapUI extends Logic
 
     @ExecSpace("ClientOnly")
     method void BeginSelect()
-        -- The NPC press: its answer is wanted even if an earlier relist of the map is still unanswered.
+        -- The NPC press: its answer is wanted even if an earlier relist of the map is still unanswered, and until it comes (or AskTimeout passes)
+        -- no other press is accepted.
         self._T.relisting = false
+        self._T.asking = true
+        self._T.askedAt = DateTime.UtcNow.Elapsed
     end
 
     @ExecSpace("ClientOnly")
     method void ShowSelect(string town, string status, table header, table targets, table board)
         -- The server's answer to the NPC press. READY opens (or switches) the map in target selection with the board and links of that answer;
-        -- any other status opens nothing (their messages come with their own ticket), and closes a selection that was already open.
+        -- any other status opens no map: it closes a selection that was already open and shows the message window of that status.
         -- A READY that is not shown (the map was closed since the map's own relist asked, or the town cannot show it) has already made the server
         -- count the player as a map viewer, so the player tells it they are not watching.
         log("[VRF][FactionWarMap] ui select status=" .. status .. " town=" .. town .. " targets=" .. tostring(#targets))
         local relisted = self._T.relisting == true
+        local wasOpen = self._T.open
         self._T.relisting = false
+        self._T.asking = false
         if status ~= "READY" then
             if self._T.open and self._T.mode == "select" then self:Close() end
+            -- A relist answered after the player closed the map is not an answer to anything the player is waiting for.
+            if relisted and not wasOpen then return end
+            local here = _UserService.LocalPlayer
+            if isvalid(here) and here.CurrentMapName == town then self:ShowMessage(town, self:MessageFor(status, header)) end
             return
         end
         local player = _UserService.LocalPlayer
@@ -390,6 +420,49 @@ script FactionWarMapUI extends Logic
         local names = {}
         for _, target in ipairs(targets) do table.insert(names, target.town) end
         log("[VRF][FactionWarMap] ui select open origin=" .. header.town .. " targets=" .. table.concat(names, ","))
+    end
+
+    @ExecSpace("ClientOnly")
+    method string MessageFor(string status, table header)
+        -- The words of each answer that opens no map; "" for a status that has none. Town names carry the one highlight colour.
+        if status == "ENGAGED" then
+            local target = header.target
+            if type(target) == "string" and _FactionWarTownDocument:IsTown(target) then
+                return "目前正在進攻 " .. _FactionWarUI:HighlightedTownName(target) .. "，要改變目標請先取消配對（畫面上方的攻城面板可以取消）"
+            end
+            return "目前已在配對中，要改變目標請先取消配對（畫面上方的攻城面板可以取消）"
+        elseif status == "NOT_OWNED" then
+            return "這座城已不屬於你的陣營"
+        elseif status == "UNAVAILABLE" then
+            return "暫時無法讀取國戰資料，請再試一次"
+        elseif status == "NO_TARGETS" then
+            return "目前沒有可進攻的相鄰敵城"
+        end
+        return ""
+    end
+
+    @ExecSpace("ClientOnly")
+    method void ShowMessage(string town, string text)
+        -- The message window: one window, above the map, with the one 確定 button; it needs no map to be open.
+        if text == "" then return end
+        local window = self:Ui("Message")
+        if not isvalid(window) then return end
+        self._T.message = text
+        self._T.messageTown = town
+        self:SetText("Message/Window/Text", text)
+        window:SetEnable(true)
+        log("[VRF][FactionWarMap] ui message " .. text)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void DismissMessage()
+        -- 確定 (or leaving the town): close the message window; the NPCs answer again.
+        if self._T.message == nil then return end
+        self._T.message = nil
+        self._T.messageTown = ""
+        local window = self:Ui("Message")
+        if isvalid(window) then window:SetEnable(false) end
+        log("[VRF][FactionWarMap] ui message dismissed")
     end
 
     @ExecSpace("ClientOnly")

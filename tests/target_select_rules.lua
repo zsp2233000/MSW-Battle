@@ -36,7 +36,7 @@ _FactionWar = {
     ReadFaction = function(_, profile, complete) complete(factions[profile]) end,
 }
 local engaged, queued = false, {}
-_MatchFlow = { StateForUser = function() return engaged and "QUEUED" or "IDLE" end, QueueForWar = function(_, userId, origin, target) table.insert(queued, userId .. ":" .. origin .. ">" .. target) end }
+_MatchFlow = { StateForUser = function() return engaged and "QUEUED" or "IDLE" end, TargetForUser = function() return engaged and "gushan" or "" end, QueueForWar = function(_, userId, origin, target) table.insert(queued, userId .. ":" .. origin .. ">" .. target) end }
 _FormationHandoff = { IsLockedForUser = function() return false end }
 local judged = {}
 _FactionWarLanding = { Judge = function(_, userId, request) table.insert(judged, userId .. ":" .. request.kind .. ":" .. request.town) return false end }
@@ -82,15 +82,17 @@ check(map._T.viewers["red-user"] == red and next(map._T.siegeViewers) == nil, "a
 check(attack._T.reading["red-user"] == nil, "the read is released")
 
 -- Every other status answers with the status alone: no targets, no board, no viewer, no map.
-local function statusOnly(label, status)
+local function statusOnly(label, status, expectedHeader)
     local reply = answers[#answers]
-    check(reply.status == status and #reply.targets == 0 and next(reply.board) == nil and next(reply.header) == nil, label .. ": status " .. status .. " and nothing else")
+    check(reply.status == status and #reply.targets == 0 and next(reply.board) == nil, label .. ": status " .. status .. " and no targets, no board")
+    for key, value in pairs(reply.header) do check(expectedHeader ~= nil and expectedHeader[key] == value, label .. ": header " .. key) end
+    for key in pairs(expectedHeader or {}) do check(reply.header[key] ~= nil, label .. ": header " .. key .. " is sent") end
 end
 freshMap()
 engaged = true
 attack:SelectFor("red-user")
-statusOnly("a queued player", "ENGAGED")
-check(next(map._T.viewers) == nil, "a queued player is not made a map viewer")
+statusOnly("a queued player", "ENGAGED", { target = "gushan" })
+check(next(map._T.viewers) == nil, "a queued player is not made a map viewer, and the answer names the town they are attacking")
 engaged = false
 factions.red = nil
 attack:SelectFor("red-user")
@@ -105,6 +107,13 @@ attack:SelectFor("red-user")
 statusOnly("a fallen departure town", "NOT_OWNED")
 check(judged[1] == "red-user:CHECK:zuoying" and next(map._T.viewers) == nil, "the fallen town sends the player to their capital and subscribes nothing")
 board.zuoying.owner = "A"
+-- An owner of the departure town with no adjacent enemy town has nothing to pick: a status of its own, no map, no viewer.
+board.gushan.owner = "A"
+judged = {}
+attack:SelectFor("red-user")
+statusOnly("no adjacent enemy town", "NO_TARGETS")
+check(next(map._T.viewers) == nil and #judged == 0, "NO_TARGETS subscribes nothing and judges nothing")
+board.gushan.owner = "B"
 local before = #answers
 players["red-user"].CurrentMapName = "formationlobby"
 attack:SelectFor("red-user")
@@ -342,6 +351,129 @@ check(not ui._T.open and not node("Overlay").Enable and calls.close == 1, "a sta
 ui:ShowSelect("zuoying", "ENGAGED", {}, {}, {})
 ui:ShowSelect("zuoying", "UNAVAILABLE", {}, {}, {})
 check(not ui._T.open and not node("Overlay").Enable and calls.close == 1, "and opens nothing when the map was closed")
+
+-- ---- #127: an answer that is not READY opens a message window, never the map ----------------------------------------------------------
+local ENGAGED_TEXT = "目前正在進攻 <c>鼓山</c>，要改變目標請先取消配對（畫面上方的攻城面板可以取消）"
+local function shown() return node("Message").Enable and text("Message/Window/Text") or nil end
+local function noMap(label) check(not ui._T.open and not node("Overlay").Enable and not node("Confirm").Enable, label .. ": the map stays closed") end
+for _, case in ipairs({
+    { "ENGAGED", { target = "gushan" }, ENGAGED_TEXT },
+    { "ENGAGED", {}, "目前已在配對中，要改變目標請先取消配對（畫面上方的攻城面板可以取消）" },
+    { "NOT_OWNED", {}, "這座城已不屬於你的陣營" },
+    { "UNAVAILABLE", {}, "暫時無法讀取國戰資料，請再試一次" },
+    { "NO_TARGETS", {}, "目前沒有可進攻的相鄰敵城" },
+}) do
+    fresh()
+    ui:BeginSelect()
+    ui:ShowSelect("zuoying", case[1], case[2], {}, {})
+    noMap(case[1])
+    check(shown() == case[3], case[1] .. ": the message says " .. case[3])
+    check(calls.open == 0 and calls.select == 0 and #calls.attack == 0 and calls.close == 0, case[1] .. ": no further request")
+    check(ui:BlocksInteraction(), case[1] .. ": the NPCs ignore the key while the message is shown")
+    ui:HandleKey({ key = KeyboardKey.M })
+    ui:Open()
+    check(not ui._T.open and calls.open == 0, case[1] .. ": neither M nor the map button opens a map behind the message")
+    ui:DismissMessage()
+    check(shown() == nil and not ui:BlocksInteraction(), case[1] .. ": 確定 closes it and the NPCs answer again")
+end
+fresh()
+ui:ShowSelect("zuoying", "SOMETHING_ELSE", {}, {}, {})
+check(shown() == nil, "an unknown status shows no message")
+
+-- The same message when a selection that was open is ended by a non-READY answer (a relist), and none when the map was closed meanwhile.
+fresh()
+ready("zuoying", { gushan }, towns())
+ui:ShowSelect("zuoying", "NOT_OWNED", {}, {}, {})
+check(not ui._T.open and calls.close == 1 and shown() == "這座城已不屬於你的陣營", "an open selection that is answered NOT_OWNED closes and says so")
+fresh()
+ready("zuoying", { gushan }, towns())
+ui:ShowBoard(towns({}, { yancheng = "A" }), links)
+ui:Close()
+ui:ShowSelect("zuoying", "ENGAGED", { target = "gushan" }, {}, {})
+check(shown() == nil and not ui:BlocksInteraction(), "a relist answered after the player closed the map shows nothing")
+fresh()
+_UserService.LocalPlayer.CurrentMapName = "gushan"
+ui:ShowSelect("zuoying", "NOT_OWNED", {}, {}, {})
+check(shown() == nil, "an answer for a town the player has left shows nothing")
+_UserService.LocalPlayer.CurrentMapName = "zuoying"
+
+-- The message stands above the map too: over the open view it is shown and blocks the view.
+fresh()
+ui:Open()
+ui:ShowSelect("zuoying", "UNAVAILABLE", {}, {}, {})
+check(ui._T.open and shown() == "暫時無法讀取國戰資料，請再試一次", "over the open view the message is shown and the view stays")
+ui:HandleWheel({ ScrollDelta = 1 })
+ui:HandleKey({ key = KeyboardKey.M })
+check(ui._T.open and ui._T.zoom == 1, "behind the message the wheel does not zoom and M does not close the view")
+ui:DismissMessage()
+ui:HandleKey({ key = KeyboardKey.M })
+check(not ui._T.open, "after 確定 M closes the view again")
+
+-- Leaving the town takes the message with it.
+fresh()
+ui:ShowSelect("zuoying", "NO_TARGETS", {}, {}, {})
+_UserService.LocalPlayer.CurrentMapName = "formationlobby"
+ui:ExpireStale()
+check(shown() == nil and not ui:BlocksInteraction(), "a message of a town the player left is dismissed")
+_UserService.LocalPlayer.CurrentMapName = "zuoying"
+
+-- ---- the guard: one request and one window per press, no interaction behind a window -------------------------------------------------
+local war, lobbyNpc = _FactionWarNpc, _FactionWarLobbyNpc
+local lobbyOpened = 0
+_FormationLobby.OpenTownPanel = function() lobbyOpened = lobbyOpened + 1 end
+local me = _UserService.LocalPlayer
+local function pressWar(who) war:HandleInteractionEvent({ InteractionEntity = who or me }) end
+local function pressLobby() lobbyNpc:HandleInteractionEvent({ InteractionEntity = me }) end
+fresh()
+lobbyOpened = 0
+DateTime.UtcNow.Elapsed = 1000
+pressWar()
+check(calls.select == 1 and ui:BlocksInteraction(), "a press asks the server once and then waits")
+pressWar()
+pressLobby()
+check(calls.select == 1 and lobbyOpened == 0, "while the answer is awaited neither NPC reacts: no second request")
+pressWar({})
+check(calls.select == 1, "and a press by someone else is never this player's request")
+ui:ShowSelect("zuoying", "ENGAGED", { target = "gushan" }, {}, {})
+pressWar()
+pressLobby()
+check(calls.select == 1 and lobbyOpened == 0 and shown() == ENGAGED_TEXT, "while the message is shown neither NPC reacts: no second window")
+ui:DismissMessage()
+pressWar()
+check(calls.select == 2, "after 確定 the war NPC asks again")
+ui:ShowSelect("zuoying", "READY", header, { gushan }, { towns = towns(), links = links })
+check(ui._T.open and not ui._T.asking, "the answer ends the wait")
+pressWar()
+pressLobby()
+check(calls.select == 2 and lobbyOpened == 0, "behind the open map neither NPC reacts")
+ui:Pick("gushan")
+pressWar()
+pressLobby()
+check(ui._T.selected == "gushan" and calls.select == 2 and lobbyOpened == 0, "nor behind the confirmation window")
+ui:ConfirmAttack()
+ui:ShowAttackResult("QUEUING")
+pressLobby()
+check(lobbyOpened == 1, "with every window closed the lobby NPC opens its panel")
+-- A reply that never comes must not lock the NPCs for good.
+fresh()
+DateTime.UtcNow.Elapsed = 1000
+pressWar()
+DateTime.UtcNow.Elapsed = 1000 + ui.AskTimeout * 1000 - 1
+ui:ExpireStale()
+check(ui:BlocksInteraction(), "the wait lasts the whole timeout")
+DateTime.UtcNow.Elapsed = 1000 + ui.AskTimeout * 1000 + 1
+ui:ExpireStale()
+check(not ui:BlocksInteraction(), "then it ends and the NPC answers a new press")
+pressWar()
+check(calls.select == 2, "which asks again")
+-- A READY answer that is not shown (lobby screen over the town) also ends the wait.
+fresh()
+_FormationLobby.IsTownPanelOpen = function() return true end
+pressWar()
+ready("zuoying", { gushan }, towns())
+check(not ui:BlocksInteraction(), "an answer that opens nothing still ends the wait")
+_FormationLobby.IsTownPanelOpen = function() return false end
+DateTime.UtcNow.Elapsed = 1000
 
 -- The capital note.
 fresh()

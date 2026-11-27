@@ -71,7 +71,8 @@ script FactionWarAttack extends Logic
     @ExecSpace("ServerOnly")
     method void SelectFor(string userId)
         -- One answer for the NPC press: the status, the departure town, the selectable targets and, only when the player can attack,
-        -- the board and links the world map draws. The town table and the faction are read once (Resolve); a READY player also
+        -- the board and links the world map draws. Only READY opens the map; ENGAGED, NOT_OWNED, UNAVAILABLE and NO_TARGETS (an owner with
+        -- no adjacent enemy town) are answered with the status alone (ENGAGED also names the town being attacked) and the client shows a message. The town table and the faction are read once (Resolve); a READY player also
         -- becomes a map viewer without another read, so later changes of the board are pushed to the open map.
         local player = _UserService:GetUserEntityByUserId(userId)
         if not isvalid(player) or not isvalid(player.PlayerComponent) then return end
@@ -86,7 +87,11 @@ script FactionWarAttack extends Logic
                 -- A player standing in a town that fell is sent to their capital, whichever room delivered the news.
                 _FactionWarLanding:Judge(userId, { kind = "CHECK", town = town, board = towns })
             elseif self:IsEngaged(userId) then
-                self:ReceiveSelect(town, "ENGAGED", {}, {}, {}, userId)
+                -- The message names the town the player is already attacking ("" for a player who is engaged without a war ticket).
+                self:ReceiveSelect(town, "ENGAGED", { target = _MatchFlow:TargetForUser(userId) }, {}, {}, userId)
+            elseif #self:Targets(town, faction, towns) == 0 then
+                -- Nothing to pick: no map, no viewer; the client says so in a message.
+                self:ReceiveSelect(town, "NO_TARGETS", {}, {}, {}, userId)
             else
                 local board = _FactionWarMap:Board(towns)
                 self:ReceiveSelect(town, "READY", self:Header(town, faction, towns), self:Targets(town, faction, towns),

@@ -4,8 +4,10 @@
 //   - Overlay/Window/Side/Rows/<town>/Pick  a Cardgame button over the row; shown only for a town the server listed as a target
 //   - Overlay/Window/Side/Rows/<town>/Dim   a dark veil over the row of a town that cannot be picked in selection mode
 //   - Confirm                               the "進攻 <town>？" window (dimmer, frame, title, both strengths, capital note, status, 是 / 否)
+//   - Message                               (#127) the message window of an answer that opens no map: dimmer, frame, one text, one 確定 button
 // FactionWarMapUI.mlua finds every entity by path under /ui/WorldMapGroup, so keep the paths below in step with it.
-// The confirmation window is a root sibling after Overlay, so it is drawn above the map (Maker takes render order from the order in the file).
+// The confirmation window is a root sibling after Overlay, so it is drawn above the map, and the message window after it, above everything
+// (Maker takes render order from the order in the file; the message window needs no map to be open).
 
 const TOWNS = ['nanzih', 'zuoying', 'gushan', 'yancheng'];
 const CARD_BUTTON = { normal: '9505617fb63c447c8ff9c15c18d88064', highlighted: '398dfdb46d534ea2a2373e4f5d29ae2a', pressed: '1016088c7aca43c78cdd06c01645ab1b' };
@@ -33,9 +35,25 @@ function cardButton(b, name, text, opts) {
   b.patchComponent(name, 'MOD.Core.TextGUIRendererComponent', { OutlineColor: OUTLINE.outline_color, OutlineWidth: 0.2, FaceDilate: 0.2, FontStyle: 1 });
 }
 
+// The paths the message window adds, so a rebuild of it alone (build_message_ui.cjs) can remove them first.
+function messagePaths() {
+  return ['Message'];
+}
+
 // The paths this adds, so a rebuild can remove them first.
 function selectPaths() {
-  return ['Confirm', ...TOWNS.flatMap(id => [`Overlay/Window/Side/Rows/${id}/Pick`, `Overlay/Window/Side/Rows/${id}/Dim`])];
+  return ['Confirm', ...messagePaths(), ...TOWNS.flatMap(id => [`Overlay/Window/Side/Rows/${id}/Pick`, `Overlay/Window/Side/Rows/${id}/Dim`])];
+}
+
+// The message window (#127): shown for ENGAGED, NOT_OWNED, UNAVAILABLE and NO_TARGETS instead of the map. Like the confirmation window its dimmer takes
+// every click and has no handler, but it has one button only (確定). It is the last root child, so it is drawn above the map and the confirmation window.
+function addMessageUi(b) {
+  b.sprite('Message', { anchor: 'stretch', rect_size: [1920, 1080], color: '#000000', alpha: 0.6, raycast: true, enable: false });
+  b.sprite('Message/Window', { anchor: 'middle-center', rect_size: [760, 380], color: BROWN_PANEL, sprite_type: 1, raycast: true });
+  b.sprite('Message/Window/Frame', { anchor: 'stretch', rect_size: [760, 380], image_ruid: BASE_FRAME, color: '#FFFFFF', sprite_type: 1 });
+  b.patchComponent('Message/Window/Frame', 'MOD.Core.SpriteGUIRendererComponent', { FillCenter: false });
+  b.text('Message/Window/Text', '', { size: 30, color: '#FFFFFF', ...OUTLINE, anchor: 'top-center', pos: [0, -48], rect_size: [660, 190] });
+  cardButton(b, 'Message/Window/Ok', '確定', { anchor: 'bottom-center', pos: [0, 32], rect_size: [240, 88], font_size: 32 });
 }
 
 function addSelectUi(b) {
@@ -59,6 +77,7 @@ function addSelectUi(b) {
   b.text('Confirm/Window/Status', '', { size: 24, color: GOLD, ...OUTLINE, anchor: 'bottom-center', pos: [0, 140], rect_size: [680, 40] });
   cardButton(b, 'Confirm/Window/Yes', '是', { anchor: 'bottom-center', pos: [-150, 32], rect_size: [240, 88], font_size: 32 });
   cardButton(b, 'Confirm/Window/No', '否', { anchor: 'bottom-center', pos: [150, 32], rect_size: [240, 88], font_size: 32 });
+  addMessageUi(b);
 }
 
-module.exports = { addSelectUi, selectPaths };
+module.exports = { addSelectUi, addMessageUi, selectPaths, messagePaths };
