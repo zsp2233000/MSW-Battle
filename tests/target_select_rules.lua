@@ -927,6 +927,21 @@ ui:Close()
 ready("zuoying", { gushan }, towns())
 check(ui._T.zoom == ui.SelectZoom and near(viewPointOf("zuoying").x, 0), "and focuses it when the remembered view does not show it")
 
+-- Town names take the stance colour: ally blue, enemy red (the faction is A here: zuoying is ally, gushan enemy); white while the faction is unknown.
+fresh()
+ready("zuoying", { gushan }, towns())
+local function nameColor(path) return node(path).TextGUIRendererComponent.FontColor end
+local ally, enemy = nameColor("Overlay/Window/Map/Content/Towns/zuoying/Name"), nameColor("Overlay/Window/Map/Content/Towns/gushan/Name")
+check(ally.b > ally.r and enemy.r > enemy.b, "an ally town's name is blue and an enemy town's red on the map")
+local rowAlly, rowEnemy = nameColor("Overlay/Window/Side/Rows/zuoying/Name"), nameColor("Overlay/Window/Side/Rows/gushan/Name")
+check(rowAlly.b > rowAlly.r and rowEnemy.r > rowEnemy.b, "and in the list")
+fresh()
+ui:ShowBoard(towns(), links)
+ui:ShowFaction("LOADING")
+ui:Open()
+local unknownName = nameColor("Overlay/Window/Map/Content/Towns/gushan/Name")
+check(unknownName.r == 1 and unknownName.g == 1 and unknownName.b == 1, "a name stays white until the viewer's faction is known")
+
 -- Hover: the pickable crest under the pointer is drawn larger, nothing else is.
 fresh()
 ready("zuoying", { gushan }, towns())

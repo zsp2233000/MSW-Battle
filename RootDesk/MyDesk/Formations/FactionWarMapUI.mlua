@@ -950,6 +950,13 @@ script FactionWarMapUI extends Logic
         if isvalid(crest) then crest.SpriteGUIRendererComponent.Color = dimmed and Color(color.r, color.g, color.b, self.DimCrestAlpha) or color end
         local fullStrength = _FactionWarTownDocument.FullStrength
         local strength = known and (tostring(town.strength) .. "/" .. tostring(fullStrength)) or "—"
+        -- The town's name takes the viewer's stance colour (ally blue, enemy red) once both the viewer's faction and the owner are known; white until then.
+        local nameColor = Color(1, 1, 1, 1)
+        if known and _FactionWarTownDocument:IsFaction(self._T.faction) then nameColor = color end
+        local label = self:Ui(node .. "/Name")
+        if isvalid(label) then label.TextGUIRendererComponent.FontColor = nameColor end
+        local rowName = self:Ui("Overlay/Window/Side/Rows/" .. town.id .. "/Name")
+        if isvalid(rowName) then rowName.TextGUIRendererComponent.FontColor = nameColor end
         local capital = self:Ui(node .. "/Capital")
         if isvalid(capital) then capital:SetEnable(town.capital == true) end
         local row = "Overlay/Window/Side/Rows/" .. town.id
