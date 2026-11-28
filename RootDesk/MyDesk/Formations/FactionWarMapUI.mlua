@@ -823,6 +823,22 @@ script FactionWarMapUI extends Logic
     end
 
     @ExecSpace("ClientOnly")
+    method string StanceTownName(string id)
+        -- A town's name for the windows and lines: in the viewer's stance colour (ally blue, enemy red) once the viewer's faction and the town's owner are known,
+        -- the common town-name highlight until then.
+        local name = _FactionWarTownDocument.TownNames[id] or ""
+        if _FactionWarTownDocument:IsFaction(self._T.faction) then
+            for _, town in ipairs(self._T.board or {}) do
+                if town.id == id and _FactionWarTownDocument:IsFaction(town.owner) then
+                    local c = _FactionWarUI:TownColor(self._T.faction, town.owner)
+                    return string.format("<color=#%02X%02X%02X>", math.floor(c.r * 255 + 0.5), math.floor(c.g * 255 + 0.5), math.floor(c.b * 255 + 0.5)) .. name .. "</color>"
+                end
+            end
+        end
+        return _FactionWarUI:HighlightedTownName(id)
+    end
+
+    @ExecSpace("ClientOnly")
     method any StrengthOf(string id)
         -- The strength of one town on the board last shown; nil before any board arrived.
         for _, town in ipairs(self._T.board or {}) do
@@ -848,9 +864,9 @@ script FactionWarMapUI extends Logic
         window:SetEnable(target ~= nil)
         if target == nil then return end
         local capital = _FactionWarTownDocument:IsCapital(target)
-        self:SetText("Confirm/Window/Title", "進攻 " .. _FactionWarUI:HighlightedTownName(target) .. "？")
-        self:SetText("Confirm/Window/Origin", "出發城 " .. _FactionWarUI:HighlightedTownName(self._T.origin) .. "　" .. self:StrengthText(self:StrengthOf(self._T.origin)))
-        self:SetText("Confirm/Window/Target", "目標城 " .. _FactionWarUI:HighlightedTownName(target) .. "　" .. self:StrengthText(self:StrengthOf(target)))
+        self:SetText("Confirm/Window/Title", "進攻 " .. self:StanceTownName(target) .. "？")
+        self:SetText("Confirm/Window/Origin", "出發城 " .. self:StanceTownName(self._T.origin) .. "　" .. self:StrengthText(self:StrengthOf(self._T.origin)))
+        self:SetText("Confirm/Window/Target", "目標城 " .. self:StanceTownName(target) .. "　" .. self:StrengthText(self:StrengthOf(target)))
         self:SetText("Confirm/Window/Note", capital and "打贏不扣主城兵力" or "")
         self:SetText("Confirm/Window/Status", self._T.pending and "正在加入配對…" or (self._T.note or ""))
         for _, name in ipairs({ "Yes", "No" }) do

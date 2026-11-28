@@ -284,12 +284,12 @@ check(ui._T.selected == nil and not node("Confirm").Enable, "own, departure and 
 -- A pick asks for the confirmation, with both strengths and the live numbers.
 ui:Pick("gushan")
 check(node("Confirm").Enable and ui._T.selected == "gushan", "the pick opens the confirmation")
-check(text("Confirm/Window/Title") == "進攻 <c>鼓山</c>？", "the title names the target")
-check(text("Confirm/Window/Origin") == "出發城 <c>左營</c>　兵力 100 / 100" and text("Confirm/Window/Target") == "目標城 <c>鼓山</c>　兵力 55 / 100", "the departure and target strengths")
+check(text("Confirm/Window/Title") == "進攻 <color=#D64A3D>鼓山</color>？", "the title names the target")
+check(text("Confirm/Window/Origin") == "出發城 <color=#4580E0>左營</color>　兵力 100 / 100" and text("Confirm/Window/Target") == "目標城 <color=#D64A3D>鼓山</color>　兵力 55 / 100", "the departure and target strengths")
 check(text("Confirm/Window/Note") == "" and text("Confirm/Window/Status") == "", "an ordinary town has no capital note")
 check(node("Confirm/Window/Yes").ButtonComponent.Enable and node("Confirm/Window/No").ButtonComponent.Enable, "both buttons answer")
 ui:ShowBoard(towns({ gushan = 35, zuoying = 90 }), links)
-check(text("Confirm/Window/Origin") == "出發城 <c>左營</c>　兵力 90 / 100" and text("Confirm/Window/Target") == "目標城 <c>鼓山</c>　兵力 35 / 100", "a pushed board updates the open window")
+check(text("Confirm/Window/Origin") == "出發城 <color=#4580E0>左營</color>　兵力 90 / 100" and text("Confirm/Window/Target") == "目標城 <color=#D64A3D>鼓山</color>　兵力 35 / 100", "a pushed board updates the open window")
 check(text(rowOf("gushan") .. "/Value") == "35/100" and calls.select == 0, "and the list, without asking again")
 ui:ShowBoard(towns({ gushan = 35 }, { yancheng = "A" }), links)
 check(calls.select == 1, "a town that changed hands asks the server for the targets again")
@@ -515,7 +515,7 @@ _UserService.LocalPlayer.CurrentMapName = "gushan"
 ui:ShowSelect("gushan", "READY", { town = "gushan", strength = 100, owner = "A", faction = "A" }, { { town = "yancheng", name = "鹽埕", capital = true, strength = 100, owner = "B" } },
     { towns = (function() local list = {} for _, id in ipairs(doc.TownOrder) do table.insert(list, { id = id, name = doc.TownNames[id], owner = fallen[id].owner, strength = fallen[id].strength, capital = doc:IsCapital(id) }) end return list end)(), links = links })
 ui:Pick("yancheng")
-check(text("Confirm/Window/Note") == "打贏不扣主城兵力" and text("Confirm/Window/Title") == "進攻 <c>鹽埕</c>？", "a capital target adds the note that winning takes no strength")
+check(text("Confirm/Window/Note") == "打贏不扣主城兵力" and text("Confirm/Window/Title") == "進攻 <color=#D64A3D>鹽埕</color>？", "a capital target adds the note that winning takes no strength")
 _UserService.LocalPlayer.CurrentMapName = "zuoying"
 
 -- Closing the map (the close button, leaving the town) drops the selection, the window included, and a later view is a plain view.
@@ -606,7 +606,7 @@ check(not first.Enable and second.Enable and second.SpriteGUIRendererComponent.C
 openConfirm()
 ui:ShowBoard(towns({ gushan = 20, zuoying = 70 }), links)
 check(node("Confirm").Enable and ui._T.selected == "gushan" and not ui._T.pending, "a strength change keeps the confirmation window open")
-check(text("Confirm/Window/Origin") == "出發城 <c>左營</c>　兵力 70 / 100" and text("Confirm/Window/Target") == "目標城 <c>鼓山</c>　兵力 20 / 100", "and updates both numbers")
+check(text("Confirm/Window/Origin") == "出發城 <color=#4580E0>左營</color>　兵力 70 / 100" and text("Confirm/Window/Target") == "目標城 <color=#D64A3D>鼓山</color>　兵力 20 / 100", "and updates both numbers")
 check(text(rowOf("gushan") .. "/Value") == "20/100", "the side list still shows the strength")
 check(calls.select == 0 and notice() == nil and node(rowOf("gushan") .. "/Pick").Enable, "no request, no line, the same pick buttons")
 
@@ -1166,7 +1166,7 @@ check(ui._T.selected == "yancheng" and notice() == nil and markOn("yancheng", "F
 -- Strength only: the crest-clicked window follows the numbers, the crest keeps its frame.
 openCrestConfirm()
 ui:ShowBoard(towns({ gushan = 20 }), links)
-check(node("Confirm").Enable and markOn("gushan", "Frame") and text("Confirm/Window/Target") == "目標城 <c>鼓山</c>　兵力 20 / 100" and notice() == nil, "a strength change keeps the window, its numbers and the frame")
+check(node("Confirm").Enable and markOn("gushan", "Frame") and text("Confirm/Window/Target") == "目標城 <color=#D64A3D>鼓山</color>　兵力 20 / 100" and notice() == nil, "a strength change keeps the window, its numbers and the frame")
 
 -- The departure town falls (NOT_OWNED to the map's own relist): window closed, one line, every crest and row dimmed, nothing can be clicked.
 p = openCrestConfirm()
