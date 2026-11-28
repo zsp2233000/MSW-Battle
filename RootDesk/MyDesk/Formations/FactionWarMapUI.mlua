@@ -51,6 +51,8 @@ script FactionWarMapUI extends Logic
         self._T.age = -1
         self._T.unavailable = false
         self._T.zoom = 0
+        -- The view (zoom and offset) the player left the map with is kept in this client's memory and restored on the next opening; nothing is stored.
+        self._T.hasMemory = false
         -- "view" (button or M, read only) or "select" (the NPC press: pick an adjacent enemy town). Selection state exists only in "select".
         self._T.mode = "view"
         self._T.targets = {}
@@ -321,6 +323,17 @@ script FactionWarMapUI extends Logic
     end
 
     @ExecSpace("ClientOnly")
+    method boolean TownVisible(string town)
+        -- Whether a town's crest is inside the viewport at the current zoom and offset (a margin keeps it clear of the edge).
+        local node = self:Ui(self.ViewPath .. "/Content/Towns/" .. town)
+        local view = self:Ui(self.ViewPath)
+        if not isvalid(node) or not isvalid(view) then return false end
+        local rect = view.UITransformComponent.RectSize
+        local point = self:TownViewPoint(node.UITransformComponent.anchoredPosition, self._T.zoom, self._T.mapOffset)
+        return math.abs(point.x) <= rect.x / 2 - 40 and math.abs(point.y) <= rect.y / 2 - 40
+    end
+
+    @ExecSpace("ClientOnly")
     method void FocusOrigin(string town)
         -- The selection opens zoomed on the departure town, so the crests and names are legible at once; the wheel and the drag take over from there.
         local node = self:Ui(self.ViewPath .. "/Content/Towns/" .. town)
@@ -515,7 +528,8 @@ script FactionWarMapUI extends Logic
         self:SetMode("view", {}, "")
         self:ClearNotice()
         _FactionWarMap:RequestClose()
-        log("[VRF][FactionWarMap] ui close")
+        self._T.hasMemory = true
+        log("[VRF][FactionWarMap] ui close zoom=" .. tostring(self._T.zoom))
     end
 
     @ExecSpace("ClientOnly")
@@ -535,7 +549,12 @@ script FactionWarMapUI extends Logic
         self._T.relistsOutstanding = 0
         self._T.wheelLogged = false
         self:ApplyBaseScale()
-        self:SetMapView(1, Vector2(0, 0))
+        -- Open where the player left it (the first opening shows the whole map).
+        if self._T.hasMemory and self._T.mapOffset ~= nil then
+            self:SetMapView(self._T.zoom, self._T.mapOffset)
+        else
+            self:SetMapView(1, Vector2(0, 0))
+        end
         self:SetMode(mode, {}, "")
         self:ClearNotice()
     end
@@ -620,6 +639,7 @@ script FactionWarMapUI extends Logic
         if not showable then return end
         -- A selection that is already open (a refreshed list) keeps the view the player has moved to.
         local entering = not (self._T.open and self._T.mode == "select")
+        local reopened = not self._T.open and self._T.hasMemory == true
         if not self._T.open then self:Reveal("select") end
         -- A pick that the new list no longer has is dropped by SetMode; the line below says which town it was.
         local picked = self._T.selected
@@ -633,7 +653,12 @@ script FactionWarMapUI extends Logic
             self:ClearNotice()
         end
         -- A new departure town (the old one fell and the player was sent to the capital) is focused like an opening; the same one keeps the player's view.
-        if entering or previousOrigin ~= header.town then self:FocusOrigin(header.town) end
+        -- A remembered view stays when it still shows the departure town; otherwise (and on a first opening or a switch from the view) the departure town is focused.
+        if entering then
+            if not (reopened and self:TownVisible(header.town)) then self:FocusOrigin(header.town) end
+        elseif previousOrigin ~= header.town then
+            self:FocusOrigin(header.town)
+        end
         self._T.unavailable = false
         self:ApplyBoard(board.towns, board.links)
         self:ShowFaction(header.faction)

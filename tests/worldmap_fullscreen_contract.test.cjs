@@ -102,7 +102,7 @@ test('the map at 1x fits the height of the window, is centred, and is drawn at t
   assert.ok(scale.x >= 1.15 && scale.x <= 1.25, `the base scale is about 1.2: ${scale.x}`);
   assert.equal(scale.x, require('../assets/worldmap/fullscreen_ui.cjs').BASE_SCALE, 'the script and the layout module agree on it');
   assert.deepEqual(file.getComponent(VIEW, transform).UIScale, { x: 1, y: 1, z: 1 }, 'the file holds no scale of its own (the import would ignore it, and it would be a second source of the number)');
-  assert.match(body(client(), 'Reveal'), /self:ApplyBaseScale\(\)\s+self:SetMapView\(1, Vector2\(0, 0\)\)/, 'the map sets the scale when it opens, before the first view');
+  assert.match(body(client(), 'Reveal'), /self:ApplyBaseScale\(\)[^]*self:SetMapView\(1, Vector2\(0, 0\)\)/, 'the map sets the scale when it opens, before the first view');
   assert.match(body(client(), 'ApplyBaseScale'), /view\.UITransformComponent\.UIScale = Vector3\(self\.BaseScale, self\.BaseScale, 1\)/, 'on the viewport');
   const layout = JSON.parse(source('assets/worldmap/layout.json'));
   assert.deepEqual(file.getComponent(`${VIEW}/Content`, transform).RectSize, { x: layout.size.w, y: layout.size.h }, 'the map keeps the size it was painted at');

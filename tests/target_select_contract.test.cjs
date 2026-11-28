@@ -401,7 +401,7 @@ test('the click path: the touch surface decides click or drag by the screen dist
   assert.match(body(text, 'TownViewPoint'), /offset\.x \+ position\.x \* zoom, offset\.y \+ position\.y \* zoom/, 'the content is scaled about its centre, then moved');
   assert.match(body(text, 'FocusOrigin'), /self:SetMapView\(self\.SelectZoom, self:CenterOffset\(/, 'the focus uses the one view setter (the clamp and the labels stay in it)');
   const select = body(text, 'ShowSelect');
-  assert.match(select, /local entering = not \(self\._T\.open and self\._T\.mode == "select"\)[^]*local previousOrigin = self\._T\.origin[^]*self:SetMode\("select", targets, header\.town\)[^]*if entering or previousOrigin ~= header\.town then self:FocusOrigin\(header\.town\) end/, 'the selection zooms when it opens or switches over from the view, not on a refreshed list');
+  assert.match(select, /local entering = not \(self\._T\.open and self\._T\.mode == "select"\)[^]*local previousOrigin = self\._T\.origin[^]*self:SetMode\("select", targets, header\.town\)[^]*if entering then\s+if not \(reopened and self:TownVisible\(header\.town\)\) then self:FocusOrigin\(header\.town\) end\s+elseif previousOrigin ~= header\.town then\s+self:FocusOrigin\(header\.town\)\s+end/, 'the selection zooms when it opens or switches over from the view, not on a refreshed list');
   assert.match(body(text, 'Open'), /self:Reveal\("view"\)/, 'the view still opens through Reveal at the full overview');
   assert.match(body(text, 'Reveal'), /self:SetMapView\(1, Vector2\(0, 0\)\)/, 'which is the full overview');
   assert.match(body(text, 'RenderConfirm'), /self:RenderMarks\(\)/, 'the marks follow every change of the selection');
