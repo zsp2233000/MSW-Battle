@@ -198,7 +198,7 @@ test('only a status other than READY shows a message, with the words of the tick
     '暫時無法讀取國戰資料，請再試一次',
     '目前沒有可進攻的相鄰敵城',
   ]) assert.ok(words.includes(sentence), `the message says ${sentence}`);
-  assert.ok(words.includes('"目前正在進攻 " .. _FactionWarUI:HighlightedTownName(target)'), 'the town being attacked is named with the shared highlight');
+  assert.ok(words.includes('"目前正在進攻 " .. self:StanceTownName(target)'), 'the town being attacked is named in its stance colour (#132)');
   assert.doesNotMatch(words, /<color|#[0-9A-Fa-f]{6}/, 'the colour is not repeated here');
   const select = body(text, 'ShowSelect');
   const rest = select.slice(select.indexOf('if status ~= "READY" then'), select.indexOf('local player = _UserService.LocalPlayer'));
@@ -300,7 +300,7 @@ test('a changed town table (#128): ownership relists, a target that is gone clos
   assert.doesNotMatch(nothing, /Close\(\)|ShowMessage|RequestClose/, 'the map is neither closed nor replaced by a message window');
   const notice = body(text, 'SetNotice');
   for (const words of ['" 已不能進攻"', '"這座城已不屬於你的陣營"', '"目前沒有可進攻的相鄰敵城"']) assert.ok(notice.includes(words), `the line can say ${words}`);
-  assert.match(notice, /_FactionWarUI:HighlightedTownName\(town\)/, 'the town name has the one highlight');
+  assert.match(notice, /self:StanceTownName\(town\)/, 'the town name has its stance colour (#132)');
   assert.match(notice, /self:Ui\("Overlay\/Window\/Side\/Notice"\)/, 'in the side panel');
   const refused = body(text, 'ShowAttackResult');
   assert.match(refused, /result == "INVALID" then[^]*local dropped = self\._T\.selected[^]*self:SetNotice\("REFUSED", dropped\)[^]*self:RenderConfirm\(\)[^]*relistsOutstanding \+ 1[^]*_FactionWarAttack:RequestSelect\(\)/, 'a refusal names the town (a line a list that still has the town does not take away), closes the window and asks for the list again');

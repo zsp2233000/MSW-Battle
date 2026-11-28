@@ -7,7 +7,8 @@ local ok, reason = pcall(function()
     local ui = _FactionWarUI
     local town = _UserService.LocalPlayer.CurrentMapName
     assert(_FactionWar:IsTown(town), "client stands in a town")
-    local highlight = "<color=" .. ui.TownNameHighlightHex .. ">"
+    -- (#132) The departure town is the player's own (blue), the target the enemy's (red).
+    local ally, enemy = "<color=" .. _FactionWarTownDocument.AllyNameHex .. ">", "<color=" .. _FactionWarTownDocument.EnemyNameHex .. ">"
     local function text(path) return ui:Ui(path).TextGUIRendererComponent.Text end
     local saved = _MatchFlowInput.Snapshot
     local value = { state = "QUEUED", reasonCode = "", started = DateTime.UtcNow.Elapsed - 8000, players = 0,
@@ -27,7 +28,7 @@ local ok, reason = pcall(function()
     ui:ShowSiegeBoard({ { id = town, owner = "A", strength = 80 }, { id = "yancheng", owner = "B", strength = 100 } })
     ui:RenderSiege(town)
     assert(bar.Enable and string.match(text("SiegePanel/Status"), "^配對中 · 倒數 %d+ 秒$"), "siege panel uses the real deadline: " .. text("SiegePanel/Status"))
-    assert(text("SiegePanel/Origin") == highlight .. _FactionWarTownDocument.TownNames[town] .. "</color> 兵力 80" and text("SiegePanel/Target") == highlight .. "鹽埕</color> 兵力 100", "both towns with their strengths")
+    assert(text("SiegePanel/Origin") == ally .. _FactionWarTownDocument.TownNames[town] .. "</color> 兵力 80" and text("SiegePanel/Target") == enemy .. "鹽埕</color> 兵力 100", "both towns with their strengths")
     assert(button.Enable and button.TextGUIRendererComponent.Text == "取消配對", "cancel button offered in place")
     ui._T.siegeSequenceKey, ui._T.siegeSequence, ui._T.siegePendingAction = value.sequenceKey, value.sequence, "CANCEL"
     ui:RenderSiege(town)
@@ -37,7 +38,7 @@ local ok, reason = pcall(function()
     assert(button.Enable, "another accepted sequence on the same phase clears pending")
     ui:ShowSiegeBoard({ { id = town, owner = "A", strength = 60 }, { id = "yancheng", owner = "B", strength = 100 } })
     ui:RenderSiege(town)
-    assert(text("SiegePanel/Origin") == highlight .. _FactionWarTownDocument.TownNames[town] .. "</color> 兵力 60", "the first line follows a pushed board")
+    assert(text("SiegePanel/Origin") == ally .. _FactionWarTownDocument.TownNames[town] .. "</color> 兵力 60", "the first line follows a pushed board")
     value.guardAt = DateTime.UtcNow.Elapsed
     ui:RenderSiege(town)
     assert(not button.Enable and status.Text == "即將開戰…", "no button at zero")

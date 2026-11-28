@@ -38,8 +38,8 @@ _FormationStorage = {
     end,
 }
 _FactionWar = { IsMissing = function(_, code, raw) return code == 1000002 or (code == 0 and raw == nil) end }
-_FactionWarTownDocument = { TownNames = { nanzih = "楠梓", zuoying = "左營", gushan = "鼓山", yancheng = "鹽埕" } }
-_FactionWarUI = { HighlightedTownName = function(_, town) return "<c>" .. _FactionWarTownDocument.TownNames[town] .. "</c>" end }
+-- _FactionWarTownDocument is the production script (absent_result_local.cjs): origin is the viewer's own town (blue), target the enemy's (red).
+local ALLY, ENEMY = "<color=" .. _FactionWarTownDocument.AllyNameHex .. ">", "<color=" .. _FactionWarTownDocument.EnemyNameHex .. ">"
 function wait() end
 isvalid = function(value) return value ~= nil end
 
@@ -129,10 +129,10 @@ local view = doc:Present(doc:Compose("LOBBY", "m", "LOSE", nil))
 check(view.title == "上一場對戰結果" and view.resultText == "失敗" and not view.war and #view.rows == 0 and view.conclusion == "", "lobby: only the result")
 view = doc:Present(doc:Compose("WAR", "m", "WIN", receipt))
 check(view.title == "上一場戰果" and view.resultText == "勝利" and view.war, "war title")
-check(#view.rows == 2 and view.rows[1] == "<c>左營</c>　兵力 100 → 100", "the departure town's row")
-check(view.rows[2] == "<c>鼓山</c>　兵力 100 → 80" and view.conclusion == "未易主", "the target row and the conclusion")
+check(#view.rows == 2 and view.rows[1] == ALLY .. "左營</color>　兵力 100 → 100", "the departure town's row")
+check(view.rows[2] == ENEMY .. "鼓山</color>　兵力 100 → 80" and view.conclusion == "未易主", "the target row and the conclusion")
 view = doc:Present(doc:Compose("WAR", "m", "DRAW", { origin = "zuoying", target = "gushan", status = "NO_CHANGE", conclusion = "未易主" }))
-check(view.resultText == "平手" and #view.rows == 2 and view.rows[1] == "<c>左營</c>　兵力不變", "no change reads as unchanged")
+check(view.resultText == "平手" and #view.rows == 2 and view.rows[1] == ALLY .. "左營</color>　兵力不變", "no change reads as unchanged")
 view = doc:Present(doc:Compose("WAR", "m", "WIN", { origin = "zuoying", target = "nanzih", status = "NO_CHANGE", conclusion = "主城：兵力不變" }))
 check(#view.rows == 0 and view.conclusion == "主城：兵力不變", "a capital as the loser has no rows")
 view = doc:Present(doc:Compose("WAR", "m", "LOSE", { origin = "zuoying", target = "gushan", status = "EXEMPT", conclusion = "過期戰果：本場不計兵力" }))
@@ -141,7 +141,7 @@ view = doc:Present(doc:Compose("WAR", "m", "LOSE", { origin = "zuoying", target 
 check(#view.rows == 0 and view.conclusion == "戰果結算失敗，兵力未變動", "a failed settlement")
 view = doc:Present(doc:Compose("WAR", "m", "WIN", { origin = "zuoying", target = "gushan", status = "SAVED", conclusion = "奪城：鼓山 改為 A 方",
     originBefore = 100, originAfter = 100, targetBefore = 20, targetAfter = 100, capturedTown = "gushan", newOwner = "A" }))
-check(view.conclusion == "奪城：<c>鼓山</c> 改為 A 方" and view.rows[2] == "<c>鼓山</c>　兵力 20 → 100", "a captured town is highlighted in the conclusion")
+check(view.conclusion == "奪城：" .. ALLY .. "鼓山</color> 改為 A 方" and view.rows[2] == ENEMY .. "鼓山</color>　兵力 20 → 100", "a captured target is the viewer's blue in the conclusion")
 
 -- Delivery in the static room: the window is pushed once per match, again after a reconnect, never in a match room.
 local users, recovered, hinted, pushed, instance = {}, {}, {}, {}, false

@@ -68,16 +68,17 @@ local function clientMatch()
 end
 local function checkReturnButton(destination, lost)
     -- #119 (ADR 0016): the button says where it goes, the line above it says so first when the departure town fell, and the screen shows exactly that.
-    local highlight = "<color=" .. _FactionWarUI.TownNameHighlightHex .. ">"
+    -- (#132) The return destination is the player's own town (blue); a fallen departure town is the enemy's now (red).
+    local ally, enemy = "<color=" .. _FactionWarTownDocument.AllyNameHex .. ">", "<color=" .. _FactionWarTownDocument.EnemyNameHex .. ">"
     local view = _MatchFlowInput:View()
     local name = _FactionWarTownDocument.TownNames[destination]
-    assert(view.label == "返回 " .. highlight .. name .. "</color>" and view.action == "RETURN" and view.enabled, "return label names " .. name .. ": " .. tostring(view.label))
+    assert(view.label == "返回 " .. ally .. name .. "</color>" and view.action == "RETURN" and view.enabled, "return label names " .. name .. ": " .. tostring(view.label))
     assert(await(function()
         local action, status = _MatchFlowInput.action, _MatchFlowInput.status
         return isvalid(action) and isvalid(status) and action.TextGUIRendererComponent.Text == view.label and status.TextGUIRendererComponent.Text == view.text
     end, 100), "the visible return button and the line above it show the same words")
     if lost then
-        assert(view.text == highlight .. "左營</color>已失守", "the fall notice above the button: " .. tostring(view.text))
+        assert(view.text == enemy .. "左營</color>已失守", "the fall notice above the button: " .. tostring(view.text))
     else
         assert(not string.find(view.text, "已失守", 1, true), "no fall notice while the departure town stands: " .. tostring(view.text))
     end
@@ -95,16 +96,17 @@ local function inspectSaved(player, battle, coordinator, ui, destination)
     assert(receipt.origin == "zuoying" and receipt.target == "gushan", "viewer orientation")
     assert(receipt.originBefore == 100 and receipt.originAfter == 100 and receipt.targetBefore == before and receipt.targetAfter == after, "historical strength snapshot")
     assert(receipt.originLost == (destination == "nanzih"), "origin ownership preview")
-    local highlight = "<color=" .. _FactionWarUI.TownNameHighlightHex .. ">"
+    -- (#132) The origin row is the player's own town (blue), the target row the enemy's (red); a captured target is the player's now (blue).
+    local ally, enemy = "<color=" .. _FactionWarTownDocument.AllyNameHex .. ">", "<color=" .. _FactionWarTownDocument.EnemyNameHex .. ">"
     local function label(node) return node.TextGUIRendererComponent.Text end
     assert(ui.warOrigin.EnabledInHierarchy and ui.warTarget.EnabledInHierarchy, "strength rows visible")
     -- One merged panel: the HUD steps aside and the window grew upward by the section, bottom edge kept.
     local frame = ui.resultWindow.UITransformComponent
     assert(not ui.hud.Enable, "the HUD steps aside for the merged result panel")
     assert(frame.RectSize.y == 360 + ui.WarExtraHeight and frame.anchoredPosition.y == 90 + ui.WarExtraHeight / 2, "window grown by the war section")
-    assert(label(ui.warOrigin) == highlight .. "左營</color>　兵力 100 → 100", "origin row")
-    assert(label(ui.warTarget) == highlight .. "鼓山</color>　兵力 " .. before .. " → " .. after, "target row")
-    local conclusion = KIND == "HUMAN" and ("奪城：" .. highlight .. "鼓山</color> 改為 A 方") or "未易主"
+    assert(label(ui.warOrigin) == ally .. "左營</color>　兵力 100 → 100", "origin row")
+    assert(label(ui.warTarget) == enemy .. "鼓山</color>　兵力 " .. before .. " → " .. after, "target row")
+    local conclusion = KIND == "HUMAN" and ("奪城：" .. ally .. "鼓山</color> 改為 A 方") or "未易主"
     assert(label(ui.warConclusion) == conclusion, "ownership conclusion")
     checkReturnButton(destination, destination == "nanzih")
     assert(await(function() return battle.ExperienceResult.status == "SAVED" end), "experience still settles")
@@ -145,7 +147,7 @@ local ok, failure = pcall(function()
                 and ui.warConclusion.UITransformComponent.anchoredPosition.y == ui.warOrigin.UITransformComponent.anchoredPosition.y, "pending uses the short war window")
             -- Until the receipt knows, the departure town is what the button promises.
             local view = _MatchFlowInput:View()
-            assert(view.label == "返回 <color=" .. _FactionWarUI.TownNameHighlightHex .. ">左營</color>", "pending return button names the departure town: " .. tostring(view.label))
+            assert(view.label == "返回 <color=" .. _FactionWarTownDocument.AllyNameHex .. ">左營</color>", "pending return button names the departure town: " .. tostring(view.label))
             log("[VRF][Result115] PENDING PASS kind=" .. KIND)
         end
         inspectSaved(player, battle, coordinator, ui, "zuoying")

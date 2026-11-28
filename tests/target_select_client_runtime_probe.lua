@@ -48,8 +48,15 @@ local function click(path)
     entity:SendEvent(ButtonClickEvent(entity))
 end
 local function row(id) return "Overlay/Window/Side/Rows/" .. id end
-local highlight = "<color=" .. _FactionWarUI.TownNameHighlightHex .. ">"
-local function name(id) return highlight .. _FactionWarTownDocument.TownNames[id] .. "</color>" end
+-- (#132) A town's name in the windows is in the viewer's stance colour once the faction and the town's owner are known, the common highlight until then.
+local function name(id)
+    local owner
+    for _, town in ipairs(ui._T.board or {}) do if town.id == id then owner = town.owner end end
+    if _FactionWarTownDocument:IsFaction(ui._T.faction) and _FactionWarTownDocument:IsFaction(owner) then
+        return _FactionWarTownDocument:StanceName(id, owner == ui._T.faction and "ally" or "enemy")
+    end
+    return "<color=" .. _FactionWarUI.TownNameHighlightHex .. ">" .. _FactionWarTownDocument.TownNames[id] .. "</color>"
+end
 local function strengthText(value) return "兵力 " .. tostring(value) .. " / 100" end
 
 local ok, failure = pcall(function()

@@ -18,7 +18,7 @@ test('#119: the result page return button names the destination from the settlem
   assert.match(view, /_BattleUIController:CurrentWarResult\(\)/, 'the destination comes from the receipt the result page displays');
   assert.match(view, /receipt\.destination/, 'it is the receipt\'s destination');
   assert.match(view, /destination == "" and originName ~= "" then destination = origin/, 'until the receipt knows, the departure town is shown');
-  assert.match(view, /HighlightedTownName\(destination\)/, 'the town name uses the shared highlight');
+  assert.match(view, /StanceName\(destination, "ally"\)/, 'the town name is in the viewer\'s own colour (the return destination is theirs)');
   assert.match(view, /originLost = receipt ~= nil and receipt\.originLost == true/, 'the fall notice follows the receipt, so a later change updates it');
   assert.match(body(ui(), 'CurrentWarResult'), /return self\._T\.warReceipt/, 'the controller hands out the receipt it displays');
 });

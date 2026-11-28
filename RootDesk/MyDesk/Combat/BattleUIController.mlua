@@ -472,10 +472,10 @@ script BattleUIController extends Logic
 	end
 
 	@ExecSpace("ClientOnly")
-	method string WarStrengthText(string town, any before, any after, boolean unchanged)
+	method string WarStrengthText(string town, any before, any after, boolean unchanged, string stance)
 		local strength = unchanged and "兵力不變"
 			or ("兵力 " .. (before == nil and "—" or string.format("%d", before)) .. " → " .. (after == nil and "—" or string.format("%d", after)))
-		return _FactionWarUI:HighlightedTownName(town) .. "　" .. strength
+		return _FactionWarTownDocument:StanceName(town, stance) .. "　" .. strength
 	end
 
 	@ExecSpace("ClientOnly")
@@ -521,14 +521,10 @@ script BattleUIController extends Logic
 		self:SetEnabled(self.warOrigin, showRows)
 		self:SetEnabled(self.warTarget, showRows)
 		if showRows then
-			self:SetText(self.warOrigin, self:WarStrengthText(receipt.origin, receipt.originBefore, receipt.originAfter, unchanged))
-			self:SetText(self.warTarget, self:WarStrengthText(receipt.target, receipt.targetBefore, receipt.targetAfter, unchanged))
+			self:SetText(self.warOrigin, self:WarStrengthText(receipt.origin, receipt.originBefore, receipt.originAfter, unchanged, "ally"))
+			self:SetText(self.warTarget, self:WarStrengthText(receipt.target, receipt.targetBefore, receipt.targetAfter, unchanged, "enemy"))
 		end
-		local conclusion = receipt.conclusion
-		if receipt.capturedTown ~= nil then
-			local town = _FactionWarTownDocument.TownNames[receipt.capturedTown]
-			if town ~= nil then local replaced, replacedCount = string.gsub(conclusion, town, _FactionWarUI:HighlightedTownName(receipt.capturedTown), 1) conclusion = replaced end
-		end
+		local conclusion = _FactionWarTownDocument:ColoredConclusion(receipt.conclusion, receipt)
 		self:SetText(self.warConclusion, conclusion)
 		self:SetWarLayout(true, showRows)
 		self:SetEnabled(self.warResult, true)

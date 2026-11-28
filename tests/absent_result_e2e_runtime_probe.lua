@@ -181,7 +181,7 @@ local ok, reason = pcall(function()
         if war then
             assert(string.find(text("War/Origin"), "鼓山", 1, true) and string.find(text("War/Origin"), "100 → 80", 1, true), "origin row: " .. text("War/Origin"))
             assert(string.find(text("War/Target"), "左營", 1, true) and string.find(text("War/Conclusion"), "未易主", 1, true), "target row and conclusion")
-            assert(string.find(text("War/Origin"), _FactionWarUI.TownNameHighlightHex, 1, true), "the town name is highlighted")
+            assert(string.find(text("War/Origin"), _FactionWarTownDocument.AllyNameHex, 1, true), "the departure town name is in the viewer's own colour")
         end
         for _, word in ipairs({ "經驗", "exp" }) do assert(not string.find(title .. result .. text("War/Conclusion"), word, 1, true), "no experience in the window") end
         log("[VRF][AbsentResultE2E] CLIENT PASS title=" .. title .. " result=" .. result)

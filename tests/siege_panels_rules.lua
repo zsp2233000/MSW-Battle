@@ -213,6 +213,13 @@ local unknown = card({}, {})
 check(unknown.origin == "<c>左營</c> 兵力 —" and unknown.target == "<c>鼓山</c> 兵力 —", "a strength not heard yet is a dash, never 0")
 local live = card({}, { zuoying = 60, gushan = 0 })
 check(live.origin == "<c>左營</c> 兵力 60" and live.target == "<c>鼓山</c> 兵力 0", "the numbers follow the board, a real 0 included")
+-- (#132) Once the viewer's faction and both owners are known the names take the stance colour: the departure town blue (A's), the target red (B's).
+ui._T.siegeFaction = "A"
+local stanced = ui:SiegeView(queued(), { origin = "zuoying", now = clock, towns = { zuoying = { strength = 80, owner = "A" }, gushan = { strength = 55, owner = "B" } } })
+check(stanced.origin == "<color=#4580E0>左營</color> 兵力 80" and stanced.target == "<color=#D64A3D>鼓山</color> 兵力 55", "the card's names are in the stance colours")
+local flipped = ui:SiegeView(queued(), { origin = "zuoying", now = clock, towns = { zuoying = { strength = 80, owner = "B" }, gushan = { strength = 55, owner = "A" } } })
+check(flipped.origin == "<color=#D64A3D>左營</color> 兵力 80" and flipped.target == "<color=#4580E0>鼓山</color> 兵力 55", "and follow a town that changed hands")
+ui._T.siegeFaction = nil
 local fired = card({ guardAt = clock })
 check(fired.status == "即將開戰…" and fired.action == "" and fired.label == "", "countdown at zero: no button")
 local matched = card({ state = "SAVING", opponentFound = true })

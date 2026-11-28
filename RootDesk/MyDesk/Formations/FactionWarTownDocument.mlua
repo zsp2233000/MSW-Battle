@@ -1,6 +1,11 @@
 @Logic
 script FactionWarTownDocument extends Logic
 
+    -- One colour for a runtime town name on every war screen and notice: the viewer's side blue, the other side red, the Cardgame cyan when the stance is not known.
+    -- AllyNameHex / EnemyNameHex are the FactionWarUI ally / enemy town colours (a contract test holds them equal); the server composes some notices, so they live here.
+    property string AllyNameHex = "#4580E0"
+    property string EnemyNameHex = "#D64A3D"
+    property string HighlightNameHex = "#4DFEE7"
     property string TownStorageName = "CountryWarV1"
     property string TownStorageKey = "Towns"
     property table TownOrder = { "nanzih", "zuoying", "gushan", "yancheng" }
@@ -23,6 +28,24 @@ script FactionWarTownDocument extends Logic
         self._T.settling = {}
         self._T.timers = {}
         log("[VRF][FactionWarTownDocument] ready")
+    end
+
+    method string StanceName(string town, string stance)
+        -- A town's name as rich text: stance "ally" blue, "enemy" red, anything else the common highlight.
+        local hex = self.HighlightNameHex
+        if stance == "ally" then hex = self.AllyNameHex elseif stance == "enemy" then hex = self.EnemyNameHex end
+        return "<color=" .. hex .. ">" .. (self.TownNames[town] or "") .. "</color>"
+    end
+
+    method string ColoredConclusion(string conclusion, any war)
+        -- The captured town of a war receipt in the conclusion line, in the viewer's colour: the viewer departed from war.origin, so a captured target is now theirs (blue)
+        -- and a captured origin is now the enemy's (red).
+        if type(war) ~= "table" or war.capturedTown == nil then return conclusion end
+        local name = self.TownNames[war.capturedTown]
+        if name == nil then return conclusion end
+        local colored = self:StanceName(war.capturedTown, war.capturedTown == war.target and "ally" or "enemy")
+        local replaced = string.gsub(conclusion, name, function() return colored end, 1)
+        return replaced
     end
 
     method boolean IsTown(string town)

@@ -56,6 +56,16 @@ for i = 1, 20 do board.settled[i] = "old-" .. tostring(i) end
 local capped = doc:Apply(board, battle("new")).document
 assert(#capped.settled == 20 and capped.settled[1] == "old-2" and doc:OutcomeFrom(capped, "old-1") == nil)
 assert(doc:OutcomeFrom(capped, "new").strength == 80 and #board.settled == 20)
+-- (#132) A town's name in rich text: ally blue, enemy red, the common highlight otherwise. The hex values are literals, not read back from the module.
+assert(doc:StanceName("gushan", "ally") == "<color=#4580E0>鼓山</color>", "ally name")
+assert(doc:StanceName("gushan", "enemy") == "<color=#D64A3D>鼓山</color>", "enemy name")
+assert(doc:StanceName("gushan", "") == "<color=#4DFEE7>鼓山</color>" and doc:StanceName("gushan", "other") == "<color=#4DFEE7>鼓山</color>", "unknown stance")
+-- The captured town in a conclusion: the viewer departed from war.origin, so a captured target is theirs (blue) and a captured origin the enemy's (red).
+local won = { origin = "zuoying", target = "gushan", capturedTown = "gushan" }
+assert(doc:ColoredConclusion("奪城：鼓山 改為 A 方", won) == "奪城：<color=#4580E0>鼓山</color> 改為 A 方", "captured target")
+local lost = { origin = "zuoying", target = "gushan", capturedTown = "zuoying" }
+assert(doc:ColoredConclusion("奪城：左營 改為 B 方", lost) == "奪城：<color=#D64A3D>左營</color> 改為 B 方", "captured origin")
+assert(doc:ColoredConclusion("未易主", { origin = "zuoying", target = "gushan" }) == "未易主" and doc:ColoredConclusion("未易主", nil) == "未易主", "no capture, no colour")
 log("[VRF][FactionWarTownDocument] pure rules PASS")
 
 -- Summary uses the viewer's perspective, the settlement snapshot, and the current board only for landing.

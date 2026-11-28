@@ -29,7 +29,8 @@ local function real()
 end
 local function text(path) return _FactionWarUI:Ui(path).TextGUIRendererComponent.Text end
 local function teamText(path) return _FactionWarTeam:Ui(path).TextGUIRendererComponent.Text end
-local highlight = "<color=" .. _FactionWarUI.TownNameHighlightHex .. ">"
+-- (#132) The departure town is the player's own (blue), the target the enemy's (red).
+local ally, enemy = "<color=" .. _FactionWarTownDocument.AllyNameHex .. ">", "<color=" .. _FactionWarTownDocument.EnemyNameHex .. ">"
 
 local ok, failure = pcall(function()
     assert(Environment:IsMakerPlay(), "Maker Play required")
@@ -113,8 +114,8 @@ local ok, failure = pcall(function()
     elseif STEP == "SIEGE_SHOWN" then
         -- The real client queued against Gushan from Zuoying: the card replaces the old queue bar, with both towns and the live strengths.
         local card = _FactionWarUI:Ui("SiegePanel")
-        assert(await(function() return card.Enable and text("SiegePanel/Origin") == highlight .. "左營</color> 兵力 100" end, 150), "the card shows the departure town and its strength")
-        assert(text("SiegePanel/Target") == highlight .. "鼓山</color> 兵力 55", "and the target with the board's strength: " .. text("SiegePanel/Target"))
+        assert(await(function() return card.Enable and text("SiegePanel/Origin") == ally .. "左營</color> 兵力 100" end, 150), "the card shows the departure town and its strength")
+        assert(text("SiegePanel/Target") == enemy .. "鼓山</color> 兵力 55", "and the target with the board's strength: " .. text("SiegePanel/Target"))
         assert(text("SiegePanel/Versus") ~= "", "the versus mark")
         assert(string.find(text("SiegePanel/Status"), "配對中", 1, true), "the status: " .. text("SiegePanel/Status"))
         local button = _FactionWarUI:Ui("SiegePanel/Cancel")
@@ -123,7 +124,7 @@ local ok, failure = pcall(function()
         assert(not string.find(text("SiegePanel/Status") .. text("SiegePanel/Origin") .. text("SiegePanel/Target"), "守衛", 1, true), "no 守衛")
         log("[VRF][Siege] SIEGE_SHOWN PASS origin=" .. text("SiegePanel/Origin") .. " target=" .. text("SiegePanel/Target") .. " status=" .. text("SiegePanel/Status"))
     elseif STEP == "SIEGE_PUSHED" then
-        assert(await(function() return text("SiegePanel/Origin") == highlight .. "左營</color> 兵力 70" and text("SiegePanel/Target") == highlight .. "鼓山</color> 兵力 20" end, 100), "the card followed the other match without a request: " .. text("SiegePanel/Origin") .. " / " .. text("SiegePanel/Target"))
+        assert(await(function() return text("SiegePanel/Origin") == ally .. "左營</color> 兵力 70" and text("SiegePanel/Target") == enemy .. "鼓山</color> 兵力 20" end, 100), "the card followed the other match without a request: " .. text("SiegePanel/Origin") .. " / " .. text("SiegePanel/Target"))
         log("[VRF][Siege] SIEGE_PUSHED PASS")
     elseif STEP == "SIEGE_HIDDEN" then
         local card = _FactionWarUI:Ui("SiegePanel")

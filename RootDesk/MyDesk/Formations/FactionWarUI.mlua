@@ -23,6 +23,14 @@ script FactionWarUI extends Logic
     end
 
     @ExecSpace("ClientOnly")
+    method string StanceTownName(string town, string faction, string owner)
+        -- A town's name in the viewer's stance colour (ally blue, enemy red) once the viewer's faction and the town's owner are both known; the common highlight until then.
+        local doc = _FactionWarTownDocument
+        if not doc:IsFaction(faction) or not doc:IsFaction(owner) then return self:HighlightedTownName(town) end
+        return doc:StanceName(town, owner == faction and "ally" or "enemy")
+    end
+
+    @ExecSpace("ClientOnly")
     method Entity Ui(string path)
         return _EntityService:GetEntityByPath("/ui/FactionWarGroup/" .. path)
     end
@@ -191,7 +199,8 @@ script FactionWarUI extends Logic
         local label = self:Ui("TownHUD/Strength")
         if not isvalid(label) then return end
         local capital = _FactionWarTownDocument:IsCapital(town)
-        label.TextGUIRendererComponent.Text = _FactionWarTownDocument.TownNames[town] .. (capital and "（主城）" or "") .. "  ｜  兵力 " .. strength
+        -- The HUD shows the town the player stands in, which is the player's own side's.
+        label.TextGUIRendererComponent.Text = _FactionWarTownDocument:StanceName(town, "ally") .. (capital and "（主城）" or "") .. "  ｜  兵力 " .. strength
         log("[VRF][FactionWar] hud town=" .. town .. " strength=" .. strength)
     end
 
@@ -233,10 +242,10 @@ script FactionWarUI extends Logic
     end
 
     @ExecSpace("ClientOnly")
-    method string SiegeTown(string town, any strength)
+    method string SiegeTown(string town, any strength, any owner)
         -- One side of the card's first line: "<town> 兵力 80"; a strength not heard yet is a dash, never 0.
         local figure = type(strength) == "number" and string.format("%d", strength) or "—"
-        return self:HighlightedTownName(town) .. " 兵力 " .. figure
+        return self:StanceTownName(town, self._T.siegeFaction or "", type(owner) == "string" and owner or "") .. " 兵力 " .. figure
     end
 
     @ExecSpace("ClientOnly")
@@ -247,7 +256,7 @@ script FactionWarUI extends Logic
         local match = _MatchFlowState:PresentMatch(snapshot, { now = context.now, pending = pending ~= "", pendingAction = pending })
         local towns = context.towns or {}
         local origin, target = towns[context.origin], towns[snapshot.target]
-        return { origin = self:SiegeTown(context.origin, origin and origin.strength), target = self:SiegeTown(snapshot.target, target and target.strength),
+        return { origin = self:SiegeTown(context.origin, origin and origin.strength, origin and origin.owner), target = self:SiegeTown(snapshot.target, target and target.strength, target and target.owner),
             originTown = origin, targetTown = target, originId = context.origin, targetId = snapshot.target,
             status = match.text, label = match.label, action = match.action, enabled = match.enabled }
     end

@@ -558,7 +558,8 @@ _UserService.LocalPlayer.CurrentMapName = "zuoying"
 
 -- ---- #128: the town table changes while the map or the confirmation window is open ---------------------------------------------------
 local yancheng = { town = "yancheng", name = "鹽埕", capital = true, strength = 100, owner = "B" }
-local TARGET_GONE = "<c>鼓山</c> 已不能進攻"
+local GONE_ENEMY, GONE_ALLY = "<color=#D64A3D>鼓山</color> 已不能進攻", "<color=#4580E0>鼓山</color> 已不能進攻"
+local TARGET_GONE = GONE_ENEMY
 local ORIGIN_GONE = "這座城已不屬於你的陣營"
 local function notice() return node("Overlay/Window/Side/Notice").Enable and text("Overlay/Window/Side/Notice") or nil end
 local function openConfirm()
@@ -630,7 +631,7 @@ openConfirm()
 ui:ShowBoard(towns({}, { gushan = "A" }), links)
 ready("zuoying", { yancheng }, towns({}, { gushan = "A" }))
 check(not node("Confirm").Enable and ui._T.selected == nil and ui._T.open and ui._T.mode == "select", "the confirmation window closes, the map stays in selection")
-check(notice() == TARGET_GONE, "the side panel says the town can no longer be attacked: " .. tostring(notice()))
+check(notice() == GONE_ALLY, "the side panel says the town can no longer be attacked: " .. tostring(notice()))
 check(node(rowOf("yancheng") .. "/Pick").Enable and not node(rowOf("gushan") .. "/Pick").Enable, "and the list is redrawn")
 check(not node("Message").Enable and ui._T.message == nil and calls.close == 0, "no message window and the map is not closed")
 ui:Pick("yancheng")
@@ -640,7 +641,7 @@ openConfirm()
 ui:ShowBoard(towns({}, { gushan = "A" }), links)
 ui:ShowSelect("zuoying", "NO_TARGETS", {}, {}, {})
 check(ui._T.open and ui._T.mode == "select" and not node("Confirm").Enable and ui._T.selected == nil, "NO_TARGETS to the map's own relist keeps the map and closes the window")
-check(notice() == TARGET_GONE and not node("Message").Enable and calls.close == 0, "with the same line and no message window")
+check(notice() == GONE_ALLY and not node("Message").Enable and calls.close == 0, "with the same line and no message window")
 everythingDim("NO_TARGETS")
 -- Without a pick open the line names the cause.
 fresh()
@@ -675,7 +676,7 @@ ui._T.mapName = "zuoying"
 openConfirm()
 ui:ShowBoard(towns({}, { gushan = "A" }), links)
 ready("zuoying", { yancheng }, towns({}, { gushan = "A" }))
-check(notice() == TARGET_GONE, "setup: a line is shown")
+check(notice() == GONE_ALLY, "setup: a line is shown")
 ui:Close()
 check(notice() == nil, "closing the map clears the line")
 ui:BeginSelect()
@@ -718,7 +719,7 @@ openConfirm()
 ui:ConfirmAttack()
 ui:ShowBoard(towns({}, { gushan = "A" }), links)
 ready("zuoying", { yancheng }, towns({}, { gushan = "A" }))
-check(not ui._T.pending and not node("Confirm").Enable and notice() == TARGET_GONE, "a relist answered while waiting also closes the window and says so")
+check(not ui._T.pending and not node("Confirm").Enable and notice() == GONE_ALLY, "a relist answered while waiting also closes the window and says so")
 ui:ShowAttackResult("QUEUING")
 check(not ui._T.open and not node("Overlay").Enable and calls.close == 1, "and the QUEUING that was already on its way still closes the map")
 openConfirm()
@@ -726,7 +727,7 @@ ui:ConfirmAttack()
 ui:ShowBoard(towns({}, { gushan = "A" }), links)
 ready("zuoying", { yancheng }, towns({}, { gushan = "A" }))
 ui:ShowAttackResult("INVALID")
-check(notice() == TARGET_GONE and not ui._T.pending and ui._T.open, "an INVALID after the relist already dropped the pick keeps the line and does not get stuck")
+check(notice() == GONE_ALLY and not ui._T.pending and ui._T.open, "an INVALID after the relist already dropped the pick keeps the line and does not get stuck")
 -- The other refusals still keep the window (unchanged by #128), without a line.
 openConfirm()
 ui:ConfirmAttack()
@@ -1154,7 +1155,7 @@ local p = openCrestConfirm()
 local zoomBefore = ui._T.zoom
 ui:ShowBoard(towns({}, { gushan = "A" }), links)
 ready("zuoying", { yancheng }, towns({}, { gushan = "A" }))
-check(not node("Confirm").Enable and ui._T.selected == nil and notice() == TARGET_GONE, "an owner change closes the crest-clicked window and says why")
+check(not node("Confirm").Enable and ui._T.selected == nil and notice() == GONE_ALLY, "an owner change closes the crest-clicked window and says why")
 check(ui:CrestState("gushan") == "dimmed" and crestDim("gushan") and not markOn("gushan", "Frame") and not markOn("gushan", "Mark"), "the town's crest dims and loses its frame and mark")
 check(ui:CrestState("yancheng") == "selectable" and markOn("yancheng", "Mark") and not crestDim("yancheng"), "the remaining target keeps its mark")
 check(ui._T.zoom == zoomBefore, "and the player's view is not pulled back")

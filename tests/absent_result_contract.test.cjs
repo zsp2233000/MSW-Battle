@@ -52,8 +52,8 @@ test('the presentation: war title and block, lobby title and result only, never 
   assert.match(present, /if war == nil then return view end/, 'a lobby record shows only the result');
   const code = (source) => source.split(/\r?\n/).filter((line) => !line.trim().startsWith('--')).join(' ');
   assert.doesNotMatch(code(text) + code(view()), /experience|經驗/i, 'no experience anywhere in the window');
-  assert.match(body(text, 'StrengthLine'), /_FactionWarUI:HighlightedTownName\(town\)/, 'the shared highlight colours the town names');
-  assert.match(present, /_FactionWarUI:HighlightedTownName\(war\.capturedTown\)/, 'including the captured town in the conclusion');
+  assert.match(body(text, 'StrengthLine'), /_FactionWarTownDocument:StanceName\(town, stance\)/, 'the shared stance colour (ally blue, enemy red) colours the town names');
+  assert.match(present, /_FactionWarTownDocument:ColoredConclusion\(war\.conclusion or "", war\)/, 'including the captured town in the conclusion');
   assert.match(text, /ResultText = \{ WIN = "勝利", LOSE = "失敗", DRAW = "平手" \}/);
   assert.match(read('RootDesk/MyDesk/Formations/FactionWarUI.mlua'), /TownNameHighlightHex = "#4DFEE7"/, 'one highlight colour for every war surface');
   assert.match(view(), /_AbsentResult:RequestAcknowledge\(record\.id\)/, '確定 asks the server to forget the record');

@@ -33,8 +33,15 @@ local function saveBoard(board)
     _FactionWarTownDocument:WriteTowns(board, function(ok) written = ok end)
     assert(await(function() return written end, 300), "write Maker fixture board")
 end
-local highlight = "<color=" .. _FactionWarUI.TownNameHighlightHex .. ">"
-local function name(id) return highlight .. _FactionWarTownDocument.TownNames[id] .. "</color>" end
+-- (#132) A town's name in the windows is in the viewer's stance colour once the faction and the town's owner are known, the common highlight until then.
+local function name(id)
+    local owner
+    for _, town in ipairs(ui._T.board or {}) do if town.id == id then owner = town.owner end end
+    if _FactionWarTownDocument:IsFaction(ui._T.faction) and _FactionWarTownDocument:IsFaction(owner) then
+        return _FactionWarTownDocument:StanceName(id, owner == ui._T.faction and "ally" or "enemy")
+    end
+    return "<color=" .. _FactionWarUI.TownNameHighlightHex .. ">" .. _FactionWarTownDocument.TownNames[id] .. "</color>"
+end
 local function npcEntity()
     local typeName = NPC == "LOBBY" and "script.FactionWarLobbyNpc" or "script.FactionWarNpc"
     local list = _UserService.LocalPlayer.CurrentMap:GetChildComponentsByTypeName(typeName, true)

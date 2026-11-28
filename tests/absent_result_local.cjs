@@ -11,5 +11,14 @@ const logic = readFileSync(join(__dirname, '../RootDesk/MyDesk/Matchmaking/Absen
   .replace(/^    (?:method \w+ |handler )(\w+)\(([^)]*)\)$/gm, (_, name, params) =>
     `function doc:${name}(${params.replace(/\b\w+ (\w+)/g, '$1')})`)
   .replace(/\nend\s*$/, '\n_AbsentResult = doc');
+// (#132) The town names are coloured by the production town document (StanceName, ColoredConclusion), lowered the same way as in faction_war_town_document_local.cjs.
+const townDocument = readFileSync(join(__dirname, '../RootDesk/MyDesk/Formations/FactionWarTownDocument.mlua'), 'utf8')
+  .replace(/\r\n/g, '\n')
+  .replace(/^@Logic\nscript FactionWarTownDocument extends Logic\n/, 'local townDoc = { _T = {} }\n')
+  .replace(/^    @ExecSpace\("ServerOnly"\)\n/gm, '')
+  .replace(/^    property \w+ (\w+ = .+)$/gm, 'townDoc.$1')
+  .replace(/^    method \w+ (\w+)\(([^)]*)\)$/gm, (_, name, params) =>
+    `function townDoc:${name}(${params.replace(/\b\w+ (\w+)/g, '$1')})`)
+  .replace(/\nend\s*$/, '\n_FactionWarTownDocument = townDoc');
 const rules = readFileSync(join(__dirname, 'absent_result_rules.lua'), 'utf8');
-process.stdout.write(`local ok, failure = xpcall(function()\nlog = print\nlog_error = print\n${logic}\ndo\n${rules}\nend\nend, function(message) return debug.traceback(message) end)\nif not ok then io.stderr:write(failure .. "\\n") os.exit(1) end\n`);
+process.stdout.write(`local ok, failure = xpcall(function()\nlog = print\nlog_error = print\n${townDocument}\n${logic}\ndo\n${rules}\nend\nend, function(message) return debug.traceback(message) end)\nif not ok then io.stderr:write(failure .. "\\n") os.exit(1) end\n`);

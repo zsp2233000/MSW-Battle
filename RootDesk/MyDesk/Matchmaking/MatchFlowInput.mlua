@@ -126,8 +126,9 @@ script MatchFlowInput extends Logic
         return _MatchFlowState:Present(self.Snapshot, { now = DateTime.UtcNow.Elapsed,
             pending = self._T.pending, pendingAction = self._T.pendingAction, formation = _FormationEditSession.Snapshot,
             inMatchRoom = map == "matchprobe", originName = originName,
-            originLabel = originName ~= "" and _FactionWarUI:HighlightedTownName(origin) or "",
-            destinationName = (originName ~= "" and destination ~= "") and _FactionWarUI:HighlightedTownName(destination) or "",
+            -- The departure town is the player's own side's until the receipt says it fell.
+            originLabel = originName ~= "" and _FactionWarTownDocument:StanceName(origin, (receipt ~= nil and receipt.originLost == true) and "enemy" or "ally") or "",
+            destinationName = (originName ~= "" and destination ~= "") and _FactionWarTownDocument:StanceName(destination, "ally") or "",
             originLost = receipt ~= nil and receipt.originLost == true,
             ready = _FormationSchema:IsLoadConfirmed(_FormationEditSession.Snapshot.loadState),
             editBusy = _FormationEditSession:Busy(), unconfirmed = _FormationEditSession:Unconfirmed(),

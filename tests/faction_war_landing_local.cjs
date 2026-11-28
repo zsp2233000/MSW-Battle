@@ -21,6 +21,8 @@ DateTime = { UtcNow = { Elapsed = 0 } }
 wait = function(seconds) coroutine.yield(seconds) end
 local landing, doc = _FactionWarLanding, _FactionWarTownDocument
 local user = "test"
+-- (#132) Town names in the notices are rich text in the stance colour (literals, not read back from the module).
+local ALLY, ENEMY = "<color=#4580E0>", "<color=#D64A3D>"
 local player, faction, home, board, offline, instance, owned, vacate
 local moves, notices, reads, cancels, remembered, factionReplies, holdFaction, settling, moveFailed
 local function reset(here, side, preferred)
@@ -147,7 +149,7 @@ assert(advance(loginThread) == true and not landing:IsJudging(user) and #moves =
 
 reset("formationlobby", "A"); captured()
 assert(battle("RESTORE") and moves[1] == "zuoying" and reads == 1, "a capturer restored from the lobby returns to origin")
-assert(notices[1] == "上一場戰果：奪下鼓山。")
+assert(notices[1] == "上一場戰果：奪下" .. ALLY .. "鼓山</color>。")
 assert(not login() and #moves == 1 and #notices == 1, "login following restore does not replay the battle notice")
 board = nil
 local priorReads = reads
@@ -161,7 +163,7 @@ local restore = coroutine.create(function() return battle("RESTORE") end)
 assert(advance(restore) == 0.1, "restore waits for the sweep")
 holdFaction = false; reply()
 assert(advance(restore) == false and not landing:IsJudging(user) and #moves == 0)
-assert(#notices == 1 and notices[1] == "上一場戰果：奪下鼓山。", "already at origin: notify once without moving")
+assert(#notices == 1 and notices[1] == "上一場戰果：奪下" .. ALLY .. "鼓山</color>。", "already at origin: notify once without moving")
 
 reset("matchprobe", "A"); captured()
 instance, settling = true, true
@@ -191,7 +193,7 @@ assert(battle("RETURN", transfer, "gushan") and transferred == "yancheng" and #n
 instance = false
 player.CurrentMapName = transferred
 assert(not battle("RESTORE", nil, "gushan") and #moves == 0)
-assert(#notices == 1 and notices[1]:find("鼓山已失守，已撤回主城。", 1, true))
+assert(#notices == 1 and notices[1]:find(ENEMY .. "鼓山</color>已失守，已撤回主城。", 1, true))
 assert(not login("reconnect") and #notices == 1)
 
 -- A failed admission can restore a ticket in its still-friendly origin with no recorded battle.
@@ -206,7 +208,7 @@ moveFailed = true
 assert(not battle("RESTORE") and #notices == 0, "do not send a notice for a failed move")
 moveFailed = false
 assert(battle("RESTORE") and moves[1] == "nanzih")
-assert(#notices == 1 and notices[1] == "左營已失守，已撤回主城。上一場戰果：奪下鼓山。")
+assert(#notices == 1 and notices[1] == ENEMY .. "左營</color>已失守，已撤回主城。上一場戰果：奪下" .. ALLY .. "鼓山</color>。")
 
 -- The stale match was EXEMPT and has no stored outcome; the other match's capture does not determine this landing or notice.
 reset("matchprobe", "B"); captured()
@@ -215,7 +217,7 @@ assert(battle("RETURN", transfer, "gushan", "exempt") and transferred == "yanche
 instance = false
 player.CurrentMapName = "formationlobby"
 assert(battle("RESTORE", nil, "gushan", "exempt") and moves[1] == "yancheng")
-assert(#notices == 1 and notices[1] == "鼓山已失守，已撤回主城。上一場對戰已結束。")
+assert(#notices == 1 and notices[1] == ENEMY .. "鼓山</color>已失守，已撤回主城。上一場對戰已結束。")
 
 reset("matchprobe", "A"); captured()
 instance, settling = true, true
@@ -223,6 +225,16 @@ local late = coroutine.create(function() return battle("RETURN", function() erro
 assert(advance(late) == 0.1)
 offline, settling = true, false
 assert(advance(late) == false)
+-- (#132) The names in the notices take the colour of the town's side for the player: a fallen town the enemy's (red), the one returned to the player's (blue);
+-- the last battle's loser is now the winner's if the town flipped, else still the loser's. The hex values are literals.
+assert(landing:FallenNotice("zuoying") == ENEMY .. "左營</color>已失守，已撤回主城。", "a fallen town is red")
+local flipped = { loser = "gushan", winner = "zuoying", flipped = true }
+assert(landing:NoticeText(flipped, "zuoying") == "上一場戰果：奪下" .. ALLY .. "鼓山</color>。", "a captured town is blue for the captor")
+assert(landing:NoticeText(flipped, "gushan") == "上一場戰果：" .. ENEMY .. "鼓山</color>已易主。", "and red for the player whose origin it was")
+local hit = { loser = "gushan", winner = "zuoying", flipped = false, strength = 80 }
+assert(landing:NoticeText(hit, "zuoying") == "上一場戰果：" .. ENEMY .. "鼓山</color>兵力降至80。", "an enemy town that lost strength is red")
+assert(landing:NoticeText(hit, "gushan") == "上一場戰果：" .. ALLY .. "鼓山</color>兵力降至80。", "the player's own town that lost strength is blue")
+assert(landing:NoticeText(nil, "zuoying") == "上一場對戰已結束。", "no record, no names")
 print("[VRF][FactionWarLanding] local placement scenarios PASS")
 end, debug.traceback)
 if not ok then io.stderr:write(failure, "\n"); os.exit(1) end

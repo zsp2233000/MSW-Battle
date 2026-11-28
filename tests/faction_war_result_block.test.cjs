@@ -110,7 +110,8 @@ test('the result controller binds the window and the war rows by UUID, resizes t
   assert.match(script, /receipt\.matchId ~= session\.MatchKey or receipt\.profile ~= profile/);
   assert.match(script, /self:RenderWarResult\(session, map,/);
   assert.match(script, /GetFirstChildComponentByTypeName\("script\.MatchedBattle", true\)/);
-  assert.match(script, /_FactionWarUI:HighlightedTownName\(/);
+  assert.match(script, /_FactionWarTownDocument:StanceName\(town, stance\)/);
+  assert.match(script, /_FactionWarTownDocument:ColoredConclusion\(receipt\.conclusion, receipt\)/);
   const layout = /method void SetWarLayout\(boolean grown, boolean rows\)([^]*?)\n\tend/.exec(script)?.[1] ?? '';
   assert.match(layout, /WarExtraHeight/, 'the window grows by the section height');
   assert.match(layout, /RectSize = Vector2\(base\.size\.x, base\.size\.y \+ extra\)/);

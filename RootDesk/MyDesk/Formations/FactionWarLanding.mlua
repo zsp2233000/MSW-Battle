@@ -178,7 +178,8 @@ script FactionWarLanding extends Logic
 
     method string FallenNotice(string town)
         -- Use one notice for login and eviction from the same lost town.
-        return _FactionWarTownDocument.TownNames[town] .. "已失守，已撤回主城。"
+        -- The fallen town is the enemy's now.
+        return _FactionWarTownDocument:StanceName(town, "enemy") .. "已失守，已撤回主城。"
     end
 
     @ExecSpace("ServerOnly")
@@ -267,7 +268,7 @@ script FactionWarLanding extends Logic
         end
         if not self:Active(userId, slot, player, here) or _FormationHandoff:IsLockedForUser(userId) then return false end
         local destination = _FactionWarTownDocument:Landing(faction, home, board)
-        local message = destination == home and ("已回到" .. _FactionWarTownDocument.TownNames[destination] .. "。") or self:FallenNotice(home)
+        local message = destination == home and ("已回到" .. _FactionWarTownDocument:StanceName(destination, "ally") .. "。") or self:FallenNotice(home)
         local moved = self:MoveAndNotify(userId, player, destination, message)
         log("[VRF][FactionWar] login placed user=" .. userId .. " faction=" .. faction .. " home=" .. home .. " destination=" .. destination .. " moved=" .. tostring(moved))
         return moved
@@ -336,10 +337,12 @@ script FactionWarLanding extends Logic
         -- Report the historical town effect, not current ownership, the landing town, or a player's win/loss.
         local names = _FactionWarTownDocument.TownNames
         if outcome == nil or outcome.loser == nil or names[outcome.loser] == nil then return "上一場對戰已結束。" end
-        local town = names[outcome.loser]
-        if outcome.flipped and outcome.winner == origin then return "上一場戰果：奪下" .. town .. "。" end
-        if outcome.flipped then return "上一場戰果：" .. town .. "已易主。" end
-        return "上一場戰果：" .. town .. "兵力降至" .. tostring(outcome.strength) .. "。"
+        -- The colour is the town's side for the player who departed from origin: a flipped loser is now the winner's, an unflipped one still belongs to the loser.
+        local winnerIsOrigin = outcome.winner == origin
+        local doc = _FactionWarTownDocument
+        if outcome.flipped and winnerIsOrigin then return "上一場戰果：奪下" .. doc:StanceName(outcome.loser, "ally") .. "。" end
+        if outcome.flipped then return "上一場戰果：" .. doc:StanceName(outcome.loser, "enemy") .. "已易主。" end
+        return "上一場戰果：" .. doc:StanceName(outcome.loser, winnerIsOrigin and "enemy" or "ally") .. "兵力降至" .. tostring(outcome.strength) .. "。"
     end
 
     @ExecSpace("ServerOnly")

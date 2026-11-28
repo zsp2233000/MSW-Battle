@@ -260,11 +260,11 @@ script AbsentResult extends Logic
         end)
     end
 
-    method string StrengthLine(string town, any before, any after, boolean unchanged)
+    method string StrengthLine(string town, any before, any after, boolean unchanged, string stance)
         -- One line of the war block: the highlighted town and its strength before and after (or unchanged).
         local strength = unchanged and "兵力不變"
             or ("兵力 " .. (before == nil and "—" or string.format("%d", before)) .. " → " .. (after == nil and "—" or string.format("%d", after)))
-        return _FactionWarUI:HighlightedTownName(town) .. "　" .. strength
+        return _FactionWarTownDocument:StanceName(town, stance) .. "　" .. strength
     end
 
     method table Present(table record)
@@ -276,17 +276,9 @@ script AbsentResult extends Logic
         view.war = true
         local unchanged = (war.status == "NO_CHANGE" and war.conclusion == "未易主") or war.status == "SKIPPED"
         if unchanged or war.status == "SAVED" or war.status == "DUPLICATE" then
-            view.rows = { self:StrengthLine(war.origin, war.originBefore, war.originAfter, unchanged), self:StrengthLine(war.target, war.targetBefore, war.targetAfter, unchanged) }
+            view.rows = { self:StrengthLine(war.origin, war.originBefore, war.originAfter, unchanged, "ally"), self:StrengthLine(war.target, war.targetBefore, war.targetAfter, unchanged, "enemy") }
         end
-        local conclusion = war.conclusion or ""
-        if war.capturedTown ~= nil then
-            local town = _FactionWarTownDocument.TownNames[war.capturedTown]
-            if town ~= nil then
-                local replaced, count = string.gsub(conclusion, town, _FactionWarUI:HighlightedTownName(war.capturedTown), 1)
-                conclusion = replaced
-            end
-        end
-        view.conclusion = conclusion
+        view.conclusion = _FactionWarTownDocument:ColoredConclusion(war.conclusion or "", war)
         return view
     end
 end

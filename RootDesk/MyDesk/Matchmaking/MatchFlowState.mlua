@@ -65,7 +65,7 @@ script MatchFlowState extends Logic
         if self:EntryFailed(snapshot, context.now) then
             local label = "停止入場"
             if context.inMatchRoom then
-                label = (context.originName or "") ~= "" and ("返回 " .. context.originName) or "返回大廳"
+                label = (context.originName or "") ~= "" and ("返回 " .. (context.originLabel or context.originName)) or "返回大廳"
             end
             return { text = "入場失敗", label = label, action = "RETURN", enabled = enabled }
         end

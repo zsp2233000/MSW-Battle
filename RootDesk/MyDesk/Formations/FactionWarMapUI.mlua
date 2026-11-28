@@ -696,7 +696,7 @@ script FactionWarMapUI extends Logic
         local node = self:Ui("Overlay/Window/Side/Notice")
         local line = ""
         if kind == "TARGET" or kind == "REFUSED" then
-            line = _FactionWarUI:HighlightedTownName(town) .. " 已不能進攻"
+            line = self:StanceTownName(town) .. " 已不能進攻"
         elseif kind == "ORIGIN" then
             line = "這座城已不屬於你的陣營"
         elseif kind == "NO_TARGETS" then
@@ -720,7 +720,7 @@ script FactionWarMapUI extends Logic
         if status == "ENGAGED" then
             local target = header.target
             if type(target) == "string" and _FactionWarTownDocument:IsTown(target) then
-                return "目前正在進攻 " .. _FactionWarUI:HighlightedTownName(target) .. "，要改變目標請先取消配對（畫面上方的攻城面板可以取消）"
+                return "目前正在進攻 " .. self:StanceTownName(target) .. "，要改變目標請先取消配對（畫面上方的攻城面板可以取消）"
             end
             return "目前已在配對中，要改變目標請先取消配對（畫面上方的攻城面板可以取消）"
         elseif status == "NOT_OWNED" then
@@ -826,16 +826,11 @@ script FactionWarMapUI extends Logic
     method string StanceTownName(string id)
         -- A town's name for the windows and lines: in the viewer's stance colour (ally blue, enemy red) once the viewer's faction and the town's owner are known,
         -- the common town-name highlight until then.
-        local name = _FactionWarTownDocument.TownNames[id] or ""
-        if _FactionWarTownDocument:IsFaction(self._T.faction) then
-            for _, town in ipairs(self._T.board or {}) do
-                if town.id == id and _FactionWarTownDocument:IsFaction(town.owner) then
-                    local c = _FactionWarUI:TownColor(self._T.faction, town.owner)
-                    return string.format("<color=#%02X%02X%02X>", math.floor(c.r * 255 + 0.5), math.floor(c.g * 255 + 0.5), math.floor(c.b * 255 + 0.5)) .. name .. "</color>"
-                end
-            end
+        local owner = ""
+        for _, town in ipairs(self._T.board or {}) do
+            if town.id == id then owner = town.owner end
         end
-        return _FactionWarUI:HighlightedTownName(id)
+        return _FactionWarUI:StanceTownName(id, self._T.faction, owner)
     end
 
     @ExecSpace("ClientOnly")
