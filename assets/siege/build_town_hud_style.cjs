@@ -14,11 +14,12 @@ const { UIBuilder } = require('../../.agents/skills/msw-ui-system/scripts/msw_ui
 
 const uiFile = path.join(__dirname, '..', '..', 'ui', 'FactionWarGroup.ui');
 
-// Cardgame parts (msw-ui-kit cardgame palette): Base_6, a 200 x 84 sliced wooden plank with metal ends, the wood of the Cardgame buttons next to it. Base_9 (near black),
-// Base_10 (teal), Base_11 (red), Base_1 (grey) and Base_2 (orange banner) were tried in Maker and did not match the brown of the siege panel and the buttons.
-const HUD_STRIP = '4585df922c98448cb1dcc9e416ad7346';
+// Cardgame parts (msw-ui-kit cardgame palette): Base_3, a sliced dark plate with a thin bronze frame, the look of the siege panel (dark fill inside a frame). A display strip must not
+// look like a button, so the wooden planks of the Cardgame buttons (Base_6, tried first) are not used; Base_7 (flat brown), Base_8 (black with a metal frame), Base_9 (near black),
+// Base_10 (teal), Base_11 (red), Base_1 (grey plank) and Base_2 (orange banner) were tried in Maker as well.
+const HUD_STRIP = '16b391d441ad46afae46305de48b354c';
 const NOTICE_STRIP = HUD_STRIP;
-// The same CardButton states as the other buttons.
+// The CardButton states of the lobby's close button, the same as the other buttons.
 const CARD_BUTTON = { normal: '9505617fb63c447c8ff9c15c18d88064', highlighted: '398dfdb46d534ea2a2373e4f5d29ae2a', pressed: '1016088c7aca43c78cdd06c01645ab1b' };
 const OUTLINE = { OutlineColor: { r: 0, g: 0, b: 0, a: 0.7 }, OutlineWidth: 0.2, FaceDilate: 0.2 };
 const WHITE = { r: 1, g: 1, b: 1, a: 1 };
