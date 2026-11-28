@@ -4,8 +4,9 @@ script FactionWarLobbyNpc extends Component
     @ExecSpace("ClientOnly")
     @EventSender("Self")
     handler HandleInteractionEvent(InteractionEvent event)
-        -- Only the player who pressed the interaction key opens their own lobby panel.
-        if event.InteractionEntity == _UserService.LocalPlayer then
+        -- Only the player who pressed the interaction key opens their own lobby panel, and not while the map covers the town
+        -- (an interaction event is not stopped by a UI mask).
+        if event.InteractionEntity == _UserService.LocalPlayer and not _FactionWarMapUI:BlocksInteraction() then
             _FormationLobby:OpenTownPanel()
         end
     end

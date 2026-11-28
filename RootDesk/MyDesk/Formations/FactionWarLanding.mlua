@@ -1,0 +1,360 @@
+@Logic
+script FactionWarLanding extends Logic
+
+    property number EnforceLeaseSeconds = 30
+    property number LoginReadySeconds = 5
+    property number ReadWaitSeconds = 5
+    property number LandingWaitSeconds = 25
+    property integer LandingReadAttempts = 2
+
+    @ExecSpace("ServerOnly")
+    method void OnBeginPlay()
+        -- Each room owns the placement slots and the outcomes it observed locally.
+        self._T.slots = {}
+        self._T.outcomes = {}
+        log("[VRF][FactionWarLanding] ready")
+    end
+
+    @ExecSpace("ServerOnly")
+    method void RememberOutcome(string matchKey, table outcome)
+        -- Keep this room's confirmed result for fast returns; a different room can rebuild it from the town document.
+        self._T.outcomes[matchKey] = outcome
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean WaitWhile(any condition, number limitSeconds)
+        -- Let the current coroutine wait a bounded time for readiness, recovery or a callback.
+        local waited = 0
+        while condition() do
+            if waited >= limitSeconds then return false end
+            wait(0.1)
+            waited = waited + 0.1
+        end
+        return true
+    end
+
+    @ExecSpace("ServerOnly")
+    method any Await(any start)
+        -- Bridge a callback-style read; a missing or late answer is not a usable document.
+        local box = { done = false }
+        start(function(value)
+            box.value = value
+            box.done = true
+        end)
+        self:WaitWhile(function() return not box.done end, self.ReadWaitSeconds)
+        return box.value
+    end
+
+    @ExecSpace("ServerOnly")
+    method any ReadBoard()
+        -- Read the same live document for every placement path.
+        return self:Await(function(done) _FactionWarTownDocument:Read(done) end)
+    end
+
+    @ExecSpace("ServerOnly")
+    method any CurrentPlayer(string userId)
+        -- A retained offline entity is not a placement target.
+        local player = _UserService:GetUserEntityByUserId(userId)
+        if _MatchFlow:IsOffline(userId) or not isvalid(player) or not isvalid(player.PlayerComponent) then return nil end
+        return player
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean Active(string userId, table slot, Entity player, string here)
+        -- Revalidate the slot, the entity and its starting map after each yield that precedes a side effect.
+        return self._T.slots[userId] == slot and self:CurrentPlayer(userId) == player and player.CurrentMapName == here
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean IsJudging(string userId)
+        -- Observe in-flight work without relying on the slot representation.
+        return self._T.slots[userId] ~= nil
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean HasLease(table slot)
+        -- Only town checks can lose their lease. Battle returns have their own bounded waits and must not be superseded mid-transfer.
+        return slot.kind ~= "CHECK" or DateTime.UtcNow.Elapsed - slot.started < self.EnforceLeaseSeconds * 1000
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean Judge(string userId, table trigger)
+        -- CHECK { town, board? } is asynchronous; LOGIN { cause, owned } and RESTORE { origin, matchKey } place in the static room.
+        -- RETURN { origin, matchKey, move } calls move(destination) in the match room and returns whether the transfer succeeded.
+        local kind = trigger.kind
+        if kind ~= "CHECK" and kind ~= "LOGIN" and kind ~= "RESTORE" and kind ~= "RETURN" then return false end
+        if _RoomService:IsInstanceRoom() ~= (kind == "RETURN") then return false end
+        if (kind == "RESTORE" or kind == "RETURN") and not _FactionWarTownDocument:IsTown(trigger.origin) then
+            log("[VRF][MatchFlow] landing after restore not needed user=" .. userId .. "; the ticket was not a war ticket")
+            return false
+        end
+        local player = self:CurrentPlayer(userId)
+        if kind == "CHECK" and (player == nil or player.CurrentMapName ~= trigger.town) then return false end
+        if (kind == "RESTORE" or kind == "RETURN") and (player == nil or player.CurrentMapName == "") then
+            log("[VRF][FactionWarAttack] landing skipped user=" .. userId .. "; the player is not available")
+            return false
+        end
+        local running = self._T.slots[userId]
+        if running ~= nil and self:HasLease(running) then
+            if kind == "CHECK" then
+                running.again = trigger.town
+                log("[VRF][FactionWar] enforce queued user=" .. userId .. " town=" .. trigger.town .. "; it runs again when the current check ends")
+                return false
+            elseif kind == "LOGIN" then
+                if running.kind ~= "LOGIN" and running.login == nil then running.login = trigger end
+                log("[VRF][FactionWar] login placement already running user=" .. userId .. " cause=" .. trigger.cause)
+                return false
+            elseif kind == "RESTORE" and player ~= nil then
+                -- The ticket is already closed. Wait for the current static-room placement rather than dropping the return.
+                local ready = self:WaitWhile(function()
+                    local other = self._T.slots[userId]
+                    return other ~= nil and self:HasLease(other)
+                end, self.EnforceLeaseSeconds)
+                if not ready or self:CurrentPlayer(userId) ~= player then return false end
+                running = self._T.slots[userId]
+            else
+                return false
+            end
+        end
+        if running ~= nil then log("[VRF][FactionWar] enforce lease expired user=" .. userId .. "; the old check is abandoned") end
+        local slot = { kind = kind, started = DateTime.UtcNow.Elapsed,
+            again = running and running.again or nil, login = running and running.login or nil }
+        if kind == "LOGIN" then slot.login = nil end
+        self._T.slots[userId] = slot
+        if kind == "CHECK" then
+            self:BeginCheck(userId, slot, player, trigger)
+            return false
+        end
+        local ok, result = pcall(function()
+            if kind == "LOGIN" then return self:PlaceLogin(userId, slot, trigger) end
+            return self:PlaceAfterBattle(userId, slot, trigger, player)
+        end)
+        if not ok then log_error("[VRF][FactionWarLanding] " .. kind .. " failed user=" .. userId .. " " .. tostring(result)) end
+        self:Finish(userId, slot)
+        return ok and result == true
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Finish(string userId, table slot)
+        -- A stale callback never clears a newer slot; a queued check discards its old board and reads again.
+        if self._T.slots[userId] ~= slot then return end
+        self._T.slots[userId] = nil
+        if slot.login ~= nil then self:Judge(userId, slot.login) end
+        if slot.again ~= nil then self:Judge(userId, { kind = "CHECK", town = slot.again }) end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void BeginCheck(string userId, table slot, Entity player, table trigger)
+        -- Keep the sweep non-blocking per player, while retaining the same slot through faction read, queue release and board recheck.
+        local town = trigger.town
+        local function inspect(board)
+            if not self:Active(userId, slot, player, town) or board == nil then self:Finish(userId, slot) return end
+            _FactionWar:ReadFaction(player.PlayerComponent.ProfileCode, function(faction)
+                if self:Active(userId, slot, player, town) then
+                    local ok, failure = pcall(function() self:CheckTown(userId, slot, player, town, faction, board) end)
+                    if not ok then log_error("[VRF][FactionWar] evict failed user=" .. userId .. " " .. tostring(failure)) end
+                end
+                self:Finish(userId, slot)
+            end)
+        end
+        if trigger.board ~= nil then
+            inspect(trigger.board)
+        else
+            _FactionWarTownDocument:Read(function(board)
+                if board == nil then log("[VRF][FactionWar] recheck unreadable user=" .. userId .. " town=" .. town)
+                else log("[VRF][FactionWar] recheck user=" .. userId .. " town=" .. town) end
+                inspect(board)
+            end)
+        end
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean MoveAndNotify(string userId, Entity player, string destination, string message)
+        -- Static-room placement keeps last-town persistence in FactionWar:Move and only notifies after dispatch succeeds.
+        local moved = _FactionWar:Move(player, destination)
+        if moved and message ~= "" then _FactionWar:ReceiveTownNotice(destination, message, userId) end
+        return moved
+    end
+
+    method string FallenNotice(string town)
+        -- Use one notice for login and eviction from the same lost town.
+        -- The fallen town is the enemy's now.
+        return _FactionWarTownDocument:StanceName(town, "enemy") .. "已失守，已撤回主城。"
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean CheckTown(string userId, table slot, Entity player, string town, any faction, table board)
+        -- A live check can cancel a waiting ticket, but only a fresh board after that cancellation may move the player.
+        if faction == nil or faction == "" then return false end
+        if _FactionWarTownDocument:Landing(faction, town, board) == town then
+            log("[VRF][FactionWar] evict not needed user=" .. userId .. " town=" .. town)
+            return false
+        end
+        if not _MatchFlow:Vacate(userId) then
+            log("[VRF][FactionWar] evict held user=" .. userId .. " town=" .. town)
+            return false
+        end
+        if not self:Active(userId, slot, player, town) then return false end
+        local live = self:ReadBoard()
+        if live == nil then
+            log("[VRF][FactionWar] evict unverified user=" .. userId .. " town=" .. town .. "; the board could not be read again")
+            return false
+        end
+        if not self:Active(userId, slot, player, town) then
+            log("[VRF][FactionWar] evict dropped user=" .. userId .. " town=" .. town .. "; the player is no longer there or went offline")
+            return false
+        end
+        local destination = _FactionWarTownDocument:Landing(faction, town, live)
+        if destination == town then
+            log("[VRF][FactionWar] evict cancelled user=" .. userId .. " town=" .. town .. "; the faction holds it again")
+            return false
+        end
+        local moved = self:MoveAndNotify(userId, player, destination, self:FallenNotice(town))
+        log("[VRF][FactionWar] evicted user=" .. userId .. " from=" .. town .. " to=" .. destination .. " moved=" .. tostring(moved))
+        return moved
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean PlaceLogin(string userId, table slot, table trigger)
+        -- Login either checks the current town or restores the last town for a fresh, unowned lobby arrival.
+        local player = nil
+        local ready = self:WaitWhile(function()
+            player = self:CurrentPlayer(userId)
+            return self._T.slots[userId] == slot and not _MatchFlow:IsOffline(userId)
+                and (player == nil or player.CurrentMapName == "")
+        end, self.LoginReadySeconds)
+        if not ready or player == nil or self._T.slots[userId] ~= slot then
+            log("[VRF][FactionWar] login placement skipped user=" .. userId .. " cause=" .. trigger.cause .. "; the entity is not ready or offline")
+            return false
+        end
+        local here = player.CurrentMapName
+        local profile = player.PlayerComponent.ProfileCode
+        local held = trigger.owned or _FormationHandoff:IsLockedForUser(userId)
+        if _FactionWarTownDocument:IsTown(here) then
+            _FactionWar:Remember(profile, here)
+            if held then
+                log("[VRF][FactionWar] login placement left to the ticket user=" .. userId .. " town=" .. here)
+                return false
+            end
+            local board = self:ReadBoard()
+            if board == nil then
+                log("[VRF][FactionWar] login placement unreadable user=" .. userId .. " town=" .. here .. "; judged at the next town action")
+                return false
+            end
+            if not self:Active(userId, slot, player, here) then return false end
+            log("[VRF][FactionWar] login judged user=" .. userId .. " cause=" .. trigger.cause .. " town=" .. here)
+            local faction = self:Await(function(done) _FactionWar:ReadFaction(profile, done) end)
+            if not self:Active(userId, slot, player, here) or _FormationHandoff:IsLockedForUser(userId) then return false end
+            return self:CheckTown(userId, slot, player, here, faction, board)
+        end
+        if trigger.cause ~= "enter" or here ~= "formationlobby" or held then
+            log("[VRF][FactionWar] login placement not needed user=" .. userId .. " cause=" .. trigger.cause .. " map=" .. here .. " held=" .. tostring(held))
+            return false
+        end
+        local faction = self:Await(function(done) _FactionWar:ReadFaction(profile, done) end)
+        local home = self:Await(function(done) _FactionWar:ReadTown(profile, done) end)
+        if faction == nil or home == nil then
+            log("[VRF][FactionWar] login placement unreadable user=" .. userId .. "; the player stays in the lobby")
+            return false
+        end
+        if faction == "" or home == "" then
+            log("[VRF][FactionWar] login placement not needed user=" .. userId .. "; no faction or no last town")
+            return false
+        end
+        local board = self:ReadBoard()
+        if board == nil then
+            log("[VRF][FactionWar] login placement unreadable user=" .. userId .. " the town table could not be read; the player stays in the lobby")
+            return false
+        end
+        if not self:Active(userId, slot, player, here) or _FormationHandoff:IsLockedForUser(userId) then return false end
+        local destination = _FactionWarTownDocument:Landing(faction, home, board)
+        local message = destination == home and ("已回到" .. _FactionWarTownDocument:StanceName(destination, "ally") .. "。") or self:FallenNotice(home)
+        local moved = self:MoveAndNotify(userId, player, destination, message)
+        log("[VRF][FactionWar] login placed user=" .. userId .. " faction=" .. faction .. " home=" .. home .. " destination=" .. destination .. " moved=" .. tostring(moved))
+        return moved
+    end
+
+    @ExecSpace("ServerOnly")
+    method table BattleDestination(string userId, string profile, string origin, string matchKey)
+        -- ADR 0016: wait for settlement, then judge the origin against live ownership. The outcome is for the notice only.
+        self:WaitWhile(function() return _FactionWarTownDocument:IsSettling(matchKey) end, self.LandingWaitSeconds)
+        local outcome = self._T.outcomes[matchKey]
+        local faction, board = nil, nil
+        for attempt = 1, self.LandingReadAttempts do
+            faction = self:Await(function(done) _FactionWar:ReadFaction(profile, done) end)
+            board = self:ReadBoard()
+            if faction ~= nil and board ~= nil then break end
+            log("[VRF][FactionWarAttack] landing read missing user=" .. userId .. " attempt=" .. tostring(attempt))
+        end
+        if faction == nil or faction == "" or board == nil then
+            log("[VRF][FactionWarAttack] landing unreadable user=" .. userId .. " origin=" .. origin .. "; keeps the departure town")
+            return { destination = origin, reliable = false }
+        end
+        local rebuilt = false
+        if outcome == nil then
+            outcome = _FactionWarTownDocument:OutcomeFrom(board, matchKey)
+            rebuilt = outcome ~= nil
+        end
+        local destination = _FactionWarTownDocument:Landing(faction, origin, board)
+        log("[VRF][FactionWarAttack] landing user=" .. userId .. " faction=" .. faction .. " origin=" .. origin .. " destination=" .. destination .. " originLost=" .. tostring(destination ~= origin) .. " rebuilt=" .. tostring(rebuilt))
+        return { destination = destination, outcome = outcome, reliable = true }
+    end
+
+    @ExecSpace("ServerOnly")
+    method boolean PlaceAfterBattle(string userId, table slot, table trigger, any player)
+        -- An unreadable board falls back to origin only for cross-room return. Static restore leaves a correctly placed player alone.
+        local origin = trigger.origin
+        local here = player.CurrentMapName
+        local result = self:BattleDestination(userId, player.PlayerComponent.ProfileCode, origin, trigger.matchKey)
+        local destination = result.destination
+        if not self:Active(userId, slot, player, here) or not _FactionWarTownDocument:IsTown(destination) then return false end
+        if trigger.kind == "RETURN" then return trigger.move(destination) end
+        if not result.reliable then
+            log("[VRF][MatchFlow] landing after restore left in place user=" .. userId .. " town=" .. here .. "; the landing could not be read")
+            return false
+        end
+        -- The closed ticket delivers one arrival notice. Put live origin loss first without dropping the historical result.
+        local message = self:NoticeText(result.outcome, origin)
+        local originLost = destination ~= origin
+        if originLost then message = self:FallenNotice(origin) .. message end
+        local moved = false
+        if here == destination then
+            log("[VRF][MatchFlow] landing in place user=" .. userId .. " town=" .. destination)
+            -- A failed admission can also restore a war ticket here without any past battle to report.
+            if not originLost and result.outcome == nil then return false end
+            _FactionWar:ReceiveTownNotice(destination, message, userId)
+        else
+            moved = self:MoveAndNotify(userId, player, destination, message)
+            log("[VRF][MatchFlow] landing after restore user=" .. userId .. " from=" .. here .. " to=" .. destination .. " moved=" .. tostring(moved))
+        end
+        if moved or here == destination then
+            log("[VRF][MatchFlow] landing notice user=" .. userId .. " town=" .. destination .. " originLost=" .. tostring(originLost) .. " recorded=" .. tostring(result.outcome ~= nil))
+        end
+        return moved
+    end
+
+    method string NoticeText(any outcome, string origin)
+        -- Report the historical town effect, not current ownership, the landing town, or a player's win/loss.
+        local names = _FactionWarTownDocument.TownNames
+        if outcome == nil or outcome.loser == nil or names[outcome.loser] == nil then return "上一場對戰已結束。" end
+        -- The colour is the town's side for the player who departed from origin: a flipped loser is now the winner's, an unflipped one still belongs to the loser.
+        local winnerIsOrigin = outcome.winner == origin
+        local doc = _FactionWarTownDocument
+        if outcome.flipped and winnerIsOrigin then return "上一場戰果：奪下" .. doc:StanceName(outcome.loser, "ally") .. "。" end
+        if outcome.flipped then return "上一場戰果：" .. doc:StanceName(outcome.loser, "enemy") .. "已易主。" end
+        return "上一場戰果：" .. doc:StanceName(outcome.loser, winnerIsOrigin and "enemy" or "ally") .. "兵力降至" .. tostring(outcome.strength) .. "。"
+    end
+
+    @ExecSpace("ServerOnly")
+    method void OnEndPlay()
+        -- Invalidate any coroutine still waiting on this room's placement.
+        self._T.slots = {}
+    end
+
+    @ExecSpace("ServerOnly")
+    @EventSender("Service", "UserService")
+    handler HandleUserLeaveEvent(UserLeaveEvent event)
+        -- A departed player's pending placement must never act on a later entity.
+        self._T.slots[event.UserId] = nil
+    end
+end

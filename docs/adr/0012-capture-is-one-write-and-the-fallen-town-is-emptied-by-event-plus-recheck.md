@@ -1,14 +1,18 @@
 # 奪城是一次文件寫入；失守城鎮用靜態房事件加動作時複查來清空
 
-兵力降到零的那場戰果，與「該城換旗並回滿 100」是同一次寫入。`FactionWarAttack.Settle` 在 `Attempt` 裡算出 `remaining = 兵力 - 扣除量`，`<= 0` 時把該城寫成 `{ owner = 勝方城鎮目前的歸屬, strength = FullStrength(100) }`，其餘城鎮原樣複製，整份城鎮文件只寫一次（#107 當時是 `WriteTowns`；#108 起改為比較並寫入的 `SwapTowns`，見 ADR 0013）。儲存的兵力仍不可能是 0：`FactionWar.DecodeTowns` 依舊拒收 `< 1` 或 `> 100`，也依舊把兩座主城強制讀成 `RED/100`、`BLUE/100`，所以主城即使被誤寫也不會讀回易主。主城的「永不扣兵、永不易主」仍由 `Deduction` 回傳 0、`Settle` 以 `NO_CHANGE` 結束而不碰儲存來保證。
+> 後續重構只調整程式分工：`FactionWarTownDocument` 管城鎮文件；`FactionWarLanding:Judge` 的 `CHECK` 接手下文的 `Enforce`、`Recheck` 與 `Evict`。失城事件仍由 `FactionWar` 掃描，取消等待票券後仍重讀城鎮文件再決定是否撤離。落點檢查槽與登入共用，見 ADR 0014。
+
+兵力降到零的那場戰果，與「該城換旗並回滿 100」是同一次寫入。`FactionWarAttack.Settle` 在 `Attempt` 裡算出 `remaining = 兵力 - 扣除量`，`<= 0` 時把該城寫成 `{ owner = 勝方城鎮目前的歸屬, strength = FullStrength(100) }`，其餘城鎮原樣複製，整份城鎮文件只寫一次（#107 當時是 `WriteTowns`；#108 起改為比較並寫入的 `SwapTowns`，見 ADR 0013）。儲存的兵力仍不可能是 0：`FactionWar.DecodeTowns` 依舊拒收 `< 1` 或 `> 100`，也依舊把兩座主城強制讀成 `A/100`、`B/100`（#125 之前是 `RED/100`、`BLUE/100`，舊值讀取時轉換，見 ADR 0018），所以主城即使被誤寫也不會讀回易主。主城的「永不扣兵、永不易主」仍由 `Deduction` 回傳 0、`Settle` 以 `NO_CHANGE` 結束而不碰儲存來保證。
 
 ## 戰果要能被重複取得
 
-`towns.settled` 由「比賽鍵字串清單」改為「每場一筆紀錄」：`{ k = 比賽鍵, w = 勝方城, l = 敗方城, s = 結算後敗方城兵力, o = 換旗後的歸屬（沒換旗為空字串） }`。`FactionWarAttack:EntryKey` 同時讀得懂舊的字串項目，舊文件不必遷移。重複送來的同一場戰果回 `DUPLICATE`，並帶出當初的 `s`、`o`，所以「寫入成功但回應遺失」之後的重試仍能知道這一場奪了城，後面的撤離與落點才不會漏掉。清單上限仍是 20 筆（`SettledHistory`），單筆約 110 位元組，整份文件預估約 2.4 KB，要低於一個儲存額度（4000 位元組）；`tests/faction_war_conquest_runtime_probe.lua` 寫滿 20 筆後會量並要求小於 4000。
+`towns.settled` 由「比賽鍵字串清單」改為「每場一筆紀錄」：`{ k = 比賽鍵, w = 勝方城, l = 敗方城, s = 結算後敗方城兵力, o = 換旗後的歸屬（沒換旗為空字串） }`。`FactionWarAttack:EntryKey` 同時讀得懂舊的字串項目，舊文件不必遷移。重複送來的同一場戰果回 `DUPLICATE`，並帶出當初的 `s`、`o`，所以「寫入成功但回應遺失」之後的重試仍能知道這一場奪了城，後面的撤離與城鎮戰果提示才不會漏掉。清單上限仍是 20 筆（`SettledHistory`），單筆約 110 位元組，整份文件預估約 2.4 KB，要低於一個儲存額度（4000 位元組）；`tests/faction_war_conquest_runtime_probe.lua` 寫滿 20 筆後會量並要求小於 4000。
 
 `Settle` 回報 `complete(status, detail, outcome)`：`detail` 仍是敗方城的新兵力（奪城時為 100），新增的 `outcome` 是 `{ status, winner, loser, amount, strength, flipped, owner }`。`SAVED` 與 `DUPLICATE` 的結果也記在 `FactionWarAttack._T.outcomes[比賽鍵]`，供這個房間裡之後按「返回」的玩家查詢。#109 起，房間沒有記住這場戰果時（玩家斷線重連、比賽房已被回收），`FactionWarAttack:OutcomeFrom` 從這份 `towns.settled` 紀錄重建同樣的結果，`Attempt` 的 `DUPLICATE` 回應與 `LandingFor` 共用它（見 ADR 0014 決定六）。這個形狀是為 #108（同時爭城）預留的。#108 的實際做法（ADR 0013）：回傳值不變，只多了 `EXEMPT` 一種 `status`（`flipped = false`）；「出戰時的換旗次數」放在城鎮文件每座城的 `e` 與配對的 `homeEpoch` / `awayEpoch`，不放進這份逐場紀錄。
 
 ## 落點：依戰果與即時歸屬，在玩家按「返回」時決定
+
+> 下文為 #107 的歷史落點規則，已由 ADR 0016 取代：奪城者同樣回出發城，只有出發城已不屬己方才回主城。仍先等結算、再看即時歸屬；原來的 5 秒記述不是目前的等待上限（見 ADR 0013 的 `LandingWaitSeconds`）。失城清掃不變。
 
 這取代 ADR 0010 的「有 `origin` 的票券回到出發城」。`MatchFlow:MoveHome` 對戰爭票券改問 `FactionWarAttack:LandingFor(userId, ticket)`，它回傳：奪下城鎮的那位玩家（`outcome.flipped` 且 `outcome.winner == 票券的 origin`）要去被奪下的城；其他人要回出發城；任何一個落點只要玩家的陣營此刻已不擁有，就改去自己陣營的主城。「此刻擁有」讀即時的城鎮文件，判斷由純規則 `FactionWar:Landing(faction, preferred, towns)` 做，不分真人戰或守衛戰。返回仍是玩家按結果畫面上的按鈕才發生，所以結果卡片與經驗值畫面不被打斷；「自動進城」指的是不必再走傳送門。按得比結算寫入還快時，`LandingFor` 先等 `_T.settling` 清掉（最多 5 秒）。讀不到陣營或城鎮文件時回到出發城，與先前行為相同，後面的複查會補正。
 

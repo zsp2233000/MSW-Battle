@@ -1,0 +1,284 @@
+@Logic
+script AbsentResult extends Logic
+
+    -- ADR 0017 / #122: the one result a player did not see because they were not in the match room when it settled.
+    -- Only the latest match is kept (a newer one replaces it) and a pressed 確定 clears it. The record is per player (profile) storage.
+    property string StorageKey = "AbsentResultV1"
+    property integer WriteAttempts = 3
+    property number ReadWaitSeconds = 5
+    property table ResultText = { WIN = "勝利", LOSE = "失敗", DRAW = "平手" }
+
+    @ExecSpace("ServerOnly")
+    method void OnBeginPlay()
+        -- Each room delivers to the players it holds; a delivery in flight is remembered so a repeated hint does not repeat the window.
+        self._T.delivered = {}
+        self._T.delivering = {}
+        self._T.again = {}
+        log("[VRF][AbsentResult] ready")
+    end
+
+    method table Compose(string kind, string matchKey, string result, any receipt)
+        -- The record for one match: kind WAR carries the settled war block (the same figures the result page shows), kind LOBBY only the result.
+        local record = { v = 1, id = matchKey, kind = kind, result = result }
+        if kind == "WAR" and type(receipt) == "table" then
+            local war = {}
+            for _, key in ipairs({ "origin", "target", "status", "conclusion", "originBefore", "originAfter", "targetBefore", "targetAfter", "capturedTown", "newOwner" }) do
+                war[key] = receipt[key]
+            end
+            record.war = war
+        end
+        return record
+    end
+
+    @ExecSpace("ServerOnly")
+    method any Decode(string raw)
+        -- The stored record, a { id, cleared } marker for one the player confirmed, or nil for anything unreadable.
+        local ok, record = pcall(function() return _HttpService:JSONDecode(raw) end)
+        if not ok or type(record) ~= "table" or record.v ~= 1 or type(record.id) ~= "string" or record.id == "" then return nil end
+        if record.cleared == true then return { v = 1, id = record.id, cleared = true } end
+        if record.kind ~= "WAR" and record.kind ~= "LOBBY" then return nil end
+        if record.result ~= "WIN" and record.result ~= "LOSE" and record.result ~= "DRAW" then return nil end
+        if record.kind == "WAR" and type(record.war) ~= "table" then return nil end
+        if record.kind == "WAR" and record.war.newOwner ~= nil then
+            -- ADR 0018: a stored retired colour id reads as A / B; a value that is no faction is dropped and the rest of the result stays readable.
+            record.war.newOwner = _FactionWarTownDocument:NormalizeFaction(record.war.newOwner)
+        end
+        return record
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Read(string profile, any complete)
+        -- complete(record, raw, readable): record is nil when nothing usable is stored; readable is false only when storage failed.
+        _FormationStorage:Read(profile, self.StorageKey, function(code, key, raw)
+            if _FactionWar:IsMissing(code, raw) then complete(nil, "", true) return end
+            if code ~= 0 then complete(nil, "", false) return end
+            complete(self:Decode(raw), raw, true)
+        end)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Write(string profile, table record, any complete)
+        -- A newer match replaces the stored one; writing the same match again changes nothing. A lost race is read and tried again.
+        local attempt = 0
+        local function try()
+            attempt = attempt + 1
+            self:Read(profile, function(current, raw, readable)
+                if not readable then complete(false) return end
+                if current ~= nil and current.id == record.id then complete(true) return end
+                _FormationStorage:Write(profile, self.StorageKey, raw, _HttpService:JSONEncode(record), function(code)
+                    if code == 0 then
+                        complete(true)
+                    elseif code == 2000000 and attempt < self.WriteAttempts then
+                        try()
+                    else
+                        log_error("[VRF][AbsentResult] write failed profile=" .. profile .. " match=" .. record.id .. " code=" .. tostring(code) .. " attempts=" .. tostring(attempt))
+                        complete(false)
+                    end
+                end)
+            end)
+        end
+        try()
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Clear(string profile, string matchKey, any complete)
+        -- Only the record of this very match is cleared; a newer match that replaced it stays. A lost race is read and tried again, like a write.
+        local attempt = 0
+        local function try()
+            attempt = attempt + 1
+            self:Read(profile, function(current, raw, readable)
+                if not readable then complete(false) return end
+                if current == nil or current.cleared == true or current.id ~= matchKey then complete(true) return end
+                _FormationStorage:Write(profile, self.StorageKey, raw, _HttpService:JSONEncode({ v = 1, id = matchKey, cleared = true }), function(code)
+                    if code == 0 then
+                        complete(true)
+                    elseif code == 2000000 and attempt < self.WriteAttempts then
+                        try()
+                    else
+                        log_error("[VRF][AbsentResult] clear failed profile=" .. profile .. " match=" .. matchKey .. " code=" .. tostring(code) .. " attempts=" .. tostring(attempt))
+                        complete(false)
+                    end
+                end)
+            end)
+        end
+        try()
+    end
+
+    @ExecSpace("ServerOnly")
+    method any RecordFor(string profile)
+        -- The stored record of this profile (a waiting one, or the marker of one already confirmed), or nil; waits a bounded time for storage.
+        local box = { done = false }
+        self:Read(profile, function(record)
+            box.record = record
+            box.done = true
+        end)
+        local waited = 0
+        while not box.done and waited < self.ReadWaitSeconds do
+            wait(0.1)
+            waited = waited + 0.1
+        end
+        return box.record
+    end
+
+    @ExecSpace("ServerOnly")
+    method any PendingFor(string profile)
+        -- The unconfirmed record of this profile, or nil.
+        local record = self:RecordFor(profile)
+        if record == nil or record.cleared == true then return nil end
+        return record
+    end
+
+    @ExecSpace("ServerOnly")
+    method string Standing(string profile, string matchKey)
+        -- Where this very match stands in the player's record: PENDING (waiting to be seen), CLEARED (seen or confirmed), or "" (it is not the stored match).
+        -- The ticket of a match the player never entered ends because of the first, and of the second when nothing but the ticket is left.
+        if profile == "" or (matchKey or "") == "" then return "" end
+        local record = self:RecordFor(profile)
+        if record == nil or record.id ~= matchKey then return "" end
+        return record.cleared == true and "CLEARED" or "PENDING"
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Announce(string profile, string matchKey)
+        -- The static room of this world instance hears it directly (or here, when the match ends in a static room), every other instance through the world-instance event.
+        if _RoomService:IsInstanceRoom() then
+            local roomEvent = AbsentResultEvent()
+            roomEvent.Profile = profile
+            roomEvent.MatchKey = matchKey
+            _RoomService:RequestSendEventToRoomAsync(roomEvent, _RoomService.StaticRoomKey, function(code)
+                log("[VRF][AbsentResult] announced room=" .. tostring(code == SendEventRequestResultCode.OK) .. " profile=" .. profile)
+            end)
+        else
+            self:Notify(profile, matchKey)
+        end
+        local event = AbsentResultEvent()
+        event.Profile = profile
+        event.MatchKey = matchKey
+        _WorldInstanceService:RequestSendEventToAllWorldInstancesAsync(event, function(code)
+            log("[VRF][AbsentResult] announced instances=" .. tostring(code == SendEventRequestResultCode.OK) .. " profile=" .. profile)
+        end)
+    end
+
+    @ExecSpace("ServerOnly")
+    @EventSender("Service", "RoomService")
+    handler HandleRoomAbsentResult(AbsentResultEvent event)
+        -- From a match room of this world instance.
+        self:Notify(event.Profile, event.MatchKey)
+    end
+
+    @ExecSpace("ServerOnly")
+    @EventSender("Service", "WorldInstanceService")
+    handler HandleInstanceAbsentResult(AbsentResultEvent event)
+        -- From another world instance (this instance's own announcement already arrived as a room event; delivering twice is harmless).
+        self:Notify(event.Profile, event.MatchKey)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Notify(string profile, string matchKey)
+        -- A match this profile never saw has settled. Only the static room holds the towns and the lobby, where an online absent player stands.
+        if _RoomService:IsInstanceRoom() then return end
+        local ids = {}
+        for _, user in ipairs(_UserService.UserEntities.Values) do
+            if isvalid(user) and isvalid(user.PlayerComponent) and user.PlayerComponent.ProfileCode == profile then table.insert(ids, user.PlayerComponent.UserId) end
+        end
+        for _, userId in ipairs(ids) do self:DeliverAfterSettle(userId) end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void Deliver(string userId)
+        -- A login or a reconnect: show the record that is waiting, once.
+        self:RunDelivery(userId, false)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void DeliverAfterSettle(string userId)
+        -- A match just settled without this player: its ticket ends first (Recover reads this very record), then the window shows once.
+        self:RunDelivery(userId, true)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void RunDelivery(string userId, boolean recover)
+        local player = _MatchFlow:Player(userId)
+        if player == nil or _RoomService:IsInstanceRoom() then return end
+        if self._T.delivering[userId] then
+            -- A delivery is reading the record right now; what this call announces may have been written after that read, so it goes round once more.
+            self._T.again[userId] = self._T.again[userId] == true or recover
+            return
+        end
+        self._T.delivering[userId] = true
+        local ok, failure = pcall(function()
+            if recover then
+                _MatchFlow:HintSettled(userId)
+                _MatchFlow:Recover(userId)
+            end
+            local profile = player.PlayerComponent.ProfileCode
+            local record = self:PendingFor(profile)
+            if record == nil or self._T.delivered[userId] == record.id or _MatchFlow:Player(userId) ~= player then return end
+            self._T.delivered[userId] = record.id
+            log("[VRF][AbsentResult] deliver user=" .. userId .. " match=" .. record.id .. " kind=" .. record.kind .. " result=" .. record.result)
+            self:ReceiveAbsentResult(record, userId)
+        end)
+        self._T.delivering[userId] = nil
+        if not ok then log_error("[VRF][AbsentResult] deliver failed user=" .. userId .. " " .. tostring(failure)) end
+        local again = self._T.again[userId]
+        if again ~= nil then
+            self._T.again[userId] = nil
+            log("[VRF][AbsentResult] deliver again user=" .. userId .. " recover=" .. tostring(again))
+            self:RunDelivery(userId, again)
+        end
+    end
+
+    @ExecSpace("ServerOnly")
+    @EventSender("Service", "UserService")
+    handler HandleUserReconnectEvent(UserReconnectEvent event)
+        -- A reconnected client starts with no window, so a record still waiting is shown again.
+        self._T.delivered[event.UserId] = nil
+        self:Deliver(event.UserId)
+    end
+
+    @ExecSpace("ServerOnly")
+    @EventSender("Service", "UserService")
+    handler HandleUserLeaveEvent(UserLeaveEvent event)
+        self._T.delivered[event.UserId] = nil
+        self._T.again[event.UserId] = nil
+    end
+
+    @ExecSpace("Client")
+    method void ReceiveAbsentResult(table record)
+        _AbsentResultUI:Show(record)
+    end
+
+    @ExecSpace("Server")
+    method void RequestAcknowledge(string matchKey)
+        -- The player pressed 確定: the record of that match is cleared and never shown again.
+        local userId = senderUserId
+        local player = _MatchFlow:Player(userId)
+        if player == nil then return end
+        local profile = player.PlayerComponent.ProfileCode
+        self:Clear(profile, matchKey, function(cleared)
+            log("[VRF][AbsentResult] acknowledged user=" .. userId .. " match=" .. matchKey .. " cleared=" .. tostring(cleared))
+        end)
+    end
+
+    method string StrengthLine(string town, any before, any after, boolean unchanged, string stance)
+        -- One line of the war block: the highlighted town and its strength before and after (or unchanged).
+        local strength = unchanged and "兵力不變"
+            or ("兵力 " .. (before == nil and "—" or string.format("%d", before)) .. " → " .. (after == nil and "—" or string.format("%d", after)))
+        return _FactionWarTownDocument:StanceName(town, stance) .. "　" .. strength
+    end
+
+    method table Present(table record)
+        -- What the window shows: the title and the result for every match, the two towns' strengths and the conclusion for a war match; never experience.
+        local view = { title = "上一場對戰結果", resultText = self.ResultText[record.result] or "", result = record.result, rows = {}, conclusion = "", war = false }
+        local war = record.kind == "WAR" and record.war or nil
+        if war == nil then return view end
+        view.title = "上一場戰果"
+        view.war = true
+        local unchanged = (war.status == "NO_CHANGE" and war.conclusion == "未易主") or war.status == "SKIPPED"
+        if unchanged or war.status == "SAVED" or war.status == "DUPLICATE" then
+            view.rows = { self:StrengthLine(war.origin, war.originBefore, war.originAfter, unchanged, "ally"), self:StrengthLine(war.target, war.targetBefore, war.targetAfter, unchanged, "enemy") }
+        end
+        view.conclusion = _FactionWarTownDocument:ColoredConclusion(war.conclusion or "", war)
+        return view
+    end
+end

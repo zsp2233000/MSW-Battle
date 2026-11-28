@@ -12,24 +12,24 @@
 local STORAGE = "CountryWarProbe109V1"
 local TOWN_KEY = "CountryWarProbe109TownV1"
 local PROFILE = "wp2621"
-local originalStorage, originalKey, originalReady = _FactionWar.TownStorageName, _FactionWar.TownKey, _FactionWar.LoginReadySeconds
+local originalStorage, originalKey, originalReady = _FactionWarTownDocument.TownStorageName, _FactionWar.TownKey, _FactionWarLanding.LoginReadySeconds
 local function await(predicate, tries)
     for _ = 1, tries or 100 do if predicate() then return true end wait(0.1) end
     return false
 end
 local function readRaw()
     local towns, raw, done = nil, nil, false
-    _FactionWar:ReadTownsRaw(function(t, r) towns, raw, done = t, r, true end)
+    _FactionWarTownDocument:ReadTownsRaw(function(t, r) towns, raw, done = t, r, true end)
     assert(await(function() return done end), "town read answered")
     return towns, raw
 end
 local function write(towns)
     local saved = false
-    _FactionWar:WriteTowns(towns, function(ok) saved = ok end)
+    _FactionWarTownDocument:WriteTowns(towns, function(ok) saved = ok end)
     assert(await(function() return saved end), "town write confirmed")
 end
 local function seed(owners, strengths, settled)
-    local towns = _FactionWar:InitialTowns()
+    local towns = _FactionWarTownDocument:InitialTowns()
     for id, owner in pairs(owners or {}) do towns[id].owner = owner end
     for id, strength in pairs(strengths or {}) do towns[id].strength = strength end
     -- The engine's JSONEncode rejects an empty table, so an empty history is stored as no field at all.
@@ -52,70 +52,70 @@ local function has(text, part) return string.find(text, part, 1, true) ~= nil en
 
 local ok, reason = pcall(function()
     local war, attack, flow = _FactionWar, _FactionWarAttack, _MatchFlow
-    war.TownStorageName = STORAGE
+    _FactionWarTownDocument.TownStorageName = STORAGE
     war.TownKey = TOWN_KEY
-    war.LoginReadySeconds = 0.5
+    _FactionWarLanding.LoginReadySeconds = 0.5
 
     -- OutcomeFrom: pure, rebuilt from the record { k, w, l, s, o }.
-    local board = war:InitialTowns()
+    local board = _FactionWarTownDocument:InitialTowns()
     board.settled = {
-        { k = "r109-flip", w = "zuoying", l = "gushan", s = 100, o = "RED" },
+        { k = "r109-flip", w = "zuoying", l = "gushan", s = 100, o = "A" },
         { k = "r109-hit", w = "zuoying", l = "gushan", s = 80, o = "" },
         "r109-legacy",
     }
     local encoded = _HttpService:JSONEncode(board)
-    local flip = attack:OutcomeFrom(board, "r109-flip")
-    assert(flip ~= nil and flip.flipped == true and flip.owner == "RED" and flip.winner == "zuoying" and flip.loser == "gushan" and flip.strength == 100, "a capture is rebuilt with its winner, loser, owner and refilled strength")
-    local hit = attack:OutcomeFrom(board, "r109-hit")
+    local flip = _FactionWarTownDocument:OutcomeFrom(board, "r109-flip")
+    assert(flip ~= nil and flip.flipped == true and flip.owner == "A" and flip.winner == "zuoying" and flip.loser == "gushan" and flip.strength == 100, "a capture is rebuilt with its winner, loser, owner and refilled strength")
+    local hit = _FactionWarTownDocument:OutcomeFrom(board, "r109-hit")
     assert(hit ~= nil and hit.flipped == false and hit.owner == "" and hit.strength == 80 and hit.loser == "gushan", "a deduction is rebuilt without a capture")
-    local legacy = attack:OutcomeFrom(board, "r109-legacy")
+    local legacy = _FactionWarTownDocument:OutcomeFrom(board, "r109-legacy")
     assert(legacy ~= nil and legacy.flipped == false and legacy.loser == "" and legacy.status == "DUPLICATE", "a bare key says the match was settled and nothing else")
-    assert(attack:OutcomeFrom(board, "r109-absent") == nil, "no record reads as no capture")
-    assert(attack:OutcomeFrom(nil, "r109-flip") == nil and attack:OutcomeFrom({}, "r109-flip") == nil and attack:OutcomeFrom(board, "") == nil, "a missing board, history or key rebuilds nothing")
+    assert(_FactionWarTownDocument:OutcomeFrom(board, "r109-absent") == nil, "no record reads as no capture")
+    assert(_FactionWarTownDocument:OutcomeFrom(nil, "r109-flip") == nil and _FactionWarTownDocument:OutcomeFrom({}, "r109-flip") == nil and _FactionWarTownDocument:OutcomeFrom(board, "") == nil, "a missing board, history or key rebuilds nothing")
     assert(_HttpService:JSONEncode(board) == encoded, "the reader changed nothing")
 
     -- NoticeText: what the record says, and no claim about who won.
     local origin = "zuoying"
-    assert(has(attack:NoticeText(flip, origin), "奪下") and has(attack:NoticeText(flip, origin), "鼓山"), "the conqueror's town is told the capture")
-    assert(has(attack:NoticeText(flip, "gushan"), "易主"), "any other town is told the flag changed")
-    assert(has(attack:NoticeText(hit, origin), "80") and has(attack:NoticeText(hit, origin), "鼓山"), "a deduction names the town and its strength")
-    assert(has(attack:NoticeText(nil, origin), "已結束") and has(attack:NoticeText(legacy, origin), "已結束"), "no record or a bare key only says the match is over")
-    for _, text in ipairs({ attack:NoticeText(flip, origin), attack:NoticeText(hit, origin), attack:NoticeText(nil, origin) }) do
+    assert(has(_FactionWarLanding:NoticeText(flip, origin), "奪下") and has(_FactionWarLanding:NoticeText(flip, origin), "鼓山"), "the conqueror's town is told the capture")
+    assert(has(_FactionWarLanding:NoticeText(flip, "gushan"), "易主"), "any other town is told the flag changed")
+    assert(has(_FactionWarLanding:NoticeText(hit, origin), "80") and has(_FactionWarLanding:NoticeText(hit, origin), "鼓山"), "a deduction names the town and its strength")
+    assert(has(_FactionWarLanding:NoticeText(nil, origin), "已結束") and has(_FactionWarLanding:NoticeText(legacy, origin), "已結束"), "no record or a bare key only says the match is over")
+    for _, text in ipairs({ _FactionWarLanding:NoticeText(flip, origin), _FactionWarLanding:NoticeText(hit, origin), _FactionWarLanding:NoticeText(nil, origin) }) do
         assert(not has(text, "勝利") and not has(text, "落敗") and not has(text, "平手"), "the notice claims no win or loss")
     end
 
     -- Landing for a login: home if the faction holds it (again), else the capital; no faction, no landing.
-    local rules = war:InitialTowns()
-    assert(war:Landing("RED", "zuoying", rules) == "zuoying", "friendly: home")
-    rules.zuoying.owner = "BLUE"
+    local rules = _FactionWarTownDocument:InitialTowns()
+    assert(_FactionWarTownDocument:Landing("A", "zuoying", rules) == "zuoying", "friendly: home")
+    rules.zuoying.owner = "B"
     rules.zuoying.e = 1
-    assert(war:Landing("RED", "zuoying", rules) == "nanzih", "fallen: the capital")
-    rules.zuoying.owner = "RED"
+    assert(_FactionWarTownDocument:Landing("A", "zuoying", rules) == "nanzih", "fallen: the capital")
+    rules.zuoying.owner = "A"
     rules.zuoying.e = 2
-    assert(war:Landing("RED", "zuoying", rules) == "zuoying", "fallen and retaken (count +2, same owner): home")
-    assert(war:Landing("", "zuoying", rules) == "", "no faction: nowhere")
-    assert(war:Landing("BLUE", "zuoying", rules) == "yancheng", "the other faction at a town it does not own: its capital")
+    assert(_FactionWarTownDocument:Landing("A", "zuoying", rules) == "zuoying", "fallen and retaken (count +2, same owner): home")
+    assert(_FactionWarTownDocument:Landing("", "zuoying", rules) == "", "no faction: nowhere")
+    assert(_FactionWarTownDocument:Landing("B", "zuoying", rules) == "yancheng", "the other faction at a town it does not own: its capital")
     log("[VRF][FactionWarReconnect] rules ok")
 
     -- OutcomeFrom against stored documents: a repeat answers the same capture, nothing is written, a record falls out of the capped history.
     seed({}, { gushan = 20 })
     local status, strength, outcome = settle("r109-m1", "zuoying", "gushan", "WIN")
-    assert(status == "SAVED" and outcome.flipped == true and outcome.owner == "RED" and strength == 100, "the first delivery captures Gushan")
+    assert(status == "SAVED" and outcome.flipped == true and outcome.owner == "A" and strength == 100, "the first delivery captures Gushan")
     local towns, before = readRaw()
-    local rebuilt = attack:OutcomeFrom(towns, "r109-m1")
-    assert(rebuilt ~= nil and rebuilt.flipped == true and rebuilt.winner == "zuoying" and rebuilt.loser == "gushan" and rebuilt.owner == "RED" and rebuilt.strength == 100, "the stored record rebuilds the capture")
+    local rebuilt = _FactionWarTownDocument:OutcomeFrom(towns, "r109-m1")
+    assert(rebuilt ~= nil and rebuilt.flipped == true and rebuilt.winner == "zuoying" and rebuilt.loser == "gushan" and rebuilt.owner == "A" and rebuilt.strength == 100, "the stored record rebuilds the capture")
     status, strength, outcome = settle("r109-m1", "zuoying", "gushan", "WIN")
-    assert(status == "DUPLICATE" and outcome.flipped == true and outcome.owner == "RED" and outcome.strength == 100, "the repeat answer is the same capture, through the shared reader")
+    assert(status == "DUPLICATE" and outcome.flipped == true and outcome.owner == "A" and outcome.strength == 100, "the repeat answer is the same capture, through the shared reader")
     local _, after = readRaw()
     assert(after == before, "reading and repeating wrote nothing")
     local old = {}
-    for index = 1, attack.SettledHistory do old[index] = { k = "r109-old" .. index, w = "zuoying", l = "gushan", s = 80, o = "" } end
+    for index = 1, _FactionWarTownDocument.SettledHistory do old[index] = { k = "r109-old" .. index, w = "zuoying", l = "gushan", s = 80, o = "" } end
     seed({}, {}, old)
     assert(settle("r109-new", "zuoying", "gushan", "WIN") == "SAVED", "a new result is stored")
     towns = readRaw()
-    assert(#towns.settled == attack.SettledHistory, "the history stays capped")
-    assert(attack:OutcomeFrom(towns, "r109-old1") == nil, "the oldest record fell out: it reads as no capture")
-    assert(attack:OutcomeFrom(towns, "r109-new") ~= nil, "the newest is there")
+    assert(#towns.settled == _FactionWarTownDocument.SettledHistory, "the history stays capped")
+    assert(_FactionWarTownDocument:OutcomeFrom(towns, "r109-old1") == nil, "the oldest record fell out: it reads as no capture")
+    assert(_FactionWarTownDocument:OutcomeFrom(towns, "r109-new") ~= nil, "the newest is there")
     log("[VRF][FactionWarReconnect] outcome ok")
 
     -- The last-town key.
@@ -174,18 +174,18 @@ local ok, reason = pcall(function()
     assert(flow:TransferAdapter():FindRoom("probe-109-room") ~= nil, "and the room is found again")
 
     -- One login, one placement: the enter and the reconnect event both ask; the second finds the first running and leaves it alone.
-    war.LoginReadySeconds = 1
-    _TimerService:SetTimerOnce(function() war:PlaceAtLogin("probe-109-nobody", "enter", false) end, 0.01)
+    _FactionWarLanding.LoginReadySeconds = 1
+    _TimerService:SetTimerOnce(function() _FactionWarLanding:Judge("probe-109-nobody", { kind = "LOGIN", cause = "enter", owned = false }) end, 0.01)
     wait(0.3)
-    local slot = war._T.placing["probe-109-nobody"]
-    assert(slot ~= nil and slot.cause == "enter", "the first placement holds the slot while it waits for an entity")
-    war:PlaceAtLogin("probe-109-nobody", "reconnect", false)
-    assert(war._T.placing["probe-109-nobody"] == slot, "the second ask did not take over")
-    assert(await(function() return war._T.placing["probe-109-nobody"] == nil end, 50), "a player who never appears releases the slot after the wait")
+    local slot = _FactionWarLanding._T.slots["probe-109-nobody"]
+    assert(slot ~= nil and slot.kind == "LOGIN", "the first placement holds the slot while it waits for an entity")
+    _FactionWarLanding:Judge("probe-109-nobody", { kind = "LOGIN", cause = "reconnect", owned = false })
+    assert(_FactionWarLanding._T.slots["probe-109-nobody"] == slot, "the second ask did not take over")
+    assert(await(function() return _FactionWarLanding._T.slots["probe-109-nobody"] == nil end, 50), "a player who never appears releases the slot after the wait")
     log("[VRF][FactionWarReconnect] flow seams ok")
 end)
 
-_FactionWar.TownStorageName, _FactionWar.TownKey, _FactionWar.LoginReadySeconds = originalStorage, originalKey, originalReady
+_FactionWarTownDocument.TownStorageName, _FactionWar.TownKey, _FactionWarLanding.LoginReadySeconds = originalStorage, originalKey, originalReady
 _FormationStorage:ConfigureMakerFaults(0, 0, 0)
 _MatchFaults:Remove()
 _MatchFlow._T.records["probe-109-early"] = nil

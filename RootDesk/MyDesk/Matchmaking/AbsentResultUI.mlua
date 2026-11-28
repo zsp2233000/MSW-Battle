@@ -1,0 +1,100 @@
+@Logic
+script AbsentResultUI extends Logic
+
+    -- The 上一場戰果 / 上一場對戰結果 window (#122), authored by assets/siege/build_absent_result_ui.cjs in ui/AbsentResultGroup.ui.
+    property string GroupPath = "/ui/AbsentResultGroup"
+    property number WarWindowHeight = 560
+    property number LobbyWindowHeight = 400
+    property string WinHex = "#FFD173"
+    property string LoseHex = "#E8998D"
+    property string DrawHex = "#BCBBBB"
+
+    @ExecSpace("ClientOnly")
+    method Entity Ui(string path)
+        return _EntityService:GetEntityByPath(self.GroupPath .. "/" .. path)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnBeginPlay()
+        self._T.bound = false
+        self._T.record = nil
+        self._T.queued = nil
+        self._T.confirm = nil
+        self._T.confirmKey = nil
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Show(table record)
+        -- The newest unconfirmed record wins; the window is drawn on the next update, once its entities exist.
+        self._T.queued = record
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnUpdate(number delta)
+        local popup = self:Ui("Popup")
+        if not isvalid(popup) then return end
+        if not self._T.bound then
+            local confirm = self:Ui("Popup/Window/Confirm")
+            if not isvalid(confirm) then return end
+            self._T.bound = true
+            self._T.confirm = confirm
+            self._T.confirmKey = confirm:ConnectEvent(ButtonClickEvent, function() self:Confirm() end)
+        end
+        local record = self._T.queued
+        if record == nil then return end
+        self._T.queued = nil
+        self:Render(popup, record)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void SetText(string path, string text)
+        local entity = self:Ui(path)
+        if isvalid(entity) then entity.TextGUIRendererComponent.Text = text end
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Render(Entity popup, table record)
+        -- Fill the window from the pure presentation: war results carry the two strengths and the conclusion, lobby results only win or lose.
+        local view = _AbsentResult:Present(record)
+        self._T.record = record
+        self:SetText("Popup/Window/Title", view.title)
+        self:SetText("Popup/Window/Result", view.resultText)
+        local hex = view.result == "WIN" and self.WinHex or (view.result == "LOSE" and self.LoseHex or self.DrawHex)
+        local result = self:Ui("Popup/Window/Result")
+        if isvalid(result) then result.TextGUIRendererComponent.FontColor = Color.FromHexCode(hex) end
+        local war = self:Ui("Popup/Window/War")
+        if isvalid(war) then war:SetEnable(view.war) end
+        local origin, target = self:Ui("Popup/Window/War/Origin"), self:Ui("Popup/Window/War/Target")
+        if isvalid(origin) then origin:SetEnable(#view.rows > 0) end
+        if isvalid(target) then target:SetEnable(#view.rows > 0) end
+        if #view.rows > 0 then
+            self:SetText("Popup/Window/War/Origin", view.rows[1])
+            self:SetText("Popup/Window/War/Target", view.rows[2])
+        end
+        self:SetText("Popup/Window/War/Conclusion", view.conclusion)
+        local window = self:Ui("Popup/Window")
+        if isvalid(window) then
+            local frame = window.UITransformComponent
+            frame.RectSize = Vector2(frame.RectSize.x, view.war and self.WarWindowHeight or self.LobbyWindowHeight)
+        end
+        popup:SetEnable(true)
+        log("[VRF][AbsentResultUI] shown match=" .. record.id .. " title=" .. view.title .. " result=" .. view.resultText .. " rows=" .. tostring(#view.rows))
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Confirm()
+        -- 確定: close at once and ask the server to forget the record; if that fails the window comes back at the next login.
+        local record = self._T.record
+        if record == nil then return end
+        self._T.record = nil
+        local popup = self:Ui("Popup")
+        if isvalid(popup) then popup:SetEnable(false) end
+        log("[VRF][AbsentResultUI] confirmed match=" .. record.id)
+        _AbsentResult:RequestAcknowledge(record.id)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void OnEndPlay()
+        if isvalid(self._T.confirm) and self._T.confirmKey ~= nil then self._T.confirm:DisconnectEvent(ButtonClickEvent, self._T.confirmKey) end
+    end
+end

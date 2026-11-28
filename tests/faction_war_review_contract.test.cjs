@@ -15,18 +15,6 @@ const storage = () => source('RootDesk/MyDesk/Formations/FormationStorage.mlua')
 const flow = () => source('RootDesk/MyDesk/Matchmaking/MatchFlow.mlua');
 const adr = prefix => source(`docs/adr/${fs.readdirSync('docs/adr').find(name => name.startsWith(prefix))}`);
 
-// Every early `return false` of `text` has a [VRF] log on the line before it (or on its own line).
-const silentReturns = text => {
-  const lines = text.split('\n');
-  const silent = [];
-  lines.forEach((line, index) => {
-    if (!/\breturn false\b/.test(line)) return;
-    if (/\[VRF\]/.test(line) || /\[VRF\]/.test(lines[index - 1] || '')) return;
-    silent.push(line.trim());
-  });
-  return silent;
-};
-
 // ---- S: standards ------------------------------------------------------------------------------------------------------------
 
 test('S1: the ADRs speak the glossary: 換旗次數 and 過期戰果, never 世代 / 失效戰果 / 免扣 as a name', () => {
@@ -46,14 +34,9 @@ test('S1: the ADRs speak the glossary: 換旗次數 and 過期戰果, never 世�
   assert.match(adr('0012'), /換旗次數/, 'ADR 0012 calls the per-town count 換旗次數');
 });
 
-test('S2: StorageOwner is a pure string builder, so it carries no ExecSpace', () => {
-  assert.ok(methods(war()).includes('StorageOwner'));
-  assert.doesNotMatch(war(), /@ExecSpace\("\w+"\)\n    method string StorageOwner\(/, 'pure helpers (IsTown, CapitalOf, EpochOf, StorageOwner) are untagged');
-});
-
 test('S3: the branches that used to return silently now say which one was taken', () => {
-  assert.deepEqual(silentReturns(body(war(), 'Evict')), [], 'every early return of Evict logs a [VRF] line first');
-  assert.match(body(attack(), 'ResolveLanding'), /origin == "" or not isvalid\(player\) then\n\s+log\("\[VRF\]\[FactionWarAttack\] landing skipped/, 'the landing logs why it returns the departure town untouched');
+  const landing = source('RootDesk/MyDesk/Formations/FactionWarLanding.mlua');
+  assert.match(body(landing, 'BattleDestination'), /\[VRF\]\[FactionWarAttack\] landing unreadable/);
   assert.match(body(ui(), 'ShowTownNotice'), /arrivalNotice = [^\n]*\n\s+log\("\[VRF\]\[FactionWar\] notice kept/, 'a notice kept for the destination town is logged');
 });
 
@@ -91,28 +74,11 @@ test('S6: a settlement keeps no attempts counter that nothing reads', () => {
 
 test('S7: shared rules are written once', () => {
   const text = attack();
-  // The flip count comes from the one default-zero rule.
-  assert.match(body(text, 'Attempt'), /e = _FactionWar:EpochOf\(towns, operation\.loser\) \+ 1/);
-  assert.doesNotMatch(body(text, 'Attempt'), /\.e or 0/, 'no second spelling of "a missing count is zero"');
-  // One definition of the full strength, owned by the module that owns the document rules.
-  assert.match(war(), /property integer FullStrength = 100\b/);
-  assert.doesNotMatch(text, /property integer FullStrength/, 'the attack module reads it from FactionWar');
-  assert.match(body(text, 'Attempt'), /strength = _FactionWar\.FullStrength/);
-  for (const name of ['DecodeTowns', 'InitialTowns']) {
-    assert.doesNotMatch(body(war(), name), /\b100\b/, `${name} has no literal 100`);
-    assert.match(body(war(), name), /self\.FullStrength/, `${name} uses the constant`);
-  }
   // The HUD asks the rule instead of repeating the two capitals.
   assert.doesNotMatch(ui(), /"nanzih"|"yancheng"/, 'the HUD names no town');
-  assert.match(body(ui(), 'ShowTownStatus'), /_FactionWarAttack:IsCapital\(town\)/);
-  // One bounded poll loop.
-  assert.ok(methods(text).includes('WaitWhile'));
-  assert.match(body(text, 'Await'), /self:WaitWhile\(/);
-  assert.match(body(text, 'ResolveLanding'), /self:WaitWhile\(/);
-  assert.doesNotMatch(body(text, 'ResolveLanding'), /wait\(0\.1\)/, 'the landing no longer repeats the loop');
-  // One "is the player still in that town" guard, used by the town status, the eviction and the NPC reads.
+  assert.match(body(ui(), 'ShowTownStatus'), /_FactionWarTownDocument:IsCapital\(town\)/);
+  // Town status and NPC reads revalidate their own reply; placement revalidates its slot separately.
   assert.ok(methods(war()).includes('StillIn'));
-  assert.match(body(war(), 'Evict'), /self:StillIn\(/);
   assert.match(body(war(), 'RequestTownStatus'), /self:StillIn\(/);
   assert.match(body(text, 'Resolve'), /_FactionWar:StillIn\(/);
   assert.doesNotMatch(text, /method boolean StillHere\(/, 'the attack module had its own copy');
@@ -129,34 +95,7 @@ test('S7: shared rules are written once', () => {
 
 // ---- C: spec correctness -----------------------------------------------------------------------------------------------------
 
-test('C1: a check that arrives while another runs is not dropped, and the running slot is always released', () => {
-  const text = war();
-  assert.match(text, /property number EnforceLeaseSeconds = \d+/, 'a slot that was never released expires');
-  const enforce = body(text, 'Enforce');
-  assert.match(enforce, /running\.again = town/, 'a request that finds a check running marks it to run again');
-  assert.doesNotMatch(enforce, /or self\._T\.evicting\[userId\] then return end/, 'it is no longer simply discarded');
-  assert.match(enforce, /EnforceLeaseSeconds \* 1000/, 'an old slot is taken over');
-  assert.match(enforce, /pcall\(function\(\) self:Evict\(/, 'an error inside the check cannot keep the slot');
-  assert.ok(enforce.indexOf('pcall(') < enforce.indexOf('self._T.evicting[userId] = nil\n'), 'the slot is cleared after the guarded call');
-  assert.match(enforce, /self\._T\.evicting\[userId\] ~= check then return end/, 'an abandoned or departed check does nothing late');
-  assert.match(enforce, /check\.again ~= nil and self:StillIn\(player, userId, check\.again\) then self:Recheck\(userId, check\.again\)/, 'the marked request runs once the check is over, unless the player already left that town');
-  assert.ok(methods(text).includes('Recheck'));
-  assert.match(body(text, 'Recheck'), /ReadTowns\([^]*self:Enforce\(userId, town, towns\)/, 'the second look is taken on a freshly read board, not on the one the request carried');
-  assert.match(text, /handler HandleUserLeaveEvent[^]*evicting\[event\.UserId\] = nil/, 'a leaver frees the slot');
-});
-
-test('C2: a player is moved only on the board read after the last yield, so a town taken back keeps its people', () => {
-  const evict = body(war(), 'Evict');
-  const vacate = evict.indexOf('_MatchFlow:Vacate(userId)');
-  const reread = evict.indexOf('ReadTowns(done)');
-  const second = evict.indexOf('self:Landing(faction, town, live)');
-  const move = evict.indexOf('self:Move(player, destination)');
-  assert.ok(vacate > -1 && reread > vacate, 'the board is read again after the cancellation has yielded');
-  assert.ok(second > reread && move > second, 'the destination is judged on that board, then the player moves');
-  assert.match(evict, /live == nil then[^]*return false/, 'a board that cannot be read again moves nobody');
-  assert.match(evict, /if destination == town then[^]*holds it again[^]*return false/, 'a retaken town keeps the player');
-  assert.ok(evict.indexOf('self:StillIn(') > reread && evict.indexOf('self:StillIn(') < move, 'the player is checked once more after the last yield');
-});
+// C1/C2 (concurrent checks, lost leases and retaken towns) run through Judge in the local suite and the Maker conquest probe.
 
 test('C3: Vacate tries again a bounded number of times for the passing ticket states', () => {
   const text = flow();
@@ -180,9 +119,10 @@ test('C4: Vacate cancels only a ticket still waiting for an opponent; a matched 
   for (const state of ['SAVING', 'COMMITTING', 'TRANSFER', 'IN_ROOM']) assert.doesNotMatch(waiting, new RegExp(state), `${state} is a match`);
   const vacate = body(text, 'Vacate').replace(/--.*$/gm, '');
   assert.match(vacate, /not self:IsWaiting\(ticket\)[^]*vacate held[^]*return false/, 'a matched ticket is refused without a cancellation');
-  assert.doesNotMatch(vacate, /CanCancel/, 'CanCancel also allows SAVING (the player\'s own button), so it does not decide here');
-  // The player's own cancel button keeps its reach (ADR 0011's accepted gap).
-  assert.match(body(source('RootDesk/MyDesk/Formations/FormationHandoff.mlua'), 'CanCancel'), /state == "SAVING"/);
+  assert.doesNotMatch(vacate, /CanCancel/, 'storage transition eligibility does not decide if a matchup exists');
+  const cancel = body(text, 'CancelForUser');
+  assert.match(cancel, /self:OpponentFound\(ticket\)[^]*CANCEL_MATCH_FOUND[^]*return end[^]*self:CancelMatching/, 'player cancellation uses the same recognized pairing boundary');
+  assert.match(body(text, 'OpponentFound'), /ticket\.guardPairing[^]*_MatchFlowState:IsEntering/, 'covers a guard claim and SAVING onward');
 });
 
 test('C5: the war board is read as soon as the pairing is known, before any wait that precedes the seal', () => {
@@ -200,26 +140,33 @@ test('C5: the war board is read as soon as the pairing is known, before any wait
   assert.match(matched, /ticket\.data == nil or ticket\.data\.state ~= "SAVING" then return end[^]*matched response deferred/, 'the ticket is re-checked after the reading yields, before the cancellation check');
 });
 
-test('C6: a lost race backs off with jitter and is bounded by time, not by a count a crowd can exhaust', () => {
-  const text = attack();
-  for (const name of ['ConflictRetrySeconds', 'ConflictBackoffCap', 'ConflictBudgetSeconds']) assert.match(text, new RegExp(`property number ${name} = `), `${name} is a property`);
-  assert.doesNotMatch(text, /SettleConflicts/, 'the old count of ten is gone');
-  assert.ok(methods(text).includes('ConflictDelay'));
-  assert.doesNotMatch(text, /@ExecSpace\("\w+"\)\n    method number ConflictDelay\(/, 'the delay rule is pure');
-  assert.match(body(text, 'ConflictDelay'), /2 \^ \(conflicts - 1\)/, 'the pause doubles');
-  assert.match(body(text, 'ConflictDelay'), /math\.min\(self\.ConflictBackoffCap/, 'up to a cap');
-  assert.match(body(text, 'ConflictDelay'), /\(0\.5 \+ 0\.5 \* roll\)/, 'with the upper half jittered');
-  const retry = body(text, 'Retry');
-  assert.match(retry, /ConflictDelay\(operation\.conflicts, _UtilLogic:RandomDouble\(\)\)/, 'every lost race draws its own jitter');
-  assert.match(retry, /ConflictBudgetSeconds/, 'the bound is elapsed time');
-  assert.match(retry, /\[VRF\]\[FactionWarAttack\] settle gave up/, 'giving up says so');
-  assert.match(body(text, 'Settle'), /started = DateTime\.UtcNow\.Elapsed/, 'the clock starts with the settlement');
-  assert.match(body(text, 'Settle'), /self\._T\.settling\[matchKey\] = operation/, 'a running settlement can be observed (and still reads as "settling")');
-  assert.match(text, /property number LandingWaitSeconds = (\d+)/, 'the landing wait is a property');
-  const landingWait = Number(text.match(/property number LandingWaitSeconds = (\d+)/)[1]);
-  const budget = Number(text.match(/property number ConflictBudgetSeconds = (\d+)/)[1]);
-  assert.ok(landingWait >= budget, 'a returning player outwaits a contended settlement, so the conqueror is placed with the finished outcome');
-  assert.match(body(text, 'Finish'), /conflicts = operation\.conflicts/, 'the outcome says how often the settlement lost a race');
+test('ADR 0016: glossary, supersession notes and shared battle landing agree on origin ownership', () => {
+  const glossary = source('CONTEXT.md');
+  assert.match(glossary, /\*\*奪城\*\*:\n[^\n]*不會因此進入新城[^\n]*回出發城[^\n]*不屬己方就回主城/);
+  for (const term of ['登入落點', '過期戰果']) {
+    assert.match(glossary, new RegExp(`\\*\\*${term}\\*\\*:\\n[^\\n]*出發城[^\\n]*回出發城[^\\n]*回己方主城`));
+  }
+  assert.match(adr('0016'), /每個人返回時都回出發城[^\n]*不屬己方，就回己方主城/);
+  assert.match(adr('0016'), /LandingWaitSeconds/);
+  for (const prefix of ['0010', '0012', '0013', '0014']) {
+    assert.match(adr(prefix), /由 ADR 0016 取代/, `ADR ${prefix} flags the superseded landing rule`);
+  }
+
+  const landing = source('RootDesk/MyDesk/Formations/FactionWarLanding.mlua');
+  const destination = body(landing, 'BattleDestination').replace(/--.*$/gm, '');
+  assert.match(destination, /IsSettling\(matchKey\)[^]*_FactionWarTownDocument:Landing\(faction, origin, board\)/);
+  assert.doesNotMatch(destination, /outcome\.(flipped|winner|loser)/, 'capture fields cannot pick where to land');
+  const rule = body(source('RootDesk/MyDesk/Formations/FactionWarTownDocument.mlua'), 'Landing');
+  assert.match(rule, /\.owner == faction then return[^]*return self:CapitalOf\(faction\)/);
+  assert.match(body(landing, 'PlaceAfterBattle'), /self:BattleDestination\([^]*if trigger\.kind == "RETURN" then return trigger\.move\(destination\)/);
+});
+
+test('C6: the return waits through the document conflict budget', () => {
+  const doc = source('RootDesk/MyDesk/Formations/FactionWarTownDocument.mlua');
+  const landing = source('RootDesk/MyDesk/Formations/FactionWarLanding.mlua');
+  const landingWait = Number(landing.match(/property number LandingWaitSeconds = (\d+)/)[1]);
+  const budget = Number(doc.match(/property number ConflictBudgetSeconds = (\d+)/)[1]);
+  assert.ok(landingWait >= budget, 'a returning player outwaits a contended settlement');
 });
 
 test('every C item has a probe step in the Maker probes', () => {
@@ -233,8 +180,8 @@ test('every C item has a probe step in the Maker probes', () => {
   assert.match(contest, /settle gave up|"FAILED"[^]*budget/i, 'C6: the time budget');
   const e2e = probe('faction_war_conquest_e2e_runtime_probe.lua');
   assert.match(e2e, /EVICTRACE/, 'C1 / C2: the check race and the double flip');
-  assert.match(e2e, /enforce queued|evicting/, 'C1: the second request while a check runs');
+  assert.match(e2e, /IsJudging/, 'C1: the second request while a check runs');
   assert.match(e2e, /EnforceLeaseSeconds/, 'C1: an old slot is taken over');
-  assert.match(e2e, /Evict\(/, 'C2: Evict on a board that was retaken');
-  assert.match(probe('faction_war_contest_e2e_runtime_probe.lua'), /snapshot/, 'C5: the tickets hold their first reading');
+  assert.match(e2e, /Judge\([^]*retaken-town check finished/, 'C2: Judge on a board that was retaken');
+  assert.match(probe('faction_war_contest_e2e_runtime_probe.lua'), /match.homeEpoch == 0 and match.awayEpoch == 0/, 'C5: each pairing carries the first reading of the board (the ticket drops its own snapshot once the match is committed)');
 });

@@ -1,4 +1,5 @@
--- client in matchprobe, with ConfigureMakerFaults(0, 1, 0) armed in that room after admission.
+-- client in matchprobe, with ConfigureMakerFaults(0, 1, 0) armed in that room once the result's experience saves have finished
+-- (MonsterLevelStorage writes use the same write fault: armed earlier, the first attempt of a profile's experience save takes it and the return save succeeds).
 -- Tests the return-save failure at the settled result; battle HUD verification has a separate probe.
 local function await(predicate)
     for _ = 1, 900 do if predicate() then return true end wait(0.1) end

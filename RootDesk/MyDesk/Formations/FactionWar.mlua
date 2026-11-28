@@ -3,43 +3,17 @@ script FactionWar extends Logic
 
     property string FactionKey = "CountryWarFactionV1"
     property string TownKey = "CountryWarTownV1"
-    property string TownStorageName = "CountryWarV1"
-    property string TownStorageKey = "Towns"
-    property table TownOrder = { "nanzih", "zuoying", "gushan", "yancheng" }
-    property table TownNames = { nanzih = "楠梓", zuoying = "左營", gushan = "鼓山", yancheng = "鹽埕" }
-    property table CapitalByFaction = { RED = "nanzih", BLUE = "yancheng" }
-    property integer FullStrength = 100
-    property number EnforceLeaseSeconds = 30
-    property number LoginReadySeconds = 5
 
     @ExecSpace("ServerOnly")
     method void OnBeginPlay()
         self._T.pending = {}
-        self._T.evicting = {}
         self._T.remembering = {}
-        self._T.placing = {}
         log("[VRF][FactionWar] ready")
     end
 
     method boolean IsTown(string name)
-        return self.TownNames[name] ~= nil
-    end
-
-    method string CapitalOf(string faction)
-        -- A capital never changes hands, so it is always a safe landing; an unknown faction has none.
-        return self.CapitalByFaction[faction] or ""
-    end
-
-    method string Landing(string faction, string preferred, any towns)
-        -- A player stands in the preferred town only while their faction owns it; every other case ends in their own capital.
-        if type(towns) == "table" and type(towns[preferred]) == "table" and towns[preferred].owner == faction then return preferred end
-        return self:CapitalOf(faction)
-    end
-
-    method number EpochOf(any towns, string id)
-        -- How many times the town has changed hands; a document written before #108 has no count and reads as zero.
-        if type(towns) ~= "table" or type(towns[id]) ~= "table" then return 0 end
-        return towns[id].e or 0
+        -- Keep town membership available to the world-entry and ticket flows.
+        return _FactionWarTownDocument:IsTown(name)
     end
 
     @ExecSpace("ServerOnly")
@@ -48,85 +22,9 @@ script FactionWar extends Logic
         return isvalid(player) and _UserService:GetUserEntityByUserId(userId) == player and player.CurrentMapName == town
     end
 
-    method boolean CanPass(string faction, string origin, string destination, table towns)
-        -- A gate leads only between two towns that both belong to the traveller's faction, judged on the live town table.
-        return towns[origin].owner == faction and towns[destination].owner == faction
-    end
-
-    @ExecSpace("ServerOnly")
-    method table InitialTowns()
-        return {
-            nanzih = { owner = "RED", strength = self.FullStrength },
-            zuoying = { owner = "RED", strength = self.FullStrength },
-            gushan = { owner = "BLUE", strength = self.FullStrength },
-            yancheng = { owner = "BLUE", strength = self.FullStrength }
-        }
-    end
-
-    @ExecSpace("ServerOnly")
-    method table DecodeTowns(string raw)
-        local ok, towns = pcall(function() return _HttpService:JSONDecode(raw) end)
-        if not ok or type(towns) ~= "table" then return nil end
-        for _, id in ipairs(self.TownOrder) do
-            local town = towns[id]
-            if type(town) ~= "table" or (town.owner ~= "RED" and town.owner ~= "BLUE")
-                or type(town.strength) ~= "number" or town.strength % 1 ~= 0
-                or town.strength < 1 or town.strength > self.FullStrength
-                or (town.e ~= nil and (type(town.e) ~= "number" or town.e % 1 ~= 0 or town.e < 0)) then return nil end
-        end
-        if towns.nanzih.owner ~= "RED" or towns.nanzih.strength ~= self.FullStrength
-            or towns.yancheng.owner ~= "BLUE" or towns.yancheng.strength ~= self.FullStrength then return nil end
-        return towns
-    end
-
     method boolean IsMissing(any code, any raw)
         -- A storage read that found nothing: the key is absent (1000002), or the read worked and returned no value.
         return code == 1000002 or (code == 0 and raw == nil)
-    end
-
-    method string StorageOwner()
-        -- The town document is a world-wide table; the storage boundary addresses it as "global:<name>".
-        return _FormationStorage.GlobalPrefix .. self.TownStorageName
-    end
-
-    @ExecSpace("ServerOnly")
-    method void ReadTownsRaw(any complete)
-        -- Read the town document together with its exact stored bytes (nil while nothing is stored yet); a swap names those bytes.
-        _FormationStorage:Read(self:StorageOwner(), self.TownStorageKey, function(code, key, raw)
-            if self:IsMissing(code, raw) then
-                complete(self:InitialTowns(), nil)
-            elseif code == 0 then
-                local towns = self:DecodeTowns(raw)
-                complete(towns, towns ~= nil and raw or nil)
-            else
-                complete(nil, nil)
-            end
-        end)
-    end
-
-    @ExecSpace("ServerOnly")
-    method void ReadTowns(any complete)
-        -- Every reader sees the same document the settlement works on.
-        self:ReadTownsRaw(function(towns, raw) complete(towns) end)
-    end
-
-    @ExecSpace("ServerOnly")
-    method void SwapTowns(any expected, table towns, any complete)
-        -- Replace the document only if it still holds exactly the bytes that were read (nil: only if still absent); complete("OK" | "CONFLICT" | "FAILED").
-        -- A conflict means another settlement wrote first (2000000 changed bytes, 1000007 another first creation in progress); the caller reads again.
-        _FormationStorage:Swap(self:StorageOwner(), self.TownStorageKey, expected or "", _HttpService:JSONEncode(towns), function(code)
-            local result = code == 0 and "OK" or ((code == 2000000 or code == 1000007) and "CONFLICT" or "FAILED")
-            log("[VRF][FactionWar] swap code=" .. tostring(code) .. " result=" .. result)
-            complete(result)
-        end)
-    end
-
-    @ExecSpace("ServerOnly")
-    method void WriteTowns(table towns, any complete)
-        -- Persist the whole town document unconditionally (seeding and test fixtures); a settlement never uses this, it swaps.
-        _DataStorageService:GetGlobalDataStorage(self.TownStorageName):SetAsync(self.TownStorageKey, _HttpService:JSONEncode(towns), function(code)
-            complete(code == 0)
-        end)
     end
 
     @ExecSpace("ServerOnly")
@@ -141,11 +39,14 @@ script FactionWar extends Logic
 
     @ExecSpace("ServerOnly")
     method string FindFrontline(string faction, table towns)
-        -- Search from the opposing end so a faction with two borders starts furthest from home.
-        for index = 1, #self.TownOrder do
-            local id = self.TownOrder[faction == "RED" and #self.TownOrder - index + 1 or index]
+        -- Search from the opposing end so a faction with two borders starts furthest from home:
+        -- the faction whose capital is the first town scans from the last town, the other faction from the first.
+        local order = _FactionWarTownDocument.TownOrder
+        local capitalIsFirst = _FactionWarTownDocument:CapitalOf(faction) == order[1]
+        for index = 1, #order do
+            local id = order[capitalIsFirst and #order - index + 1 or index]
             if towns[id].owner == faction then
-                for _, enemy in ipairs(self.TownOrder) do
+                for _, enemy in ipairs(order) do
                     if towns[enemy].owner ~= faction and isvalid(self:FindGate(id, enemy)) then return id end
                 end
             end
@@ -168,13 +69,13 @@ script FactionWar extends Logic
     end
 
     @ExecSpace("ServerOnly")
-    method void ReadProfileKey(string profile, string storageKey, any accepts, any complete)
-        -- One small per-profile value: "" when nothing was stored yet, the value itself when accepts(raw) says it is one, nil when storage failed or holds something else.
+    method void ReadProfileKey(string profile, string storageKey, any read, any complete)
+        -- One small per-profile value: "" when nothing was stored yet, read(raw) when storage returned a value (read gives the value to deliver, or nil for something that is not one), nil when storage failed.
         _FormationStorage:Read(profile, storageKey, function(code, stored, raw)
             if self:IsMissing(code, raw) then
                 complete("")
-            elseif code == 0 and accepts(raw) then
-                complete(raw)
+            elseif code == 0 then
+                complete(read(raw))
             else
                 complete(nil)
             end
@@ -183,14 +84,14 @@ script FactionWar extends Logic
 
     @ExecSpace("ServerOnly")
     method void ReadFaction(string profile, any complete)
-        -- The player's faction: "" when none was chosen yet, nil when storage failed or holds something that is no faction.
-        self:ReadProfileKey(profile, self.FactionKey, function(raw) return raw == "RED" or raw == "BLUE" end, complete)
+        -- The player's faction as A / B (a stored retired colour id is converted, ADR 0018): "" when none was chosen yet, nil when storage failed or holds something that is no faction.
+        self:ReadProfileKey(profile, self.FactionKey, function(raw) return _FactionWarTownDocument:NormalizeFaction(raw) end, complete)
     end
 
     @ExecSpace("ServerOnly")
     method void ReadTown(string profile, any complete)
         -- The last town the player stood in: "" when none was stored yet, nil when storage failed or holds something that is no town.
-        self:ReadProfileKey(profile, self.TownKey, function(raw) return self:IsTown(raw) end, complete)
+        self:ReadProfileKey(profile, self.TownKey, function(raw) return self:IsTown(raw) and raw or nil end, complete)
     end
 
     @ExecSpace("ServerOnly")
@@ -246,7 +147,7 @@ script FactionWar extends Logic
 
     @ExecSpace("Server")
     method void RequestEntry(string choice)
-        if choice ~= "" and choice ~= "RED" and choice ~= "BLUE" then return end
+        if choice ~= "" and not _FactionWarTownDocument:IsFaction(choice) then return end
         local userId = senderUserId
         local player = _UserService:GetUserEntityByUserId(userId)
         if not self:CanEnterFromLobby(player, userId) then
@@ -289,7 +190,7 @@ script FactionWar extends Logic
             end
             return
         end
-        self:ReadTowns(function(towns)
+        _FactionWarTownDocument:Read(function(towns)
             if not self:Finish(userId, player) then return end
             if not self:CanEnterFromLobby(player, userId) then self:ReceiveEntry("BLOCKED", userId) return end
             local destination = towns ~= nil and self:FindFrontline(faction, towns) or ""
@@ -322,20 +223,20 @@ script FactionWar extends Logic
         local gate = self:FindGate(origin, destination)
         if not self:NearGate(player, gate) then return end
         if _FactionWarAttack:IsEngaged(userId) then
-            self:ReceiveTownNotice(origin, "配對中請先取消配對再離開城鎮。", userId)
+            self:ReceiveTownNotice(origin, "請先完成目前的對局或配對操作，再離開城鎮。", userId)
             return
         end
         self._T.pending[userId] = player
         self:ReadFaction(player.PlayerComponent.ProfileCode, function(faction)
-            self:ReadTowns(function(towns)
+            _FactionWarTownDocument:Read(function(towns)
                 if not self:Finish(userId, player) or not self:NearGate(player, gate) then return end
                 if towns == nil or faction == nil then
                     self:ReceiveTownNotice(origin, "暫時無法讀取國戰資料，請再試一次。", userId)
-                elseif not self:CanPass(faction, origin, destination, towns) then
+                elseif not _FactionWarTownDocument:CanPass(faction, origin, destination, towns) then
                     self:ReceiveTownNotice(origin, "只能前往相連的己方城鎮。", userId)
                     log("[VRF][FactionWar] gate denied " .. origin .. " -> " .. destination)
                     -- A refusal inside a town the player no longer owns is also the moment to send them home.
-                    self:Enforce(userId, origin, towns)
+                    _FactionWarLanding:Judge(userId, { kind = "CHECK", town = origin, board = towns })
                 elseif self:Move(player, destination) then
                     log("[VRF][FactionWar] gate " .. origin .. " -> " .. destination)
                 else
@@ -401,181 +302,13 @@ script FactionWar extends Logic
         end
         log("[VRF][FactionWar] sweep town=" .. town .. " present=" .. tostring(#ids))
         if #ids == 0 then return end
-        self:ReadTowns(function(towns)
+        _FactionWarTownDocument:Read(function(towns)
             if towns == nil then
                 log("[VRF][FactionWar] sweep unreadable town=" .. town)
                 return
             end
-            for _, userId in ipairs(ids) do self:Enforce(userId, town, towns) end
+            for _, userId in ipairs(ids) do _FactionWarLanding:Judge(userId, { kind = "CHECK", town = town, board = towns }) end
         end)
-    end
-
-    @ExecSpace("ServerOnly")
-    method void Enforce(string userId, string town, table towns)
-        -- A player may stand in a town only while their faction owns it. One check runs per player; a request that arrives meanwhile
-        -- (its board may be newer than the one the running check holds) makes it run again afterwards, on a board read then.
-        local player = _UserService:GetUserEntityByUserId(userId)
-        if not isvalid(player) or not isvalid(player.PlayerComponent) or player.CurrentMapName ~= town then return end
-        -- A disconnected player is judged when they come back, on the board of that moment.
-        if _MatchFlow:IsOffline(userId) then
-            log("[VRF][FactionWar] enforce skipped offline user=" .. userId .. " town=" .. town .. "; judged when they reconnect")
-            return
-        end
-        local running = self._T.evicting[userId]
-        if running ~= nil and DateTime.UtcNow.Elapsed - running.started < self.EnforceLeaseSeconds * 1000 then
-            running.again = town
-            log("[VRF][FactionWar] enforce queued user=" .. userId .. " town=" .. town .. "; it runs again when the current check ends")
-            return
-        end
-        if running ~= nil then log("[VRF][FactionWar] enforce lease expired user=" .. userId .. "; the old check is abandoned") end
-        local check = { started = DateTime.UtcNow.Elapsed, again = nil }
-        self._T.evicting[userId] = check
-        self:ReadFaction(player.PlayerComponent.ProfileCode, function(faction)
-            -- A newer check (this one outlived its lease) or the player's departure owns the slot now.
-            if self._T.evicting[userId] ~= check then return end
-            -- Whatever happens inside the check, the slot is released.
-            local ok, failure = pcall(function() self:Evict(userId, player, town, faction, towns) end)
-            if not ok then log_error("[VRF][FactionWar] evict failed user=" .. userId .. " " .. tostring(failure)) end
-            self._T.evicting[userId] = nil
-            -- No second look is needed when the player already left the town that request was about.
-            if check.again ~= nil and self:StillIn(player, userId, check.again) then self:Recheck(userId, check.again) end
-        end)
-    end
-
-    @ExecSpace("ServerOnly")
-    method void Recheck(string userId, string town)
-        -- A request arrived while a check was running: judge the player once more on the board as it is now, not on the one that request carried.
-        self:ReadTowns(function(towns)
-            if towns == nil then
-                log("[VRF][FactionWar] recheck unreadable user=" .. userId .. " town=" .. town)
-                return
-            end
-            log("[VRF][FactionWar] recheck user=" .. userId .. " town=" .. town)
-            self:Enforce(userId, town, towns)
-        end)
-    end
-
-    @ExecSpace("ServerOnly")
-    method boolean Evict(string userId, Entity player, string town, any faction, table towns)
-        -- Send a player whose faction lost this town to their capital, releasing a waiting queue first; true only when they were moved.
-        -- towns decides whether a move is needed at all; the board is read again after the last yield, so a town that was taken and taken back keeps its people.
-        if faction == nil or faction == "" then
-            log("[VRF][FactionWar] evict skipped user=" .. userId .. " faction unknown")
-            return false
-        end
-        if self:Landing(faction, town, towns) == town then
-            log("[VRF][FactionWar] evict not needed user=" .. userId .. " town=" .. town)
-            return false
-        end
-        if not _MatchFlow:Vacate(userId) then
-            log("[VRF][FactionWar] evict held user=" .. userId .. " town=" .. town)
-            return false
-        end
-        -- The board that sent them away is older than the cancellation, which yielded.
-        local live = _FactionWarAttack:Await(function(done) self:ReadTowns(done) end)
-        if live == nil then
-            log("[VRF][FactionWar] evict unverified user=" .. userId .. " town=" .. town .. "; the board could not be read again")
-            return false
-        end
-        -- Both waits may have outlasted the player (or the server).
-        if not self:StillIn(player, userId, town) or _MatchFlow:IsOffline(userId) then
-            log("[VRF][FactionWar] evict dropped user=" .. userId .. " town=" .. town .. "; the player is no longer there or went offline")
-            return false
-        end
-        local destination = self:Landing(faction, town, live)
-        if destination == town then
-            log("[VRF][FactionWar] evict cancelled user=" .. userId .. " town=" .. town .. "; the faction holds it again")
-            return false
-        end
-        local moved = self:Move(player, destination)
-        log("[VRF][FactionWar] evicted user=" .. userId .. " from=" .. town .. " to=" .. destination .. " moved=" .. tostring(moved))
-        if moved then self:ReceiveTownNotice(destination, self.TownNames[town] .. "已失守，已撤回主城。", userId) end
-        return moved
-    end
-
-    @ExecSpace("ServerOnly")
-    method void PlaceAtLogin(string userId, string cause, boolean owned)
-        -- Judge once per login where the player belongs: a town they stand in is kept only while their faction holds it, and a fresh arrival in the lobby goes back to the last town.
-        -- owned says a ticket (a queue, a match room, a return) still has the player; the enter and the reconnect event of one login may both ask, the second finds the first running.
-        if _RoomService:IsInstanceRoom() then return end
-        if self._T.placing[userId] ~= nil then
-            log("[VRF][FactionWar] login placement already running user=" .. userId .. " cause=" .. cause)
-            return
-        end
-        local slot = { cause = cause }
-        self._T.placing[userId] = slot
-        local ok, failure = pcall(function() self:PlaceOnce(userId, cause, owned) end)
-        if not ok then log_error("[VRF][FactionWar] login placement failed user=" .. userId .. " " .. tostring(failure)) end
-        if self._T.placing[userId] == slot then self._T.placing[userId] = nil end
-    end
-
-    @ExecSpace("ServerOnly")
-    method void PlaceOnce(string userId, string cause, boolean owned)
-        -- The body of one placement. The login event can come before the entity has a map, so it polls for both first.
-        local player = nil
-        local ready = _FactionWarAttack:WaitWhile(function()
-            player = _UserService:GetUserEntityByUserId(userId)
-            return not (isvalid(player) and isvalid(player.PlayerComponent) and player.CurrentMapName ~= "")
-        end, self.LoginReadySeconds)
-        if not ready then
-            log("[VRF][FactionWar] login placement skipped user=" .. userId .. " cause=" .. cause .. "; the entity is not ready")
-            return
-        end
-        if _MatchFlow:IsOffline(userId) then
-            log("[VRF][FactionWar] login placement skipped user=" .. userId .. " cause=" .. cause .. "; offline, judged when they reconnect")
-            return
-        end
-        local profile = player.PlayerComponent.ProfileCode
-        local here = player.CurrentMapName
-        -- A ticket holds the player when the flow says so or when the handoff still locks the profile (a recovery that timed out or could not open its record).
-        local held = owned or _FormationHandoff:IsLockedForUser(userId)
-        if self:IsTown(here) then
-            -- Arriving anywhere in a town (a return from a match room, a reconnect) keeps it for the next login, then the usual check decides whether they may stay.
-            self:Remember(profile, here)
-            if held then
-                log("[VRF][FactionWar] login placement left to the ticket user=" .. userId .. " town=" .. here)
-                return
-            end
-            local board = _FactionWarAttack:Await(function(done) self:ReadTowns(done) end)
-            if board == nil then
-                log("[VRF][FactionWar] login placement unreadable user=" .. userId .. " town=" .. here .. "; judged at the next town action")
-                return
-            end
-            log("[VRF][FactionWar] login judged user=" .. userId .. " cause=" .. cause .. " town=" .. here)
-            self:Enforce(userId, here, board)
-            return
-        end
-        if cause ~= "enter" or here ~= "formationlobby" or held then
-            log("[VRF][FactionWar] login placement not needed user=" .. userId .. " cause=" .. cause .. " map=" .. here .. " owned=" .. tostring(owned) .. " held=" .. tostring(held))
-            return
-        end
-        local faction = _FactionWarAttack:Await(function(done) self:ReadFaction(profile, done) end)
-        local home = _FactionWarAttack:Await(function(done) self:ReadTown(profile, done) end)
-        if faction == nil or home == nil then
-            log("[VRF][FactionWar] login placement unreadable user=" .. userId .. " faction=" .. tostring(faction) .. " home=" .. tostring(home) .. "; the player stays in the lobby")
-            return
-        end
-        if faction == "" or home == "" then
-            log("[VRF][FactionWar] login placement not needed user=" .. userId .. " faction=" .. faction .. " home=" .. home .. "; no faction or no last town")
-            return
-        end
-        local towns = _FactionWarAttack:Await(function(done) self:ReadTowns(done) end)
-        if towns == nil then
-            log("[VRF][FactionWar] login placement unreadable user=" .. userId .. " the town table could not be read; the player stays in the lobby")
-            return
-        end
-        -- Each read yielded: the player may have moved on, left, or gone offline again.
-        if _MatchFlow:IsOffline(userId) or _UserService:GetUserEntityByUserId(userId) ~= player or player.CurrentMapName ~= here then
-            log("[VRF][FactionWar] login placement dropped user=" .. userId .. "; the player is no longer in the lobby")
-            return
-        end
-        local destination = self:Landing(faction, home, towns)
-        local moved = self:Move(player, destination)
-        log("[VRF][FactionWar] login placed user=" .. userId .. " faction=" .. faction .. " home=" .. home .. " destination=" .. destination .. " moved=" .. tostring(moved))
-        if moved then
-            local message = destination == home and ("已回到" .. self.TownNames[destination] .. "。") or (self.TownNames[home] .. "已失守，已撤回主城。")
-            self:ReceiveTownNotice(destination, message, userId)
-        end
     end
 
     @ExecSpace("Server")
@@ -584,12 +317,12 @@ script FactionWar extends Logic
         local player = _UserService:GetUserEntityByUserId(userId)
         if not isvalid(player) or not self:IsTown(player.CurrentMapName) then return end
         local town = player.CurrentMapName
-        self:ReadTowns(function(towns)
+        _FactionWarTownDocument:Read(function(towns)
             if not self:StillIn(player, userId, town) then return end
             local strength = towns ~= nil and tostring(towns[town].strength) or "讀取失敗"
             self:ReceiveTownStatus(town, strength, userId)
             -- Arriving in a town the player's faction no longer owns (a missed announcement, a late return) ends in their capital.
-            if towns ~= nil then self:Enforce(userId, town, towns) end
+            if towns ~= nil then _FactionWarLanding:Judge(userId, { kind = "CHECK", town = town, board = towns }) end
         end)
     end
 
@@ -612,7 +345,5 @@ script FactionWar extends Logic
     @EventSender("Service", "UserService")
     handler HandleUserLeaveEvent(UserLeaveEvent event)
         self._T.pending[event.UserId] = nil
-        self._T.evicting[event.UserId] = nil
-        self._T.placing[event.UserId] = nil
     end
 end

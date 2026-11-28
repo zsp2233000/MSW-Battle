@@ -1,10 +1,10 @@
 -- Maker end-to-end for #108 (two matches contest one town). Needs five virtual players, added in Play before running this in server_main:
---   add_virtual_player -profile_code wp2611 -nickname RedOne    (RED,  Zuoying, 3 tanks, home of match 1)
---   add_virtual_player -profile_code wp2612 -nickname BlueOne    (BLUE, Gushan,  1 tank,  away of match 1)
---   add_virtual_player -profile_code wp2613 -nickname RedTwo     (RED,  Zuoying, 3 tanks, home of match 2)
---   add_virtual_player -profile_code wp2614 -nickname BlueTwo    (BLUE, Gushan,  1 tank,  away of match 2)
---   add_virtual_player -profile_code wp2615 -nickname BlueIdle   (BLUE, Gushan,  stands still, must be sent home exactly once)
--- Writes the REAL town storage (Gushan starts at 20); STEP 9 deletes it. Keep the real player in formationlobby.
+--   add_virtual_player -profile_code wp2611 -nickname RedOne    (A,  Zuoying, 3 tanks, home of match 1)
+--   add_virtual_player -profile_code wp2612 -nickname BlueOne    (B, Gushan,  1 tank,  away of match 1)
+--   add_virtual_player -profile_code wp2613 -nickname RedTwo     (A,  Zuoying, 3 tanks, home of match 2)
+--   add_virtual_player -profile_code wp2614 -nickname BlueTwo    (B, Gushan,  1 tank,  away of match 2)
+--   add_virtual_player -profile_code wp2615 -nickname BlueIdle   (B, Gushan,  stands still, must be sent home exactly once)
+-- ADR 0016 updates: written, not run. Uses REAL local town storage (Gushan starts at 20); STEP 9 deletes it. Keep the real player in formationlobby.
 -- Steps are numbered; set STEP below, dispatch, wait for the line it announces.
 --   1 SETUP      server_main, ~90 s, wait "SETUP PASS"
 --   2 QUEUE1     server_main: RedOne -> Gushan, BlueOne -> Zuoying (pair 1), RedTwo -> Gushan, BlueTwo -> Zuoying (pair 2).
@@ -16,9 +16,9 @@
 --                experience do not move (DUPLICATE for the room that flipped, EXEMPT for the other). It cannot run after RETURN: the
 --                match room is recycled once its players have left. A redelivery without a room (the same match key, with and
 --                without the stamp, after the world moved on) is covered by faction_war_contest_runtime_probe.lua.
---   6 LANDING1   server_main: exactly one red player stands in Gushan (the conqueror), the other in Zuoying; both blue players and the idle
---                one stand in Yancheng; nobody is locked; both matches are in the blue players' monster-level history
---   7 QUEUE2     server_main: Gushan is put back to blue/60; the red player who stayed in Zuoying and the blue player who went to Yancheng
+--   6 LANDING1   server_main: both red players return to Zuoying; both blue players and the idle one stand in Yancheng; nobody is locked;
+--                both matches are in the blue players' monster-level history
+--   7 QUEUE2     server_main: Gushan is put back to blue/60; RedOne in Zuoying and BlueOne (moved back from Yancheng to Gushan)
 --                are paired (stamp Gushan = 0), then the document is rewritten as "taken and taken back" (blue, 60, counted twice)
 --   8 LANDING2   server_main, after STEP 4 in the new room: no deduction (Gushan still 60, counted twice), the red player stays in Zuoying,
 --                the blue player stays in Gushan (its own town again)
@@ -46,7 +46,7 @@ local function id(user)
 end
 local function readTowns()
     local towns, done = nil, false
-    _FactionWar:ReadTowns(function(result) towns, done = result, true end)
+    _FactionWarTownDocument:Read(function(result) towns, done = result, true end)
     assert(await(function() return done end, 100), "towns read")
     return towns
 end
@@ -82,16 +82,16 @@ local ok, reason = pcall(function()
         setup(r2, three)
         setup(b1, {{ monsterId = "monster_tank", x = -3.25, y = -1.25 }})
         setup(b2, {{ monsterId = "monster_tank", x = -3.25, y = -1.25 }})
-        for user, value in pairs({ [r1] = "RED", [r2] = "RED", [b1] = "BLUE", [b2] = "BLUE", [idle] = "BLUE" }) do
+        for user, value in pairs({ [r1] = "A", [r2] = "A", [b1] = "B", [b2] = "B", [idle] = "B" }) do
             local saved = false
             _FormationStorage:Write(user.PlayerComponent.ProfileCode, _FactionWar.FactionKey, "", value, function(code) saved = code == 0 end)
             await(function() return saved end, 100)
         end
         -- Gushan one win from falling; the guard must not claim a queued player before the two human matches are made.
-        local towns = _FactionWar:InitialTowns()
+        local towns = _FactionWarTownDocument:InitialTowns()
         towns.gushan.strength = 20
         local written = false
-        _FactionWar:WriteTowns(towns, function(saved) written = saved end)
+        _FactionWarTownDocument:WriteTowns(towns, function(saved) written = saved end)
         assert(await(function() return written end, 100), "Gushan seeded at 20")
         _FactionWarGuard.WaitSeconds = 600
         assert(_FactionWar:Move(r1, "zuoying") and _FactionWar:Move(r2, "zuoying") and _FactionWar:Move(b1, "gushan") and _FactionWar:Move(b2, "gushan") and _FactionWar:Move(idle, "gushan"), "moves dispatched")
@@ -100,38 +100,50 @@ local ok, reason = pcall(function()
         end), "players in their towns")
         log("[VRF][ContestE2E] SETUP PASS")
     elseif STEP == 2 then
+        -- The static room drops a player's ticket once the player is moved into the match room (about a second after the pair forms), so the
+        -- stamp and the match key are read here, right after each pair forms, not after both pairs are made. A ticket left over from an earlier
+        -- match (state RETURNED) still holds that match's pairing, so only a pairing with a NEW match key counts.
+        local stamps = {}
         local function pair(red, blue)
+            local previous = {}
+            for _, user in ipairs({ red, blue }) do previous[user] = (ticketData(user) or {}).matchKey end
             _FactionWarAttack:AttackFor(id(red), "gushan")
             assert(await(function() return _FactionWarAttack:IsEngaged(id(red)) end, 100), "red engaged")
             _FactionWarAttack:AttackFor(id(blue), "zuoying")
             assert(await(function() return _FactionWarAttack:IsEngaged(id(blue)) end, 100), "blue engaged")
             -- The pair must exist before the next ticket, or FIFO could pair a red with the wrong blue.
             assert(await(function() return _MatchFlow:StateForUser(id(red)) ~= "QUEUED" and _MatchFlow:StateForUser(id(blue)) ~= "QUEUED" end, 300), "pair formed")
+            -- Every ticket carries the stamp of the board it was paired on.
+            assert(await(function()
+                for _, user in ipairs({ red, blue }) do
+                    local data = ticketData(user)
+                    if data == nil or data.match == nil or data.matchKey == nil or data.matchKey == previous[user] then return false end
+                end
+                return true
+            end, 300), "both tickets hold the new pairing")
+            for _, user in ipairs({ red, blue }) do
+                -- The stamp in the pairing is the ticket's first reading of the board (the ticket drops its own copy once the match is committed).
+                local match = ticketData(user).match
+                assert(match.homeEpoch == 0 and match.awayEpoch == 0, "the pairing is stamped with Gushan and Zuoying at count zero, got " .. tostring(match.homeEpoch) .. "/" .. tostring(match.awayEpoch))
+                stamps[user] = ticketData(user).matchKey
+            end
         end
         pair(r1, b1)
         pair(r2, b2)
-        -- Every ticket carries the stamp of the board it was paired on, and the two matches are two different rooms.
-        assert(await(function() return ticketData(r1) ~= nil and ticketData(r1).match ~= nil and ticketData(b1) ~= nil and ticketData(b1).match ~= nil and ticketData(r2) ~= nil and ticketData(r2).match ~= nil and ticketData(b2) ~= nil and ticketData(b2).match ~= nil end, 300), "all four tickets hold their pairing")
-        for _, user in ipairs({ r1, b1, r2, b2 }) do
-            local match = ticketData(user).match
-            assert(match.homeEpoch == 0 and match.awayEpoch == 0, "the pairing is stamped with Gushan and Zuoying at count zero, got " .. tostring(match.homeEpoch) .. "/" .. tostring(match.awayEpoch))
-            -- The ticket keeps its first reading (a match that resumes after a cancellation never restamps).
-            local snapshot = _MatchFlow._T.records[id(user)].snapshot
-            assert(type(snapshot) == "table" and snapshot.home == 0 and snapshot.away == 0, "the ticket kept its first reading of the board")
-        end
-        assert(ticketData(r1).matchKey == ticketData(b1).matchKey and ticketData(r2).matchKey == ticketData(b2).matchKey and ticketData(r1).matchKey ~= ticketData(r2).matchKey, "two matches, two rooms")
-        log("[VRF][ContestE2E] QUEUED match1=" .. ticketData(r1).matchKey .. " match2=" .. ticketData(r2).matchKey .. "; wait for both results, then STEP 3")
+        -- The two matches are two different rooms.
+        assert(stamps[r1] == stamps[b1] and stamps[r2] == stamps[b2] and stamps[r1] ~= stamps[r2], "two matches, two rooms")
+        log("[VRF][ContestE2E] QUEUED match1=" .. stamps[r1] .. " match2=" .. stamps[r2] .. "; wait for both results, then STEP 3")
     elseif STEP == 3 then
         local towns
         assert(await(function()
             towns = readTowns()
-            return towns ~= nil and towns.gushan.owner == "RED" and towns.settled ~= nil
+            return towns ~= nil and towns.gushan.owner == "A" and towns.settled ~= nil
         end, 2000), "Gushan changed flag within 200 s")
         wait(5)
         towns = readTowns()
-        assert(towns.gushan.strength == 100 and _FactionWar:EpochOf(towns, "gushan") == 1, "refilled to 100 and counted once, got " .. tostring(towns.gushan.strength) .. "/" .. tostring(_FactionWar:EpochOf(towns, "gushan")))
+        assert(towns.gushan.strength == 100 and _FactionWarTownDocument:EpochOf(towns, "gushan") == 1, "refilled to 100 and counted once, got " .. tostring(towns.gushan.strength) .. "/" .. tostring(_FactionWarTownDocument:EpochOf(towns, "gushan")))
         assert(#towns.settled == 1, "only one match left a record, got " .. tostring(#towns.settled))
-        assert(towns.zuoying.strength == 100 and towns.zuoying.owner == "RED" and towns.nanzih.strength == 100 and towns.yancheng.strength == 100 and towns.yancheng.owner == "BLUE", "no other town moved")
+        assert(towns.zuoying.strength == 100 and towns.zuoying.owner == "A" and towns.nanzih.strength == 100 and towns.yancheng.strength == 100 and towns.yancheng.owner == "B", "no other town moved")
         assert(await(function() return idle.CurrentMapName == "yancheng" end, 300), "the idle blue player was sent to Yancheng")
         log("[VRF][ContestE2E] CAPTURE PASS flipping match=" .. tostring(towns.settled[1].k))
     elseif STEP == 4 then
@@ -159,17 +171,17 @@ local ok, reason = pcall(function()
         end
         log("[VRF][ContestE2E] REDELIVER PASS " .. key .. " status=" .. tostring(status) .. " flipped=" .. tostring(outcome.flipped))
     elseif STEP == 6 then
-        -- Expect: exactly one red player in Gushan (the conqueror), the other in Zuoying; both blue players and the idle one in Yancheng.
+        -- The actual capturer and the exempt A player both go back to their origin.
         assert(await(function()
             users = find()
             r1, b1, r2, b2, idle = users.wp2611, users.wp2612, users.wp2613, users.wp2614, users.wp2615
             return isvalid(r1) and isvalid(r2) and isvalid(b1) and isvalid(b2) and isvalid(idle)
-                and ((r1.CurrentMapName == "gushan" and r2.CurrentMapName == "zuoying") or (r1.CurrentMapName == "zuoying" and r2.CurrentMapName == "gushan"))
+                and r1.CurrentMapName == "zuoying" and r2.CurrentMapName == "zuoying"
                 and b1.CurrentMapName == "yancheng" and b2.CurrentMapName == "yancheng" and idle.CurrentMapName == "yancheng"
-        end, 600), "one conqueror advanced to Gushan, the other red player stayed, every blue player is in Yancheng")
+        end, 600), "both A players are in Zuoying and every B player is in Yancheng")
         for _, user in ipairs({ r1, b1, r2, b2, idle }) do assert(await(function() return not _FactionWarAttack:IsEngaged(id(user)) end), "unlocked") end
         local towns = readTowns()
-        assert(towns.gushan.owner == "RED" and towns.gushan.strength == 100, "the board is as the one flipping match left it")
+        assert(towns.gushan.owner == "A" and towns.gushan.strength == 100, "the board is as the one flipping match left it")
         -- Experience is independent of the town result: both blue players lost their tank and both matches are in their history.
         local keys = {}
         for _, user in ipairs({ b1, b2 }) do
@@ -184,46 +196,53 @@ local ok, reason = pcall(function()
         assert(keys[flipping] == true and credited == 2, "both matches, the exempt one too, were credited")
         log("[VRF][ContestE2E] LANDING1 PASS")
     elseif STEP == 7 then
-        -- Round two: Gushan is blue and at 60 again. The red player who stayed in Zuoying meets the blue player who went to Yancheng.
+        -- Round two: use fixed profiles so a player from the sidelines cannot satisfy the landing check.
         users = find()
-        r1, b1, r2, b2 = users.wp2611, users.wp2612, users.wp2613, users.wp2614
-        local red = r1.CurrentMapName == "zuoying" and r1 or r2
-        local blue = b1
-        local seeded = _FactionWar:InitialTowns()
+        local red, blue = users.wp2611, users.wp2612
+        assert(isvalid(red) and red.CurrentMapName == "zuoying" and isvalid(blue) and blue.CurrentMapName == "yancheng", "RedOne and BlueOne completed the first return")
+        local seeded = _FactionWarTownDocument:InitialTowns()
         seeded.gushan.strength = 60
         local written = false
-        _FactionWar:WriteTowns(seeded, function(saved) written = saved end)
+        _FactionWarTownDocument:WriteTowns(seeded, function(saved) written = saved end)
         assert(await(function() return written end, 100), "Gushan reset to blue/60")
         assert(_FactionWar:Move(blue, "gushan") and await(function() return blue.CurrentMapName == "gushan" end), "the blue player went to Gushan")
+        -- Both players still hold the ticket of round one (state RETURNED) with round one's pairing; only a pairing with a NEW match key is round two's.
+        local previous = { red = (ticketData(red) or {}).matchKey, blue = (ticketData(blue) or {}).matchKey }
         _FactionWarAttack:AttackFor(id(red), "gushan")
         assert(await(function() return _FactionWarAttack:IsEngaged(id(red)) end, 100), "red engaged")
         _FactionWarAttack:AttackFor(id(blue), "zuoying")
         assert(await(function() return _FactionWarAttack:IsEngaged(id(blue)) end, 100), "blue engaged")
         assert(await(function() return _MatchFlow:StateForUser(id(red)) ~= "QUEUED" and _MatchFlow:StateForUser(id(blue)) ~= "QUEUED" end, 300), "pair formed")
-        assert(await(function() return ticketData(red) ~= nil and ticketData(red).match ~= nil end, 300), "the red ticket holds its pairing")
-        assert(ticketData(red).match.awayEpoch == 0, "the pairing was stamped with Gushan at count zero")
+        -- The tickets read the board a moment AFTER the state leaves QUEUED (the read yields), and the pairing carries that reading once the match is
+        -- committed. Rewriting the board before that would make the pairing see the "taken and taken back" board and the match would not be exempt.
+        assert(await(function()
+            local redData, blueData = ticketData(red), ticketData(blue)
+            return redData ~= nil and redData.match ~= nil and redData.matchKey ~= nil and redData.matchKey ~= previous.red
+                and blueData ~= nil and blueData.match ~= nil and blueData.matchKey ~= nil and blueData.matchKey ~= previous.blue
+        end, 300), "both tickets hold the new pairing")
+        assert(ticketData(red).match.awayEpoch == 0 and ticketData(blue).match.awayEpoch == 0, "the pairing was stamped with Gushan at count zero")
         -- While the match is on, Gushan is taken and taken back: blue again, strength 60, counted twice.
-        local retaken = _FactionWar:InitialTowns()
+        local retaken = _FactionWarTownDocument:InitialTowns()
         retaken.gushan.strength = 60
         retaken.gushan.e = 2
         written = false
-        _FactionWar:WriteTowns(retaken, function(saved) written = saved end)
+        _FactionWarTownDocument:WriteTowns(retaken, function(saved) written = saved end)
         assert(await(function() return written end, 100), "Gushan rewritten as taken and taken back")
         log("[VRF][ContestE2E] ROUND 2 QUEUED red=" .. red.PlayerComponent.ProfileCode .. " blue=" .. blue.PlayerComponent.ProfileCode .. "; wait for the result, run STEP 4 inside the new match room, then STEP 8")
     elseif STEP == 8 then
         assert(await(function()
             users = find()
-            r1, b1, r2, b2 = users.wp2611, users.wp2612, users.wp2613, users.wp2614
-            local red = (r1.CurrentMapName == "zuoying" and r1) or (r2.CurrentMapName == "zuoying" and r2)
-            return isvalid(b1) and b1.CurrentMapName == "gushan" and red ~= nil and isvalid(red)
-        end, 1500), "the red player stayed in Zuoying and the blue player stayed in Gushan (its own town again)")
+            r1, b1 = users.wp2611, users.wp2612
+            return isvalid(r1) and r1.CurrentMapName == "zuoying" and not _FactionWarAttack:IsEngaged(id(r1))
+                and isvalid(b1) and b1.CurrentMapName == "gushan" and not _FactionWarAttack:IsEngaged(id(b1))
+        end, 1500), "RedOne returned to Zuoying and BlueOne returned to Gushan (its own town again); both unlocked")
         local towns = readTowns()
-        assert(towns.gushan.owner == "BLUE" and towns.gushan.strength == 60 and _FactionWar:EpochOf(towns, "gushan") == 2, "no strength was deducted: Gushan is still blue, 60, counted twice")
+        assert(towns.gushan.owner == "B" and towns.gushan.strength == 60 and _FactionWarTownDocument:EpochOf(towns, "gushan") == 2, "no strength was deducted: Gushan is still blue, 60, counted twice")
         assert(towns.zuoying.strength == 100 and towns.nanzih.strength == 100 and towns.yancheng.strength == 100, "no town lost strength")
         log("[VRF][ContestE2E] LANDING2 PASS")
     elseif STEP == 9 then
         _FactionWarGuard.WaitSeconds = 10
-        local code = _DataStorageService:DeleteGlobalDataStorageAndWait(_FactionWar.TownStorageName)
+        local code = _DataStorageService:DeleteGlobalDataStorageAndWait(_FactionWarTownDocument.TownStorageName)
         log("[VRF][ContestE2E] CLEANUP town storage deleted code=" .. tostring(code))
     end
 end)

@@ -5,12 +5,12 @@
 -- STEP 4 restores the storage name and deletes what the probe wrote. Final line of each STEP 2: [VRF][ReconnectLogin] <CASE> PASS.
 -- For every CASE in the table: STEP 1 (seed), then the console command in the table, then STEP 2 (check), then STEP 3 (kick). Set CASE and STEP below.
 --   CASE            profile  seeded                                              expected
---   FRIENDLY        wp2625   RED, last town Zuoying, Zuoying red                 lands in Zuoying
---   FALLEN          wp2625   RED, last town Zuoying, Zuoying BLUE (count 1)      lands in Nanzih (the capital), the last town is now Nanzih
---   RETAKEN         wp2625   RED, last town Zuoying, Zuoying red (count 2)       lands in Zuoying (fell and was retaken: home)
+--   FRIENDLY        wp2625   A, last town Zuoying, Zuoying red                 lands in Zuoying
+--   FALLEN          wp2625   A, last town Zuoying, Zuoying B (count 1)      lands in Nanzih (the capital), the last town is now Nanzih
+--   RETAKEN         wp2625   A, last town Zuoying, Zuoying red (count 2)       lands in Zuoying (fell and was retaken: home)
 --   NOFACTION       wp2626   no faction, last town Zuoying                       stays in formationlobby
---   NOTOWN          wp2625   RED, no last town                                   stays in formationlobby
---   OFFLINE_FALL    wp2626   BLUE, no last town; the probe moves it to Gushan     goes offline in Gushan; Gushan falls to red; the fall sweep skips it
+--   NOTOWN          wp2625   A, no last town                                   stays in formationlobby
+--   OFFLINE_FALL    wp2626   B, no last town; the probe moves it to Gushan     goes offline in Gushan; Gushan falls to red; the fall sweep skips it
 --                                                                                 ("sweep skipped offline"); the reconnect sends it to Yancheng
 --   OFFLINE_RETAKEN wp2626   as above                                            Gushan falls and is taken back while it is away; the sweep skips it;
 --                                                                                 the reconnect keeps it in Gushan ("evict not needed")
@@ -26,13 +26,13 @@ local CASE = "FRIENDLY"
 local STEP = 1
 local STORAGE = "CountryWarProbe109V1"
 local CASES = {
-    FRIENDLY = { profile = "wp2625", faction = "RED", town = "zuoying", expected = "zuoying" },
-    FALLEN = { profile = "wp2625", faction = "RED", town = "zuoying", owners = { zuoying = "BLUE" }, counts = { zuoying = 1 }, expected = "nanzih", remembered = "nanzih" },
-    RETAKEN = { profile = "wp2625", faction = "RED", town = "zuoying", counts = { zuoying = 2 }, expected = "zuoying" },
+    FRIENDLY = { profile = "wp2625", faction = "A", town = "zuoying", expected = "zuoying" },
+    FALLEN = { profile = "wp2625", faction = "A", town = "zuoying", owners = { zuoying = "B" }, counts = { zuoying = 1 }, expected = "nanzih", remembered = "nanzih" },
+    RETAKEN = { profile = "wp2625", faction = "A", town = "zuoying", counts = { zuoying = 2 }, expected = "zuoying" },
     NOFACTION = { profile = "wp2626", town = "zuoying", expected = "formationlobby" },
-    NOTOWN = { profile = "wp2625", faction = "RED", expected = "formationlobby" },
-    OFFLINE_FALL = { profile = "wp2626", faction = "BLUE" },
-    OFFLINE_RETAKEN = { profile = "wp2626", faction = "BLUE" },
+    NOTOWN = { profile = "wp2625", faction = "A", expected = "formationlobby" },
+    OFFLINE_FALL = { profile = "wp2626", faction = "B" },
+    OFFLINE_RETAKEN = { profile = "wp2626", faction = "B" },
 }
 local function await(predicate, tries) for _ = 1, tries or 100 do if predicate() then return true end wait(0.1) end return false end
 local function find(profile)
@@ -52,14 +52,14 @@ local function wipe(profile)
     storage:DeleteAndWait(_FactionWar.TownKey)
 end
 local function board(case)
-    local towns = _FactionWar:InitialTowns()
+    local towns = _FactionWarTownDocument:InitialTowns()
     for id, owner in pairs(case.owners or {}) do towns[id].owner = owner end
     for id, count in pairs(case.counts or {}) do towns[id].e = count end
     return towns
 end
 local function store(towns)
     local saved = false
-    _FactionWar:WriteTowns(towns, function(ok) saved = ok end)
+    _FactionWarTownDocument:WriteTowns(towns, function(ok) saved = ok end)
     assert(await(function() return saved end), "board stored")
 end
 local function readTown(profile)
@@ -78,14 +78,14 @@ local ok, reason = pcall(function()
     assert(case ~= nil, "unknown CASE " .. tostring(CASE))
     if STEP == 1 then
         assert(find(case.profile) == nil, case.profile .. " must not be connected yet: kick it (STEP 3) before seeding")
-        _FactionWar.TownStorageName = STORAGE
+        _FactionWarTownDocument.TownStorageName = STORAGE
         wipe(case.profile)
         if case.faction ~= nil then put(case.profile, _FactionWar.FactionKey, "", case.faction) end
         if case.town ~= nil then put(case.profile, _FactionWar.TownKey, "", case.town) end
         store(board(case))
         log("[VRF][ReconnectLogin] " .. CASE .. " SEEDED; now: add_virtual_player -profile_code " .. case.profile .. " -nickname Login109, then STEP 2")
     elseif STEP == 2 then
-        assert(_FactionWar.TownStorageName == STORAGE, "STEP 1 swapped the storage name")
+        assert(_FactionWarTownDocument.TownStorageName == STORAGE, "STEP 1 swapped the storage name")
         local user = find(case.profile)
         assert(isvalid(user), case.profile .. " is connected")
         local userId = user.PlayerComponent.UserId
@@ -97,15 +97,15 @@ local ok, reason = pcall(function()
             assert(await(function() return readTown(case.profile) == "gushan" end, 50), "Gushan is the last town")
             _MatchFlow:Depart(userId, "Probe")
             assert(_MatchFlow:IsOffline(userId), "offline, the entity stays in Gushan")
-            local fallen = _FactionWar:InitialTowns()
-            fallen.gushan.owner = "RED"
+            local fallen = _FactionWarTownDocument:InitialTowns()
+            fallen.gushan.owner = "A"
             fallen.gushan.e = 1
             store(fallen)
             _FactionWar:SweepFallen("gushan")
             wait(2)
             assert(user.CurrentMapName == "gushan", "the sweep leaves the disconnected player where they are")
             if CASE == "OFFLINE_RETAKEN" then
-                local retaken = _FactionWar:InitialTowns()
+                local retaken = _FactionWarTownDocument:InitialTowns()
                 retaken.gushan.e = 2
                 store(retaken)
             end
@@ -128,7 +128,7 @@ local ok, reason = pcall(function()
             assert(user.CurrentMapName == case.expected, "and the player stays there (one placement per login)")
         end
         assert(not _FactionWarAttack:IsEngaged(userId), "no ticket is held")
-        assert(await(function() return _FactionWar._T.placing[userId] == nil end, 50), "the placement slot is free")
+        assert(await(function() return not _FactionWarLanding:IsJudging(userId) end, 50), "the placement slot is free")
         if case.expected ~= "formationlobby" then
             assert(await(function() return readTown(case.profile) == (case.remembered or case.expected) end, 80), "the last town now is " .. (case.remembered or case.expected))
         end
@@ -140,7 +140,7 @@ local ok, reason = pcall(function()
         assert(await(function() return find(case.profile) == nil end, 100), "the entity left")
         log("[VRF][ReconnectLogin] kicked " .. case.profile)
     elseif STEP == 4 then
-        _FactionWar.TownStorageName = "CountryWarV1"
+        _FactionWarTownDocument.TownStorageName = "CountryWarV1"
         _DataStorageService:DeleteGlobalDataStorageAndWait(STORAGE)
         wipe("wp2625")
         wipe("wp2626")

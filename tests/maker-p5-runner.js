@@ -66,7 +66,7 @@ local function verifyUserKeys()
     end
 end
 local function verifyTownBoard()
-    verifyAbsent(_DataStorageService:GetGlobalDataStorage("${storage}"), _FactionWar.TownStorageKey, "isolated town board")
+    verifyAbsent(_DataStorageService:GetGlobalDataStorage("${storage}"), _FactionWarTownDocument.TownStorageKey, "isolated town board")
 end`;
 
 // Correlate all probe output with this run AND the dispatch. Never clear the Console.
@@ -135,17 +135,17 @@ for _ = 1, 150 do
     for _, user in ipairs(_UserService.UserEntities.Values) do
         if isvalid(user) then table.insert(users, user) end
     end
-    if _FactionWar._T.placing ~= nil and #users > 0 then break end
+    if _FactionWarLanding._T.slots ~= nil and #users > 0 then break end
     wait(0.1)
 end
-assert(_FactionWar._T.placing ~= nil, "FactionWar startup incomplete")
-assert(_FactionWar.TownStorageName == "CountryWarV1", "town board already overridden")
+assert(_FactionWarLanding._T.slots ~= nil, "FactionWar startup incomplete")
+assert(_FactionWarTownDocument.TownStorageName == "CountryWarV1", "town board already overridden")
 assert(#users == 1, "expected one local player, got " .. tostring(#users))
 local localPlayer = users[1]
 local localId = localPlayer.PlayerComponent.UserId
 for _ = 1, 120 do
     if _MatchFlow._T.arrivalTimers[localId] == nil and not _MatchFlow._T.busy[localId]
-        and not _MatchFlow._T.pendingRecover[localId] and not _FactionWar._T.placing[localId] then break end
+        and not _MatchFlow._T.pendingRecover[localId] and not _FactionWarLanding:IsJudging(localId) then break end
     wait(0.1)
 end
 assert(not _FactionWarAttack:IsEngaged(localId), "local player must not have a live match ticket")
@@ -190,7 +190,7 @@ ${probe(scenario, 2)}`, m => m === `${prefix} PASS`, 80);
       await stage('cleanup', `
 ${findProfile}
 ${absent}
-_FactionWar.TownStorageName = "CountryWarV1"
+_FactionWarTownDocument.TownStorageName = "CountryWarV1"
 for _, profile in ipairs({${profileList}}) do
     local user = runnerFind(profile)
     if isvalid(user) then _UserService:KickUser(user.PlayerComponent.UserId, KickReason.ETC) end
@@ -207,7 +207,7 @@ for _, profile in ipairs({${profileList}}) do
 end
 assert(code == 0 or code == 1000002, "isolated board deletion code=" .. tostring(code))
 assert(runnerFind("${profiles[0]}") == nil and runnerFind("${profiles[1]}") == nil, "fixture player still connected")
-assert(_FactionWar.TownStorageName == "CountryWarV1", "town storage name not restored")
+assert(_FactionWarTownDocument.TownStorageName == "CountryWarV1", "town storage name not restored")
 verifyUserKeys()
 verifyTownBoard()
 log("CLEANUP PASS")`, m => m === 'CLEANUP PASS');

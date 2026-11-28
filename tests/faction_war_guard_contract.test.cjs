@@ -64,7 +64,7 @@ test('the guard pairing is read back from the ticket, so no adapter has to know 
   assert.doesNotMatch(body(text, 'Recover'), /QueueAdapter\(\):Lookup/, 'recovery never asks the adapter about a guard match');
   assert.match(body(text, 'Rendezvous'), /\.guard/, 'a guard match has no peer to wait for and is admitted at once');
   assert.match(body(text, 'RoomBattleAdmission'), /guard/, 'the match room admits the lone player against the guard');
-  assert.match(body(text, 'PublishState'), /guardAt/, 'the clients see when the guard comes');
+  assert.match(body(text, 'StateSnapshot'), /guardAt/, 'clients get the existing queue deadline');
 });
 
 test('the battle fields the guard from the town roster and never settles a profile for it', () => {
@@ -77,16 +77,16 @@ test('the battle fields the guard from the town roster and never settles a profi
   assert.match(source('RootDesk/MyDesk/Combat/BattleView.mlua'), /IsGuardProfile/, 'the opponent avatar is named as the guard');
 });
 
-test('a guard win takes ten from a contestable town and every other guard result takes nothing', () => {
-  const text = attack();
-  assert.match(text, /property integer GuardDeduction = 10\b/);
-  assert.match(body(text, 'Deduction'), /GUARD/, 'the deduction depends on the match kind');
-  assert.match(body(text, 'Settle'), /kind/, 'Settle takes the match kind');
-  assert.match(body(text, 'Settle'), /kind ~= "GUARD"/, 'a lost or drawn guard match changes no town');
+test('the attack flow forwards the match kind to the town document', () => {
+  assert.match(body(attack(), 'Settle'), /_FactionWarTownDocument:Settle\([^]*kind = kind/);
 });
 
-test('the queue bar shows the guard countdown and then the guard fight', () => {
+test('the siege panel uses the same presentation as the lobby and receives no opponent kind', () => {
   const ui = source('RootDesk/MyDesk/Formations/FactionWarUI.mlua');
-  assert.match(body(ui, 'QueueView'), /guardAt/, 'the countdown is computed from the server clock');
-  assert.match(body(ui, 'QueueView'), /守衛/, 'the text names the guard');
+  const state = source('RootDesk/MyDesk/Matchmaking/MatchFlowState.mlua');
+  assert.match(body(ui, 'SiegeView'), /_MatchFlowState:PresentMatch\(/);
+  assert.match(body(state, 'Present'), /self:PresentMatch\(/);
+  assert.match(body(state, 'PresentMatch'), /snapshot\.guardAt/, 'use the authoritative deadline');
+  assert.doesNotMatch(body(flow(), 'StateSnapshot'), /\bguard\s*=/, 'no guard identity in the snapshot');
+  for (const code of [body(ui, 'SiegeView'), body(ui, 'SiegeTown'), body(state, 'PresentMatch')]) assert.doesNotMatch(code, /守衛|取消入場/);
 });

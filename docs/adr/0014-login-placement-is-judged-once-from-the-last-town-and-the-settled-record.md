@@ -1,5 +1,7 @@
 # 登入落點由國戰判斷一次：最後所在的城鎮加上已存的戰果紀錄，不輪詢、不補算戰鬥
 
+> 後續重構：下文記錄 #109 當時的實作。現在 `FactionWarLanding:Judge` 共用每位玩家一個落點檢查槽：`LOGIN` 等票券復原後才判斷；`CHECK` 接手失城清掃及城鎮動作的複查，稍後處理時丟棄舊城鎮表；`RETURN` 用 `MatchTransfer` 跨房返回；`RESTORE` 在靜態房內傳送並顯示提示，無法確認落點就不移動。兩條戰後路徑共用落點規則；奪城者的偏好城規則已由 ADR 0016 取代，只看出發城的即時歸屬。戰果可從 `FactionWarTownDocument:OutcomeFrom` 重建，供城鎮提示使用。存檔、票券順序與兩種移動方式不變。
+
 規格 #103 的「斷線重返」要求：排隊中離線立即取消；對戰中離線，戰鬥繼續，重連回到同一場；戰後重連顯示該場結果，落點先套用戰果、再檢查該城登入時的歸屬；重新登入的人回到原城（仍屬己方或已奪回），否則回己方主城。#107、#108 完成後，缺的是三件事：沒有人知道一位剛登入的玩家上次站在哪座城、結算後的戰果只存在比賽房的記憶體裡、比賽房內的重連根本不恢復票券。這份 ADR 記下 #109 的做法，詞彙依 CONTEXT.md（登入落點、戰果、奪城、換旗次數、過期戰果、守衛）。
 
 ## 決定一：「最後所在的城鎮」是玩家自己的一個小 key
@@ -46,10 +48,12 @@ Maker 實測兩種離線：
 ## 決定五：重連回同一場
 
 - **實體還在**（`UserReconnectEvent` 發生在比賽房）：以前這個處理器在比賽房直接 return，而 `Depart` 又丟掉了該玩家的票券紀錄，狀態會變成 `ENTRY_FAILED`、返回鈕回大廳。現在 `Recover`（`IN_ROOM` 且房間鍵相同就回報 `ARRIVED`）加 `PublishState`，並呼叫 `BattleSession:RearmExperienceReceipt`：怪物經驗收據每個實體只發一次，重連的 client 沒有舊收據，所以清掉那個實體的標記，下一次更新重發。這不是重新結算：不呼叫 `MonsterLevelStorage:Settle`，也沒有任何兵力或經驗被改。不重新入場：保留的實體本來就在房間裡。
-- **實體已消失**（真的離開後重新登入）：票券仍是 `IN_ROOM`。房間裡還有別的玩家時房間還在（決定四），靜態房的 `Recover` 先 `Rejoin`：`TransferAdapter:FindRoom(matchKey)`（`_RoomService.InstanceRooms:TryGetValue`，且 `IsValid()`）找得到比賽房，就用和入場相同的 `MoveToMatch` 送回去，由房間自己的協調者接手（`UserEnterEvent` → `Recover` → `ARRIVED`）。靜態房讀不到別的房間的戰鬥階段，所以不判斷「戰鬥是否已到結果」：已到結果的房間也進去，玩家看到結果與經驗收據，按返回時依該房間自己的戰果落點。找不到房間就和以前一樣：關閉票券（`STALE_ROOM_RECOVERY`），再走決定六的落點。`Admit` 在移動期間標記 `_T.moving`，`Rejoin` 看到就不與它搶。只限同一個 world instance 的房間；別的 instance 的房間在這裡看不到，留給 #110。
+- **實體已消失**（真的離開後重新登入）：票券仍是 `IN_ROOM`。房間裡還有別的玩家時房間還在（決定四），靜態房的 `Recover` 先 `Rejoin`：`TransferAdapter:FindRoom(matchKey)`（`_RoomService.InstanceRooms:TryGetValue`，且 `IsValid()`）找得到比賽房，就用和入場相同的 `MoveToMatch` 送回去，由房間自己的協調者接手（`UserEnterEvent` → `Recover` → `ARRIVED`）。靜態房讀不到別的房間的戰鬥階段，所以不判斷「戰鬥是否已到結果」：已到結果的房間也進去，玩家看到結果與經驗收據，按返回時仍先等該房間的結算，再依 ADR 0016 判斷出發城歸屬。找不到房間就和以前一樣：關閉票券（`STALE_ROOM_RECOVERY`），再走決定六的落點。`Admit` 在移動期間標記 `_T.moving`，`Rejoin` 看到就不與它搶。只限同一個 world instance 的房間；別的 instance 的房間在這裡看不到，留給 #110。
 - 房間查詢放在轉接 adapter（`MatchTransfer:FindRoom`），`MatchFaults:ConfigureRooms(true)` 可以在 Maker 裡讓所有房間「看起來已被回收」，不必等引擎回收就能走「房間已消失」那條路徑。
 
 ## 決定六：戰後重連，戰果從已存的紀錄重建
+
+> 下文的「奪城者的偏好城」與帶回新城的例子已由 ADR 0016 取代：先等戰果寫入，再依出發城即時歸屬落點，不以戰果紀錄改換目的地。靜態房讀不到時仍不移動；讀取可靠且已在目的地時不重傳送，但若有戰果紀錄或出發城已失守，仍送出城鎮提示。登入只判斷一次及從紀錄重建戰果提示的規則不變。
 
 `FactionWarAttack:OutcomeFrom(towns, matchKey)` 是 `towns.settled` 的唯一讀取者（純函式，`{ k, w, l, s, o }` 還原成勝方城、敗方城、結算後兵力、新歸屬與是否奪城），`Attempt` 的重複回應與落點共用。落點由 `FactionWarAttack:ResolveLanding(userId, ticket)` 決定，回傳一個表 `{ destination, outcome, reliable }`；`LandingFor` 只是它的薄包裝，回傳 `destination`，給 `MoveHome` 這種當場就移動的返回。`ResolveLanding` 先用本房記住的戰果，沒有（重連、房間已被回收）就從剛讀到的城鎮表重建。找不到紀錄就是沒有奪城，和房內平手、守衛戰落敗、過期戰果的意義相同；紀錄被擠出 20 筆之後、或結算最後 `FAILED`，同樣讀成沒有奪城（已知缺口）。次序仍是規格的「先戰果、再歸屬」：奪城者的偏好城是被奪下的城，再交給 `Landing` 看登入當下是否仍屬己方。
 

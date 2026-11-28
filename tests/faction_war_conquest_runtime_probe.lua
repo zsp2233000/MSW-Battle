@@ -7,7 +7,7 @@
 -- Review fixes covered here without a player: Vacate keeps a matched ticket (C4) and retries the passing ticket states a bounded number
 -- of times (C3), on tickets planted under made-up user ids; the full strength is one constant (S7).
 local STORAGE = "CountryWarProbe107V1"
-local original = _FactionWar.TownStorageName
+local original = _FactionWarTownDocument.TownStorageName
 local vacatePause = _MatchFlow.VacateRetrySeconds
 local plantedTickets = { "probe-vacate-SAVING", "probe-vacate-COMMITTING", "probe-vacate-TRANSFER", "probe-vacate-IN_ROOM", "probe-vacate-early", "probe-vacate-stuck", "probe-vacate-cancelling", "probe-vacate-none" }
 local function await(predicate, tries)
@@ -16,17 +16,17 @@ local function await(predicate, tries)
 end
 local function read()
     local result, done = nil, false
-    _FactionWar:ReadTowns(function(towns) result, done = towns, true end)
+    _FactionWarTownDocument:Read(function(towns) result, done = towns, true end)
     assert(await(function() return done end), "town read answered")
     return result
 end
 local function write(towns)
     local saved = false
-    _FactionWar:WriteTowns(towns, function(ok) saved = ok end)
+    _FactionWarTownDocument:WriteTowns(towns, function(ok) saved = ok end)
     assert(await(function() return saved end), "town write confirmed")
 end
 local function seed(owners, strengths, settled)
-    local towns = _FactionWar:InitialTowns()
+    local towns = _FactionWarTownDocument:InitialTowns()
     for id, owner in pairs(owners or {}) do towns[id].owner = owner end
     for id, strength in pairs(strengths or {}) do towns[id].strength = strength end
     -- The engine's JSONEncode rejects an empty table, so an empty history is stored as no field at all.
@@ -45,25 +45,25 @@ local ok, reason = pcall(function()
     local war, attack = _FactionWar, _FactionWarAttack
 
     -- Pure rules: capital, landing, passage.
-    assert(war:CapitalOf("RED") == "nanzih" and war:CapitalOf("BLUE") == "yancheng" and war:CapitalOf("") == "", "capital of each faction")
-    local board = war:InitialTowns()
-    board.gushan.owner = "RED"
-    assert(war:Landing("RED", "gushan", board) == "gushan", "a faction lands in a town it owns")
-    assert(war:Landing("BLUE", "gushan", board) == "yancheng", "a faction that lost the town lands in its capital")
-    assert(war:Landing("RED", "yancheng", board) == "nanzih", "an enemy capital is never a landing")
-    assert(war:Landing("BLUE", "nowhere", board) == "yancheng" and war:Landing("BLUE", "gushan", nil) == "yancheng", "unknown town or no table falls back to the capital")
-    assert(war:CanPass("RED", "zuoying", "gushan", board) and not war:CanPass("BLUE", "gushan", "zuoying", board), "a gate needs both towns to be the traveller's")
+    assert(_FactionWarTownDocument:CapitalOf("A") == "nanzih" and _FactionWarTownDocument:CapitalOf("B") == "yancheng" and _FactionWarTownDocument:CapitalOf("") == "", "capital of each faction")
+    local board = _FactionWarTownDocument:InitialTowns()
+    board.gushan.owner = "A"
+    assert(_FactionWarTownDocument:Landing("A", "gushan", board) == "gushan", "a faction lands in a town it owns")
+    assert(_FactionWarTownDocument:Landing("B", "gushan", board) == "yancheng", "a faction that lost the town lands in its capital")
+    assert(_FactionWarTownDocument:Landing("A", "yancheng", board) == "nanzih", "an enemy capital is never a landing")
+    assert(_FactionWarTownDocument:Landing("B", "nowhere", board) == "yancheng" and _FactionWarTownDocument:Landing("B", "gushan", nil) == "yancheng", "unknown town or no table falls back to the capital")
+    assert(_FactionWarTownDocument:CanPass("A", "zuoying", "gushan", board) and not _FactionWarTownDocument:CanPass("B", "gushan", "zuoying", board), "a gate needs both towns to be the traveller's")
 
     -- AC3 board after Gushan turns red: front line for new players, gate and NPC options follow the new owner.
-    assert(war:FindFrontline("RED", board) == "gushan", "a new red player lands in Gushan")
-    assert(war:FindFrontline("BLUE", board) == "yancheng", "a new blue player lands in Yancheng (the capital faces Gushan)")
-    assert(names(attack:Targets("gushan", "RED", board)) == "yancheng" and attack:Targets("gushan", "RED", board)[1].capital == true, "red at Gushan can only pick the blue capital")
-    assert(names(attack:Targets("zuoying", "RED", board)) == "", "Zuoying no longer borders an enemy")
-    assert(names(attack:Targets("yancheng", "BLUE", board)) == "gushan" and attack:Targets("yancheng", "BLUE", board)[1].capital == false, "blue at its capital can pick Gushan")
-    assert(names(attack:Targets("gushan", "BLUE", board)) == "", "a town the faction lost offers nothing")
-    assert(attack:CanTarget("yancheng", "gushan", "BLUE", board) and attack:CanTarget("gushan", "yancheng", "RED", board), "blue with only Yancheng and red at Gushan pick each other")
+    assert(war:FindFrontline("A", board) == "gushan", "a new red player lands in Gushan")
+    assert(war:FindFrontline("B", board) == "yancheng", "a new blue player lands in Yancheng (the capital faces Gushan)")
+    assert(names(attack:Targets("gushan", "A", board)) == "yancheng" and attack:Targets("gushan", "A", board)[1].capital == true, "red at Gushan can only pick the blue capital")
+    assert(names(attack:Targets("zuoying", "A", board)) == "", "Zuoying no longer borders an enemy")
+    assert(names(attack:Targets("yancheng", "B", board)) == "gushan" and attack:Targets("yancheng", "B", board)[1].capital == false, "blue at its capital can pick Gushan")
+    assert(names(attack:Targets("gushan", "B", board)) == "", "a town the faction lost offers nothing")
+    assert(attack:CanTarget("yancheng", "gushan", "B", board) and attack:CanTarget("gushan", "yancheng", "A", board), "blue with only Yancheng and red at Gushan pick each other")
 
-    assert(war.FullStrength == 100 and war:InitialTowns().gushan.strength == war.FullStrength, "one constant for the full strength, used by the initial board")
+    assert(_FactionWarTownDocument.FullStrength == 100 and _FactionWarTownDocument:InitialTowns().gushan.strength == _FactionWarTownDocument.FullStrength, "one constant for the full strength, used by the initial board")
 
     -- C4 + C3: Vacate on planted tickets. The ids are made up, so no player, queue or storage is involved; the retry pause is shortened and restored at the end.
     local flow = _MatchFlow
@@ -102,31 +102,31 @@ local ok, reason = pcall(function()
     assert(vacate("probe-vacate-none") == true, "no ticket: free to go")
     log("[VRF][FactionWarConquest] vacate ok")
 
-    _FactionWar.TownStorageName = STORAGE
+    _FactionWarTownDocument.TownStorageName = STORAGE
 
     -- AC1: a human win over a 20-strength town flips it at once and refills it to 100.
     seed({}, { gushan = 20 })
     local status, strength, outcome = settle("c107-m1", "zuoying", "gushan", "WIN")
     assert(status == "SAVED" and strength == 100, "flip reports the refilled strength, got " .. tostring(status) .. "/" .. tostring(strength))
-    assert(outcome.flipped == true and outcome.owner == "RED" and outcome.winner == "zuoying" and outcome.loser == "gushan" and outcome.amount == 20, "outcome names the capture")
+    assert(outcome.flipped == true and outcome.owner == "A" and outcome.winner == "zuoying" and outcome.loser == "gushan" and outcome.amount == 20, "outcome names the capture")
     local towns = read()
-    assert(towns.gushan.owner == "RED" and towns.gushan.strength == 100, "stored Gushan is red with 100")
-    assert(towns.zuoying.owner == "RED" and towns.zuoying.strength == 100 and towns.nanzih.strength == 100 and towns.yancheng.owner == "BLUE" and towns.yancheng.strength == 100, "nothing else moved")
-    assert(towns.settled[1].k == "c107-m1" and towns.settled[1].o == "RED" and towns.settled[1].s == 100, "the settled record keeps what the match did")
+    assert(towns.gushan.owner == "A" and towns.gushan.strength == 100, "stored Gushan is red with 100")
+    assert(towns.zuoying.owner == "A" and towns.zuoying.strength == 100 and towns.nanzih.strength == 100 and towns.yancheng.owner == "B" and towns.yancheng.strength == 100, "nothing else moved")
+    assert(towns.settled[1].k == "c107-m1" and towns.settled[1].o == "A" and towns.settled[1].s == 100, "the settled record keeps what the match did")
     -- A repeat of the same result changes nothing and answers the same capture.
     status, strength, outcome = settle("c107-m1", "zuoying", "gushan", "WIN")
-    assert(status == "DUPLICATE" and outcome.flipped == true and outcome.owner == "RED" and outcome.strength == 100, "a repeat is DUPLICATE and still reports the capture")
+    assert(status == "DUPLICATE" and outcome.flipped == true and outcome.owner == "A" and outcome.strength == 100, "a repeat is DUPLICATE and still reports the capture")
     towns = read()
     assert(towns.gushan.strength == 100 and #towns.settled == 1, "the repeat wrote nothing new")
-    assert(attack._T.outcomes["c107-m1"].flipped == true, "the room remembers the outcome for the returning players")
+    assert(_FactionWarLanding._T.outcomes["c107-m1"].flipped == true, "the room remembers the outcome for the returning players")
 
     -- Winning from 40 leaves 20 and does not flip; the next win then does.
     seed({}, { gushan = 40 })
     status, strength, outcome = settle("c107-m2", "zuoying", "gushan", "WIN")
     assert(status == "SAVED" and strength == 20 and outcome.flipped == false and outcome.owner == "", "40 -> 20 is no capture")
-    assert(read().gushan.owner == "BLUE", "still blue at 20")
+    assert(read().gushan.owner == "B", "still blue at 20")
     status, strength, outcome = settle("c107-m3", "gushan", "zuoying", "LOSE")
-    assert(status == "SAVED" and strength == 100 and outcome.flipped == true and outcome.owner == "RED", "a blue home loss (red won) takes the town at 20")
+    assert(status == "SAVED" and strength == 100 and outcome.flipped == true and outcome.owner == "A", "a blue home loss (red won) takes the town at 20")
 
     -- A guard win from 10 also captures; a guard win at 20 only takes 10.
     seed({}, { gushan = 10 })
@@ -138,20 +138,20 @@ local ok, reason = pcall(function()
     assert(settle("c107-g3", "zuoying", "gushan", "LOSE", "GUARD") == "NO_CHANGE" and read().gushan.strength == 10, "losing to the guard changes nothing")
 
     -- AC4 on the flipped board: blue (only Yancheng left) wins -> Gushan -20; red wins at Yancheng -> nothing.
-    seed({ gushan = "RED" }, {}, {})
+    seed({ gushan = "A" }, {}, {})
     status, strength, outcome = settle("c107-b1", "yancheng", "gushan", "WIN")
     assert(status == "SAVED" and strength == 80 and not outcome.flipped, "blue human win takes 20 from Gushan")
     status, strength, outcome = settle("c107-b2", "gushan", "yancheng", "WIN")
     assert(status == "NO_CHANGE" and outcome.flipped == false, "red winning over the capital changes nothing")
     assert(settle("c107-b3", "gushan", "yancheng", "WIN", "GUARD") == "NO_CHANGE", "beating the capital guard changes nothing either")
     towns = read()
-    assert(towns.yancheng.owner == "BLUE" and towns.yancheng.strength == 100 and towns.nanzih.owner == "RED" and towns.nanzih.strength == 100, "capitals keep owner and strength")
-    assert(towns.gushan.owner == "RED" and towns.gushan.strength == 80, "Gushan took exactly one 20")
+    assert(towns.yancheng.owner == "B" and towns.yancheng.strength == 100 and towns.nanzih.owner == "A" and towns.nanzih.strength == 100, "capitals keep owner and strength")
+    assert(towns.gushan.owner == "A" and towns.gushan.strength == 80, "Gushan took exactly one 20")
     -- Capture back from the capital's side: 80 -> 60 -> 40 -> 20 -> flip, one human win each.
     for index = 1, 3 do assert(settle("c107-back" .. index, "yancheng", "gushan", "WIN") == "SAVED", "counter-attack " .. index) end
-    assert(read().gushan.strength == 20 and read().gushan.owner == "RED", "Gushan is down to 20")
+    assert(read().gushan.strength == 20 and read().gushan.owner == "A", "Gushan is down to 20")
     status, strength, outcome = settle("c107-back4", "yancheng", "gushan", "WIN")
-    assert(status == "SAVED" and strength == 100 and outcome.flipped and outcome.owner == "BLUE" and read().gushan.owner == "BLUE", "blue takes Gushan back from its capital")
+    assert(status == "SAVED" and strength == 100 and outcome.flipped and outcome.owner == "B" and read().gushan.owner == "B", "blue takes Gushan back from its capital")
 
     -- Legacy documents (bare match keys) are still understood and kept, and the whole list stays small.
     seed({}, { gushan = 20 }, { "legacy-1" })
@@ -171,12 +171,12 @@ local ok, reason = pcall(function()
     end
     towns = read()
     local bytes = #_HttpService:JSONEncode(towns)
-    assert(#towns.settled == attack.SettledHistory, "the history is capped at " .. tostring(attack.SettledHistory) .. ", got " .. tostring(#towns.settled))
+    assert(#towns.settled == _FactionWarTownDocument.SettledHistory, "the history is capped at " .. tostring(_FactionWarTownDocument.SettledHistory) .. ", got " .. tostring(#towns.settled))
     assert(bytes < 4000, "the town document stays under one storage credit, bytes=" .. tostring(bytes))
     log("[VRF][FactionWarConquest] document bytes=" .. tostring(bytes) .. " settled=" .. tostring(#towns.settled))
 end)
 
-_FactionWar.TownStorageName = original
+_FactionWarTownDocument.TownStorageName = original
 _MatchFlow.VacateRetrySeconds = vacatePause
 for _, userId in ipairs(plantedTickets) do _MatchFlow._T.records[userId] = nil end
 _DataStorageService:DeleteGlobalDataStorageAndWait(STORAGE)

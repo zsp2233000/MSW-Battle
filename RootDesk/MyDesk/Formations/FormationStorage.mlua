@@ -159,6 +159,16 @@ script FormationStorage extends Logic
     end
 
     @ExecSpace("ServerOnly")
+    method void WriteMakerGlobalFixture(string owner, string key, string raw, any complete)
+        -- Only Maker probes can replace global fixture data unconditionally; production uses conditional writes.
+        if not Environment:IsMakerPlay() or string.sub(owner, 1, #self.GlobalPrefix) ~= self.GlobalPrefix then
+            complete(false)
+            return
+        end
+        self:Storage(owner):SetAsync(key, raw, function(code) complete(code == 0) end)
+    end
+
+    @ExecSpace("ServerOnly")
     method void Swap(string owner, string key, string expected, string raw, any complete)
         -- Compare-and-swap for a table nobody deletes or force-writes (the war town document): the native conditional update alone arbitrates an existing document,
         -- so no guard can be left behind to block every later writer in the world; only the very first creation (expected "") shares Write's guard.

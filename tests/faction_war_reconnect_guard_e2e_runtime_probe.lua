@@ -1,6 +1,6 @@
 -- Maker end-to-end for #109 (a guard fight goes on while the only player is disconnected, the reconnect gets the same room back, the result is delivered once).
 -- One virtual player, added in Play before running this in server_main:
---   add_virtual_player -profile_code wp2622 -nickname Guard109   (RED, Zuoying, 4 units; Gushan is seeded at 10, so a guard win captures it)
+--   add_virtual_player -profile_code wp2622 -nickname Guard109   (A, Zuoying, 4 units; Gushan is seeded at 10, so a guard win captures it)
 -- Writes the REAL town storage (Gushan starts at 10); STEP 9 deletes it. Keep the real player in formationlobby.
 -- The disconnect is the production Depart run inside the match room plus a synthetic UserReconnectEvent there: the entity stays in the room, like a
 -- retained disconnected entity. A real leave (KickUser) while the room runs is faction_war_reconnect_relogin_e2e_runtime_probe.lua.
@@ -17,12 +17,14 @@
 --                 "RECONNECT PASS"). Nothing is settled again
 --   6 REDELIVER   room, BEFORE RETURN: the same result is delivered again: Settle answers DUPLICATE (NO_CHANGE after a loss), the towns do not move, the
 --                 experience is not credited twice. It cannot run after RETURN: the match room is recycled once its player has left
---   7 RETURN      room: ReturnForUser; the conqueror lands in Gushan by the stored result ("[VRF][FactionWarAttack] landing ... conqueror=true")
---   8 LANDING     server_main: in Gushan after a win (Zuoying otherwise), unlocked, the towns as the one settlement left them, the match is in the
---                 monster-level history exactly once ("LANDING PASS")
+--   7 RETURN      room: ReturnForUser; look for "[VRF][FactionWarAttack] landing ... origin=zuoying destination=zuoying originLost=false"
+--   8 LANDING     server_main: in Zuoying even after capture; unlocked, one XP credit, capture record unchanged ("LANDING PASS")
 --   9 CLEANUP     deletes the war town storage
+--  10 LOSE_ORIGIN optional ADR 0016 variant, written, not run: in a separate fresh Play run 1–6, then STEP 10 in server_main after a capture.
+--                 Run 7 then 8 with EXPECT_ORIGIN_LOST = true for STEP 8. Expect Nanzih and a single recorded landing notice there with originLost=true.
 -- Expected [VRF] lines (read with logs): see tests/README.md, "Disconnect and reconnect (#109)".
 local STEP = 1
+local EXPECT_ORIGIN_LOST = false -- set true for STEP 8 only when STEP 10 was used
 local PROFILE = "wp2622"
 local function await(predicate, tries) for _ = 1, tries or 300 do if predicate() then return true end wait(0.1) end return false end
 local function find()
@@ -33,7 +35,7 @@ local function find()
 end
 local function readTowns()
     local towns, done = nil, false
-    _FactionWar:ReadTowns(function(result) towns, done = result, true end)
+    _FactionWarTownDocument:Read(function(result) towns, done = result, true end)
     assert(await(function() return done end, 100), "towns read")
     return towns
 end
@@ -75,13 +77,13 @@ local ok, reason = pcall(function()
         _FormationService:ActivateForUser(userId, slotId, record.saved.slots[tostring(slotId)].revision)
         assert(await(function() return not record.pending and record.saved.activeSlot == slotId end), "activate confirmed")
         local saved = false
-        _FormationStorage:Write(PROFILE, _FactionWar.FactionKey, "", "RED", function(code) saved = code == 0 end)
+        _FormationStorage:Write(PROFILE, _FactionWar.FactionKey, "", "A", function(code) saved = code == 0 end)
         await(function() return saved end, 100)
         -- Gushan one guard win from falling (a guard win takes 10).
-        local towns = _FactionWar:InitialTowns()
+        local towns = _FactionWarTownDocument:InitialTowns()
         towns.gushan.strength = 10
         local written = false
-        _FactionWar:WriteTowns(towns, function(ok) written = ok end)
+        _FactionWarTownDocument:WriteTowns(towns, function(ok) written = ok end)
         assert(await(function() return written end, 100), "Gushan seeded at 10")
         -- The #107 and #108 e2e probes park the guard at 600 s; this one needs the real 10 s.
         _FactionWarGuard.WaitSeconds = 10
@@ -126,11 +128,11 @@ local ok, reason = pcall(function()
                 towns = readTowns()
                 return towns ~= nil and recordsOf(towns, key) == 1
             end, 300), "the settlement was stored exactly once")
-            assert(towns.gushan.owner == "RED" and towns.gushan.strength == 100 and _FactionWar:EpochOf(towns, "gushan") == 1, "Gushan was captured and counted once")
+            assert(towns.gushan.owner == "A" and towns.gushan.strength == 100 and _FactionWarTownDocument:EpochOf(towns, "gushan") == 1, "Gushan was captured and counted once")
         else
             wait(5)
             towns = readTowns()
-            assert(recordsOf(towns, key) == 0 and towns.gushan.owner == "BLUE" and towns.gushan.strength == 10, "a loss or a draw to the guard changes nothing")
+            assert(recordsOf(towns, key) == 0 and towns.gushan.owner == "B" and towns.gushan.strength == 10, "a loss or a draw to the guard changes nothing")
         end
         assert(isvalid(human) and await(function() return battle._T.experienceSent[human] ~= nil end, 100), "the receipt was sent to the entity that is away")
         log("[VRF][ReconnectGuard] RESULT PASS result=" .. result .. "; run STEP 5")
@@ -171,8 +173,9 @@ local ok, reason = pcall(function()
         log("[VRF][ReconnectGuard] RETURN issued")
     elseif STEP == 8 then
         local towns = readTowns()
-        local captured = towns.gushan.owner == "RED"
-        local expected = captured and "gushan" or "zuoying"
+        local captured = towns.gushan.owner == "A"
+        local expected = EXPECT_ORIGIN_LOST and "nanzih" or "zuoying"
+        assert(towns.zuoying.owner == (EXPECT_ORIGIN_LOST and "B" or "A"), "expected origin ownership at return")
         assert(await(function()
             a = find()
             return isvalid(a) and a.CurrentMapName == expected
@@ -190,15 +193,25 @@ local ok, reason = pcall(function()
         for _, id in ipairs(history(PROFILE).settled or {}) do if id == key then count = count + 1 end end
         assert(count == 1, "the match is in the monster-level history exactly once, found " .. tostring(count))
         if captured then
-            assert(towns.gushan.strength == 100 and recordsOf(towns, key) == 1 and _FactionWar:EpochOf(towns, "gushan") == 1, "one settlement, one capture")
+            assert(towns.gushan.strength == 100 and recordsOf(towns, key) == 1 and _FactionWarTownDocument:EpochOf(towns, "gushan") == 1, "one settlement, one capture")
         else
             assert(towns.gushan.strength == 10 and recordsOf(towns, key) == 0, "no settlement changed Gushan")
         end
         log("[VRF][ReconnectGuard] LANDING PASS in " .. expected)
     elseif STEP == 9 then
         _FactionWarGuard.WaitSeconds = 10
-        local code = _DataStorageService:DeleteGlobalDataStorageAndWait(_FactionWar.TownStorageName)
+        local code = _DataStorageService:DeleteGlobalDataStorageAndWait(_FactionWarTownDocument.TownStorageName)
         log("[VRF][ReconnectGuard] CLEANUP town storage deleted code=" .. tostring(code))
+    elseif STEP == 10 then
+        assert(not _RoomService:IsInstanceRoom() and not isvalid(find()), "run in server_main while the player is still looking at the result")
+        local towns = readTowns()
+        assert(towns.gushan.owner == "A" and towns.zuoying.owner == "A", "the guard capture completed and the origin is still owned")
+        -- Simulate another battle winning Zuoying during the result screen, without altering the guard capture record.
+        towns.zuoying.owner, towns.zuoying.strength, towns.zuoying.e = "B", 100, _FactionWarTownDocument:EpochOf(towns, "zuoying") + 1
+        local written = false
+        _FactionWarTownDocument:WriteTowns(towns, function(saved) written = saved end)
+        assert(await(function() return written end, 100), "the origin changed hands before RETURN")
+        log("[VRF][ReconnectGuard] LOSE_ORIGIN staged; run STEP 7, then STEP 8 with EXPECT_ORIGIN_LOST=true")
     end
 end)
 if not ok then log_error("[VRF][ReconnectGuard] STEP " .. tostring(STEP) .. " FAIL " .. tostring(reason)) end

@@ -2,16 +2,29 @@
 script MatchedBattle extends Component
 
     @Sync property boolean AdmissionFailed = false
+    -- ms clock (DateTime.UtcNow.Elapsed) at which a lone participant's wait for the opponent ends and the match starts without him; 0 when nobody waits.
+    @Sync property number WaitDeadline = 0
     property number AdmissionTimeoutSeconds = 30
+    property number AbsentLoadGraceSeconds = 10
+    -- How long the settlement of a war result may take before the absent sides are told without it (#122).
+    property number SettlementWatchSeconds = 30
+    property table WarResultReceipt = {}
 
     @ExecSpace("ServerOnly")
     method void OnBeginPlay()
         -- This map owns admission and result publication for exactly one match room.
         self.AdmissionFailed = false
+        self.WaitDeadline = 0
+        self._T.absent = nil
         self._T.elapsed = 0
         self._T.interval = 0
         self._T.started = false
         self._T.published = false
+        self._T.seen = {}
+        -- Per profile: WRITING while its absent result is being saved, WRITTEN once it stands (and was announced).
+        self._T.absentWritten = {}
+        self._T.absentDone = false
+        self._T.watchdog = nil
         self._T.matchKey = _RoomService.RoomKey
         log("[VRF][MatchedBattle] room controller ready")
     end
@@ -28,28 +41,25 @@ script MatchedBattle extends Component
         local battle = self.Entity.CurrentMap:GetComponent("script.BattleSession")
         if not isvalid(battle) then return end
         if not self._T.started and not self.AdmissionFailed then
-            local admission = _MatchFlow:RoomBattleAdmission()
+            local timedOut = self._T.elapsed >= self.AdmissionTimeoutSeconds
+            -- ADR 0017: both sides here (or a town guard) starts at once; a lone human is held until the entry time is over.
+            local admission = _MatchFlow:RoomBattleAdmission(true)
             if admission ~= nil and battle.Phase == "WAITING" then
-                local homeUnits = _FormationHandoff:Roster(admission.homeTicket)
-                -- A guard match fields the defended town's roster; a human match reads the opponent's sealed capsule.
-                local awayUnits = admission.guard and _FactionWarGuard:Roster(admission.awayTown) or _FormationHandoff:Roster(admission.awayTicket)
-                self._T.started = homeUnits ~= nil and awayUnits ~= nil and battle:InitializeMatchedBattle(admission.key, admission.home, admission.away, homeUnits, awayUnits)
-                -- A war match carries the two towns it was queued for; a lobby match leaves them empty.
-                self._T.homeTown = admission.homeTown
-                self._T.awayTown = admission.awayTown
-                self._T.kind = admission.guard and "GUARD" or "HUMAN"
-                -- The stamp says how often each town had changed hands when this match was paired (nil: the match was not stamped).
-                self._T.epochs = admission.epochs
-                if admission.epochs ~= nil then log("[VRF][MatchedBattle] stamp home=" .. tostring(admission.epochs.home) .. " away=" .. tostring(admission.epochs.away)) end
-                if not self._T.started then self.AdmissionFailed = true end
-            elseif battle.Phase == "CONFIG_ERROR" or self._T.elapsed >= self.AdmissionTimeoutSeconds then
+                if admission.absent == nil then
+                    self:StartMatch(battle, admission, nil)
+                else
+                    self:HoldForAbsent(battle, admission, users, timedOut)
+                end
+            elseif battle.Phase == "CONFIG_ERROR" or timedOut then
                 self.AdmissionFailed = true
             end
             if self._T.started or self.AdmissionFailed then
+                self.WaitDeadline = 0
                 for _, user in ipairs(users) do _MatchFlow:PublishState(user.PlayerComponent.UserId, self.AdmissionFailed and "ENTRY_FAILED" or "BATTLE_STARTED") end
                 log("[VRF][MatchedBattle] admission started=" .. tostring(self._T.started) .. " failed=" .. tostring(self.AdmissionFailed))
             end
         end
+        if battle.Phase == "RESULT" and battle.MatchKey == self._T.matchKey then self:TrackResultViewers(battle, users) end
         if battle.Phase == "RESULT" and battle.MatchKey == self._T.matchKey and not self._T.published then
             self._T.published = true
             for _, user in ipairs(users) do
@@ -60,8 +70,244 @@ script MatchedBattle extends Component
             log("[VRF][MatchedBattle] result published once match=" .. self._T.matchKey .. " home=" .. battle:ResultForProfile(battle.HomeProfile) .. " away=" .. battle:ResultForProfile(battle.AwayProfile))
             -- The result is settled on the towns here, once per match; the match key makes a repeated delivery harmless.
             if (self._T.homeTown or "") ~= "" then
-                _FactionWarAttack:Settle(self._T.matchKey, self._T.homeTown, self._T.awayTown, battle:ResultForProfile(battle.HomeProfile), self._T.kind or "HUMAN", nil, self._T.epochs)
+                local war = self:BeginWarResult(battle.HomeProfile, battle.AwayProfile)
+                _FactionWarAttack:Settle(self._T.matchKey, self._T.homeTown, self._T.awayTown, battle:ResultForProfile(battle.HomeProfile), self._T.kind or "HUMAN", function(status, detail, outcome)
+                    if self._T.war ~= war then return end
+                    war.outcome = outcome
+                    -- Do not show a pre-settlement return preview for a result that may have flipped a town.
+                    war.towns = nil
+                    self:RefreshWarResultBoard()
+                    self:PublishWarReceipts()
+                    -- A side that never saw the result page is told about this settled result (#122).
+                    self:WriteAbsentResults(battle, war)
+                end, self._T.epochs)
+                self:WatchSettlement(battle, war)
+                if war.outcome == nil then self:RefreshWarResultBoard() end
+            else
+                self:WriteAbsentResults(battle, nil)
             end
         end
+        self:PublishWarReceipts()
+    end
+
+    @ExecSpace("ServerOnly")
+    method void WatchSettlement(any battle, table war)
+        -- A settlement that never answers must not leave the absent side waiting for its ticket to expire: after the watch time the result is written with the
+        -- settlement marked failed, which is what the result page says too (戰果結算失敗，兵力未變動). An answer that comes later changes nothing in the record.
+        if self._T.absentDone then return end
+        self._T.watchdog = _TimerService:SetTimerOnce(function()
+            self._T.watchdog = nil
+            if not isvalid(self.Entity) or self._T.absentDone or self._T.war ~= war then return end
+            log_error("[VRF][MatchedBattle] the settlement of match=" .. tostring(self._T.matchKey) .. " has not answered after " .. tostring(self.SettlementWatchSeconds) .. " s; the absent result is written without it")
+            self:WriteAbsentResults(battle, { profiles = war.profiles, outcome = { status = "FAILED" } })
+        end, self.SettlementWatchSeconds)
+    end
+
+    @ExecSpace("ServerOnly")
+    method void TrackResultViewers(any battle, table users)
+        -- #122: whoever is in this room while the result stands sees the result page, so nothing is owed to them; a side that comes in after its
+        -- absent result was written takes that record back, because it saw the page after all.
+        for _, user in ipairs(users) do
+            if isvalid(user) and user.CurrentMap == self.Entity.CurrentMap and isvalid(user.PlayerComponent) then
+                local profile = user.PlayerComponent.ProfileCode
+                if battle:ParticipantSide(profile) ~= "" and not self._T.seen[profile] then
+                    self._T.seen[profile] = true
+                    -- A record still being saved is taken back by its own save callback, which sees this profile in seen.
+                    if self._T.absentWritten[profile] == "WRITTEN" then
+                        self._T.absentWritten[profile] = nil
+                        local matchKey = self._T.matchKey
+                        _AbsentResult:Clear(profile, matchKey, function(cleared)
+                            log("[VRF][MatchedBattle] late arrival saw the result page profile=" .. profile .. " absent result cleared=" .. tostring(cleared))
+                        end)
+                    end
+                end
+            end
+        end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void WriteAbsentResults(any battle, any war)
+        -- #122 / ADR 0017: every human side that was not in this room to see the result gets it as its latest absent result, once per match.
+        -- A war match waits for its settlement (the war block needs the settled figures); a lobby match writes at once. A guard has no profile storage.
+        if self._T.absentDone then return end
+        self._T.absentDone = true
+        if self._T.watchdog ~= nil then _TimerService:ClearTimer(self._T.watchdog) self._T.watchdog = nil end
+        local matchKey = self._T.matchKey
+        for _, profile in ipairs({ battle.HomeProfile, battle.AwayProfile }) do
+            local result = profile ~= "" and battle:ResultForProfile(profile) or ""
+            if result ~= "" and not _FactionWarGuard:IsGuardProfile(profile) and not self._T.seen[profile] then
+                local receipt = nil
+                local side = war ~= nil and war.profiles[profile] or nil
+                if side ~= nil then receipt = _FactionWarTownDocument:Summarize(side.origin, side.target, "", war.outcome, nil) end
+                local record = _AbsentResult:Compose(side ~= nil and "WAR" or "LOBBY", matchKey, result, receipt)
+                self._T.absentWritten[profile] = "WRITING"
+                _AbsentResult:Write(profile, record, function(saved)
+                    log("[VRF][MatchedBattle] absent result written profile=" .. profile .. " match=" .. matchKey .. " kind=" .. record.kind .. " result=" .. result .. " saved=" .. tostring(saved))
+                    if not saved then
+                        self._T.absentWritten[profile] = nil
+                    elseif self._T.seen[profile] then
+                        -- The side came in and saw the result page while its record was being saved: it takes the record back now that it stands.
+                        self._T.absentWritten[profile] = nil
+                        _AbsentResult:Clear(profile, matchKey, function(cleared)
+                            log("[VRF][MatchedBattle] late arrival saw the result page during the save profile=" .. profile .. " absent result cleared=" .. tostring(cleared))
+                        end)
+                    else
+                        self._T.absentWritten[profile] = "WRITTEN"
+                        _AbsentResult:Announce(profile, matchKey)
+                    end
+                end)
+            end
+        end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void StartMatch(any battle, table admission, any absentUnits)
+        -- Field both rosters: a present side's from its ticket in this room, the absent side's from its own sealed roster.
+        local homeUnits = admission.absent == "home" and absentUnits or _FormationHandoff:Roster(admission.homeTicket)
+        local awayUnits = admission.absent == "away" and absentUnits
+            or (admission.guard and _FactionWarGuard:Roster(admission.awayTown) or _FormationHandoff:Roster(admission.awayTicket))
+        self._T.started = homeUnits ~= nil and awayUnits ~= nil and battle:InitializeMatchedBattle(admission.key, admission.home, admission.away, homeUnits, awayUnits)
+        -- A war match carries the two towns it was queued for; a lobby match leaves them empty.
+        self._T.homeTown = admission.homeTown
+        self._T.awayTown = admission.awayTown
+        self._T.kind = admission.guard and "GUARD" or "HUMAN"
+        -- The stamp says how often each town had changed hands when this match was paired (nil: the match was not stamped).
+        self._T.epochs = admission.epochs
+        if admission.epochs ~= nil then log("[VRF][MatchedBattle] stamp home=" .. tostring(admission.epochs.home) .. " away=" .. tostring(admission.epochs.away)) end
+        if admission.absent ~= nil then log("[VRF][MatchedBattle] absent side fielded side=" .. admission.absent .. " profile=" .. tostring(admission.absentProfile) .. " started=" .. tostring(self._T.started)) end
+        if not self._T.started then self.AdmissionFailed = true end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void HoldForAbsent(any battle, table admission, table users, boolean timedOut)
+        -- Only one human side is here: copy the other side's sealed roster into this room now, tell the one waiting, and start when the entry time ends.
+        local slot = self._T.absent
+        if slot == nil or slot.profile ~= admission.absentProfile then
+            slot = { profile = admission.absentProfile, status = "LOADING" }
+            self._T.absent = slot
+            _FormationHandoff:LoadAbsentRoster(slot.profile, admission.pairing, function(units)
+                if self._T.absent ~= slot then return end
+                slot.units = units
+                slot.status = units ~= nil and "READY" or "FAILED"
+            end)
+        end
+        if self.WaitDeadline == 0 then
+            self.WaitDeadline = DateTime.UtcNow.Elapsed + math.max(0, self.AdmissionTimeoutSeconds - self._T.elapsed) * 1000
+            for _, user in ipairs(users) do _MatchFlow:PublishState(user.PlayerComponent.UserId, "WAITING_OPPONENT") end
+            log("[VRF][MatchedBattle] waiting for the absent side=" .. admission.absent .. " profile=" .. tostring(admission.absentProfile))
+        end
+        if not timedOut then return end
+        if slot.status == "READY" then
+            self:StartMatch(battle, admission, slot.units)
+        elseif slot.status == "FAILED" or self._T.elapsed >= self.AdmissionTimeoutSeconds + self.AbsentLoadGraceSeconds then
+            self.AdmissionFailed = true
+            log("[VRF][MatchedBattle] absent roster unavailable profile=" .. tostring(admission.absentProfile) .. "; the match does not start")
+        end
+    end
+
+    @ExecSpace("ServerOnly")
+    method table BeginWarResult(string home, string away)
+        local war = { matchId = self._T.matchKey, profiles = {}, revision = 0 }
+        war.profiles[home] = { origin = self._T.homeTown, target = self._T.awayTown }
+        if self._T.kind ~= "GUARD" then
+            war.profiles[away] = { origin = self._T.awayTown, target = self._T.homeTown }
+        end
+        self._T.war = war
+        -- Deliver pending independently of storage or the combat/XP displays.
+        self:PublishWarReceipts()
+        for profile, side in pairs(war.profiles) do
+            _FactionWar:ReadFaction(profile, function(faction)
+                if self._T.war == war then side.faction = faction end
+            end)
+        end
+        return war
+    end
+
+    @ExecSpace("ServerOnly")
+    method void PublishWarReceipts()
+        -- New entities and explicitly re-armed retained entities get the current snapshot; unchanged receipts are not sent again.
+        local war = self._T.war
+        if war == nil then return end
+        local map = self.Entity.CurrentMap
+        for _, user in ipairs(_UserService.UserEntities.Values) do
+            if isvalid(user) and user.CurrentMap == map and isvalid(user.PlayerComponent) then
+                local profile, userId = user.PlayerComponent.ProfileCode, user.PlayerComponent.UserId
+                local side = war.profiles[profile]
+                if side ~= nil and _MatchFlow:Player(userId) == user then
+                    local receipt = _FactionWarTownDocument:Summarize(side.origin, side.target, side.faction or "", war.outcome, war.towns)
+                    if side.entity ~= user or side.status ~= receipt.status or side.destination ~= receipt.destination or side.originLost ~= receipt.originLost then
+                        side.entity, side.status, side.destination, side.originLost = user, receipt.status, receipt.destination, receipt.originLost
+                        war.revision = war.revision + 1
+                        receipt.matchId, receipt.profile, receipt.revision = war.matchId, profile, war.revision
+                        self:ReceiveWarResultReceipt(receipt, userId)
+                        log("[VRF][WarResultReceipt] sent match=" .. war.matchId .. " profile=" .. profile .. " status=" .. receipt.status .. " revision=" .. tostring(receipt.revision) .. " destination=" .. receipt.destination)
+                    end
+                end
+            end
+        end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void RefreshWarResultBoard()
+        -- One read at a time; a notification received during a read requires a newer read, not its stale answer.
+        local war = self._T.war
+        if war == nil then return end
+        if war.reading then war.readAgain = true return end
+        war.reading = true
+        _FactionWarTownDocument:Read(function(towns)
+            if self._T.war ~= war then return end
+            war.reading = false
+            if war.readAgain then
+                war.readAgain = false
+                self:RefreshWarResultBoard()
+            elseif towns ~= nil then
+                war.towns = towns
+                self:PublishWarReceipts()
+            end
+        end)
+    end
+
+    @ExecSpace("ServerOnly")
+    @EventSender("Service", "RoomService")
+    handler HandleWarResultRoomBoardChanged(TownBoardChangedEvent event)
+        self:RefreshWarResultBoard()
+    end
+
+    @ExecSpace("ServerOnly")
+    @EventSender("Service", "WorldInstanceService")
+    handler HandleWarResultInstanceBoardChanged(TownBoardChangedEvent event)
+        self:RefreshWarResultBoard()
+    end
+
+    @ExecSpace("ServerOnly")
+    @EventSender("Service", "UserService")
+    handler HandleWarResultReconnect(UserReconnectEvent event)
+        local war = self._T.war
+        local user = _UserService:GetUserEntityByUserId(event.UserId)
+        if war == nil or not isvalid(user) or not isvalid(user.PlayerComponent) then return end
+        local side = war.profiles[user.PlayerComponent.ProfileCode]
+        if side ~= nil then side.entity = nil end
+    end
+
+    @ExecSpace("ServerOnly")
+    method void OnEndPlay()
+        if self._T.watchdog ~= nil then _TimerService:ClearTimer(self._T.watchdog) self._T.watchdog = nil end
+        if self._T.war ~= nil and not self._T.absentDone then
+            log_error("[VRF][MatchedBattle] the room closed before the settlement of match=" .. tostring(self._T.matchKey) .. " answered; no absent result was written")
+        end
+        self._T.war = nil
+    end
+
+    @ExecSpace("Client")
+    method void ReceiveWarResultReceipt(table receipt)
+        -- Accept early delivery like experience, but never let another player's or an older receipt replace it.
+        local player = _UserService.LocalPlayer
+        if isvalid(player) and isvalid(player.PlayerComponent) and player.PlayerComponent.ProfileCode ~= "" and receipt.profile ~= player.PlayerComponent.ProfileCode then return end
+        local map = self.Entity.CurrentMap
+        local battle = isvalid(map) and map:GetComponent("script.BattleSession") or nil
+        if isvalid(battle) and battle.MatchKey ~= "" and receipt.matchId ~= battle.MatchKey then return end
+        local prior = self.WarResultReceipt
+        if prior.matchId == receipt.matchId and prior.profile == receipt.profile and prior.revision >= receipt.revision then return end
+        self.WarResultReceipt = receipt
     end
 end

@@ -51,7 +51,7 @@ test('lobby entry, faction selection, and the shared town HUD are authored', () 
   assert.equal(war.find('LobbyEntry').jsonString.enable, false);
   assert.equal(war.find('FactionChoice').jsonString.enable, false);
   assert.equal(war.find('TownHUD').jsonString.enable, false);
-  for (const button of ['Red', 'Blue', 'Close']) {
+  for (const button of ['A', 'B', 'Close']) {
     assert.ok(war.hasComponent(`FactionChoice/Window/${button}`, 'MOD.Core.ButtonComponent'));
   }
   assert.ok(war.hasComponent('TownHUD/Strength', 'MOD.Core.TextGUIRendererComponent'));

@@ -50,10 +50,10 @@ local ok, reason = pcall(function()
         _FormationService:ActivateForUser(userId, slotId, record.saved.slots[tostring(slotId)].revision)
         assert(await(function() return not record.pending and record.saved.activeSlot == slotId end), "activate confirmed")
         local saved = false
-        _FormationStorage:Write(PROFILE, _FactionWar.FactionKey, "", "RED", function(code) saved = code == 0 end)
+        _FormationStorage:Write(PROFILE, _FactionWar.FactionKey, "", "A", function(code) saved = code == 0 end)
         await(function() return saved end, 100)
         -- A clean board: the real storage starts empty, so Gushan reads 100.
-        _DataStorageService:DeleteGlobalDataStorageAndWait(_FactionWar.TownStorageName)
+        _DataStorageService:DeleteGlobalDataStorageAndWait(_FactionWarTownDocument.TownStorageName)
         -- The e2e probes of #107 and #108 park the guard at 600 s; this one needs the real 10 s.
         _FactionWarGuard.WaitSeconds = 10
         assert(_FactionWar:Move(a, "zuoying"), "move dispatched")
@@ -91,7 +91,7 @@ local ok, reason = pcall(function()
         assert(await(function() return not _FactionWarAttack:IsEngaged(userId) end, 50), "unlocked")
         -- The reconnect judges the player where they stand; Zuoying is still red, so they stay.
         wait(2)
-        assert(await(function() return _FactionWar._T.placing[userId] == nil end, 100), "the login placement ended")
+        assert(await(function() return not _FactionWarLanding:IsJudging(userId) end, 100), "the login placement ended")
         assert(a.CurrentMapName == "zuoying", "a friendly town keeps its player")
         log("[VRF][ReconnectQueue] RECONNECT PASS")
     elseif STEP == 4 then
@@ -137,7 +137,7 @@ local ok, reason = pcall(function()
         userId = a.PlayerComponent.UserId
         assert(await(function() return not _FactionWarAttack:IsEngaged(userId) end), "unlocked")
         local towns, done = nil, false
-        _FactionWar:ReadTowns(function(result) towns, done = result, true end)
+        _FactionWarTownDocument:Read(function(result) towns, done = result, true end)
         assert(await(function() return done end), "towns read")
         log("[VRF][ReconnectQueue] Gushan=" .. tostring(towns.gushan.strength))
         assert(towns.zuoying.strength == 100 and towns.nanzih.strength == 100 and towns.yancheng.strength == 100, "only the guarded town may change")
@@ -146,7 +146,7 @@ local ok, reason = pcall(function()
     elseif STEP == 8 then
         _FactionWarGuard.WaitSeconds = 10
         _MatchFaults:Remove()
-        local code = _DataStorageService:DeleteGlobalDataStorageAndWait(_FactionWar.TownStorageName)
+        local code = _DataStorageService:DeleteGlobalDataStorageAndWait(_FactionWarTownDocument.TownStorageName)
         log("[VRF][ReconnectQueue] CLEANUP town storage deleted code=" .. tostring(code))
     end
 end)

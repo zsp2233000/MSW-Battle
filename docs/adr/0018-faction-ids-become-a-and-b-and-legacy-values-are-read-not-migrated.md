@@ -1,0 +1,39 @@
+# 陣營識別字改為 A／B，讀取時接受舊值，不做遷移
+
+2026-11-24 使用者決定：國戰陣營改名為 A 方與 B 方（詞彙依 CONTEXT.md 的國戰陣營、主城），不再以顏色命名，因為之後陣營與主城不一定是紅城、藍城；地圖與面板的顏色改為只依玩家自己的立場（我方藍、敵方紅，見 ADR 0015 補記 #124）。對應不變：原紅方（`RED`，主城楠梓）＝ A 方（`A`），原藍方（`BLUE`，主城鹽埕）＝ B 方（`B`）。
+
+連存檔裡的識別字一起改，不只改畫面文字：只改顯示會讓 `RED`／`BLUE`、`RedColor`、`FactionChoice/Window/Red` 這類名字繼續暗示陣營與顏色有關，而相對立場色上線後它們就是錯的。
+
+## 決定：讀取時轉換，寫入一律新值
+
+- 有一個轉換函式：`RED → A`、`BLUE → B`，`A`、`B` 原樣通過，其他值無效。所有讀取已存陣營值的地方都經過它：玩家陣營（`CountryWarFactionV1`）、城鎮文件各城的 `owner`、結算戰果紀錄的 `owner`、`AbsentResult` 的 `newOwner`。程式其他地方不得再出現 `"RED"`／`"BLUE"` 字面值。
+- 寫入一律是 `A`、`B`；舊的城鎮文件在下一次結算寫入時自然換成新值。沒有遷移腳本。
+- ADR 0013 的 compare-swap 不受影響：它比的是讀出當下的原始位元組，轉換只發生在解碼之後。
+- 選陣營畫面的兩顆按鈕不帶顏色，只靠「A 方」「B 方」文字區分，節點名稱改為 `A`、`B`。
+
+**不選**：
+
+- 只改顯示、內部仍是 `RED`／`BLUE`：命名繼續誤導，之後要改時存檔值與測試一樣要動。
+- 清除重來（重設城鎮文件、玩家重選陣營）：程式最簡單，但會丟掉 Maker 與已發布世界中已有的陣營選擇與城鎮歸屬。
+
+## 後果與已知缺口
+
+- 已存的最近一場缺席戰果，其 `conclusion` 是組好的文字，舊紀錄可能仍寫「改為 紅方」。它只是一次性顯示、看過即清除，不另外改寫。
+- 發布交替期，舊版本的 world instance 讀到 `A`／`B` 會把城鎮文件或陣營當成無效。不做雙寫；建議在沒有進行中的戰事時發布。
+- 測試與探針的種子資料全部改為 `A`／`B`；新增規則測試，用舊值餵給每一個讀取點，並以契約測試確認字面值只出現在轉換函式。
+
+## 實作補記（#125）
+
+- 轉換函式是 `FactionWarTownDocument:NormalizeFaction`，`FactionNames` 的鍵就是有效陣營（`IsFaction`、`FactionName` 在同一模組）。讀取點：玩家陣營（`FactionWar:ReadFaction`）、城鎮文件各城的 `owner`（`DecodeTowns`）、結算戰果的 `o`（`OutcomeFrom`）、缺席戰果的 `war.newOwner`（`AbsentResult:Decode`）。字面值 `"RED"`／`"BLUE"` 只在這個函式裡，`tests/faction_id_contract.test.cjs` 把關。
+- 結算寫入時，複製進新文件的歷史紀錄其 `o` 一併轉成新值，所以舊文件經過下一次結算就整份是 `A`／`B`；比較寫入仍以讀出當下的原始位元組為準。玩家已存的舊陣營沒有寫入點，保持原樣、讀取時轉換；只有新的選擇才寫入 `A`／`B`。
+- 無效值各自的處理：城鎮文件裡的城主不是陣營，整份文件讀不出來（與以往相同）；結算紀錄的 `o` 不是陣營，視為沒有奪城（結算寫入時，複製進新文件的那筆歷史也把它寫成空字串，與讀取一致）；缺席戰果的 `newOwner` 不是陣營，丟掉該欄位，戰果其餘照常顯示。加入陣營的選擇是呼叫參數而不是存檔值，只接受空字串、`A`、`B`，不接受舊值。
+- 名稱：顏色屬性改為 `FactionAColor`／`FactionBColor`（目前仍依陣營上色；相對立場色 #130 上線時改為依立場，屆時再換名）；節點 `FactionChoice/Window/A`／`B` 與圖例 `Legend/A`／`B`。選陣營按鈕的外觀不動，由 #126 處理（見下方實作補記 #126）。
+- `FactionWar:FindFrontline` 不再以陣營字面值決定從哪一端找起，改看該陣營的主城是不是城鎮順序的起點，行為不變。
+- 驗證與兩項已知缺口的紀錄在 `tests/README.md` 的「Faction ids A and B」。
+
+## 實作補記（#126）
+
+- 選陣營畫面（`FactionChoice`）改為 Cardgame 視窗：半透明暗幕、棕色底、`Window/Frame`（Base_4 空心邊框）墊在內容之下，標題「加入國戰」、狀態文字、「關閉」仍是 Cardgame 按鈕。
+- `Window/A`、`Window/B` 是同一顆 Cardgame 按鈕（同圖、同大小、不染色、同樣的 SpriteSwap），文字只有「A 方」「B 方」（原為「加入 A 方」「加入 B 方」，底色紅、藍）。程式不改按鈕外觀，只控制啟用與否；按下各送出 `A`、`B`。
+- 以 `assets/siege/build_faction_choice_ui.cjs` 用 UIBuilder 重建，只動 `FactionChoice` 子樹；原地更新，實體 id 不變。視窗內各節點的檔案順序即繪製順序（Maker 看檔案順序，不看 `displayOrder` 數字）。
+- 驗證：`tests/faction_choice_contract.test.cjs`（節點、素材、兩顆按鈕相同）、`tests/faction_choice_local.cjs`（按鈕送出 A／B 的規則）、`tests/faction_war_faction_choice_client_runtime_probe.lua`（Maker 客戶端按真按鈕各自加入成功），執行方式見 `tests/README.md` 的「Faction choice screen」。

@@ -1,6 +1,6 @@
 -- Maker end-to-end for #106. One virtual player, added in Play before running this in server_main:
 --   add_virtual_player -profile_code wp2601 -nickname WarA
--- STEP 1 prepares it (4-unit formation, RED, standing in Zuoying) and takes ~20 s; wait for "SETUP PASS".
+-- STEP 1 prepares it (4-unit formation, A, standing in Zuoying) and takes ~20 s; wait for "SETUP PASS".
 -- STEP 2 queues against Gushan, cancels after 3 s and checks that no guard fight starts after the ten seconds ("CANCEL PASS" after ~14 s).
 -- STEP 3 queues again, waits for the guard clock and the move into the match room ("GUARD ENTRY PASS"), then the battle runs; wait for RESULT.
 -- STEP 4 (run inside server_instance_<matchKey>): _MatchFlow:ReturnForUser for the player in the room.
@@ -29,8 +29,12 @@ local ok, reason = pcall(function()
         assert(await(function() return not record.pending and #record.saved.slots[tostring(slotId)].units == #units end), "save confirmed")
         _FormationService:ActivateForUser(userId, slotId, record.saved.slots[tostring(slotId)].revision)
         assert(await(function() return not record.pending and record.saved.activeSlot == slotId end), "activate confirmed")
-        local saved = false
-        _FormationStorage:Write(a.PlayerComponent.ProfileCode, _FactionWar.FactionKey, "", "RED", function(code) saved = code == 0 end)
+        -- A rerun finds the faction an earlier run stored: the guarded write must expect it, not an empty value.
+        local saved, current = false, nil
+        _FactionWar:ReadFaction(a.PlayerComponent.ProfileCode, function(faction) current = faction end)
+        assert(await(function() return current ~= nil end, 100), "faction read")
+        if current == "A" then saved = true
+        else _FormationStorage:Write(a.PlayerComponent.ProfileCode, _FactionWar.FactionKey, current, "A", function(code) saved = code == 0 end) end
         assert(await(function() return saved end, 100), "faction saved")
         assert(_FactionWar:Move(a, "zuoying"), "move dispatched")
         assert(await(function() return a.CurrentMapName == "zuoying" end), "in Zuoying")
@@ -67,14 +71,14 @@ local ok, reason = pcall(function()
         end), "returned to the departure town")
         assert(await(function() return not _FactionWarAttack:IsEngaged(userId) end), "unlocked")
         local towns, done = nil, false
-        _FactionWar:ReadTowns(function(result) towns, done = result, true end)
+        _FactionWarTownDocument:Read(function(result) towns, done = result, true end)
         assert(await(function() return done end), "towns read")
         log("[VRF][GuardE2E] Gushan=" .. tostring(towns.gushan.strength) .. " Zuoying=" .. tostring(towns.zuoying.strength))
         assert(towns.zuoying.strength == 100 and towns.nanzih.strength == 100 and towns.yancheng.strength == 100, "only the guarded town may change")
         assert(towns.gushan.strength == 90 or towns.gushan.strength == 100, "a guard win takes exactly 10, anything else takes nothing")
         log("[VRF][GuardE2E] E2E PASS")
     elseif STEP == 6 then
-        local code = _DataStorageService:DeleteGlobalDataStorageAndWait(_FactionWar.TownStorageName)
+        local code = _DataStorageService:DeleteGlobalDataStorageAndWait(_FactionWarTownDocument.TownStorageName)
         log("[VRF][GuardE2E] CLEANUP town storage deleted code=" .. tostring(code))
     end
 end)

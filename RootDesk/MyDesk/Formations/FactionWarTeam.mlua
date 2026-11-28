@@ -1,0 +1,225 @@
+@Logic
+script FactionWarTeam extends Logic
+
+    -- The read-only team preview of the town screen (#118): the active saved team while nobody is queued, the ticket's frozen team while one is.
+    property integer MaxUnits = 6
+    property number FieldPadX = 160
+    property number FieldPadY = 150
+    property number MaxPortrait = 56
+    property string UiRoot = "/ui/FactionWarGroup/TeamPreview/"
+
+    @ExecSpace("Server")
+    method void RequestTeam()
+        -- The caller asks for the team of their own ticket; the identity comes from the server.
+        self:TeamFor(senderUserId)
+    end
+
+    @ExecSpace("ServerOnly")
+    method table TicketTeam(string userId)
+        -- Units and levels exactly as the ticket froze them at queueing, never the player's current levels. NONE: no ticket stands.
+        if _MatchFlow:StateForUser(userId) == "IDLE" then return { status = "NONE", units = {} } end
+        local ticketId = _MatchFlow:TicketIdForUser(userId)
+        local roster = ticketId ~= "" and _FormationHandoff:Roster(ticketId) or nil
+        if roster == nil then return { status = "UNAVAILABLE", units = {} } end
+        local units = {}
+        for _, unit in ipairs(roster) do
+            if #units < self.MaxUnits then table.insert(units, { monsterId = unit.monsterId, x = unit.x, y = unit.y, level = unit.level }) end
+        end
+        return { status = "TICKET", units = units }
+    end
+
+    @ExecSpace("ServerOnly")
+    method void TeamFor(string userId)
+        -- Answer only a connected player who is standing in a town; the preview belongs to the town screen.
+        local player = _UserService:GetUserEntityByUserId(userId)
+        if not isvalid(player) or not isvalid(player.PlayerComponent) or not _FactionWar:IsTown(player.CurrentMapName) then return end
+        local answer = self:TicketTeam(userId)
+        log("[VRF][FactionWarTeam] answer user=" .. userId .. " status=" .. answer.status .. " units=" .. tostring(#answer.units))
+        self:ReceiveTeam(answer.status, answer.units, userId)
+    end
+
+    @ExecSpace("Client")
+    method void ReceiveTeam(string status, table units)
+        -- The server's answer for the open preview.
+        self._T.reply = { status = status, units = units }
+        log("[VRF][FactionWarTeam] reply status=" .. status .. " units=" .. tostring(#units))
+    end
+
+    method any LevelOf(table snapshot, string monsterId)
+        -- The level the client knows for a monster of its own team; nil while levels are not loaded.
+        if snapshot.levelLoadState ~= "READY" then return nil end
+        for _, option in ipairs(snapshot.options or {}) do
+            if option.monsterId == monsterId then return option.level end
+        end
+        return nil
+    end
+
+    method table Present(any reply, table snapshot)
+        -- What the preview shows. reply is the server's answer (nil until it comes); snapshot is the client's formation session.
+        local view = { title = "出戰隊伍", hint = "", empty = "", units = {} }
+        if reply == nil then
+            view.empty = "正在讀取隊伍…"
+            return view
+        end
+        if reply.status == "TICKET" then
+            view.title = "本局隊伍"
+            for _, unit in ipairs(reply.units) do table.insert(view.units, { monsterId = unit.monsterId, x = unit.x, y = unit.y, level = unit.level }) end
+            return view
+        end
+        if reply.status == "UNAVAILABLE" then
+            view.title = "本局隊伍"
+            view.empty = "暫時無法讀取本局隊伍，請稍後再試"
+            return view
+        end
+        view.hint = "要更換出戰隊伍，請找大廳 NPC"
+        if not _FormationSchema:IsLoadConfirmed(snapshot.loadState) then
+            view.empty = (snapshot.loadState == "ERROR" or snapshot.loadState == "CONFLICT") and "讀取隊伍資料失敗，請到大廳確認" or "正在讀取隊伍資料…"
+            return view
+        end
+        local saved = snapshot.saved
+        local active = saved ~= nil and saved.activeSlot or 0
+        local slot = active > 0 and saved.slots[tostring(active)] or nil
+        if slot == nil or #slot.units == 0 then
+            view.empty = "尚未選定出戰隊伍"
+            return view
+        end
+        for _, entry in ipairs(slot.units) do
+            if #view.units < self.MaxUnits then
+                table.insert(view.units, { monsterId = entry.monsterId, x = entry.x, y = entry.y, level = self:LevelOf(snapshot, entry.monsterId) })
+            end
+        end
+        return view
+    end
+
+    method table Layout(table units, number width, number height)
+        -- Marker positions keeping the relative stance, the way the lobby preview draws it, and the portrait size that avoids overlap.
+        local minX, maxX, minY, maxY = 0, 0, 0, 0
+        local nearest = math.huge
+        for index, entry in ipairs(units) do
+            if index == 1 then minX, maxX, minY, maxY = entry.x, entry.x, entry.y, entry.y end
+            minX, maxX = math.min(minX, entry.x), math.max(maxX, entry.x)
+            minY, maxY = math.min(minY, entry.y), math.max(maxY, entry.y)
+            for other = 1, index - 1 do
+                nearest = math.min(nearest, math.max(math.abs(entry.x - units[other].x), math.abs(entry.y - units[other].y)))
+            end
+        end
+        local centerX, centerY = (minX + maxX) / 2, (minY + maxY) / 2
+        local scale = 1
+        if #units > 1 then
+            scale = math.min((width - self.FieldPadX) / math.max(0.001, maxX - minX), (height - self.FieldPadY) / math.max(0.001, maxY - minY))
+        end
+        local portrait = math.min(self.MaxPortrait, nearest * scale * 0.8)
+        local places = {}
+        for index, entry in ipairs(units) do
+            places[index] = { x = (entry.x - centerX) * scale, y = (entry.y - centerY) * scale + 8 }
+        end
+        return { places = places, portrait = portrait, scale = scale }
+    end
+
+    @ExecSpace("ClientOnly")
+    method Entity Ui(string path)
+        -- Entities of the preview, by path under /ui/FactionWarGroup/TeamPreview.
+        return _EntityService:GetEntityByPath(self.UiRoot .. path)
+    end
+
+    @ExecSpace("ClientOnly")
+    method boolean IsOpen()
+        return self._T.open == true
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Open()
+        -- Show the preview at once, ask the server which team stands for this player, and make sure the client has its own saved team.
+        local player = _UserService.LocalPlayer
+        local overlay = _EntityService:GetEntityByPath("/ui/FactionWarGroup/TeamPreview")
+        if self._T.open == true or not isvalid(overlay) or not isvalid(player) or not _FactionWar:IsTown(player.CurrentMapName) or _FormationLobby:IsTownPanelOpen() then return end
+        self._T.open = true
+        self._T.reply = nil
+        self._T.key = ""
+        self._T.queued = _MatchFlowInput.Snapshot.state ~= "IDLE"
+        overlay:SetEnable(true)
+        if _FormationEditSession.Snapshot.loadState == nil then _FormationService:RequestOpen() end
+        self:Render()
+        self:RequestTeam()
+        log("[VRF][FactionWarTeam] open town=" .. player.CurrentMapName)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Close()
+        -- Hide the preview; nothing was changed by it.
+        if self._T.open ~= true then return end
+        self._T.open = false
+        local overlay = _EntityService:GetEntityByPath("/ui/FactionWarGroup/TeamPreview")
+        if isvalid(overlay) then overlay:SetEnable(false) end
+        log("[VRF][FactionWarTeam] close")
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Sync(string map)
+        -- Called every frame by the town UI: the button follows the town, the open preview follows the answer and the queue state.
+        local button = _EntityService:GetEntityByPath("/ui/FactionWarGroup/TeamButton")
+        local available = _FactionWar:IsTown(map) and not _FormationLobby:IsTownPanelOpen()
+        if isvalid(button) and button.Enable ~= available then button:SetEnable(available) end
+        if self._T.open ~= true then return end
+        if not available then
+            self:Close()
+            return
+        end
+        -- A queue that starts or ends while the preview is open changes which team stands for the player; the phases inside a queue do not.
+        local queued = _MatchFlowInput.Snapshot.state ~= "IDLE"
+        if queued ~= self._T.queued then
+            self._T.queued = queued
+            self._T.reply = nil
+            self:RequestTeam()
+        end
+        self:Render()
+    end
+
+    @ExecSpace("ClientOnly")
+    method void Render()
+        -- Draw the view only when it changed.
+        local view = self:Present(self._T.reply, _FormationEditSession.Snapshot)
+        local parts = { view.title, view.hint, view.empty }
+        for _, unit in ipairs(view.units) do table.insert(parts, unit.monsterId .. ":" .. tostring(unit.level) .. ":" .. tostring(unit.x) .. ":" .. tostring(unit.y)) end
+        local key = table.concat(parts, "|")
+        if key == self._T.key then return end
+        self._T.key = key
+        self:SetText("Window/Title", view.title)
+        self:SetText("Window/Hint", view.hint)
+        self:SetText("Window/Field/Empty", view.empty)
+        local empty = self:Ui("Window/Field/Empty")
+        if isvalid(empty) then empty:SetEnable(view.empty ~= "") end
+        local field = self:Ui("Window/Field")
+        if not isvalid(field) then return end
+        local size = field.UITransformComponent.RectSize
+        local layout = self:Layout(view.units, size.x, size.y)
+        for index = 1, self.MaxUnits do
+            local path = "Window/Field/Unit" .. tostring(index)
+            local marker = self:Ui(path)
+            local unit = view.units[index]
+            if isvalid(marker) then
+                marker:SetEnable(unit ~= nil)
+                if unit ~= nil then
+                    local place = layout.places[index]
+                    marker.UITransformComponent.anchoredPosition = Vector2(place.x, place.y)
+                    self:SetText(path .. "/Lv", unit.level ~= nil and ("Lv " .. tostring(unit.level)) or "Lv —")
+                    local portrait = self:Ui(path .. "/Portrait")
+                    local option = _FormationEditSession:Option(unit.monsterId)
+                    if isvalid(portrait) then
+                        portrait.UITransformComponent.RectSize = Vector2(layout.portrait, layout.portrait)
+                        portrait:SetEnable(option ~= nil)
+                        if option ~= nil then portrait.SpriteGUIRendererComponent.ImageRUID = DataRef("thumbnail://" .. option.standRuid) end
+                    end
+                end
+            end
+        end
+        log("[VRF][FactionWarTeam] render title=" .. view.title .. " units=" .. tostring(#view.units) .. " empty=" .. view.empty)
+    end
+
+    @ExecSpace("ClientOnly")
+    method void SetText(string path, string text)
+        -- One text node of the preview; a missing node is skipped.
+        local node = self:Ui(path)
+        if isvalid(node) then node.TextGUIRendererComponent.Text = text end
+    end
+end

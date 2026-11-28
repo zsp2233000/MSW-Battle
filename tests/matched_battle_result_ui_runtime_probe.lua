@@ -218,6 +218,11 @@ local ok, detail = pcall(function()
     wait(0.3)
     local expected = battle:ResultForProfile(player.PlayerComponent.ProfileCode)
     assert(expected ~= "" and _MatchFlowInput.Snapshot.state == "RESULT_" .. expected, "result belongs to this player's actual battle side")
+    -- BattleUIController.ResultDisplayDelaySeconds (2 s) holds the result window back after the state changes.
+    for _ = 1, 50 do
+        if ui.OwnResult == expected and ui.result.Enable then break end
+        wait(0.1)
+    end
     assert(ui.OwnResult == expected and ui.result.Enable, "result window shows this player's result")
     assert(ui.resultWin.Enable == (expected == "WIN") and ui.resultLose.Enable == (expected == "LOSE") and ui.resultDraw.Enable == (expected == "DRAW"), "exactly one result entity")
     local own, enemy = counts()
@@ -227,7 +232,9 @@ local ok, detail = pcall(function()
     assert(panel.Enable and _MatchFlowInput.action.Parent == panel, "return action lives on the result screen")
     assert(not _MatchFlowInput.root:GetChildByName("BattleMatch", false).Enable, "only one return action")
     assert(text(_MatchFlowInput.action) == "返回大廳" and _MatchFlowInput.action.ButtonComponent.Enable, "return button enabled")
-    assert(ui.hud.Enable and text(ui.phaseText) == "戰鬥結束", "HUD names the finished phase")
+    -- The result window carries the counts (and, for a war, the war rows), so the HUD steps aside while it shows; a lobby result keeps the plain 360 high window.
+    assert(not ui.hud.Enable and text(ui.phaseText) == "戰鬥結束", "the HUD has stepped aside for the result but still names the finished phase")
+    assert(not ui.warResult.EnabledInHierarchy and ui.resultWindow.UITransformComponent.RectSize.y == 360, "a lobby result has the plain window")
     log("[VRF][MatchedResultUI] PASS own " .. expected .. " counts=" .. text(ui.resultPlayerCount) .. " vs " .. text(ui.resultEnemyCount) .. " swapped=" .. tostring(swapped) .. "; dispatching connected return button")
     _MatchFlowInput.action:SendEvent(ButtonClickEvent())
     wait(0.03)

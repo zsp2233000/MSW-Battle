@@ -52,11 +52,12 @@ script MatchQueueNative extends Logic
     end
 
     @ExecSpace("ServerOnly")
-    method boolean Cancel(string profile)
-        -- True only when the service confirms the player is no longer matching.
+    method any Cancel(string profile)
+        -- Pairing is a distinct outcome, not confirmation that the requester withdrew.
         local code = _MatchmakingService:CancelMatchingAndWait(profile)
         log("[VRF][MatchCancel] native code=" .. tostring(code))
-        return code == MatchmakingResultCode.Ok or code == MatchmakingResultCode.NotMatching or code == MatchmakingResultCode.AlreadyMatched
+        if code == MatchmakingResultCode.AlreadyMatched then return "MATCHED" end
+        return code == MatchmakingResultCode.Ok or code == MatchmakingResultCode.NotMatching
             or code == MatchmakingResultCode.RequestNotFound or code == MatchmakingResultCode.MatchingExpired
     end
 

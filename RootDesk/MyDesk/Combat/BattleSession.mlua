@@ -582,10 +582,14 @@ script BattleSession extends Component
         for _, user in ipairs(_UserService.UserEntities.Values) do
             if isvalid(user) and user.CurrentMap == self:GetMapEntity() then present[user.PlayerComponent.ProfileCode] = true end
         end
-        -- A town guard is the only participant that is allowed to be absent from the room.
+        -- ADR 0017: a human side may be absent (its sealed roster is fielded), but the room needs at least one human here; the guard is only ever the away side.
         local guardAway = _FactionWarGuard:IsGuardProfile(awayProfile)
-        if not present[homeProfile] or (not present[awayProfile] and not guardAway) then return false end
         if _FactionWarGuard:IsGuardProfile(homeProfile) then return false end
+        if guardAway then
+            if not present[homeProfile] then return false end
+        elseif not present[homeProfile] and not present[awayProfile] then
+            return false
+        end
         local home = self:PrepareMatchedRoster(homeUnits, false)
         local away = self:PrepareMatchedRoster(awayUnits, true)
         if home == nil or away == nil then return false end
@@ -609,10 +613,18 @@ script BattleSession extends Component
         return started
     end
 
+    method string ParticipantSide(string profile)
+        -- ADR 0017: standing in a match comes from its two sealed profiles, never from when a player entered the room, so a late arrival is a side like one who came on time.
+        if profile == "" or self.MatchKey == "" then return "" end
+        if profile == self.HomeProfile then return "PLAYER" end
+        if profile == self.AwayProfile then return "ENEMY" end
+        return ""
+    end
+
     method string ResultForProfile(string profile)
         -- Translate the single settled result into the participant's battle-side perspective.
-        if self.Phase ~= "RESULT" or (profile ~= self.HomeProfile and profile ~= self.AwayProfile) then return "" end
-        if profile == self.HomeProfile or self.Result == "DRAW" then return self.Result end
+        if self.Phase ~= "RESULT" or self:ParticipantSide(profile) == "" then return "" end
+        if self:ParticipantSide(profile) == "PLAYER" or self.Result == "DRAW" then return self.Result end
         if self.Result == "WIN" then return "LOSE" end
         if self.Result == "LOSE" then return "WIN" end
         return ""
@@ -644,7 +656,7 @@ script BattleSession extends Component
                 if operation ~= nil and self._T.experienceSent[user] ~= operation.status then
                     local receipt = { matchId = self.MatchKey, profile = profile, status = operation.status, monsters = {} }
                     if operation.status == "SAVED" then
-                        local faction = profile == self.HomeProfile and "PLAYER" or "ENEMY"
+                        local faction = self:ParticipantSide(profile)
                         local seen = {}
                         for _, record in ipairs(self._T.units) do
                             local unit = record.unit

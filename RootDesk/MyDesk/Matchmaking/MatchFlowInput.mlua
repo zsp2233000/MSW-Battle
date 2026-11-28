@@ -22,6 +22,7 @@ script MatchFlowInput extends Logic
         self.Snapshot = { state = "IDLE", reasonCode = "", started = 0, players = 0, busy = false, summary = "", attempt = "" }
         self._T.sequences = {}
         self._T.pending = false
+        self._T.pendingAction = ""
         self._T.pendingSeconds = 0
     end
 
@@ -43,6 +44,7 @@ script MatchFlowInput extends Logic
         self.root:SetEnable((map == "formationlobby" or map == "matchprobe") and not confirming)
         if player.CurrentMapName ~= self._T.map then
             self._T.map = player.CurrentMapName
+            self._T.pendingAction = ""
             self._T.pending = true
             self._T.pendingSeconds = 0
             _MatchFlow:RequestStatus()
@@ -96,6 +98,7 @@ script MatchFlowInput extends Logic
         self._T.sequences[snapshot.sequenceKey] = snapshot.sequence
         self.Snapshot = snapshot
         self._T.pending = false
+        self._T.pendingAction = ""
         if snapshot.eventCode == "NEED_LOADED_VALID_ACTIVE_FORMATION_AND_NO_PENDING_SAVE" then _UIToast:ShowMessage("請先儲存隊伍並設為出戰，儲存完成後再試。") end
         if snapshot.eventCode == "MONSTER_LEVELS_READ_FAILED" then _UIToast:ShowMessage("讀取怪物等級失敗，請稍後重新配對。") end
         if snapshot.eventCode == "MATCHMAKING_NOT_CONFIGURED" then _UIToast:ShowMessage("線上配對服務尚未設定") end
@@ -112,19 +115,32 @@ script MatchFlowInput extends Logic
     @ExecSpace("ClientOnly")
     method table View()
         -- Supply client-only readiness and clock facts to the shared presentation rules.
+        local player = _UserService.LocalPlayer
+        local map = isvalid(player) and player.CurrentMapName or ""
+        local origin = self.Snapshot.origin or ""
+        local originName = _FactionWarTownDocument.TownNames[origin] or ""
+        -- ADR 0016: the settlement receipt names where Return goes; until it says, the departure town is the preview.
+        local receipt = map == "matchprobe" and originName ~= "" and _BattleUIController:CurrentWarResult() or nil
+        local destination = receipt ~= nil and (receipt.destination or "") or ""
+        if destination == "" and originName ~= "" then destination = origin end
         return _MatchFlowState:Present(self.Snapshot, { now = DateTime.UtcNow.Elapsed,
-            pending = self._T.pending, formation = _FormationEditSession.Snapshot,
+            pending = self._T.pending, pendingAction = self._T.pendingAction, formation = _FormationEditSession.Snapshot,
+            inMatchRoom = map == "matchprobe", originName = originName,
+            -- The departure town is the player's own side's until the receipt says it fell.
+            originLabel = originName ~= "" and _FactionWarTownDocument:StanceName(origin, (receipt ~= nil and receipt.originLost == true) and "enemy" or "ally") or "",
+            destinationName = (originName ~= "" and destination ~= "") and _FactionWarTownDocument:StanceName(destination, "ally") or "",
+            originLost = receipt ~= nil and receipt.originLost == true,
             ready = _FormationSchema:IsLoadConfirmed(_FormationEditSession.Snapshot.loadState),
             editBusy = _FormationEditSession:Busy(), unconfirmed = _FormationEditSession:Unconfirmed(),
             confirming = _FormationEditSession.ConfirmKind ~= "", hasActive = _FormationEditSession:HasValidActive(),
-            inLobby = isvalid(_UserService.LocalPlayer) and _UserService.LocalPlayer.CurrentMapName == "formationlobby" })
+            inLobby = map == "formationlobby" })
     end
 
     @ExecSpace("ClientOnly")
     method void Click()
         -- Identify start, cancellation and return commands with the observed attempt generation.
         local view = self:View()
-        if not view.enabled then return end
+        if not view.enabled or view.action == "" then return end
         local player = _UserService.LocalPlayer
         if not isvalid(player) or (player.CurrentMapName ~= "formationlobby" and player.CurrentMapName ~= "matchprobe") then return end
         if view.action == "PREPARE" then
@@ -132,10 +148,10 @@ script MatchFlowInput extends Logic
             return
         end
         self._T.pending = true
+        self._T.pendingAction = view.action
         self._T.pendingSeconds = 0
         _FormationLobby:Render()
-        if view.action == "STATUS" then _MatchFlow:RequestStatus()
-        elseif view.action == "CANCEL" then _MatchFlow:RequestCancel(self.Snapshot.attempt)
+        if view.action == "CANCEL" then _MatchFlow:RequestCancel(self.Snapshot.attempt)
         elseif view.action == "RETURN" then _MatchFlow:RequestReturn(self.Snapshot.attempt)
         elseif view.action == "QUEUE" then _MatchFlow:RequestQueue(_UtilLogic:NewGuid()) end
         self:Render()
@@ -159,8 +175,9 @@ script MatchFlowInput extends Logic
         self.status.TextGUIRendererComponent.Text = self._T.screen == "BattleResult" and text or (mode .. "\n" .. text)
         local summary = self._T.panel:GetChildByName("FixedSummary", false)
         if isvalid(summary) then
-            summary.TextGUIRendererComponent.Text = self.Snapshot.summary ~= "" and ("本局隊伍：" .. self.Snapshot.summary .. "\n本局已固定；取消配對後可重新整備。") or "本局隊伍：尚未開始"
+            summary.TextGUIRendererComponent.Text = self.Snapshot.summary ~= "" and ("本局隊伍：" .. self.Snapshot.summary .. "\n本局隊伍已固定。") or "本局隊伍：尚未開始"
         end
+        self.action:SetEnable(view.action ~= "")
         self.action.TextGUIRendererComponent.Text = label
         self.action.ButtonComponent.Enable = view.enabled
     end

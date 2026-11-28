@@ -1,34 +1,61 @@
--- Maker `client` context, in a fresh Play where the local player stands in Gushan (the authored start map).
--- Drives the NPC dialog and the queue bar through their production methods. Final line: [VRF][WarUI] CLIENT PASS.
+-- Maker `client` context, in a fresh Play where the local player stands in one of the four towns (login lands a player in their own faction's town; an enemy town evicts).
+-- Drives the siege panel (#123) through its production methods (the attack panel of #117 is gone: tests/target_select_client_runtime_probe.lua covers the
+-- NPC's target selection of #124). Final line: [VRF][WarUI] CLIENT PASS.
+-- The synthetic ticket below replaces the client's real snapshot; a failed run must not leave it (and its pending cancel) behind.
+local realSnapshot = _MatchFlowInput.Snapshot
 local ok, reason = pcall(function()
     local ui = _FactionWarUI
-    assert(_UserService.LocalPlayer.CurrentMapName == "gushan", "client stands in Gushan")
-    local both = { { town = "zuoying", name = "左營", capital = false }, { town = "yancheng", name = "鹽埕", capital = true } }
-    ui:ShowAttackOptions("gushan", both, "READY")
-    local panel = ui:Ui("AttackPanel")
-    assert(panel.Enable, "dialog open")
-    assert(ui:Ui("AttackPanel/Window/Row1").Enable and ui:Ui("AttackPanel/Window/Row2").Enable, "two rows shown for two towns")
-    assert(ui:Ui("AttackPanel/Window/Row1/Option").TextGUIRendererComponent.Text == "進攻 左營", "row 1 names Zuoying")
-    assert(ui:Ui("AttackPanel/Window/Row1/Note").TextGUIRendererComponent.Text == "", "no capital note for a front town")
-    assert(ui:Ui("AttackPanel/Window/Row2/Note").TextGUIRendererComponent.Text == "敵方主城不會被攻下，勝利也不會扣除主城兵力", "capital note beside the attack option")
-    ui:ShowAttackOptions("gushan", { both[2] }, "READY")
-    assert(ui:Ui("AttackPanel/Window/Row1").Enable and not ui:Ui("AttackPanel/Window/Row2").Enable, "one town shows one row")
-    ui:ShowAttackOptions("gushan", { both[2] }, "ENGAGED")
-    assert(not ui:Ui("AttackPanel/Window/Row1").Enable, "no option while already queued")
-    ui:CloseAttack()
-    assert(not panel.Enable, "dialog closes")
+    local town = _UserService.LocalPlayer.CurrentMapName
+    assert(_FactionWar:IsTown(town), "client stands in a town")
+    -- (#132) The departure town is the player's own (blue), the target the enemy's (red).
+    local ally, enemy = "<color=" .. _FactionWarTownDocument.AllyNameHex .. ">", "<color=" .. _FactionWarTownDocument.EnemyNameHex .. ">"
+    local function text(path) return ui:Ui(path).TextGUIRendererComponent.Text end
     local saved = _MatchFlowInput.Snapshot
-    _MatchFlowInput.Snapshot = { state = "QUEUED", reasonCode = "", started = DateTime.UtcNow.Elapsed - 8000, players = 0, busy = false, summary = "", attempt = "abc", origin = "gushan", target = "yancheng" }
-    ui:RenderQueue("gushan")
-    local bar = ui:Ui("QueueBar")
-    assert(bar.Enable, "queue bar visible while queued")
-    local text = ui:Ui("QueueBar/Status").TextGUIRendererComponent.Text
-    assert(string.find(text, "進攻 鹽埕", 1, true) and string.find(text, "已等候 8 秒", 1, true), "target and wait clock shown: " .. text)
-    assert(ui:Ui("QueueBar/Cancel").Enable and ui._T.queueAction == "CANCEL", "cancel button offered in place")
+    local value = { state = "QUEUED", reasonCode = "", started = DateTime.UtcNow.Elapsed - 8000, players = 0,
+        busy = false, summary = "", attempt = "abc", origin = town, target = "yancheng",
+        guardAt = DateTime.UtcNow.Elapsed + 1800, sequenceKey = "war-client", sequence = 1 }
+    _MatchFlowInput.Snapshot = value
+    -- #123: the siege panel replaces the queue bar. Its first line names both towns; the strengths come from the pushed board.
+    local bar = ui:Ui("SiegePanel")
+    local status = ui:Ui("SiegePanel/Status").TextGUIRendererComponent
+    local button = ui:Ui("SiegePanel/Cancel")
+    -- The card asks the server for the board by itself as soon as it shows; let that answer arrive before the synthetic boards.
+    for _ = 1, 50 do
+        if ui._T.siegeTowns ~= nil then break end
+        wait(0.1)
+    end
+    assert(ui._T.siegeShown and ui._T.siegeTowns ~= nil, "the card asked for the board and the server answered")
+    ui:ShowSiegeBoard({ { id = town, owner = "A", strength = 80 }, { id = "yancheng", owner = "B", strength = 100 } })
+    ui:RenderSiege(town)
+    assert(bar.Enable and string.match(text("SiegePanel/Status"), "^配對中 · 倒數 %d+ 秒$"), "siege panel uses the real deadline: " .. text("SiegePanel/Status"))
+    assert(text("SiegePanel/Origin") == ally .. _FactionWarTownDocument.TownNames[town] .. "</color> 兵力 80" and text("SiegePanel/Target") == enemy .. "鹽埕</color> 兵力 100", "both towns with their strengths")
+    assert(button.Enable and button.TextGUIRendererComponent.Text == "取消配對", "cancel button offered in place")
+    ui._T.siegeSequenceKey, ui._T.siegeSequence, ui._T.siegePendingAction = value.sequenceKey, value.sequence, "CANCEL"
+    ui:RenderSiege(town)
+    assert(not button.Enable and status.Text == "正在取消配對…", "hide action while cancellation is pending")
+    value.sequence = 2
+    ui:RenderSiege(town)
+    assert(button.Enable, "another accepted sequence on the same phase clears pending")
+    ui:ShowSiegeBoard({ { id = town, owner = "A", strength = 60 }, { id = "yancheng", owner = "B", strength = 100 } })
+    ui:RenderSiege(town)
+    assert(text("SiegePanel/Origin") == ally .. _FactionWarTownDocument.TownNames[town] .. "</color> 兵力 60", "the first line follows a pushed board")
+    value.guardAt = DateTime.UtcNow.Elapsed
+    ui:RenderSiege(town)
+    assert(not button.Enable and status.Text == "即將開戰…", "no button at zero")
+    value.state = "SAVING"
+    ui:RenderSiege(town)
+    assert(not button.Enable and status.Text == "配對成功，正在進入戰場", "no cancellation after pairing")
+    value.reasonCode = "HANDOFF_SEAL_FAILED"
+    ui:RenderSiege(town)
+    assert(button.Enable and button.TextGUIRendererComponent.Text == "停止入場" and status.Text == "入場失敗", "Stop Entry only after failure")
     _MatchFlowInput.Snapshot = { state = "IDLE", reasonCode = "CANCELLED", started = 0, players = 0, busy = false, summary = "", attempt = "", origin = "", target = "" }
-    ui:RenderQueue("gushan")
-    assert(not bar.Enable, "queue bar hides after cancel")
+    ui:RenderSiege(town)
+    assert(not bar.Enable, "siege panel hides after cancel")
     _MatchFlowInput.Snapshot = saved
     log("[VRF][WarUI] CLIENT PASS")
 end)
-if not ok then log_error("[VRF][WarUI] CLIENT FAIL " .. tostring(reason)) end
+if not ok then
+    _MatchFlowInput.Snapshot = realSnapshot
+    _FactionWarUI._T.siegePendingAction = ""
+    log_error("[VRF][WarUI] CLIENT FAIL " .. tostring(reason))
+end

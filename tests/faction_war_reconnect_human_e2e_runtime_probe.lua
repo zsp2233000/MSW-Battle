@@ -1,7 +1,7 @@
 -- Maker end-to-end for #109 (a human fight goes on while one side is disconnected; the other side keeps the room alive). Two virtual players,
 -- added in Play before running this in server_main:
---   add_virtual_player -profile_code wp2623 -nickname RedAway109    (RED,  Zuoying, 3 tanks; stays connected)
---   add_virtual_player -profile_code wp2624 -nickname BlueAway109   (BLUE, Gushan,  1 tank;  disconnects mid-fight)
+--   add_virtual_player -profile_code wp2623 -nickname RedAway109    (A,  Zuoying, 3 tanks; stays connected)
+--   add_virtual_player -profile_code wp2624 -nickname BlueAway109   (B, Gushan,  1 tank;  disconnects mid-fight)
 -- Writes the REAL town storage (Gushan starts at 20, so the red win captures it); STEP 9 deletes it. Keep the real player in formationlobby.
 -- The disconnect is the production Depart run inside the match room plus a synthetic UserReconnectEvent there (the entity stays). The guard is parked at
 -- 600 s by STEP 1 so no guard fight can claim a ticket; STEP 9 puts it back to 10.
@@ -9,17 +9,17 @@
 -- "QUEUED match=" line); the others in server_main.
 --   1 SETUP       server_main, ~60 s, wait "SETUP PASS"
 --   2 QUEUE       server_main: red -> Gushan, blue -> Zuoying; the pair forms and both are moved into one room
---   3 DISCONNECT  room, after "[VRF][MatchedBattle] admission started=true": Depart for the BLUE player. Red is still online, the fight goes on
+--   3 DISCONNECT  room, after "[VRF][MatchedBattle] admission started=true": Depart for the B player. Red is still online, the fight goes on
 --   4 RESULT      room: the battle reaches its result; one settlement is stored (Gushan red / 100, counted once); the blue player's experience for their lost
 --                 tank is settled although they are away (the match is in their monster-level history exactly once)
 --   5 RECONNECT   room: a synthetic reconnect for the blue player: the ticket is back as IN_ROOM, the receipt is armed again
 --   6 REDELIVER   room, BEFORE RETURN: the same result again: DUPLICATE, the towns do not move, no experience is credited twice
---   7 RETURN      room: ReturnForUser for both. Red (the conqueror) lands in Gushan, blue (the loser) in Yancheng
---   8 LANDING     server_main: red in Gushan, blue in Yancheng, nobody locked, one settlement ("LANDING PASS")
+--   7 RETURN      room: ReturnForUser for both; ADR 0016 update written, not run
+--   8 LANDING     server_main: red (capturer) in Zuoying, blue (origin lost) in Yancheng, nobody locked, one settlement ("LANDING PASS")
 --   9 CLEANUP     deletes the war town storage and puts the guard clock back
 -- Expected [VRF] lines (read with logs): see tests/README.md, "Disconnect and reconnect (#109)".
 local STEP = 1
-local RED, BLUE = "wp2623", "wp2624"
+local PROFILE_A, PROFILE_B = "wp2623", "wp2624"
 local function await(predicate, tries) for _ = 1, tries or 300 do if predicate() then return true end wait(0.1) end return false end
 local function find()
     local found = {}
@@ -31,7 +31,7 @@ end
 local function id(user) return user.PlayerComponent.UserId end
 local function readTowns()
     local towns, done = nil, false
-    _FactionWar:ReadTowns(function(result) towns, done = result, true end)
+    _FactionWarTownDocument:Read(function(result) towns, done = result, true end)
     assert(await(function() return done end, 100), "towns read")
     return towns
 end
@@ -61,7 +61,7 @@ local function room()
 end
 local ok, reason = pcall(function()
     local users = find()
-    local a, b = users[RED], users[BLUE]
+    local a, b = users[PROFILE_A], users[PROFILE_B]
     if STEP == 1 then
         assert(isvalid(a) and isvalid(b), "both virtual players connected")
         local function setup(user, units)
@@ -78,15 +78,15 @@ local ok, reason = pcall(function()
         for index = 1, 3 do three[index] = { monsterId = "monster_tank", x = -3.25 - (index - 1) * 0.75, y = -1.25 } end
         setup(a, three)
         setup(b, {{ monsterId = "monster_tank", x = -3.25, y = -1.25 }})
-        for user, value in pairs({ [a] = "RED", [b] = "BLUE" }) do
+        for user, value in pairs({ [a] = "A", [b] = "B" }) do
             local saved = false
             _FormationStorage:Write(user.PlayerComponent.ProfileCode, _FactionWar.FactionKey, "", value, function(code) saved = code == 0 end)
             await(function() return saved end, 100)
         end
-        local towns = _FactionWar:InitialTowns()
+        local towns = _FactionWarTownDocument:InitialTowns()
         towns.gushan.strength = 20
         local written = false
-        _FactionWar:WriteTowns(towns, function(saved) written = saved end)
+        _FactionWarTownDocument:WriteTowns(towns, function(saved) written = saved end)
         assert(await(function() return written end, 100), "Gushan seeded at 20")
         _FactionWarGuard.WaitSeconds = 600
         assert(_FactionWar:Move(a, "zuoying") and _FactionWar:Move(b, "gushan"), "moves dispatched")
@@ -108,11 +108,11 @@ local ok, reason = pcall(function()
     elseif STEP == 3 then
         local _, battle = room()
         assert(battle:IsBattleActive(), "the battle is on, phase " .. tostring(battle.Phase))
-        assert(isvalid(users[RED]) and isvalid(users[BLUE]), "both players are in the room")
-        local away = id(users[BLUE])
+        assert(isvalid(users[PROFILE_A]) and isvalid(users[PROFILE_B]), "both players are in the room")
+        local away = id(users[PROFILE_B])
         _MatchFlow:Depart(away, "Probe")
         assert(_MatchFlow:IsOffline(away) and _MatchFlow._T.records[away] == nil, "blue is offline and its record is dropped")
-        assert(not _MatchFlow:IsOffline(id(users[RED])) and _MatchFlow._T.records[id(users[RED])] ~= nil, "red stays online with its ticket")
+        assert(not _MatchFlow:IsOffline(id(users[PROFILE_A])) and _MatchFlow._T.records[id(users[PROFILE_A])] ~= nil, "red stays online with its ticket")
         assert(battle:IsBattleActive(), "the fight goes on")
         log("[VRF][ReconnectHuman] DISCONNECT PASS " .. _RoomService.RoomKey .. "; wait for [VRF][MatchedBattle] result published once, then STEP 4")
     elseif STEP == 4 then
@@ -120,22 +120,22 @@ local ok, reason = pcall(function()
         assert(await(function() return battle.Phase == "RESULT" end, 3000), "the battle reaches its result")
         local key = _RoomService.RoomKey
         local towns
-        local red = battle:ResultForProfile(RED)
+        local red = battle:ResultForProfile(PROFILE_A)
         if red == "WIN" then
             assert(await(function()
                 towns = readTowns()
                 return towns ~= nil and recordsOf(towns, key) == 1
             end, 300), "one settlement was stored")
-            assert(towns.gushan.owner == "RED" and towns.gushan.strength == 100 and _FactionWar:EpochOf(towns, "gushan") == 1, "Gushan was captured and counted once")
+            assert(towns.gushan.owner == "A" and towns.gushan.strength == 100 and _FactionWarTownDocument:EpochOf(towns, "gushan") == 1, "Gushan was captured and counted once")
         else
             log("[VRF][ReconnectHuman] red did not win (" .. red .. "); the capture checks of this probe do not apply, run it again")
         end
         -- The away player's lost tank is credited although they are gone; each match id is in a history once.
-        assert(await(function() return creditedOnce(BLUE, key) == 1 end, 100), "the away player's experience was settled exactly once")
+        assert(await(function() return creditedOnce(PROFILE_B, key) == 1 end, 100), "the away player's experience was settled exactly once")
         log("[VRF][ReconnectHuman] RESULT PASS red=" .. red .. "; run STEP 5")
     elseif STEP == 5 then
         local _, battle = room()
-        local away = users[BLUE]
+        local away = users[PROFILE_B]
         assert(isvalid(away), "blue's entity is still in the room")
         local awayId = id(away)
         assert(_MatchFlow:IsOffline(awayId), "still offline from step 3")
@@ -170,18 +170,18 @@ local ok, reason = pcall(function()
     elseif STEP == 8 then
         assert(await(function()
             users = find()
-            a, b = users[RED], users[BLUE]
-            return isvalid(a) and isvalid(b) and a.CurrentMapName == "gushan" and b.CurrentMapName == "yancheng"
-        end, 600), "the conqueror entered Gushan and the loser went to Yancheng")
+            a, b = users[PROFILE_A], users[PROFILE_B]
+            return isvalid(a) and isvalid(b) and a.CurrentMapName == "zuoying" and b.CurrentMapName == "yancheng"
+        end, 600), "the capturer returned to Zuoying and the player who lost Gushan went to Yancheng")
         for _, user in ipairs({ a, b }) do assert(await(function() return not _FactionWarAttack:IsEngaged(id(user)) end), "unlocked") end
         local towns = readTowns()
-        assert(towns.gushan.owner == "RED" and towns.gushan.strength == 100 and #towns.settled == 1, "one settlement is stored")
+        assert(towns.gushan.owner == "A" and towns.gushan.strength == 100 and #towns.settled == 1, "one settlement is stored")
         local key = towns.settled[1].k
-        assert(creditedOnce(BLUE, key) == 1, "the away player's match is in their history once")
+        assert(creditedOnce(PROFILE_B, key) == 1, "the away player's match is in their history once")
         log("[VRF][ReconnectHuman] LANDING PASS")
     elseif STEP == 9 then
         _FactionWarGuard.WaitSeconds = 10
-        local code = _DataStorageService:DeleteGlobalDataStorageAndWait(_FactionWar.TownStorageName)
+        local code = _DataStorageService:DeleteGlobalDataStorageAndWait(_FactionWarTownDocument.TownStorageName)
         log("[VRF][ReconnectHuman] CLEANUP town storage deleted code=" .. tostring(code))
     end
 end)
